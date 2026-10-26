@@ -3,6 +3,7 @@
  * never a test brief's words. Each row binds by identity (ids, codes, exact executable shapes), with a contrast control
  * beside every absence claim.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod-v4';
 import { APPROXIMATE_FIGURE, CanonicalModel, type CanonicalModelT, type CanonicalQuantityT, type CanonicalRelationT, type CanonicalGoalT, type CanonicalLimitT } from '../canonical.js';
@@ -245,7 +246,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(r.perGoal[0].rests_on).toEqual(['repaired_in_a_week']);
   });
 
-  it('row 6: qualitative records are drawn as display-only cards, never in the executable model', () => {
+  it('row 6: qualitative records are never in the executable model, and not cards: the canvas draws them by id from the model (DL 24 Oct)', () => {
     const m = bakery();
     m.assumptions.push({ id: 'oven_full_speed', text: 'The new oven runs at full capacity from the first week.', applied: true, concerns: ['extra_per_oven'], author: 'olumi', quote: null, ...base });
     m.dissent.push({ id: 'partner_doubts', holder: 'my business partner', position: 'thinks demand will not keep up', concerns: ['sales_rel'], author: 'person', quote: 'my business partner thinks demand will not keep up', ...base });
@@ -258,10 +259,11 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(r.perGoal[0].rests_on).toEqual(['oven_full_speed']);
     const p = project(m, r);
     const node = (id: string) => p.graph.nodes.find((n) => n.id === id)!;
-    expect(node('oven_full_speed')).toMatchObject({ kind: 'action', analysis_participation: 'retained_excluded', provenance: 'ai_inferred' });
-    expect(node('partner_doubts')).toMatchObject({ kind: 'action', analysis_participation: 'retained_excluded', provenance: 'from_brief', source_quote: 'my business partner thinks demand will not keep up' });
+    expect(p.graph.nodes.find((n) => n.id === 'oven_full_speed')).toBeUndefined();
+    expect(p.graph.nodes.find((n) => n.id === 'partner_doubts')).toBeUndefined();
     expect(node('profit')).toMatchObject({ kind: 'outcome', analysis_participation: 'included' });
-    expect(p.items.find((i) => i.record_id === 'partner_doubts')).toMatchObject({ in_calculation: false, concerns: ['sales_rel'], author: 'person' });
+    expect(p.items.find((i) => i.record_id === 'partner_doubts')).toMatchObject({ shown_as: {}, in_calculation: false, concerns: ['sales_rel'], author: 'person' });
+    expect(m.dissent.find((d) => d.id === 'partner_doubts')).toMatchObject({ quote: 'my business partner thinks demand will not keep up' });
     const recordIds = [...m.quantities, ...m.relations, ...m.goals, ...m.options, ...m.assumptions, ...m.dissent].map((x) => x.id);
     for (const id of recordIds) expect(p.items.filter((i) => i.record_id === id)).toHaveLength(1);
     const parsed = GraphV3.safeParse(p.graph);
@@ -269,6 +271,64 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(parsed.success && parsed.data.nodes.map((n) => n.id)).toEqual(p.graph.nodes.map((n) => n.id));
     expect(p.items.find((i) => i.record_id === 'extra_per_oven')!.shown_as).toEqual({ on_edge: 'ovens_added__sales' });
     expect(p.graph.edges.find((e) => e.id === 'ovens_added__sales')).toMatchObject({ provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 120, amount_unit: 'loaf/week', per_source_change_unit: 'oven' } } });
+  });
+
+  it('W3 (26 Oct): claims and conditions are not cards: no node, no "Claim:" or "Condition:" card; the canonical record still holds each, whole', () => {
+    const m = bakery();
+    m.claims.push({ id: 'busy_saturdays', text: 'Saturdays are the busy day.', concerns: ['sales'], author: 'olumi', quote: null, ...base });
+    m.conditions.push({ id: 'landlord_agrees', text: 'Only once the landlord agrees to the wiring.', kind: 'prerequisite', concerns: ['ovens_added'], author: 'person', quote: 'once the landlord agrees', ...base });
+    // Same kind, expected PRESENT: a guardrail with no measure yet is still its own text card (limits are unchanged).
+    m.limits.push({ id: 'keep_staff', label: 'Keep the staff we have', measure: null, question: 'How would you know?', author: 'person', quote: 'keep the staff we have', ...base });
+    const before = structuredClone(m);
+    const p = project(m, compile(m));
+    const notes = ['busy_saturdays', 'landlord_agrees'];
+    expect(p.graph.nodes.filter((n) => notes.includes(String(n.id)))).toEqual([]);
+    expect(p.graph.nodes.filter((n) => /^(Claim|Condition): /.test(String(n.label)))).toEqual([]);
+    expect(p.graph.nodes.filter((n) => n.kind === 'action').map((n) => [n.id, n.label])).toEqual([['mp:limit:keep_staff', 'Limit: Keep the staff we have']]);
+    expect(p.graph.nodes.map((n) => n.id)).toEqual(expect.arrayContaining(['profit', 'sales', 'base_sales']));
+    expect(GraphV3.safeParse(p.graph).success).toBe(true);
+    // The canonical record is the notes' home: untouched by the projection, every word kept, by the record's own id.
+    expect(m).toEqual(before);
+    expect(m.claims).toEqual([expect.objectContaining({ id: 'busy_saturdays', text: 'Saturdays are the busy day.', concerns: ['sales'], author: 'olumi' })]);
+    expect(m.conditions).toEqual([expect.objectContaining({ id: 'landlord_agrees', text: 'Only once the landlord agrees to the wiring.', kind: 'prerequisite', concerns: ['ovens_added'], quote: 'once the landlord agrees' })]);
+    // Each keeps its one item, out of the calculation, with no drawn place: the canvas draws it from the model by id.
+    expect(p.items.filter((i) => notes.includes(i.record_id))).toEqual([
+      expect.objectContaining({ record_id: 'busy_saturdays', family: 'claims', shown_as: {}, in_calculation: false, concerns: ['sales'], author: 'olumi' }),
+      expect.objectContaining({ record_id: 'landlord_agrees', family: 'conditions', shown_as: {}, in_calculation: false, concerns: ['ovens_added'], author: 'person' }),
+    ]);
+  });
+
+  // Two saved drafts from the real path (model-program-turn's fixtures), never this file's own words.
+  const savedDraft = (file: string) => {
+    const s = JSON.parse(readFileSync(new URL(`../../model-program-turn/__tests__/${file}`, import.meta.url), 'utf8')) as { brief: string; canonical: unknown };
+    const m = CanonicalModel.parse(withDeclaredTiming(s.canonical));
+    return project(m, compile(m, { sourceText: s.brief }), { brief: s.brief });
+  };
+  const NOTE_FAMILIES = new Set(['claims', 'evidence', 'assumptions', 'dissent', 'conditions', 'left_out', 'preference']);
+
+  it('W3 (26 Oct), a saved draft with nine notes: none is a card; its unmeasured limit still is; each note keeps its one item', () => {
+    const p = savedDraft('hiring-alpha3.saved.json');
+    const notes = p.items.filter((i) => NOTE_FAMILIES.has(i.family));
+    expect(notes.map((i) => [i.record_id, i.family, i.shown_as])).toEqual([
+      ['prefer_lower_spend', 'preference', {}], ['leadership_gap', 'claims', {}], ['budget_cost_scope', 'assumptions', {}],
+      ['hiring_decision_not_start_date', 'assumptions', {}], ['productivity_mechanism_unresolved', 'left_out', {}],
+      ['launch_readiness_not_calculated', 'left_out', {}], ['hiring_and_onboarding_timing', 'left_out', {}],
+      ['code_quality_not_calculated', 'left_out', {}], ['productivity_target_timing', 'left_out', {}],
+    ]);
+    expect(p.graph.nodes.filter((n) => notes.some((i) => i.record_id === n.id))).toEqual([]);
+    expect(p.graph.nodes.filter((n) => n.kind === 'action').map((n) => n.id)).toEqual(['mp:limit:maintain_code_quality']);
+    expect(p.graph.nodes).toHaveLength(16);
+  });
+
+  it('W3 contrast (26 Oct), a saved draft with no notes projects exactly as before: the same cards, in order, no text card', () => {
+    const p = savedDraft('capacity-s4.saved.json');
+    expect(p.items.filter((i) => NOTE_FAMILIES.has(i.family))).toEqual([]);
+    // The cards staging drew for this draft before W3 (13e6bd5d), bound as literals: a note-less model is untouched.
+    expect(p.graph.nodes.map((n) => [n.id, n.kind])).toEqual([
+      ['mp:decision', 'decision'], ['support_capacity_goal', 'goal'], ['keep_current_staffing', 'option'], ['add_one_specialist', 'option'],
+      ['existing_capacity', 'factor'], ['additional_specialists', 'factor'], ['zero_additional_capacity', 'factor'],
+      ['additional_capacity', 'outcome'], ['weekly_support_capacity', 'outcome'],
+    ]);
   });
 
   it('row 7: an Olumi figure without a range is an error; an exact constant is STRUCTURE, never an Olumi estimate', () => {
@@ -460,7 +520,9 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(r.preferences).toEqual([{ id: 'spend_less', quantity: 'costs', direction: 'lower', label: 'costs' }]);
     expect(r.executable!.goals.map((g) => g.id)).toEqual(['weekly_profit', 'cash_buffer']);
     expect(JSON.stringify(r.executable)).not.toContain('spend_less');
-    expect(project(m, r).graph.nodes.find((n) => n.id === 'spend_less')).toMatchObject({ kind: 'action', label: 'Preference: lower costs', analysis_participation: 'retained_excluded' });
+    // Not a card (DL 24 Oct): the canvas draws it from the model by id; its item says so.
+    expect(project(m, r).graph.nodes.find((n) => n.id === 'spend_less')).toBeUndefined();
+    expect(project(m, r).items.find((i) => i.record_id === 'spend_less')).toMatchObject({ family: 'preference', shown_as: {}, in_calculation: false, concerns: ['costs'] });
   });
 
   it('asking for the result itself (an asked goal quantity) is an error; asking for a target is not', () => {

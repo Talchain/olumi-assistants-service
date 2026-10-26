@@ -8,9 +8,9 @@
  *    coefficient (drawn on its link), a target, bound or window length (on its goal or limit card), an option's value (on
  *    its option card), or a risk's chance or severity (on its risk card);
  *  · relations and effect terms are links; goals, options and risks are their own cards; limits are `goal_constraints`;
- *  · qualitative records (claims, evidence, assumptions, dissent, conditions, left out) are display-only text cards
- *    (`action`, the canvas's text card), always `retained_excluded`. Their `concerns` stay in the manifest, never as links:
- *    a GraphV3 link is a causal claim, and a note is not one.
+ *  · qualitative records (claims, evidence, assumptions, dissent, conditions, left out) and preferences are not cards: the
+ *    canvas draws them by id from the living model (`living_model.canonical`), so their items have no `shown_as` place.
+ *    Their `concerns` stay in the manifest, never as links: a GraphV3 link is a causal claim, and a note is not one.
  *
  * Authorship is shown as stated: the person's (with their words), Olumi's (provisional), or UNVERIFIED (said to be the
  * person's but their words were not found), which is never shown as theirs. Each figure carries it in the canvas's own
@@ -35,7 +35,7 @@ export type ItemFamily = 'quantity' | 'relation' | 'term' | 'goal' | 'limit' | '
 export type ProjectedItem = {
   record_id: string;
   family: ItemFamily;
-  /** Where it is drawn: its own card or link, or on another card or link. */
+  /** Where it is drawn: its own card or link, or on another card or link; none for a note or a preference (drawn from the model). */
   shown_as: { node?: string; edge?: string; on_node?: string; on_edge?: string; constraint?: string };
   in_calculation: boolean;
   why_out: string | null;
@@ -55,9 +55,6 @@ export const WAITING_WORDS = 'Waiting for your answer';
 const STRUCTURE_WORDS = 'Fixed by how the model is built';
 /** A figure no one can give yet: it is left out of the analysis, never waiting for an answer. */
 const OUT_OF_ANALYSIS = new Set(['unknown', 'unsupported', 'not_applicable']);
-const QUAL_PREFIX: Record<QualitativeFamilyT, string> = {
-  claims: 'Claim', evidence: 'Evidence', assumptions: 'Assumption', dissent: 'Disagreement', conditions: 'Condition', left_out: 'Left out',
-};
 const has = <T>(x: T | null | undefined): x is T => x !== null && x !== undefined;
 const fmt = (n: number) => (Number.isInteger(n) ? n.toLocaleString('en-GB') : String(Number(n.toPrecision(4))));
 
@@ -432,12 +429,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     }
   }
 
-  // ── preferences: wishes without a threshold, drawn as text cards ─────────────────────────────────────────────────────
+  // ── preferences: wishes without a threshold; the canvas draws them from the model ─────────────────────────────────────
   for (const p of model.preferences) {
-    const who = whoOf(p, p.id);
-    const q = Q.get(p.quantity);
-    nodes.push({ id: p.id, kind: 'action', label: `Preference: ${p.direction} ${q?.label ?? p.quantity}`, description: `Would like ${q?.label ?? p.quantity} ${p.direction}. Shown beside the result; not a goal or a limit.`, ...provenanceOf(who), ...quoteOf(p, p.id), ...participation(false) });
-    items.push({ record_id: p.id, family: 'preference', shown_as: { node: p.id }, in_calculation: false, why_out: 'A preference: shown and reported, never calculated as a goal or a limit.', author: who, approval: p.approval, concerns: [p.quantity] });
+    items.push({ record_id: p.id, family: 'preference', shown_as: {}, in_calculation: false, why_out: 'A preference: shown and reported, never calculated as a goal or a limit.', author: whoOf(p, p.id), approval: p.approval, concerns: [p.quantity] });
   }
 
   // ── risks ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -454,13 +448,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     if (Q.has(k.effect_on)) edges.push({ ...link(k.id, k.effect_on, k.mode === 'add' && sev && (sev.value ?? sev.high ?? 0) < 0 ? -1 : 1, who, inCalc, { reasoning: 'if it happens' }), id: edgeId(k.id, k.effect_on) });
   }
 
-  // ── qualitative records: display-only text cards ───────────────────────────────────────────────────────────────────
-  for (const f of QUALITATIVE_FAMILIES) for (const rec of model[f] as readonly (Rec & { id: string; author: string; quote: string | null; approval: 'proposed' | 'approved'; concerns: string[] })[]) {
-    const who = whoOf(rec, rec.id);
-    const text = f === 'dissent' ? `${String(rec.holder)}: ${String(rec.position)}` : String(rec.text);
-    const extra = f === 'left_out' ? ` Why: ${String(rec.why)}` : f === 'evidence' && has(rec.source) ? ` Source: ${String(rec.source)}` : '';
-    nodes.push({ id: rec.id, kind: 'action', label: `${QUAL_PREFIX[f]}: ${text.length > 80 ? `${text.slice(0, 79)}…` : text}`, description: `${text}${extra}`, ...provenanceOf(who), ...quoteOf(rec, rec.id), ...participation(false) });
-    items.push({ record_id: rec.id, family: f, shown_as: { node: rec.id }, in_calculation: false, why_out: 'A note: shown beside the model, never calculated.', author: who, approval: rec.approval, concerns: [...rec.concerns] });
+  // ── qualitative records: not cards; the canvas draws them by id from the model ────────────────────────────────────────
+  for (const f of QUALITATIVE_FAMILIES) for (const rec of model[f] as readonly { id: string; author: string; quote: string | null; approval: 'proposed' | 'approved'; concerns: string[] }[]) {
+    items.push({ record_id: rec.id, family: f, shown_as: {}, in_calculation: false, why_out: 'A note: shown beside the model, never calculated.', author: whoOf(rec, rec.id), approval: rec.approval, concerns: [...rec.concerns] });
   }
 
   return { graph: { nodes, edges, goal_constraints }, items };
