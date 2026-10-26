@@ -105,8 +105,8 @@ export interface CoreTurnToolsInput {
   readonly deadlineAt: number;
   /** A Challenge on one card: this turn's note may sit only beside that card. */
   readonly noteOnlyOn?: PathBToolDeps['noteOnlyOn'];
-  /** Used ONLY for propose_link_strengths, through `dispatchTool`. */
-  readonly capabilities: AgentCapabilities;
+  /** Used ONLY for propose_link_strengths, through `dispatchTool`; absent on a model program, whose tools never use it. */
+  readonly capabilities?: AgentCapabilities;
   /** The batch levels door, for a legacy scenario's change adapter; a core scenario's changes never reach it. */
   readonly commitOptionLevels?: PathBToolDeps['commitOptionLevels'];
   readonly onModelRegistered: (raw: Record<string, unknown>) => void;
@@ -122,10 +122,13 @@ export interface CoreTurnToolsInput {
 
 /** The SDK turn's tools: the typed adapters over the route's primitives, each call recorded once. */
 export function coreTurnTools(i: CoreTurnToolsInput): CoreTurnInput['tools'] {
+  const capabilities = i.capabilities;
+  const proposeLinkStrengths: PathBToolDeps['proposeLinkStrengths'] = capabilities === undefined ? undefined
+    : (c, a) => dispatchTool('propose_link_strengths', JSON.stringify(a), { ...i.ctx, ...c }, capabilities, i.mode);
   return (onCall, press) => pathBTools({ dispatch: i.dispatch, proposals: i.proposals, critique: modelCritic(coreBudget()), deadlineAt: i.deadlineAt,
     ...(i.noteOnlyOn !== undefined ? { noteOnlyOn: i.noteOnlyOn } : {}), ...(i.restructure !== undefined ? { restructure: i.restructure } : {}),
     ...(press !== undefined ? { pressedProposal: press.approves } : {}),
-    proposeLinkStrengths: (c, a) => dispatchTool('propose_link_strengths', JSON.stringify(a), { ...i.ctx, ...c }, i.capabilities, i.mode),
+    ...(proposeLinkStrengths !== undefined ? { proposeLinkStrengths } : {}),
     ...(i.commitOptionLevels !== undefined ? { commitOptionLevels: i.commitOptionLevels } : {}), onModelRegistered: (raw) => i.onModelRegistered(raw),
     runAnalysis: i.runAnalysis,
     analyseAfterCommit: i.analyseAfterCommit,

@@ -166,6 +166,8 @@ import { log } from '../utils/telemetry.js';
 import { projectCurrentRead, type CurrentReadProjection } from './current-read-projection.js';
 import { projectSelectedRunFigures, readSelectedGoalFigureContext } from './selected-run-figures.js';
 import { projectCanonicalAnalysisView, type CanonicalAnalysisView } from './canonical-analysis-view.js';
+import { isProgramGraph } from '../orchestrator-v5/model-program-turn/program-store.js';
+import { programReadinessOf } from '../orchestrator-v5/model-program-turn/program-readiness.js';
 
 /** The additive half of the scenario-graph read's 200 body. */
 export interface ScenarioAnalysisRead {
@@ -312,6 +314,14 @@ export async function readScenarioAnalysis(
     // current_graph_hash_unavailable`. Saying "not answered" is the same
     // information without spending a store read on it.
     if (params.graph === null || params.graph === undefined) return notAnswered();
+    // A MODEL PROGRAM (alpha, spec §3): its analysis is its newest STORED Run, which the read that holds it serves as
+    // `canonical_analysis_view` (`program-store.ts`), and its readiness is its own (`program-readiness.ts`). This reader's
+    // facts, freshness and composer never run on one (they read every program board as `never_run`): not answered, with
+    // only the program's readiness where every reader takes it.
+    if (isProgramGraph(params.graph)) {
+      const ready = programReadinessOf(params.graph) as AnalysisReadyPayload | undefined;
+      return { ...notAnswered(), current_read: { ...NOT_ANSWERED.current_read, ...(ready === undefined ? {} : { analysis_ready: ready }) } };
+    }
 
     // ⭐ CS-AN-2 — THE FRESHNESS HASH IS THE CANONICAL ONE, THE HASH THE RUN
     // STAMPED. `loadScenarioSnapshotForRunAnalysis` hands run_analysis

@@ -36,6 +36,7 @@ import { log } from "../utils/telemetry.js";
 import { ROUTE_TIMEOUT_MS, DRAFT_REQUEST_BUDGET_MS } from "../config/timeouts.js";
 import { recordExplicitTurnStop } from "./turn-stop.js";
 import { coreTurnStreamTimeout } from "../orchestrator-v5/core-route/contract.js";
+import { isProgramGraph } from "../orchestrator-v5/model-program-turn/program-store.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -77,6 +78,18 @@ export function resolveProxyInternalTarget(mode: unknown): ProxyInternalTarget {
   return config.proxy.proxyV5Target === "agent"
     ? "/agent/v1/turn"
     : "/orchestrate/v2/turn";
+}
+
+/**
+ * ⛔ A MODEL PROGRAM NEVER REACHES A LEGACY TURN ROUTE (spec §3: never a fall back to an older model, validator or analysis
+ * route). Its turns are the core route's; any other target (an explicit `?ai=openai` / `?ai=conventional`, or the deployment
+ * default) is refused with this typed error, never run. Read from the snapshot the ownership hook admitted this request on, so
+ * it costs no read and says nothing to a caller the hook refused. EXPORTED for the streamed sibling: one rule, not two.
+ */
+export function programOnLegacyRouteRefusal(target: ProxyInternalTarget, request: FastifyRequest, requestId: string): Record<string, unknown> | undefined {
+  if (target === "/agent/v1/core-turn" || !isProgramGraph(request.scenarioAccess?.snapshot?.graph)) return undefined;
+  return { error: { code: "MODEL_PROGRAM_LEGACY_ROUTE", source: "proxy", request_id: requestId, retry_safe: false, nothing_saved: true,
+    message: "This scenario's model can only be opened in Olumi's standard mode. Nothing was run or changed. Switch back to the standard mode to continue." } };
 }
 
 /** Headers forwarded from the browser request to the internal CEE call. */
@@ -479,6 +492,11 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     // user they can name by UUID.
     const bodyString = serialiseProxiedBodyWithoutClaimedIdentity(request.body);
     const internalTarget = resolveProxyInternalTarget(request.headers[AI_MODE_HEADER]);
+    const programRefusal = programOnLegacyRouteRefusal(internalTarget, request, requestId);
+    if (programRefusal !== undefined) {
+      for (const [k, v] of Object.entries(buildCorsHeaders(origin as string))) reply.header(k, v);
+      return reply.code(409).send(programRefusal);
+    }
 
     const injectPromise = app.inject({
       method: "POST",

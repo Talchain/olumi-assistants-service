@@ -676,6 +676,11 @@ export default async function route(app: FastifyInstance) {
         return invalid("GRAPH_EMPTY", "A graph with no nodes cannot be registered.");
       }
 
+      // A MODEL PROGRAM's core write: storage integrity only (these caps and the graph contract below, which its own CAS base and
+      // readback hash), never the legacy edit rules (`CheckedGraphAppendParams.programSave`) nor the legacy kind repair and
+      // event_risk contract: it is checked where it is made.
+      const programSave = corePostimage && isProgramGraph(submitted);
+
       // Caps BEFORE normalisation, so a hostile 10k-node array is rejected in
       // O(1) rather than walked.
       if (submittedNodes.length > GRAPH_MAX_NODES) {
@@ -693,7 +698,7 @@ export default async function route(app: FastifyInstance) {
 
       // 2.467c — the kind/type pair, resolved once, BEFORE anything hashes or
       // stores these bytes. A divergent-field file is REFUSED, not guessed at.
-      const normalised = normaliseGraphNodeKindField(submitted);
+      const normalised = programSave ? { ok: true as const, graph: submitted, changedNodeCount: 0 } : normaliseGraphNodeKindField(submitted);
       if (!normalised.ok) {
         return invalid(
           normalised.reason === "divergent_node_kind"
@@ -721,7 +726,7 @@ export default async function route(app: FastifyInstance) {
       // event_risk.v1 — the write door (src/schemas/event-risk.ts). A malformed block, or one on a
       // non-risk node, is REFUSED: stored, it would be dropped on read and the risk would run as an
       // ordinary node. A graph with no block is untouched.
-      const eventRiskIssues = eventRiskIngressIssues(
+      const eventRiskIssues = programSave ? [] : eventRiskIngressIssues(
         parsed.data.nodes as ReadonlyArray<Record<string, unknown>>,
       );
       if (eventRiskIssues.length > 0) {
@@ -732,8 +737,6 @@ export default async function route(app: FastifyInstance) {
         );
       }
 
-      // A MODEL PROGRAM's core write: storage integrity only, never the legacy edit rules (`CheckedGraphAppendParams.programSave`).
-      const programSave = corePostimage && isProgramGraph(parsed.data);
       if (req.scenarioAccess?.provisionIfMissing && !await req.scenarioAccess.provisionIfMissing()) return;
       const store = getSessionStore();
 
