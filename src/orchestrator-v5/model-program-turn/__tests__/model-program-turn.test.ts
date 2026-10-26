@@ -8,7 +8,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod-v4';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
@@ -94,6 +94,20 @@ const sent: Json[] = [];
 let replies: (string | (() => Response | Promise<Response>))[] = [];
 /** Pause either side of the fake store's atomic commit, without changing the production writer. */
 let registerPause: ((stage: 'before' | 'after') => Promise<void>) | undefined;
+/** Every POST /v1/conversations (a scenario's empty Conversation create), by its body. */
+const creates: { readonly body: Json }[] = [];
+/**
+ * Each create's answer, in order: a status (2xx = the new Conversation, else the provider's error), what fetch throws, or
+ * the answer itself. None left: the harness's own 599, as before this queue existed.
+ */
+let createAnswers: (number | Error | ((init: any) => Response | Promise<Response>))[] = [];
+/** The served 503 of 26 Oct (04:57:12Z ×2, 07:44:06Z), as its proxy sent it: plain text, no JSON. */
+const ENVOY_503 = 'upstream connect error or disconnect/reset before headers. retried and the latest reset reason: remote connection failure, transport failure reason: delayed connect error: Connection refused';
+const createAnswer = (status: number): Response => (status < 300
+  ? new Response(JSON.stringify({ id: `conv_created_${creates.length}`, object: 'conversation', created_at: 0, metadata: null }), { status, headers: { 'content-type': 'application/json' } })
+  : status === 503 ? new Response(ENVOY_503, { status, headers: { 'content-type': 'text/plain' } })
+    : new Response(JSON.stringify({ error: status === 429 ? { message: 'Rate limit reached for requests', type: 'requests', param: null, code: 'rate_limit_exceeded' }
+      : { message: 'Invalid request', type: 'invalid_request_error', param: null, code: null } }), { status, headers: { 'content-type': 'application/json' } }));
 const sse = (text: string, output?: Json[]): Response => {
   const response = { id: `resp_${sent.length}`, object: 'response', status: 'completed', model: 'gpt-6.1-sol',
     output: output ?? [{ type: 'message', id: 'msg_1', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] }],
@@ -146,6 +160,12 @@ describe('the model-program turn on the real core route', () => {
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: any) => {
       const u = String((url as any)?.href ?? (url as any)?.url ?? url);
+      if (u === 'https://api.openai.com/v1/conversations' && init?.method === 'POST') {
+        creates.push({ body: JSON.parse(String(init?.body ?? '{}')) });
+        const next = createAnswers.shift();
+        if (next instanceof Error) throw next;
+        if (next !== undefined) return typeof next === 'function' ? next(init) : createAnswer(next);
+      }
       if (!u.startsWith('https://api.openai.com/') || !u.endsWith('/responses')) return new Response(JSON.stringify({ error: 'blocked by the spike test' }), { status: 599 });
       sent.push(JSON.parse(String(init?.body ?? '{}')));
       const next = replies.shift();
@@ -179,7 +199,7 @@ describe('the model-program turn on the real core route', () => {
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); });
-  beforeEach(() => { SCENARIO = randomUUID(); persisted = null; registered.length = 0; turnRows.clear(); conversationIds.clear(); pausedRun = null; sent.length = 0; replies = []; registerPause = undefined; });
+  beforeEach(() => { SCENARIO = randomUUID(); persisted = null; registered.length = 0; turnRows.clear(); conversationIds.clear(); pausedRun = null; sent.length = 0; replies = []; registerPause = undefined; creates.length = 0; createAnswers = []; });
 
   it('T gap3: disconnect while drafting stops delivery, not the provider or the complete save; the same turn replays without another call or Run', async () => {
     const started = latch(); const finish = latch();
@@ -256,6 +276,156 @@ describe('the model-program turn on the real core route', () => {
         .toMatchObject({ status: 'ok', data: { already_saved: true, receipt: ownReceipt } });
       expect([registered.length, sent.length, JSON.stringify(persisted)]).toEqual([2, 3, snapshot]);
     } finally { finish.release(); await stream.done; registerPause = undefined; }
+  });
+
+  /**
+   * ⭐ SERVED STAGING, 26 OCT (04:57:12Z twice, 07:44:06Z once): a scenario's FIRST conversation turn, the approval after its
+   * first draft, failed in about 3 s on "503 upstream connect error or disconnect/reset before headers … Connection refused",
+   * with 0 AI calls and nothing saved, and the next turn on the same board went through. The one request such a turn makes
+   * before any AI call is the scenario's empty Conversation create, so that create alone is tried again: at most 3 attempts,
+   * only when there was no answer (fetch threw, not an abort) or the answer was a 5xx. Every row is bound at the fetch the
+   * OpenAI client sends through, on the real core route; the abort rows call the same turn with a signal (the route gives none).
+   */
+  describe('the scenario\'s empty Conversation create (served 503, 26 Oct)', () => {
+    /** Each create attempt's log line (`core_turn.conversation_create`), at either level, in the order they were written. */
+    const restoreSpies: (() => void)[] = [];
+    // Restored after every row, passed or failed: a row that fails before reading its lines never leaks them into the next.
+    afterEach(() => { restoreSpies.splice(0).forEach((restore) => restore()); });
+    const watchCreateLines = async () => {
+      const { log } = await import('../../../utils/telemetry.js'); // the instance the re-imported route holds
+      const spies = [vi.spyOn(log, 'info'), vi.spyOn(log, 'warn')];
+      restoreSpies.push(...spies.map((s) => () => s.mockRestore()));
+      return (): Json[] => spies.flatMap((s) => s.mock.calls.map((c, i) => ({ order: s.mock.invocationCallOrder[i]!, line: c[0] as Json })))
+        .filter((l) => l.line?.event === 'core_turn.conversation_create').sort((a, b) => a.order - b.order).map((l) => l.line);
+    };
+    /**
+     * The first draft (the host's own: no Conversation yet), then the approval of its reading card: the scenario's FIRST
+     * conversation turn, with `answers` for its creates. `saved` gives the scenario a Conversation first.
+     */
+    const draftThenApprove = async (answers: typeof createAnswers, saved = false) => {
+      replies = [JSON.stringify(bakery())];
+      const draft = await turn({ message: BRIEF });
+      expect(draft.statusCode, draft.body).toBe(200);
+      expect([creates.length, conversationIds.has(SCENARIO)]).toEqual([0, false]);
+      if (saved) conversationIds.set(SCENARIO, `conv_${SCENARIO}`);
+      const card = draft.json().cards[0];
+      const held = agentProposalOf([...turnRows.values()].find((r) => r.pending_actions?.length)?.pending_actions[0])!;
+      const before = { sent: sent.length, registered: registered.length, graph: JSON.stringify(persisted) };
+      createAnswers = answers;
+      replies = [() => sse('', [{ type: 'function_call', id: 'fc_approve', call_id: 'call_approve', status: 'completed', name: 'apply_change',
+        arguments: JSON.stringify({ proposal_id: card.proposal_id }) }]), 'Saved.'];
+      const r = await turn({ message: card.approve_action.message, chip: card.approve_action });
+      const j = r.json();
+      return { r, j, held, before, counts: { status: r.statusCode, creates: creates.length, responses: sent.length - before.sent,
+        writes: registered.length - before.registered, provider_rows: (j._provider_calls as Json[]).length, tools: j._agent?.tool_calls ?? null } };
+    };
+
+    it('a 503, then the create: the approval runs as an unfailed one does (one apply_change, one CAS write, the same Responses calls, tool calls and provider rows); the second create\'s id is saved', async () => {
+      // The control: the same approval, its create answered at once. Its counts are measured here, never assumed.
+      const control = await draftThenApprove([201]);
+      expect(control.counts.status, control.r.body).toBe(200);
+      expect(stableStringify(persisted!.living_model)).toBe(stableStringify(control.held.living_model));
+      const controlId = conversationIds.get(SCENARIO);
+      beforeEachReset();
+      const lines = await watchCreateLines();
+      const failed = await draftThenApprove([503, 201]);
+      const logged = lines();
+      expect(failed.counts, failed.r.body).toEqual({ ...control.counts, creates: 2 });
+      expect([control.counts.creates, control.counts.writes, control.counts.tools.filter((t: Json) => t.name === 'apply_change').length]).toEqual([1, 1, 1]);
+      // The card's frozen model is what was written, once.
+      expect(stableStringify(persisted!.living_model)).toBe(stableStringify(failed.held.living_model));
+      expect([controlId, conversationIds.get(SCENARIO), failed.j._agent.sdk.conversation_id, failed.j._agent.sdk.conversation_created])
+        .toEqual(['conv_created_1', 'conv_created_2', 'conv_created_2', true]);
+      expect(creates.map((c) => c.body)).toEqual([{ items: [] }, { items: [] }]);
+      // ONE line per attempt at this non-model boundary: path, status, attempt, ms. No body, no key, no provider prose.
+      expect(logged).toEqual([
+        { event: 'core_turn.conversation_create', scenario_id: SCENARIO, path: '/v1/conversations', attempt: 1, status: 503, duration_ms: expect.any(Number), retry: true },
+        { event: 'core_turn.conversation_create', scenario_id: SCENARIO, path: '/v1/conversations', attempt: 2, status: 201, duration_ms: expect.any(Number) },
+      ]);
+      for (const words of ['upstream connect', 'sk-', 'items', 'conv_created']) expect(JSON.stringify(logged)).not.toContain(words);
+    }, 30_000);
+
+    it('no answer at all (fetch threw: connection refused), then the create: tried once more, and the approval runs and writes once', async () => {
+      const lines = await watchCreateLines();
+      const refused = new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED 10.0.0.1:443'), { code: 'ECONNREFUSED' }) });
+      const x = await draftThenApprove([refused, 201]);
+      expect([x.counts.status, x.counts.creates, x.counts.writes], x.r.body).toEqual([200, 2, 1]);
+      expect(lines().map(({ attempt, status, error, error_code, retry }) => ({ attempt, status, error, error_code, retry }))).toEqual([
+        { attempt: 1, status: undefined, error: 'TypeError', error_code: 'ECONNREFUSED', retry: true },
+        { attempt: 2, status: 201, error: undefined, error_code: undefined, retry: undefined }]);
+    }, 30_000);
+
+    it('three 503s: the turn fails as one 503 failed it before (502, the same error), after 3 creates, with no Responses call, no write and the saved model unchanged', async () => {
+      const lines = await watchCreateLines();
+      const x = await draftThenApprove([503, 503, 503, 201]); // a fourth attempt would take the 201
+      expect({ ...x.counts, error: x.j.error, graph_unchanged: JSON.stringify(persisted) === x.before.graph, saved_id: conversationIds.get(SCENARIO) ?? null, left: createAnswers.length })
+        .toEqual({ status: 502, creates: 3, responses: 0, writes: 0, provider_rows: 0, tools: null, graph_unchanged: true, saved_id: null, left: 1,
+          error: { code: 'UPSTREAM_ERROR', message: 'The reply didn’t arrive. Any changes already saved are kept. Send a new message to continue.', retry_safe: true, nothing_saved: true } });
+      expect(lines().map((l) => [l.attempt, l.status, l.retry])).toEqual([[1, 503, true], [2, 503, true], [3, 503, false]]);
+    }, 30_000);
+
+    it.each([
+      ['a 429', 429], ['a 400', 400],
+      ['the client\'s own timeout (its fetch aborted, the turn not cancelled)', new DOMException('This operation was aborted', 'AbortError')],
+      // undici's own timeouts reach the client as fetch's TypeError; the client raises both as its timeout (Codex FAIL, r1).
+      ['undici\'s headers timeout', new TypeError('fetch failed', { cause: Object.assign(new Error('Headers Timeout Error'), { name: 'HeadersTimeoutError', code: 'UND_ERR_HEADERS_TIMEOUT' }) })],
+      ['undici\'s connect timeout', new TypeError('fetch failed', { cause: Object.assign(new Error('Connect Timeout Error (attempted address: api.openai.com:443, timeout: 10000ms)'), { name: 'ConnectTimeoutError', code: 'UND_ERR_CONNECT_TIMEOUT' }) })],
+    ] as const)('%s: ONE create attempt, never repeated; the turn fails with no Responses call and no write', async (_name, answer) => {
+      const lines = await watchCreateLines();
+      const x = await draftThenApprove([answer, 201]);
+      expect({ status: x.counts.status, creates: x.counts.creates, responses: x.counts.responses, writes: x.counts.writes, left: createAnswers.length,
+        graph_unchanged: JSON.stringify(persisted) === x.before.graph }).toEqual({ status: 502, creates: 1, responses: 0, writes: 0, left: 1, graph_unchanged: true });
+      expect(lines().map((l) => [l.attempt, l.retry])).toEqual([[1, false]]);
+    }, 30_000);
+
+    it('the classifier: every timeout the client raises is final, with or without a cause; no answer at all and a 5xx are tried again', async () => {
+      const { createFailureIsTransient } = await import('../../agent-lane/core/sdk-turn.js');
+      const { APIConnectionError, APIConnectionTimeoutError, APIError, APIUserAbortError } = await import('openai-v7');
+      const status = (s: number) => APIError.generate(s, undefined, undefined, new Headers());
+      expect([
+        new APIConnectionTimeoutError(), // the client's deadline while the body is read: no cause (unreachable here at its 600 s)
+        Object.assign(new APIConnectionTimeoutError(), { cause: new TypeError('fetch failed') }),
+        new APIUserAbortError(), status(429), status(400),
+        new APIConnectionError({ cause: new TypeError('fetch failed') }), status(500), status(503),
+      ].map(createFailureIsTransient)).toEqual([false, false, false, false, false, true, true, true]);
+    });
+
+    it.each(['create', 'backoff'] as const)('the turn\'s signal aborted during the %s: the turn stops at once, after ONE create attempt and no Responses call', async (during) => {
+      const { runCoreTurn, CONVERSATION_CREATE_BACKOFF_MS } = await import('../../agent-lane/core/sdk-turn.js');
+      const { OPENAI_ONLY, runWithProviderPolicy } = await import('../../../adapters/llm/provider-policy.js');
+      const { budgetFor } = await import('../../agent-lane/model-budgets.js');
+      const cancel = new AbortController();
+      createAnswers = [during === 'create'
+        // In flight when the turn is cancelled: fetch rejects as fetch does, on the signal it was given (never, after 3 s).
+        ? (init: any) => new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+          setTimeout(() => cancel.abort(), 10);
+          setTimeout(() => reject(new TypeError('the create was never cancelled')), 3_000);
+        })
+        // A 503, then the turn cancelled 10 ms into the wait before the next attempt.
+        : () => { setTimeout(() => cancel.abort(), 10); return createAnswer(503); }, 201];
+      const claimed: string[] = [];
+      const t0 = Date.now();
+      const outcome = await runWithProviderPolicy(OPENAI_ONLY('agent_core_turn'), () => runCoreTurn({
+        ctx: { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-cancel', verified_user_messages: ['Hello.'], user_turn_text: 'Hello.' },
+        message: 'Hello.', instructions: 'Synthetic instructions.', budget: budgetFor('gpt-6.1-sol', 'conversation'), userId: null, tools: () => [],
+        conversationStore: { read: async () => null, claim: async (_s, id) => { claimed.push(id); return id; } }, signal: cancel.signal,
+      })).then(() => 'answered', (err: unknown) => err);
+      const ms = Date.now() - t0;
+      // The cancellation itself ends the turn: the client's abort in flight, or the wait's own; never a later failure.
+      const { APIUserAbortError } = await import('openai-v7');
+      if (during === 'create') expect(outcome).toBeInstanceOf(APIUserAbortError);
+      else expect([outcome instanceof Error, (outcome as Error).name, outcome instanceof APIUserAbortError]).toEqual([true, 'AbortError', false]);
+      expect({ aborted: cancel.signal.aborted, creates: creates.length, left: createAnswers.length, responses: sent.length, claimed })
+        .toEqual({ aborted: true, creates: 1, left: 1, responses: 0, claimed: [] });
+      expect(ms).toBeLessThan(CONVERSATION_CREATE_BACKOFF_MS[0]!); // at once: never after the wait, nor a second attempt
+    }, 30_000);
+
+    it('a scenario with a saved Conversation: its first approval makes 0 creates and continues that Conversation', async () => {
+      const x = await draftThenApprove([503, 201], true);
+      expect([x.counts.status, x.counts.creates, createAnswers.length, x.counts.writes, x.j._agent.sdk.conversation_id, x.j._agent.sdk.conversation_created], x.r.body)
+        .toEqual([200, 0, 2, 1, `conv_${SCENARIO}`, false]);
+    }, 30_000);
   });
 
   it('step 1, drafter: the first turn sends ONE strict canonical-schema call at gpt-6.1-sol, effort medium, with the fixed prompt', async () => {
@@ -3170,4 +3340,4 @@ describe('the model-program turn on the real core route', () => {
   });
 });
 
-function beforeEachReset() { SCENARIO = randomUUID(); persisted = null; registered.length = 0; turnRows.clear(); conversationIds.clear(); pausedRun = null; sent.length = 0; replies = []; }
+function beforeEachReset() { SCENARIO = randomUUID(); persisted = null; registered.length = 0; turnRows.clear(); conversationIds.clear(); pausedRun = null; sent.length = 0; replies = []; creates.length = 0; createAnswers = []; }
