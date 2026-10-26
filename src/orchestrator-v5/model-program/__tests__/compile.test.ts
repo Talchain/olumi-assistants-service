@@ -11,7 +11,7 @@ import { project } from '../project.js';
 import { probeValue } from './probe.js';
 import { parseUnit, sameDims } from '../units.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
-import { simulate } from '../simulate/simulate.js';
+import { exactInitialValues, simulate } from '../simulate/simulate.js';
 import { isWithheld } from '../simulate/result.js';
 import { STARTS_AFTER_PERIODS, withDeclaredTiming } from '../canonical.js';
 import { CANONICAL_JSON_SCHEMA } from '../../model-program-turn/prompt.js';
@@ -1081,6 +1081,65 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(above.per_goal[0]).toEqual({ goal_id: 'under_a_pound', withheld: { reason: 'invalid_domain', count: 2, quantities: ['spend'] } });
   });
 
+  it('Codex r3 numbers#2 (1), spec §3.7: a value that turns nonfinite (a ratio by zero) and later recovers leaves the whole draw outside the domain, named where it arose', () => {
+    // ratio = 1 ÷ denominator, floor 0; the denominator is 0 until the change at month 1, so ratio reads [NaN, 1, 1, 1]. The
+    // end goal, the limit, the joint, within-limits and the combined finding are each withheld in all 3 draws, naming `ratio`.
+    const dividing = (start: number) => compile(model({
+      question: 'Should we make the change?', period: 'month',
+      quantities: [person('start', 'member', start, 'no members today'), qty('bump', 'member', { kind: 'coefficient', value: 1, quote: 'the change adds one member' }),
+        structure('change', '1', 0, 'No change before the option.'), structure('on', '1', 1, 'The option is on.'), person('one', '1', 1, 'one'),
+        derived('denominator', 'member'), { ...derived('ratio', '1/member'), floor: 0 }, person('target', '1/member', 0.5, 'at least a half'),
+        person('cap', '1/member', 2, 'never above two'), person('three', 'month', 3, 'in three months')],
+      relations: [eff('den_rel', 'denominator', 'start', [['change', 'bump']]), def('ratio_rel', 'ratio', 'ratio', ['one', 'denominator'])],
+      goals: [goal('half', 'ratio', '>=', 'target', 'end', 'three', 'at least a half in three months')],
+      limits: [limit('capped', 'Never above two', 'ratio', '<=', 'cap', 'end', 'three', 'never above two')],
+      options: [option('make', 'Make the change', [set('change', 'on', 'make the change', { starts_after_periods: 1 })], 'make the change')],
+    }));
+    const zero = dividing(0);
+    expect(zero.errors).toEqual([]);
+    const make = simulate(zero.executable!, { seed: 7, draws: 3, record: [0] }).options.find((o) => o.option_id === 'make')!;
+    expect(make.per_goal[0]).toEqual({ goal_id: 'half', withheld: { reason: 'invalid_domain', count: 3, quantities: ['ratio'] } });
+    expect(make.per_limit[0]).toEqual({ limit_id: 'capped', withheld: { reason: 'invalid_domain', count: 3, quantities: ['ratio'] } });
+    for (const f of [make.joint, make.within_limits, make.joint_within_limits]) expect(isWithheld(f) && f.withheld.count).toBe(3);
+    // Contrast: a denominator of 1 from the start is never nonfinite, and every finding has its chance.
+    const one = simulate(dividing(1).executable!, { seed: 7, draws: 3 }).options.find((o) => o.option_id === 'make')!;
+    expect(one.per_goal[0]).toEqual({ goal_id: 'half', chance: 1, precision_95: [1, 1] });
+    expect(one.joint_within_limits).toEqual({ chance: 1, precision_95: [1, 1] });
+  });
+
+  it('Codex r3 numbers#2 (2), spec §3.7: rounding is allowed by the calculation, never by the size of the end (£1tn + £500 is above a £1tn ceiling; 100000000 + 0.3 − 100000000 is on a 0.3 floor)', () => {
+    const big = (extra: number) => compile(model({
+      question: 'Can we stay within £1tn?', period: 'month',
+      quantities: [person('core', 'GBP', 1e12, '£1tn of core spend'), person('extra', 'GBP', extra, 'and the extra'), { ...derived('spend', 'GBP'), ceiling: 1e12 },
+        person('budget', 'GBP', 2e12, 'at most £2tn'), person('one_month', 'month', 1, 'this month')],
+      relations: [def('spend_rel', 'spend', 'sum', ['core', 'extra'])],
+      goals: [goal('within', 'spend', '<=', 'budget', 'end', 'one_month', 'at most £2tn')],
+      options: [option('as_is', 'Carry on', [], 'carry on')],
+    }));
+    const over = big(500).executable!;
+    expect(simulate(over, { seed: 7, draws: 2 }).options[0]!.per_goal[0]).toEqual({ goal_id: 'within', withheld: { reason: 'invalid_domain', count: 2, quantities: ['spend'] } });
+    expect(exactInitialValues(over).has('spend')).toBe(false);
+    const on = big(0).executable!;
+    expect(simulate(on, { seed: 7, draws: 2 }).options[0]!.per_goal[0]).toEqual({ goal_id: 'within', chance: 1, precision_95: [1, 1] });
+    expect(exactInitialValues(on).get('spend')).toBe(1e12);
+
+    // Cancellation across quantities: 0.3 worked out as (100000000 + 0.3) − 100000000 is 0.29999999701976776, on its floor.
+    const cancelling = (floor: number) => compile(model({
+      question: 'Is the share enough?', period: 'month',
+      quantities: [person('whole', '1', 100000000, 'a hundred million'), person('part', '1', 0.3, 'and 0.3'), derived('sum', '1'), { ...derived('share', '1'), floor },
+        person('fifth', '1', 0.2, 'at least a fifth'), person('one_month', 'month', 1, 'this month')],
+      relations: [def('sum_rel', 'sum', 'sum', ['whole', 'part']), def('share_rel', 'share', 'difference', ['sum', 'whole'])],
+      goals: [goal('enough', 'share', '>=', 'fifth', 'end', 'one_month', 'at least a fifth')],
+      options: [option('as_is', 'Carry on', [], 'carry on')],
+    }));
+    expect(100000000 + 0.3 - 100000000).toBeLessThan(0.3); // the rounding this half is about
+    const floored = cancelling(0.3).executable!;
+    expect(simulate(floored, { seed: 7, draws: 2 }).options[0]!.per_goal[0]).toEqual({ goal_id: 'enough', chance: 1, precision_95: [1, 1] });
+    expect(exactInitialValues(floored).has('share')).toBe(true);
+    // Contrast: a floor of 0.31 is genuinely above it.
+    expect(simulate(cancelling(0.31).executable!, { seed: 7, draws: 2 }).options[0]!.per_goal[0]).toEqual({ goal_id: 'enough', withheld: { reason: 'invalid_domain', count: 2, quantities: ['share'] } });
+  });
+
   it('Codex r2 numbers#2 (4), spec §3.7: a window length given outside Olumi\'s reading of it is asked again before any Run on that window; reversed bounds on it withhold; never run for the given length', () => {
     const windowed = (f: Partial<CanonicalQuantityT>) => {
       const g = gymFilled();
@@ -1259,7 +1318,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
 
   it('S1 one question channel (A4): what the result waits on is typed, in the model\'s order, and the compiler writes no question', () => {
     const edit = (m: CanonicalModelT, f: (m: CanonicalModelT) => void) => { f(m); return m; };
-    const cases: [string, CanonicalModelT, { id: string; code: string; scope: string[] }[]][] = [
+    const cases: [string, CanonicalModelT, { id: string; code: string; scope: string[]; reason?: string }[]][] = [
       ['asked', gym(), [{ id: 'leavers', code: 'asked', scope: ['reach_400'] }]],
       ['approximate: their figure as stated, no blocker (the AI asks for its range)', gymFilled(), []],
       ['no measure', edit(bakery(), (m) => {
