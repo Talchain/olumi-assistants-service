@@ -23,6 +23,7 @@ import { runModelProgramTurn } from '../turn.js';
 import { evaluateCanonical, seedOf, RUN_DRAWS } from '../evaluate.js';
 import { programReadOf, reopenProgram, savedProgramOf, sourceTextOf } from '../program-store.js';
 import { applyCanvasFigure, applyProgramChange, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
+import { log as staticLog } from '../../../utils/telemetry.js';
 import { GROUPS, readingOf, validatePostimage } from '../postimage.js';
 import { proposalPendingAction } from '../../agent-lane/durable-proposal.js';
 import { agentProposalOf, proposalFieldsWire, proposalRecord } from '../../agent-lane/proposal-object/record.js';
@@ -1025,7 +1026,13 @@ describe('the model-program turn on the real core route', () => {
     // (6) A merged model that does not compile is refused as today, after the drafter's two repairs; each repair asks for
     // the changes again (never the whole model), after the changes it returned.
     const broken = { claims: [{ id: 'nowhere', text: 'Bread sells.', concerns: ['no_such_record'], author: 'olumi', quote: null, party: null, approval: 'proposed', author_id: null }] };
+    const info = vi.spyOn(staticLog, 'info'); // the instance the statically imported tools hold (the routes are re-imported after resetModules)
     expect(await propose(broken, {}, 3)).toMatchObject({ status: 'refused', reason: 'does_not_compile' });
+    // Why it took three calls is logged: each attempt's compiler codes, never words (T record 26 Oct: a 124 s edit's second draft had no recorded cause).
+    const drafted = info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'model_program.update_draft' ? [o as Json] : []));
+    info.mockRestore();
+    expect(drafted.map((d) => d.attempts.map((a: Json) => a.codes))).toEqual([[['undefined_ref'], ['undefined_ref'], ['undefined_ref']]]);
+    expect(JSON.stringify(drafted)).not.toContain('Bread sells');
     expect(sent).toHaveLength(3);
     expect(sent[1]!.input.at(-2)).toEqual({ role: 'assistant', content: JSON.stringify({ ...none, ...broken }) });
     expect(String(sent[1]!.input.at(-1).content).startsWith(`${UPDATE_REPAIR_PREFIX}\n- `)).toBe(true);
