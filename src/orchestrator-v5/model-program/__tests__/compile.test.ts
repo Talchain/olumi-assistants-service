@@ -16,6 +16,7 @@ import { isWithheld } from '../simulate/result.js';
 import { STARTS_AFTER_PERIODS, withDeclaredTiming } from '../canonical.js';
 import { CANONICAL_JSON_SCHEMA } from '../../model-program-turn/prompt.js';
 import { revisionDigest } from '../../model-program-turn/run-receipt.js';
+import { evaluateCanonical } from '../../model-program-turn/evaluate.js';
 
 // ── builders ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 const base = { party: null, approval: 'proposed' as const, author_id: null };
@@ -710,6 +711,42 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     // Contrast: inside its bounds, or undeclared, a figure below 0 is no contradiction.
     expect(withMembers({ value: 5, low: null, high: null }).blockers.some((b) => b.code === 'recount')).toBe(false);
     expect(withMembers({ value: -5, low: null, high: null, floor: null }).blockers.some((b) => b.code === 'recount')).toBe(false);
+  });
+
+  it('numbers#1 (alpha G2): a person\'s firm range that only touches Olumi\'s floor or ceiling is asked again in their unit, never held in engine fractions', () => {
+    // A hall's occupancy in %, which Olumi reads as 0 to 100 %, on the real compile → present path (evaluateCanonical).
+    const words = 'The hall has 200 seats. We want at least 150 guests this month. Carry on as now. Between 100% and 120% full.';
+    const hall = (occupancy: Partial<CanonicalQuantityT>) => evaluateCanonical(model({
+      question: 'Will the hall fill?', period: 'month',
+      quantities: [person('seats', 'seat', 200, 'The hall has 200 seats'), qty('occupancy', '%', { floor: 0, ceiling: 100, quote: 'Between 100% and 120% full', ...occupancy }),
+        derived('guests', 'seat'), person('want', 'seat', 150, 'at least 150 guests'), person('one', 'month', 1, 'this month')],
+      relations: [def('guests_rel', 'guests', 'product', ['seats', 'occupancy'])],
+      goals: [goal('enough_guests', 'guests', '>=', 'want', 'end', 'one', 'at least 150 guests')],
+      options: [option('carry_on', 'Carry on as now', [], 'Carry on as now')],
+    }), { sourceText: words, seed: 7, draws: 2000 });
+    type View = { goal_chance: { notes: string[] }; options: { option_id: string; cell: { face: string; why: string; reasons: { code: string; message: string | null }[] } }[] };
+    // From above: 100–120 % against a ceiling of 100 % leaves one figure, no spread. Asked again, in %, naming Olumi's reading.
+    const above = hall({ low: 100, high: 120, range_kind: 'bounds' });
+    expect(above.compiled.errors).toEqual([]);
+    expect(above.compiled.blockers).toEqual([{ id: 'occupancy', code: 'recount', scope: ['enough_guests'] }]);
+    expect(above.compiled.perGoal.find((p) => p.goal_id === 'enough_guests')).toMatchObject({ status: 'asks', asks: ['occupancy'] });
+    const seen = above.view as unknown as View;
+    expect(seen.goal_chance.notes).toEqual(['‘enough guests’ waits on ‘occupancy’ again.']);
+    expect(seen.options.map((o) => [o.option_id, o.cell.face, o.cell.why])).toEqual([['carry_on', 'Not shown yet: needs your answer', 'The chance waits on ‘occupancy’ again.']]);
+    expect(seen.options[0]!.cell.reasons).toEqual([{ code: 'goal_asks', message: 'needs "occupancy" again: "occupancy" is given as 100–120 %, but Olumi reads it as never above 100 %.' }]);
+    expect(JSON.stringify(above.view)).not.toContain('no room');
+    // From below: −10–0 % against a floor of 0 %.
+    const below = hall({ low: -10, high: 0, range_kind: 'bounds' });
+    expect(below.compiled.blockers).toEqual([{ id: 'occupancy', code: 'recount', scope: ['enough_guests'] }]);
+    expect((below.view as unknown as View).options[0]!.cell.reasons[0]!.message).toBe('needs "occupancy" again: "occupancy" is given as -10–0 %, but Olumi reads it as never below 0 %.');
+    // Contrast: a firm range INSIDE that ends at the ceiling has room (80–100 %), and a rough estimate touching it is the
+    // ruled reading within what it can be (conditioned and disclosed): both calculate, nothing is asked again.
+    for (const [what, f] of [['firm 80–100 %', { low: 80, high: 100, range_kind: 'bounds' as const }], ['rough 100–120 %', { low: 100, high: 120, range_kind: 'plausible' as const }]] as const) {
+      const r = hall(f);
+      expect(r.compiled.blockers, what).toEqual([]);
+      expect(r.compiled.perGoal.map((p) => [p.goal_id, p.status]), what).toEqual([['enough_guests', 'calculable']]);
+      expect(r.sim, what).not.toBeNull();
+    }
   });
 
   it('alpha G6: a setting\'s timing worked out by a relation, or one that does not apply, is a typed error, never period 0', () => {
