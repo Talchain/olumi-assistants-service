@@ -7,7 +7,7 @@
 import { getEventListeners } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OPENAI_ONLY, runWithProviderPolicy } from '../provider-policy.js';
-import { ledgeredAgentsClient } from '../openai-agents-client.js';
+import { ledgeredAgentsClient, streamedLedgeredResponse } from '../openai-agents-client.js';
 import { responsesSse, sseResponse } from '../../../orchestrator-v5/agent-lane/__tests__/stream-when-asked.js';
 
 const RESPONSE = {
@@ -52,5 +52,45 @@ describe('the SDK client holds nothing once a streamed call has ended', () => {
     await Promise.race([Promise.all(pending).then(() => { settled = true; }), new Promise((resolve) => setTimeout(resolve, 500))]);
     expect(settled, 'the attempt settles without its consumer').toBe(true);
     expect(getEventListeners(signals[0]!, 'abort')).toHaveLength(0);
+  });
+
+  it.each(['throw', 'reject'] as const)('an observer that %ss cannot change the final response, ledger or listener cleanup', async (failure) => {
+    const signals: AbortSignal[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { signal?: AbortSignal | null }) => {
+      if (init?.signal) signals.push(init.signal);
+      return sseResponse(responsesSse(RESPONSE), init);
+    }));
+    const policy = OPENAI_ONLY('agent_v1_turn');
+    const events: string[] = [];
+    const final = await runWithProviderPolicy(policy, () => streamedLedgeredResponse({ site: 'draft', detailOf: () => ({ purpose: 'test' }) },
+      { model: 'gpt-6.1-sol', input: 'x' }, (event) => {
+        events.push(event.type);
+        if (failure === 'throw') throw new Error('observer');
+        return Promise.reject(new Error('observer'));
+      }));
+    expect(events).toContain('response.output_text.delta');
+    expect(events.at(-1)).toBe('response.completed');
+    expect(final).toEqual(RESPONSE);
+    expect(policy.calls).toHaveLength(1);
+    expect(policy.calls[0]?.attempt?.outcome).toBe('success');
+    expect(getEventListeners(signals[0]!, 'abort')).toHaveLength(0);
+  });
+
+  it('a provider error still rejects and settles its ledger after an observed partial output', async () => {
+    const events = [
+      { type: 'response.output_text.delta', delta: '{' },
+      { type: 'error', code: 'server_error', message: 'synthetic provider error', param: null },
+    ].map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(events, { headers: { 'content-type': 'text/event-stream' } })));
+    const policy = OPENAI_ONLY('agent_v1_turn');
+    const pending: Promise<void>[] = [];
+    const observed: string[] = [];
+    await expect(runWithProviderPolicy(policy, () => streamedLedgeredResponse({ site: 'draft', pending, detailOf: () => ({ purpose: 'test' }) },
+      { model: 'gpt-6.1-sol', input: 'x' }, (event) => { observed.push(event.type); throw new Error('observer'); })))
+      .rejects.toThrow('synthetic provider error');
+    expect(observed).toContain('response.output_text.delta');
+    await Promise.all(pending);
+    expect(policy.calls).toHaveLength(1);
+    expect(policy.calls[0]?.attempt?.outcome).toBe('invalid_response');
   });
 });

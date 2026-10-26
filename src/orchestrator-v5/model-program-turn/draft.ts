@@ -7,7 +7,7 @@
  * draft as the assistant's turn, the errors as the next user turn: phase 0b's repair shape), at most twice. Nothing here
  * edits the model but the host's own fields (`withHostFields`): what compiles is the AI's own draft.
  */
-import { streamedLedgeredResponse, type StreamedResponsesBody } from '../../adapters/llm/openai-agents-client.js';
+import { streamedLedgeredResponse, type ResponsesStreamObserver, type StreamedResponsesBody } from '../../adapters/llm/openai-agents-client.js';
 import { coreBudget } from '../agent-lane/model-budgets.js';
 import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
@@ -24,7 +24,24 @@ export const DRAFT_MAX_OUTPUT_TOKENS = 32_000;
 export type InputMessage = { readonly role: 'user' | 'assistant'; readonly content: string };
 export type CallOutput = { readonly text: string | null; readonly status: string | null; readonly incomplete: string | null; readonly usage: unknown };
 /** One Responses call with the body as built here. Injectable, so a test can answer it without a network. */
-export type ResponsesCall = (body: StreamedResponsesBody) => Promise<CallOutput>;
+export type ResponsesCall = (body: StreamedResponsesBody, observe?: ResponsesStreamObserver) => Promise<CallOutput>;
+
+/** Durations from this logical call's start; retries remain separate physical rows in the existing provider ledger. */
+export type DraftObservation = {
+  /** First nonempty native output_text.delta, NOT a usable or displayed model. Null if no delta was observed. */
+  first_output_ms: number | null;
+  /** Native completed/incomplete/failed event. Null when the call stopped without one. */
+  response_ms: number | null;
+  /** Schema reading, normalisation and compilation after JSON parsing. Null if compilation was not attempted. */
+  compile_ms: number | null;
+  /** The provider's input_tokens_details.cached_tokens; null when not reported, never an assumed zero. */
+  cached_input_tokens: number | null;
+};
+const elapsed = (start: number): number => Math.max(0, Math.round(performance.now() - start));
+const cachedInputTokens = (usage: unknown): number | null => {
+  const tokens = (usage as { input_tokens_details?: { cached_tokens?: unknown } } | null)?.input_tokens_details?.cached_tokens;
+  return typeof tokens === 'number' && Number.isFinite(tokens) && tokens >= 0 ? tokens : null;
+};
 
 /**
  * A failed call's typed fields as the SDK's APIError carries them (HTTP status, error type, error code, the provider's request
@@ -48,6 +65,7 @@ export type DraftAttempt = {
   readonly status: string | null;
   readonly usage: unknown;
   readonly ms: number;
+  readonly observation: DraftObservation;
 };
 export type DraftOutcome = {
   /** The last schema-valid draft (compiling or not), as the compiler read it when `interpret` (a first draft's saved form); null when no attempt returned one. */
@@ -125,9 +143,9 @@ export function readUpdate(saved: CanonicalModelT, update: CanonicalUpdateT, rea
 
 /** The ledgered client's Responses call, streamed (two unstreamed phase-0 calls were cut at 180 s); one per turn. */
 export function ledgeredResponsesCall(): ResponsesCall {
-  return async (body) => {
+  return async (body, observe) => {
     const final = await streamedLedgeredResponse({ site: 'model-program.draft',
-      detailOf: (b) => ({ model: String(b['model']), purpose: 'canonical_draft', ...agentRequestIdentity('agent.construct', b) }) }, body);
+      detailOf: (b) => ({ model: String(b['model']), purpose: 'canonical_draft', ...agentRequestIdentity('agent.construct', b) }) }, body, observe);
     const text = (final?.output ?? []).flatMap((o) => (o.type === 'message' ? o.content : [])).flatMap((c) => (c.type === 'output_text' ? [c.text] : []))[0];
     return { text: text ?? null, status: final?.status ?? null, incomplete: final?.incomplete_details?.reason ?? null, usage: final?.usage ?? null };
   };
@@ -153,15 +171,23 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
   let compiled: CompileResult | null = null;
   for (let a = 0; a <= MAX_REPAIRS; a += 1) {
     const t0 = Date.now();
+    const started = performance.now();
+    const observation: DraftObservation = { first_output_ms: null, response_ms: null, compile_ms: null, cached_input_tokens: null };
+    const observe: ResponsesStreamObserver = (event) => {
+      if (event.type === 'response.output_text.delta' && event.delta.length > 0 && observation.first_output_ms === null) observation.first_output_ms = elapsed(started);
+      if (event.type === 'response.completed' || event.type === 'response.incomplete' || event.type === 'response.failed') observation.response_ms = elapsed(started);
+    };
     let out: CallOutput;
-    try { out = await call(draftRequestBody(input, onto !== undefined, today, periodZero)); } catch (err) {
-      attempts.push({ attempt: a, errors: null, failed: `call failed: ${err instanceof Error ? err.name : 'error'}`, provider_error: providerErrorOf(err), status: null, usage: null, ms: Date.now() - t0 });
+    try { out = await call(draftRequestBody(input, onto !== undefined, today, periodZero), observe); } catch (err) {
+      attempts.push({ attempt: a, errors: null, failed: `call failed: ${err instanceof Error ? err.name : 'error'}`, provider_error: providerErrorOf(err), status: null, usage: null, ms: Date.now() - t0, observation });
       break;
     }
     const ms = Date.now() - t0;
-    if (out.text === null) { attempts.push({ attempt: a, errors: null, failed: `no output (${out.status ?? 'unknown'}${out.incomplete ? `: ${out.incomplete}` : ''})`, status: out.status, usage: out.usage, ms }); break; }
+    observation.cached_input_tokens = cachedInputTokens(out.usage);
+    if (out.text === null) { attempts.push({ attempt: a, errors: null, failed: `no output (${out.status ?? 'unknown'}${out.incomplete ? `: ${out.incomplete}` : ''})`, status: out.status, usage: out.usage, ms, observation }); break; }
     let json: unknown;
-    try { json = withHostFields(JSON.parse(out.text)); } catch { attempts.push({ attempt: a, errors: null, failed: 'output is not JSON', status: out.status, usage: out.usage, ms }); break; }
+    try { json = withHostFields(JSON.parse(out.text)); } catch { attempts.push({ attempt: a, errors: null, failed: 'output is not JSON', status: out.status, usage: out.usage, ms, observation }); break; }
+    const compileStarted = performance.now();
     // An update returns only its changes: the model it proposes is the saved one with them merged by id.
     const update = onto === undefined ? null : CanonicalUpdate.safeParse(json);
     const whole = update?.success ? mergeUpdate(onto!, update.data) : json;
@@ -174,8 +200,9 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
     // model's asks as they are.
     const compileOpts = { sourceText, asksNeedQuestions: typeof brief === 'string' && a < MAX_REPAIRS };
     const result = read !== undefined ? compile(read, compileOpts) : compileJson(whole, compileOpts);
+    observation.compile_ms = elapsed(compileStarted);
     if (parsed.success) { model = read ?? parsed.data; compiled = result; }
-    attempts.push({ attempt: a, errors: result.errors, status: out.status, usage: out.usage, ms });
+    attempts.push({ attempt: a, errors: result.errors, status: out.status, usage: out.usage, ms, observation });
     if (result.errors.length === 0 || a === MAX_REPAIRS) break;
     input.push({ role: 'assistant', content: out.text }, { role: 'user', content: repairMessage(result.errors, onto === undefined ? REPAIR_PREFIX : UPDATE_REPAIR_PREFIX) });
   }

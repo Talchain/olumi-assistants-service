@@ -70,18 +70,25 @@ function streamCarriedError(sse: string): boolean {
 
 /** A streamed Responses request's body, without the `stream` flag the call sets. */
 export type StreamedResponsesBody = Omit<OpenAI.Responses.ResponseCreateParamsStreaming, 'stream'>;
+/** Native SDK events for observation only; neither a throw nor a rejected observer may alter or delay the call. */
+export type ResponsesStreamObserver = (event: OpenAI.Responses.ResponseStreamEvent) => void | Promise<void>;
 
 /**
  * ONE streamed Responses call through the SAME ledgered client, for a host's structured call outside the Agents SDK (the
  * canonical drafter): its terminal response, after its ledger row has settled.
  */
-export async function streamedLedgeredResponse(ledger: AgentsClientLedger, body: StreamedResponsesBody): Promise<OpenAI.Responses.Response | undefined> {
+export async function streamedLedgeredResponse(ledger: AgentsClientLedger, body: StreamedResponsesBody,
+  observe?: ResponsesStreamObserver): Promise<OpenAI.Responses.Response | undefined> {
   const pending = ledger.pending ?? [];
   const client = ledgeredAgentsClient({ ...ledger, pending });
   const stream = await client.responses.create({ ...body, stream: true });
   let final: OpenAI.Responses.Response | undefined;
-  for await (const ev of stream) if (ev.type === 'response.completed' || ev.type === 'response.incomplete' || ev.type === 'response.failed') final = ev.response;
-  await Promise.all(pending);
+  try {
+    for await (const ev of stream) {
+      try { const observed = observe?.(ev); if (observed !== undefined) void observed.catch(() => {}); } catch { /* observation never decides the result */ }
+      if (ev.type === 'response.completed' || ev.type === 'response.incomplete' || ev.type === 'response.failed') final = ev.response;
+    }
+  } finally { await Promise.all(pending); }
   return final;
 }
 

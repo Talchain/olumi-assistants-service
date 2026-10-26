@@ -497,7 +497,8 @@ describe('the model-program turn on the real core route', () => {
     expect(j.assistant_text).toBe('I couldn\'t build a model that calculates from this yet (call failed: Error). Nothing was saved.');
     expect(j._agent.tool_calls).toEqual([{ name: 'draft_canonical_model', outcome: 'refused', refusal: 'no_draft' }]);
     const typed = { status: 429, type: 'insufficient_quota', code: 'credit_balance_exhausted', request_id: 'req_quota_1' };
-    expect(j.model_program.draft.attempts).toEqual([{ attempt: 0, errors: null, failed: 'call failed: Error', provider_error: typed, status: null, usage: null, ms: expect.any(Number) }]);
+    expect(j.model_program.draft.attempts).toEqual([{ attempt: 0, errors: null, failed: 'call failed: Error', provider_error: typed, status: null, usage: null, ms: expect.any(Number),
+      observation: { first_output_ms: null, response_ms: null, compile_ms: null, cached_input_tokens: null } }]);
     expect(line.tool_calls).toEqual([{ name: 'draft_canonical_model', outcome: 'refused', refusal: 'no_draft', provider_error: typed }]);
     // Never the provider's message (it can echo input) nor the masked key in it: not on the wire, not in the log line.
     for (const text of [r.body, JSON.stringify(line)]) for (const words of ['exceeded your current quota', 'sk-proj', 'wxyz']) expect(text).not.toContain(words);
@@ -510,7 +511,8 @@ describe('the model-program turn on the real core route', () => {
         call: async () => { throw thrown; } });
       expect(out.assistantText).toBe(`I couldn't build a model that calculates from this yet (call failed: ${name}). Nothing was saved.`);
       expect(out.toolCalls).toEqual([{ name: 'draft_canonical_model', ok: false, outcome: 'refused', refusal: 'no_draft' }]);
-      expect((out.payload.model_program['draft'] as Json).attempts).toEqual([{ attempt: 0, errors: null, failed: `call failed: ${name}`, provider_error: none, status: null, usage: null, ms: expect.any(Number) }]);
+      expect((out.payload.model_program['draft'] as Json).attempts).toEqual([{ attempt: 0, errors: null, failed: `call failed: ${name}`, provider_error: none, status: null, usage: null, ms: expect.any(Number),
+        observation: { first_output_ms: null, response_ms: null, compile_ms: null, cached_input_tokens: null } }]);
       expect(out.toolResults[0]!.provider_error).toEqual(none);
       expect(JSON.stringify(out.payload)).not.toContain('socket hang up');
     }
