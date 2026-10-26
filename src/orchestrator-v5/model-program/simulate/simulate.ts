@@ -398,23 +398,35 @@ function activeSet(sets: readonly PlanSet[], froms: Float64Array, base: number, 
   return to;
 }
 
-function evaluate(node: Exclude<Node, StockNode>, vals: Float64Array, row: number, inputs: Inputs, d: number): number {
+function evaluate(node: Exclude<Node, StockNode>, vals: Float64Array, row: number, inputs: Inputs, d: number,
+  finiteUncertain?: ReadonlySet<number>): number {
   switch (node.kind) {
     case 'fixed': return node.value;
     case 'drawn': return inputs.drawn[node.slot]![d]!;
     case 'effect': {
       let v = vals[row + node.base]!;
-      for (let i = 0; i < node.drivers.length; i++) v += vals[row + node.coefficients[i]!]! * vals[row + node.drivers[i]!]!;
+      for (let i = 0; i < node.drivers.length; i++) {
+        const coefficient = node.coefficients[i]!, driver = node.drivers[i]!;
+        const a = vals[row + coefficient]!, b = vals[row + driver]!;
+        // The exact initial read leaves a finite ranged input unsampled. Zero cancels it, not an invalid/unknown value.
+        const zero = finiteUncertain && ((a === 0 && finiteUncertain.has(driver)) || (b === 0 && finiteUncertain.has(coefficient)));
+        v += zero ? 0 : a * b;
+      }
       return v;
     }
     case 'definition': {
       const p = node.parts;
       let v = vals[row + p[0]!]!;
+      let finiteUncertainLeft = finiteUncertain?.has(p[0]!) ?? false;
       for (let i = 1; i < p.length; i++) {
         const x = vals[row + p[i]!]!;
         if (node.op === 'sum') v += x;
         else if (node.op === 'difference') v -= x;
-        else if (node.op === 'product') v *= x;
+        else if (node.op === 'product') {
+          const zero = finiteUncertain && ((v === 0 && finiteUncertain.has(p[i]!)) || (x === 0 && finiteUncertainLeft));
+          v = zero ? 0 : v * x;
+          finiteUncertainLeft = false; // an unresolved intermediate has no licence to conceal an invalid calculation
+        }
         else if (x === 0) return NaN;
         else v /= x;
       }
@@ -425,20 +437,23 @@ function evaluate(node: Exclude<Node, StockNode>, vals: Float64Array, row: numbe
 
 /**
  * The exact period-0 levels of a compiled model, before any option. Reuse the run's evaluator and dependency order,
- * without drawing inputs or running time forward. A range or risk contributes no exact value; NaN carries that absence
- * through its dependants, including a zero times an uncertain input. A stock starts at its start, not its first update.
+ * without drawing inputs or running time forward. A range has no exact value, but zero times a finite range is exactly
+ * zero. Risk-dependent or invalid values stay absent, including a zero denominator. A stock starts at its start.
  */
 export function exactInitialValues(model: ExecutableModel): ReadonlyMap<string, number> {
   const baseline = { ...model, options: [], risks: [] };
   const c = compile(baseline);
   const p = planOption(c, { id: '', label: '', sets: [] }, baseline);
   const risky = new Set(model.risks.map((r) => r.effect_on));
+  // Only the compiler's primitive finite ranges have this licence; a missing or invalid intermediate does not.
+  const finiteUncertain = new Set(c.ranged.flatMap(({ q, law }) => !risky.has(c.ids[q]!)
+    && Number.isFinite(law.centre) && Number.isFinite(law.sd) ? [q] : []));
   const vals = new Float64Array(c.nodes.length).fill(NaN);
   const inputs: Inputs = { drawn: [], riskU: [] };
   for (const q of p.order) {
     const node = c.nodes[q]!;
     if (node.kind === 'drawn' || risky.has(c.ids[q]!)) continue;
-    const value = node.kind === 'stock' ? vals[node.start]! : evaluate(node, vals, 0, inputs, 0);
+    const value = node.kind === 'stock' ? vals[node.start]! : evaluate(node, vals, 0, inputs, 0, finiteUncertain);
     if (Number.isFinite(value)) vals[q] = value;
   }
   return new Map(c.ids.flatMap((id, q) => Number.isFinite(vals[q]) ? [[id, vals[q]!] as const] : []));

@@ -1,6 +1,7 @@
 /**
  * HIGH: the goal card gets today's exact level, not an option's future result or a range's centre.
- * Hand calculation: 125 orders/week + 25 orders/week × 0 = 125 today; the option sets the switch to 1 (150).
+ * Hand calculation: 125 + [0,35] × 0 + [0,3] × 0 = 125 orders/week today, without choosing either uncertain effect.
+ * A fixed 25 × 1 would give 150; a ranged effect × 1 has no exact initial point. Reverting the zero rule makes 125 RED.
  * Mutants: use the first option; substitute a ranged input's centre; stamp the derived value as a person's;
  * forget the % conversion; use the stock's first update; default an unanswered window; flatten an event's window.
  * These are synthetic production-path rows, not provider/held-out briefs. DL owns their execution.
@@ -60,16 +61,63 @@ describe('exact current levels on the canonical projection', () => {
     expect(JSON.stringify(model)).toBe(before);
   });
 
-  it('never turns a ranged input into today’s point, even when the switch is zero', () => {
+  it('shows the exact 125 baseline when both uncertain effects have zero drivers; a nonzero driver stays uncertain', () => {
     const model = scenario();
-    Object.assign(model.quantities.find((q) => q.id === 'gain')!, { value: 25, low: 10, high: 40, range_kind: 'plausible' });
+    Object.assign(model.quantities.find((q) => q.id === 'gain')!, {
+      author: 'olumi', quote: null, status: 'estimated', value: null, low: 0, high: 35, range_kind: 'plausible', basis: 'Provisional referral effect.',
+    });
+    model.quantities.push(
+      quantity('price_response', 'order/week', null, { kind: 'coefficient', author: 'olumi', quote: null,
+        status: 'estimated', low: 0, high: 3, range_kind: 'plausible', basis: 'Provisional response to a price reduction.' }),
+      quantity('price_cut', '1', 0),
+    );
+    const effect = model.relations[0]!;
+    if (effect.form !== 'effect') throw new Error('the fixture must be an effect');
+    effect.terms.push({ driver: 'price_cut', coefficient: 'price_response', author: 'olumi', quote: null, ...record });
     const { compiled, graph } = projected(model);
     expect(compiled.executable).not.toBeNull();
-    expect(exactInitialValues(compiled.executable!).has('orders')).toBe(false);
-    expect(node(graph, 'orders').observed_state).toBeUndefined();
-    expect(node(graph, 'goal').observed_state).toBeUndefined();
-    // An unrelated fixed quantity remains exact; uncertainty is not a blanket refusal.
+    expect(exactInitialValues(compiled.executable!).get('orders')).toBe(125);
+    for (const id of ['orders', 'goal']) expect(node(graph, id).observed_state).toEqual({ value: 125, raw_value: 125, unit: 'order/week' });
+    expect(exactInitialValues(compiled.executable!).has('gain')).toBe(false); // the effect itself is still uncertain
     expect(exactInitialValues(compiled.executable!).get('base')).toBe(125);
+    model.quantities.find((q) => q.id === 'switch')!.value = 1;
+    const changed = projected(model);
+    expect(node(changed.graph, 'goal').observed_state).toBeUndefined();
+    expect(exactInitialValues(changed.compiled.executable!).has('orders')).toBe(false);
+  });
+
+  it('also cancels a finite uncertain driver when its coefficient is exactly zero', () => {
+    const model = scenario();
+    model.quantities.find((q) => q.id === 'gain')!.value = 0;
+    Object.assign(model.quantities.find((q) => q.id === 'switch')!, {
+      author: 'person', quote: 'Between 1 and 3 changes.', value: null, low: 1, high: 3, range_kind: 'bounds',
+    });
+    expect(node(projected(model).graph, 'goal').observed_state).toEqual({ value: 125, raw_value: 125, unit: 'order/week' });
+  });
+
+  it('an exact zero numerator part cancels a finite range; a zero denominator never does', () => {
+    const model = scenario();
+    Object.assign(model.quantities.find((q) => q.id === 'gain')!, { value: null, low: 10, high: 40, range_kind: 'bounds' });
+    model.relations = [{ id: 'orders_product', form: 'definition', defines: 'orders', op: 'product',
+      parts: [{ id: 'gain', power: 1 }, { id: 'switch', power: 1 }], author: 'olumi', quote: null, ...record }];
+    expect(node(projected(model).graph, 'goal').observed_state).toEqual({ value: 0, raw_value: 0, unit: 'order/week' });
+    const relation = model.relations[0]!;
+    if (relation.form !== 'definition' || relation.op !== 'product') throw new Error('the fixture must be a product');
+    relation.parts[1]!.power = -1;
+    expect(node(projected(model).graph, 'goal').observed_state).toBeUndefined();
+  });
+
+  it('zero never conceals an invalid intermediate or a risk-dependent input', () => {
+    const { compiled } = projected(scenario()), x = structuredClone(compiled.executable!);
+    x.quantities.push(
+      { id: 'invalid', label: 'invalid', unit: '1', reading: 'state', equation: { form: 'definition', op: 'ratio', parts: ['one', 'switch'] } },
+      { id: 'zero_invalid', label: 'zero_invalid', unit: '1', reading: 'state', equation: { form: 'definition', op: 'product', parts: ['switch', 'invalid'] } },
+    );
+    expect(exactInitialValues(x).has('zero_invalid')).toBe(false);
+    const gain = x.quantities.find((q) => q.id === 'gain')!;
+    gain.dist = { kind: 'range', low: 10, high: 40, range_kind: 'bounds', basis: 'person_range' };
+    x.risks.push({ id: 'risk', occurrence: 'one', severity: 'base', effect_on: 'gain', mode: 'add', from_period: 0 });
+    expect(exactInitialValues(x).has('orders')).toBe(false);
   });
 
   it.each(['asked', 'unknown', 'unsupported'] as const)('has no fallback to the base when a dependency is %s', (status) => {
@@ -109,9 +157,11 @@ describe('exact current levels on the canonical projection', () => {
       { id: 'huge', label: 'huge', unit: '1', reading: 'state', dist: { kind: 'fixed', value: 1e300, author: 'person' } },
       { id: 'overflow', label: 'overflow', unit: '1', reading: 'state', equation: { form: 'definition', op: 'product', parts: ['huge', 'huge'] } },
       { id: 'inverse', label: 'inverse', unit: '1', reading: 'state', equation: { form: 'definition', op: 'ratio', parts: ['one', 'overflow'] } },
+      { id: 'zero_after_overflow', label: 'zero after overflow', unit: '1', reading: 'state', equation: { form: 'definition', op: 'product', parts: ['huge', 'huge', 'switch'] } },
     );
     expect(exactInitialValues(x).has('overflow')).toBe(false);
     expect(exactInitialValues(x).has('inverse')).toBe(false);
+    expect(exactInitialValues(x).has('zero_after_overflow')).toBe(false);
   });
 });
 
