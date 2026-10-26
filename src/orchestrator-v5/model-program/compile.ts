@@ -702,13 +702,19 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
    * A figure given WHOLLY outside what it can be (its fixed value, or its whole range) contradicts Olumi's reading of it
    * (the PL's ruling, 23 Oct): never pinned to the bound, never moved inside. Its words and figure stay as given; the
    * person's is asked again, naming the reading so they can correct either; Olumi's is held as unsupported.
+   * A person's FIRM range (range_kind 'bounds') is drawn only where their ends and Olumi's reading overlap (range-law.ts), so
+   * one that only touches the floor or ceiling (100–120 % against "never above 100 %") shares one figure with it and leaves
+   * no spread: it contradicts the reading as fully, and is asked again in their unit, never held with the law's refusal in
+   * engine fractions ("the range 1 to 1.2 has no room", numbers#1). Compared as the law compares, in the engine's scale, so no
+   * such range is left for the law to refuse. A rough estimate touching it keeps the ruled reading within what it can be.
    */
   const outside = (q: CanonicalQuantityT): string | undefined => {
     const { floor, ceiling } = boundsOf(q), lo = has(q.low) ? q.low : q.value, hi = has(q.high) ? q.high : q.value;
     if (!has(lo) || !has(hi)) return undefined;
     const given = lo === hi ? `${lo} ${q.unit}` : `${lo}–${hi} ${q.unit}`;
-    if (floor !== null && hi < floor) return `"${q.label}" is given as ${given}, but Olumi reads it as never below ${floor} ${q.unit}`;
-    if (ceiling !== null && lo > ceiling) return `"${q.label}" is given as ${given}, but Olumi reads it as never above ${ceiling} ${q.unit}`;
+    const firm = q.author === 'person' && q.range_kind === 'bounds' && lo < hi, s = U.get(q.id)?.scale ?? 1;
+    if (floor !== null && (firm ? hi * s <= floor * s : hi < floor)) return `"${q.label}" is given as ${given}, but Olumi reads it as never below ${floor} ${q.unit}`;
+    if (ceiling !== null && (firm ? lo * s >= ceiling * s : lo > ceiling)) return `"${q.label}" is given as ${given}, but Olumi reads it as never above ${ceiling} ${q.unit}`;
     return undefined;
   };
   const contradictory = new Map(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && !chances.has(q.id) && !timingQs.has(q.id) && outside(q) !== undefined)
