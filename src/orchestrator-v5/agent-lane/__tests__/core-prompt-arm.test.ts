@@ -86,7 +86,9 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // 26 Oct (drafter candidate A2, DL): a record of theirs says only what they said, Olumi's reading its own record; an option's
     // settings are fixed choices, shares add up to the whole, uncertainty in the effects; no aim stated -> an open first question
     // on what would make it worthwhile; Olumi's lower-commitment option is a real option. Staging's pin before A2: fbdeb5fe….
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('c342228497e24045664e35a7d6795d6d70608b0e98b73ce3dc42b59a584462bd'); // 25 Oct: alpha G21, the reach rule is the compiler's (at least one goal or limit, only when every goal has a measure)
+    // A2 (4): each option of Olumi's could meet the goal on the model's own figures or is a learn-first step naming what it
+    // would find out; a staged or partial option's scale is theirs or asked, never invented. Pin before A2 (4): c3422284….
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('1f6af69d344d7afdd12d8eba87d84ae6658354fc66c85bd70226eee54e8f54a9'); // 25 Oct: alpha G21, the reach rule is the compiler's (at least one goal or limit, only when every goal has a measure)
     // 24 Oct (DL, DoD-G classes 12 and 4): an update returns only the records it changes or adds; the host merges them by id.
     expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('b54257c11969f65208dfead1d0006e17a88c65d20f0e0880588c650b58d8e4c8');
     expect(createHash('sha256').update(UPDATE_REPAIR_PREFIX, 'utf8').digest('hex')).toBe('1b52b62678cfab1b06670bc026504a9e63e186e458fec752c4b56ba9df918daf');
@@ -209,9 +211,12 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'An aim no measure can responsibly track, and a guardrail without one, keep measure null and a question.',
       // Paul 26 Oct (2) and (3): short neutral names, their words the quote; Olumi's lower-commitment options where they name none, one or only opposites.
       'Options: every option they named, each under a short neutral name ("Second oven"), their words as its quote.',
-      'Where they name none or one, only two opposites (do it or not), or ask what they can do, add one or two materially different options of Olumi\'s, lower-commitment where it fits (staged, partial, reversible or learn-first), each a real option with its own settings, never only a note; where the question is how to divide something (money, staff, hours), a small set of feasible divisions (a design, not a fact about today). Olumi\'s options stay within their stated budgets, exclusions and scope.',
+      'Where they name none or one, only two opposites (do it or not), or ask what they can do, add one or two materially different options of Olumi\'s, lower-commitment where it fits (staged, partial, reversible or learn-first), each a real option with its own settings, never only a note; where the question is how to divide something (money, staff, hours), a small set of feasible divisions (a design, not a fact about today). Olumi\'s options stay within their stated budgets, exclusions and scope,',
       // Candidate A2 (3): Olumi's staged, partial or reversible alternative is a real option with settings, never only a text record.
       'each a real option with its own settings, never only a note;',
+      // Candidate A2 (4): an option of Olumi's could meet the goal on the model's own figures, or is a learn-first step naming what
+      // it would find out; a staged or partial option's scale is their words or asked, never Olumi's invention.
+      'and each could meet the goal on the model\'s own figures or is a learn-first step naming what it would find out; a staged or partial option\'s scale (a share, a size, a start date) comes from their words or is asked, never invented by Olumi.',
       // Candidate A2 (2): an option's settings are fixed choices, its shares add up to the whole; uncertainty lives in what they act through.
       'An option\'s settings are choices, not uncertainties: each is one fixed figure (theirs, Olumi\'s on its own option, or a switch) or asked, and the shares one option divides add up exactly to the whole (1, or 100 %) or are asked; what is uncertain goes in the effects and quantities the settings work through.',
       // Candidate A2 (1): the person's record says only what they said; Olumi's interpretation, caveat or qualifier is its own record.
