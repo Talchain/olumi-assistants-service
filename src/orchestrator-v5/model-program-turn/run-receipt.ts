@@ -69,8 +69,13 @@ export type StoredRun = {
 
 /** The digest of what an evaluation reads: the canonical model and the person's words. */
 export function revisionDigest(canonical: CanonicalModelT, personWords: readonly string[]): string {
-  // A quantity's null `direction` is left out, so a program saved before the field digests as it did and its Run stays current.
-  const quantities = canonical.quantities.map(({ direction, ...q }) => (direction === null || direction === undefined ? q : { ...q, direction }));
+  // Absent declarations read as null without changing an old model's digest. A declared bound still changes its identity.
+  const quantities = canonical.quantities.map(({ direction, floor, ceiling, ...q }) => ({
+    ...q,
+    ...(direction === null || direction === undefined ? {} : { direction }),
+    ...(floor === null || floor === undefined ? {} : { floor }),
+    ...(ceiling === null || ceiling === undefined ? {} : { ceiling }),
+  }));
   return createHash('sha256').update(stableStringify({ canonical: { ...canonical, quantities }, person_words: personWords }), 'utf8').digest('hex');
 }
 
