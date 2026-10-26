@@ -58,11 +58,14 @@ export type DraftOutcome = {
   readonly today: string;
 };
 
-/** The request body: fixed instructions and schema first (the cached prefix), then the conversation. An update's schema is its changes only. */
-export function draftRequestBody(input: readonly InputMessage[], update: boolean, today: string): StreamedResponsesBody {
+/**
+ * The request body: fixed instructions and schema first (the cached prefix), then the conversation. An update's schema is its
+ * changes only; `periodZero` is the saved model's period-0 date (`todayLine`), today when it has none.
+ */
+export function draftRequestBody(input: readonly InputMessage[], update: boolean, today: string, periodZero: string = today): StreamedResponsesBody {
   return {
     model: coreBudget(DRAFT_REASONING_EFFORT).model,
-    instructions: `${DRAFTING_INSTRUCTIONS}\n\n${todayLine(today)}`,
+    instructions: `${DRAFTING_INSTRUCTIONS}\n\n${todayLine(today, periodZero)}`,
     input: input.map((m) => ({ role: m.role, content: m.content })),
     reasoning: { effort: DRAFT_REASONING_EFFORT },
     max_output_tokens: DRAFT_MAX_OUTPUT_TOKENS,
@@ -121,12 +124,15 @@ export function ledgeredResponsesCall(): ResponsesCall {
  * compiler checks every quote. A transport failure ends the loop with what it has; it is never retried here.
  * `interpret` (a FIRST draft): the model returned, compiled, saved and sent back to the agent is the compiler's reading of
  * the draft (`normalise`: a structure figure that is no structural constant is their question), never the raw draft
- * (buddy, #3709 r7). An update is read the same way, so its postimage is in the saved form.
+ * (buddy, #3709 r7). An update is read the same way, so its postimage is in the saved form. `periodZero` (an update): the
+ * saved model's period-0 date, the first draft's today (`drafted_on`); a first draft, and a program saved before it was kept,
+ * count from today.
  */
 export async function draftCanonicalModel(brief: string | readonly InputMessage[], call: ResponsesCall, sourceText: string = typeof brief === 'string' ? brief : '',
-  opts: { readonly interpret?: boolean; readonly onto?: CanonicalModelT } = {}): Promise<DraftOutcome> {
+  opts: { readonly interpret?: boolean; readonly onto?: CanonicalModelT; readonly periodZero?: string } = {}): Promise<DraftOutcome> {
   const onto = opts.onto;
   const today = todayInLondon(new Date());
+  const periodZero = opts.periodZero ?? today;
   const input: InputMessage[] = typeof brief === 'string' ? [{ role: 'user', content: brief }] : [...brief];
   const attempts: DraftAttempt[] = [];
   let model: CanonicalModelT | null = null;
@@ -134,7 +140,7 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
   for (let a = 0; a <= MAX_REPAIRS; a += 1) {
     const t0 = Date.now();
     let out: CallOutput;
-    try { out = await call(draftRequestBody(input, onto !== undefined, today)); } catch (err) {
+    try { out = await call(draftRequestBody(input, onto !== undefined, today, periodZero)); } catch (err) {
       attempts.push({ attempt: a, errors: null, failed: `call failed: ${err instanceof Error ? err.name : 'error'}`, provider_error: providerErrorOf(err), status: null, usage: null, ms: Date.now() - t0 });
       break;
     }
@@ -166,10 +172,12 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
  * THE AI'S POSTIMAGE (simplify v1: every intended update, the path mechanism completion began): the SAME drafter, in a
  * conversation holding the person's words, the saved model and the change, returns only the records it changes or adds and
  * the ids it removes; the host merges them by id onto the saved model (`mergeUpdate`), read as a first draft is. The caller
- * validates the merged model exactly (`validatePostimage`).
+ * validates the merged model exactly (`validatePostimage`). `periodZero`: the saved program's `drafted_on`, so a date in the
+ * change counts from the model's own period 0 (undefined on a program saved before it: today, as before).
  */
-export async function proposePostimage(model: CanonicalModelT, personWords: readonly string[], change: string, removals: readonly string[], call: ResponsesCall): Promise<DraftOutcome> {
+export async function proposePostimage(model: CanonicalModelT, personWords: readonly string[], change: string, removals: readonly string[], call: ResponsesCall,
+  periodZero?: string): Promise<DraftOutcome> {
   const ask = `${UPDATE_PREFIX}\nThe change: ${change}\nRemove: ${removals.length > 0 ? removals.join(', ') : 'nothing'}`;
   return draftCanonicalModel([{ role: 'user', content: personWords.join('\n\n') }, { role: 'assistant', content: JSON.stringify(model) }, { role: 'user', content: ask }],
-    call, personWords.join('\n'), { interpret: true, onto: model });
+    call, personWords.join('\n'), { interpret: true, onto: model, ...(periodZero !== undefined ? { periodZero } : {}) });
 }
