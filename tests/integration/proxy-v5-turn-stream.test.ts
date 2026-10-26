@@ -46,6 +46,9 @@ vi.stubEnv("CEE_RATE_BUCKET_READ_RPM", "10000");
 // The browser proxy family is gated; the streamed sibling registers inside the
 // same switch as the buffered one.
 vi.stubEnv("BROWSER_PROXY_ENABLED", "true");
+// Every browser turn is the core route's (inventory F1b): it must be mounted for the inner turn to answer.
+vi.stubEnv("AGENT_LANE_ENABLED", "true");
+vi.stubEnv("AGENT_LANE_PREVIEW", "false");
 const ALLOWED_ORIGIN = "http://localhost:5173";
 const STAGING_ORIGIN = "https://staging--olumi.netlify.app";
 const IMMUTABLE_DEPLOY_ORIGIN =
@@ -86,6 +89,8 @@ vi.mock("../../src/services/validateClient.js", () => ({
 const appendWrites: Array<{ scenario_id: string; graph?: unknown }> = [];
 const persistedGraphs = new Map<string, unknown>();
 const loadGraphCalls: string[] = [];
+/** Rows by (scenario, turn), so the core route can confirm the claim it appended. */
+const committedRows = new Map<string, unknown>();
 
 vi.mock("../../src/orchestrator-v5/session/index.js", async (importOriginal) => {
   const original =
@@ -97,11 +102,13 @@ vi.mock("../../src/orchestrator-v5/session/index.js", async (importOriginal) => 
       createMockSessionStore({
         append: async (write) => {
           appendWrites.push(write as { scenario_id: string; graph?: unknown });
+          committedRows.set(`${write.scenario_id}:${String(write.turn_id)}`, { ...write, id: "mock-row" });
           if (write.graph !== undefined && write.graph !== null) {
             persistedGraphs.set(write.scenario_id, write.graph);
           }
           return { id: "mock-row" };
         },
+        readCommittedTurn: async (scenarioId: string, turnId: string) => (committedRows.get(`${scenarioId}:${turnId}`) ?? null) as never,
         loadGraph: async (scenarioId: string) => {
           loadGraphCalls.push(scenarioId);
           return (persistedGraphs.get(scenarioId) ?? null) as never;
@@ -195,6 +202,7 @@ describe("POST /proxy/v5/turn/stream — the browser-facing streamed turn", () =
 
   it("is registered, and a browser with NO service key gets a real streamed turn", async () => {
     const scenarioId = nextScenarioId();
+    const turnId = nextTurnId();
     const res = await app.inject({
       method: "POST",
       url: PROXY_STREAMED_TURN_ROUTE,
@@ -205,7 +213,7 @@ describe("POST /proxy/v5/turn/stream — the browser-facing streamed turn", () =
       // plugin must admit the inner turn on the key the proxy injected. The
       // GRAPH_READY half of this row is on the served target in
       // proxy-v5-turn-stream-served.test.ts.
-      payload: systemEventPayload(scenarioId, nextTurnId()),
+      payload: systemEventPayload(scenarioId, turnId),
     });
 
     expect(res.statusCode).toBe(200);
@@ -215,18 +223,18 @@ describe("POST /proxy/v5/turn/stream — the browser-facing streamed turn", () =
     expect(frames[0].stage).toBe("DRAFTING");
     const complete = frames[frames.length - 1];
     expect(complete.stage).toBe("COMPLETE");
-    // 200 proves the internally-injected service key authenticated the inner
+    // The core route's own answer (not 401/403/404) proves the internally-injected service key authenticated the inner
     // turn. A 401 here would mean the browser surface is decorative.
     expect(
       complete.status_code,
       `inner turn refused the injected service key: ${JSON.stringify(complete.payload).slice(0, 300)}`,
-    ).toBe(200);
-    // Positive control: the inner turn ran the system event, not a refusal that
-    // happens to carry 200.
-    expect((complete.payload as { response_version?: unknown }).response_version).toBe(2);
+    ).toBe(409);
+    // Positive control: the core route itself answered, in its own contract, for this turn (a canvas edit on a scenario with
+    // no model yet is its own typed refusal, after it claimed the turn).
+    expect(complete.payload).toMatchObject({ turn_id: turnId, error: { code: "CANVAS_EDIT_REFUSED" } });
     expect(
       appendWrites.filter((w) => w.scenario_id === scenarioId).length,
-      "the inner turn committed nothing for this scenario",
+      "the inner turn recorded nothing for this scenario",
     ).toBeGreaterThan(0);
   }, 90_000);
 

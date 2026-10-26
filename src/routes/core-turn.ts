@@ -28,7 +28,7 @@ import { requestWasTyped } from '../cee/provenance/provenance-of.js';
 import { acquireCoreTurnSlot, CoreDeliveryUnknownError, CoreStateUnavailableError, runCoreTurn, type CoreTurnCalls } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { coreBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { AI_CORE_MODE, laneModeFor, type AgentLaneMode, type AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
-import type { InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import type { InternalDispatch } from '../orchestrator-v5/core-route/internal-dispatch.js';
 import { WITHHELD_ON_CHIP_TURN, type AgentTurnResult } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { providerFailureOf } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
