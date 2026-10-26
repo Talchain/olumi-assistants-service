@@ -367,6 +367,9 @@ describe('the model-program turn on the real core route', () => {
     it.each([
       ['a 429', 429], ['a 400', 400],
       ['the client\'s own timeout (its fetch aborted, the turn not cancelled)', new DOMException('This operation was aborted', 'AbortError')],
+      // undici's own timeouts reach the client as fetch's TypeError; the client raises both as its timeout (Codex FAIL, r1).
+      ['undici\'s headers timeout', new TypeError('fetch failed', { cause: Object.assign(new Error('Headers Timeout Error'), { name: 'HeadersTimeoutError', code: 'UND_ERR_HEADERS_TIMEOUT' }) })],
+      ['undici\'s connect timeout', new TypeError('fetch failed', { cause: Object.assign(new Error('Connect Timeout Error (attempted address: api.openai.com:443, timeout: 10000ms)'), { name: 'ConnectTimeoutError', code: 'UND_ERR_CONNECT_TIMEOUT' }) })],
     ] as const)('%s: ONE create attempt, never repeated; the turn fails with no Responses call and no write', async (_name, answer) => {
       const lines = await watchCreateLines();
       const x = await draftThenApprove([answer, 201]);
@@ -374,6 +377,18 @@ describe('the model-program turn on the real core route', () => {
         graph_unchanged: JSON.stringify(persisted) === x.before.graph }).toEqual({ status: 502, creates: 1, responses: 0, writes: 0, left: 1, graph_unchanged: true });
       expect(lines().map((l) => [l.attempt, l.retry])).toEqual([[1, false]]);
     }, 30_000);
+
+    it('the classifier: every timeout the client raises is final, with or without a cause; no answer at all and a 5xx are tried again', async () => {
+      const { createFailureIsTransient } = await import('../../agent-lane/core/sdk-turn.js');
+      const { APIConnectionError, APIConnectionTimeoutError, APIError, APIUserAbortError } = await import('openai-v7');
+      const status = (s: number) => APIError.generate(s, undefined, undefined, new Headers());
+      expect([
+        new APIConnectionTimeoutError(), // the client's deadline while the body is read: no cause (unreachable here at its 600 s)
+        Object.assign(new APIConnectionTimeoutError(), { cause: new TypeError('fetch failed') }),
+        new APIUserAbortError(), status(429), status(400),
+        new APIConnectionError({ cause: new TypeError('fetch failed') }), status(500), status(503),
+      ].map(createFailureIsTransient)).toEqual([false, false, false, false, false, true, true, true]);
+    });
 
     it.each(['create', 'backoff'] as const)('the turn\'s signal aborted during the %s: the turn stops at once, after ONE create attempt and no Responses call', async (during) => {
       const { runCoreTurn, CONVERSATION_CREATE_BACKOFF_MS } = await import('../../agent-lane/core/sdk-turn.js');

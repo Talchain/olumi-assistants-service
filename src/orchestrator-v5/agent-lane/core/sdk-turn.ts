@@ -31,7 +31,7 @@ import {
   Agent, extractAllTextOutput, MaxTurnsExceededError, OpenAIResponsesModel, run, RunState, setTracingDisabled,
   ToolCallError, withTrace, type AgentInputItem, type RunToolApprovalItem, type Tool,
 } from '@openai/agents';
-import { APIConnectionError, APIError, APIUserAbortError, type OpenAI } from 'openai-v7';
+import { APIConnectionError, APIConnectionTimeoutError, APIError, APIUserAbortError, type OpenAI } from 'openai-v7';
 import { getRuntimeEnv } from '../../../config/env-resolver.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
 import { currentStageEmitter, emitAgentPhase } from '../../../cee/unified-pipeline/stage-stream-context.js';
@@ -137,15 +137,16 @@ export const CONVERSATION_CREATE_BACKOFF_MS: readonly number[] = [500, 1_000];
 
 /** What fetch itself threw beneath the client's error: present only when there was no answer at all. */
 const thrownByFetch = (err: unknown): unknown => (err instanceof APIConnectionError ? err.cause : undefined);
-const isAbort = (err: unknown): boolean => err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
 
 /**
- * A create worth sending again: no answer at all (fetch threw, and not because it was aborted) or a 5xx. A cancellation of
- * the turn, the client's own timeout (its fetch aborted), a 429 and every other 4xx are answers or decisions: never repeated.
+ * A create worth sending again: no answer at all (fetch threw, not a timeout) or a 5xx. A cancellation of the turn, a 429,
+ * every other 4xx and every timeout are answers or decisions: never repeated. The client raises each timeout as an
+ * `APIConnectionTimeoutError`, a subclass of `APIConnectionError`: its own deadline (fetch aborted, or a body not read in
+ * time, with no cause) and undici's connect or headers timeout (a `TypeError` cause), so the class is tested first.
  */
-function createFailureIsTransient(err: unknown): boolean {
-  if (err instanceof APIUserAbortError) return false;
-  if (err instanceof APIConnectionError) return !isAbort(thrownByFetch(err));
+export function createFailureIsTransient(err: unknown): boolean {
+  if (err instanceof APIUserAbortError || err instanceof APIConnectionTimeoutError) return false;
+  if (err instanceof APIConnectionError) return true;
   return err instanceof APIError && typeof err.status === 'number' && err.status >= 500 && err.status <= 599;
 }
 
@@ -167,7 +168,7 @@ function createFailureOf(err: unknown): { readonly status: number } | { readonly
  * returned), sent here so it carries the turn's signal. Only this create is tried again, because a repeat cannot double
  * anything: it sends no reply and writes nothing of the model, so the worst a lost result leaves is an unused empty
  * Conversation (the store's claim keeps the id it saved).
- * - Tried again only on no answer (fetch threw, not an abort) or a 5xx (`createFailureIsTransient`); the last failure is
+ * - Tried again only on no answer (fetch threw, not a timeout) or a 5xx (`createFailureIsTransient`); the last failure is
  *   thrown as it would have been from the one attempt before, so the turn fails as it did.
  * - The turn's signal goes with each attempt and each wait: an abort stops it at once, with no further attempt.
  * - Conversation-bound Responses calls and item writes keep `maxRetries: 0` (`ledgeredAgentsClient`); the client's generic
