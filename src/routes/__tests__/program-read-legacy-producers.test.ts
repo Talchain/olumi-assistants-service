@@ -12,7 +12,8 @@ import { withScenarioRevision } from '../../../tests/utils/revision-store-double
 
 const SCENARIO = 'f1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c';
 
-const spies = vi.hoisted(() => ({ scope: vi.fn(), today: vi.fn(), admission: vi.fn(), egress: vi.fn(), offers: vi.fn(), analysis: vi.fn(), claims: vi.fn(), changed: vi.fn() }));
+const spies = vi.hoisted(() => ({ scope: vi.fn(), today: vi.fn(), admission: vi.fn(), egress: vi.fn(), offers: vi.fn(), analysis: vi.fn(), claims: vi.fn(), changed: vi.fn(),
+  heldOffers: vi.fn(), recordsApply: vi.fn() }));
 vi.mock('../../orchestrator-v5/compose/goal-scope-claim-input.js', async (load) => {
   const actual = await load<typeof import('../../orchestrator-v5/compose/goal-scope-claim-input.js')>();
   spies.scope.mockImplementation(actual.goalScopeClaimInput);
@@ -53,6 +54,17 @@ vi.mock('../../orchestrator-v5/context/changed-since-run.js', async (load) => {
   const actual = await load<typeof import('../../orchestrator-v5/context/changed-since-run.js')>();
   spies.changed.mockImplementation(actual.readChangedSinceRun);
   return { ...actual, readChangedSinceRun: spies.changed };
+});
+// F6 part b: the Living Model's held-card offer and the record's applies rule on the reload.
+vi.mock('../../orchestrator-v5/agent-lane/held-approval-offers.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/agent-lane/held-approval-offers.js')>();
+  spies.heldOffers.mockImplementation(actual.readExecutableHeldProposalOffers);
+  return { ...actual, readExecutableHeldProposalOffers: spies.heldOffers };
+});
+vi.mock('../../orchestrator-v5/agent-lane/proposal-object/record.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/agent-lane/proposal-object/record.js')>();
+  spies.recordsApply.mockImplementation(actual.heldRecordsApplyAt);
+  return { ...actual, heldRecordsApplyAt: spies.recordsApply };
 });
 vi.mock('../../config/index.js', async (load) => {
   const actual = await load<typeof import('../../config/index.js')>();
@@ -165,6 +177,9 @@ describe('a program read runs none of the legacy read producers (inventory F3, P
     const body = await reload(await storedProgram());
     expect(spies.egress).not.toHaveBeenCalled();
     expect(spies.offers).not.toHaveBeenCalled();
+    // F6 part b: the held card's offer and fields by the program card's rule, never the Living Model's.
+    expect(spies.heldOffers).not.toHaveBeenCalled();
+    expect(spies.recordsApply).not.toHaveBeenCalled();
     // PR-C: no changed-since-Run marks (a program's Run keeps no item marks) and no legacy analysis reader.
     expect(spies.changed).not.toHaveBeenCalled();
     expect(spies.analysis).not.toHaveBeenCalled();
@@ -177,6 +192,8 @@ describe('a program read runs none of the legacy read producers (inventory F3, P
     expect(spies.egress).toHaveBeenCalled();
     expect(spies.offers).toHaveBeenCalledTimes(1);
     expect(spies.changed).toHaveBeenCalledTimes(1);
+    expect(spies.heldOffers).toHaveBeenCalledTimes(1);
+    expect(spies.recordsApply).toHaveBeenCalledTimes(1);
     expect(spies.analysis).toHaveBeenCalled();
     expect((body.conversation_turns as Rec[]).map((t) => t.assistant_message)).toEqual([SAID]);
   });

@@ -21,7 +21,6 @@
  *    the analysis hash says; a program card held before its revision was recorded keeps the rule below.
  * Any other card keeps the whole-model rule.
  */
-import { AsyncLocalStorage } from 'node:async_hooks';
 import { isDeepStrictEqual } from 'node:util';
 import type { StructuredProposal } from '../proposal.js';
 import type { PendingAction } from '../../session/pending-action.js';
@@ -175,47 +174,11 @@ export function isHeldAgentCard(pa: PendingAction): boolean {
   return pa.action.kind === 'apply_proposed_change' && isRec((pa.action.inline_patch as Rec | undefined)?.['agent_proposal']);
 }
 
-/**
- * ⭐ NO SILENT LAPSE (DL-3 18 Oct, PR-2; Codex co-design §2: "Overlapping/dependency changes retain it visibly as 'Model
- * changed — review this change'"): a held Agent card whose own subject moved is KEPT, marked for review, at every seam that
- * used to drop it — the commit's carry-forward, the mutating commit's referee and the turn's reconcile. A card under review
- * is never executable (its press is refused by its own base) and never bound by typed words; the reply offers it to be
- * reviewed (the Agent prepares it again on the model as it is now) or set aside. Its pin and digest are unchanged.
- */
-const AWAITING_REVIEW = 'awaiting_review';
-/**
- * The card a verified approved write is applying now (PR-2 CI, run4 `after_write`): its OWN write moves its own subject, and that
- * is never a model change to review. The commit seams that mark a card for review retire THIS card as before PR-2, so a retry
- * after an interrupted turn still binds its press and is answered "already saved". The same async context as an approved
- * adoption (`approved-adoption-context.ts`): unreachable from outside the process.
- */
-const applying = new AsyncLocalStorage<{ readonly scenarioId: string; readonly proposalId: string }>();
-export function runApplyingHeldCard<T>(scenarioId: string, proposalId: string, fn: () => Promise<T>): Promise<T> {
-  return applying.run({ scenarioId, proposalId }, fn);
-}
-export function isHeldCardBeingApplied(pa: PendingAction): boolean {
-  const a = applying.getStore();
-  const p = pa.action.kind === 'apply_proposed_change' ? (pa.action.inline_patch as Rec | undefined)?.['agent_proposal'] : undefined;
-  return a !== undefined && pa.scenario_id === a.scenarioId && isRec(p) && p['proposal_id'] === a.proposalId;
-}
-export function heldCardUnderReview(pa: PendingAction): boolean {
-  return pa.action.kind === 'apply_proposed_change' && isRec((pa.action.inline_patch as Rec | undefined)?.[AWAITING_REVIEW]);
-}
-/** Whether the carrier of `proposalId` among these pendings is kept for review: its approve is never offered (any read). */
-export function heldCardUnderReviewIn(pendings: readonly PendingAction[], proposalId: string): boolean {
-  return pendings.some((pa) => pa.action.kind === 'apply_proposed_change' && heldCardUnderReview(pa)
-    && ((pa.action.inline_patch as Rec | undefined)?.['agent_proposal'] as Rec | undefined)?.['proposal_id'] === proposalId);
-}
-export function heldCardForReview(pa: PendingAction, modelNow: string | null | undefined): PendingAction {
-  if (pa.action.kind !== 'apply_proposed_change' || heldCardUnderReview(pa)) return pa;
-  return { ...pa, action: { ...pa.action, inline_patch: { ...pa.action.inline_patch,
-    [AWAITING_REVIEW]: { reason: 'model_changed', ...(typeof modelNow === 'string' && modelNow !== '' ? { model: modelNow } : {}) } } } } as PendingAction;
-}
+// The review marker and the card being applied live with the program card's rules (`program-card.ts`, inventory F6 part b):
+// one definition of the persisted marker and one async context, read here by the legacy seams.
+export { heldCardForReview, heldCardUnderReview, heldCardUnderReviewIn, isHeldCardBeingApplied, runApplyingHeldCard } from '../../model-program-turn/program-card.js';
 
-/** A held model program's card whose program revision moved (`programCardApplies`); any other pending is never judged here. */
-export function heldProgramCardMoved(pa: PendingAction, graph: unknown): boolean {
-  return pa.action.kind === 'apply_proposed_change' && programCardApplies((pa.action.inline_patch as Rec | undefined)?.['agent_proposal'], graph) === false;
-}
+export { heldProgramCardMoved } from '../../model-program-turn/program-card.js';
 
 export function heldAgentCardStillApplies(pa: PendingAction, graph: unknown): boolean {
   if (pa.action.kind !== 'apply_proposed_change') return false;

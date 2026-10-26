@@ -31,8 +31,7 @@ import { validatePostimage } from './postimage.js';
 import { isSaved, postimageOf, programOperationId, savePostimage, withNewRun } from './program-save.js';
 import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, sourceTextOf, unreadableWords, type SavedProgram } from './program-store.js';
 import { shownRun, shownView, type StoredRun } from './run-receipt.js';
-import { programCardApplies, programDigestOf, runsExtend } from './program-card.js';
-import { runApplyingHeldCard } from '../agent-lane/proposal-object/still-applies.js';
+import { programCardApplies, programDigestOf, runApplyingHeldCard, runsExtend } from './program-card.js';
 import { log } from '../../utils/telemetry.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 

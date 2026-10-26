@@ -56,7 +56,7 @@ import {
 import { withTodayPartsAtGoalLevel } from "../orchestrator-v5/agent-lane/goal-definition-sum.js";
 import type { PendingAction } from "../orchestrator-v5/session/pending-action.js";
 import { isProgramGraph } from "../orchestrator-v5/model-program-turn/program-store.js";
-import { heldCardForReview, heldProgramCardMoved, isHeldCardBeingApplied } from "../orchestrator-v5/agent-lane/proposal-object/still-applies.js";
+import { heldCardForReview, heldProgramCardMoved, isHeldCardBeingApplied } from "../orchestrator-v5/model-program-turn/program-card.js";
 
 /** Create-only construction may retain a count range the brief itself states. Proposed ranges still need approval. */
 function onlyBriefStatedCountRanges(graph: GraphStateIngress, brief: string | undefined): boolean {

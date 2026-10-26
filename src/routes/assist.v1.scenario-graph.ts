@@ -17,7 +17,9 @@ import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-exte
 import { deriveNotModelledManifest } from "../cee/context-integrity/not-modelled-manifest.js";
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeAnalysisAffectingGraphHash } from "../orchestrator-v5/context/graph-hash.js";
-import { proposalRecord, proposalFieldsWire, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalIssuingRow } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
+import { proposalRecord, proposalFieldsWire, heldProposalId, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalIssuingRow } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
+import { programHoldApplies } from "../orchestrator-v5/model-program-turn/program-card.js";
+import { readProgramHeldOffers } from "../orchestrator-v5/model-program-turn/program-card-turn.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { isProgramGraph, programReadOf, reopenProgram, unreadableWords } from "../orchestrator-v5/model-program-turn/program-store.js";
 import { programReadinessOf } from "../orchestrator-v5/model-program-turn/program-readiness.js";
@@ -210,7 +212,8 @@ async function readConversationTurns(
       })))
       .filter((t) => t.user_message !== null || t.assistant_message !== null)
       .slice(-CONVERSATION_TURNS_CAP); // the cap counts AFTER the drop (CURRENT-READ-v1 row 5)
-    const heldOffers = await readExecutableHeldProposalOffers({ scenarioId, ...authority, rows: answers, store });
+    // A program's waiting card by the program's own rule (`program-card-turn.ts`, inventory F6 part b).
+    const heldOffers = await (authority.program ? readProgramHeldOffers : readExecutableHeldProposalOffers)({ scenarioId, ...authority, rows: answers, store });
     if (!authority.program && typeof store.readLatestAnswerOffers === 'function') {
       // This optional leg must never change the graph, held cards or text if it fails.
       try {
@@ -558,7 +561,9 @@ export default async function route(app: FastifyInstance) {
       const issuedTurnIds = await issuedTurnIdsForProposalRecords(proposalIssuances(heldProposalRecords, latestPending), proposalRows, CONVERSATION_ROWS_READ,
         typeof store.readCommittedTurn === 'function' ? turnId => store.readCommittedTurn!(scenarioId, turnId) : undefined);
       const proposalFields = conversationRequested && graphPresent
-        ? ((hash) => proposalFieldsWire(heldProposalRecords, hash, issuedTurnIds, heldRecordsApplyAt(latestPending, graph, hash)))(
+        ? ((hash) => proposalFieldsWire(heldProposalRecords, hash, issuedTurnIds, programGraph
+          ? (r) => latestPending.some((h) => h.id === r.revision && heldProposalId(h) === r.proposal_id && programHoldApplies(h, graph, hash))
+          : heldRecordsApplyAt(latestPending, graph, hash)))(
           computeAnalysisAffectingGraphHash(graph as GraphStateIngress) ?? undefined)
         : undefined;
 
