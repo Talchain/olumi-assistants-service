@@ -80,12 +80,15 @@ export type OptionOutcome = { option_id: string; status: Outcome | 'not_compared
  * ONE THING THE RESULT WAITS ON (simplify v1 A4): typed, in the model's order, never ranked and never worded by the code.
  * `id` is the record (a quantity, goal or limit; '(model)' when there is no goal); `scope` the goals, limits and live options
  * it holds up. asked: a figure only the person can give (the AI's own question may be on the record). range_kind: their
- * range, with no word on whether its ends are hard. recount: their count, given below 0. measure: an aim or guardrail with no
- * measure. deadline: an aim or guardrail that changes over time with no deadline. no_goal: no aim at all. unknown: a figure it
- * rests on that no one can give or responsibly estimate yet; never the person's to answer (its basis says why).
+ * range, with no word on whether its ends are hard. recount: their figure, given wholly outside what Olumi reads it can be
+ * (its floor or ceiling, or those of what it sets); its `reason` names that reading in their unit, so they can correct either.
+ * measure: an aim or guardrail with no measure. deadline: an aim or guardrail that changes over time with no deadline.
+ * no_goal: no aim at all. unknown: a figure it rests on that no one can give or responsibly estimate yet; never the person's
+ * to answer (its basis says why).
  */
 export type BlockerCode = 'asked' | 'range_kind' | 'recount' | 'measure' | 'deadline' | 'no_goal' | 'unknown';
-export type Blocker = { id: string; code: BlockerCode; scope: string[] };
+/** `reason`: a recount's only (a Run stored before it has none). */
+export type Blocker = { id: string; code: BlockerCode; scope: string[]; reason?: string };
 export type Conversion =
   | { kind: 'percent'; quantity: string; from: string; to: string; factor: number; author: 'olumi' }
   | { kind: 'range_law'; quantity: string; low: number; high: number; range_kind: 'bounds' | 'plausible'; domain: Domain | null; reading: Extract<RangeReading, { kind: 'normal' }>; author: 'olumi'; provisional: true };
@@ -107,6 +110,9 @@ export type CompileResult = {
   preferences: { id: string; quantity: string; direction: 'lower' | 'higher'; label: string }[];
   /** Every conversion Olumi makes on the way to the simulator, as Olumi's provisional reading (DL ruling 4). */
   conversions: Conversion[];
+  /** What each figure can be, in the engine's scale, whether or not a Run reads it yet: a card reads its range within the
+   *  same domain either way (numbers#4). */
+  domains: Record<string, Domain>;
   /** True when the model names no option, so the executable runs one implicit "as things stand" option. */
   implicit_as_stated: boolean;
   /** Every quantity a measured goal, a measured limit or a live option rests on, whether or not it can be worked out yet:
@@ -157,7 +163,7 @@ export function compileJson(input: unknown, opts: CompileOptions = {}): CompileR
     errors: parsed.error.issues.slice(0, 20).map((i) => ({
       code: 'schema' as const, message: `The model's shape is wrong at ${i.path.join('.') || 'its top level'}: ${i.message}.`, items: [],
     })),
-    blockers: [], unverified: [], preferences: [], conversions: [], implicit_as_stated: false, in_model: [],
+    blockers: [], unverified: [], preferences: [], conversions: [], domains: {}, implicit_as_stated: false, in_model: [],
   };
 }
 
@@ -201,8 +207,32 @@ export function normalise(model: CanonicalModelT): CanonicalModelT {
   // to give: always asked of them, never Olumi's fixed figure nor read as theirs (Codex r4–r7 #3709).
   const asked = named.quantities.map((q) => (q.author === 'structure' && q.kind === 'fact' && q.status === 'known' && has(q.value) && !has(q.low) && !has(q.high)
     && !isStructuralConstant(named, q) ? structureAsked(q) : q));
-  // A direction the model does not use is not kept, so the card never states a sign the model does not use (issue 40).
-  return withUsedDirections(asked.some((q, i) => q !== named.quantities[i]) ? { ...named, quantities: asked } : named);
+  // A direction the model does not use is not kept, so the card never states a sign the model does not use (issue 40); nor
+  // a bound the Run does not apply (numbers#2).
+  return withUsedDirections(withUsedBounds(asked.some((q, i) => q !== named.quantities[i]) ? { ...named, quantities: asked } : named));
+}
+
+/**
+ * The Run reads a floor or ceiling only where it draws a figure within it: a worked-out quantity's figure is its relation's,
+ * and a chance is drawn within [0, 1] and a timing 0 or more, whatever the model declares (the PL's ruling, 23 Oct). So a
+ * bound on a worked-out quantity is cleared, and so is one on a chance or a timing that those draws do not keep (a floor
+ * above 0; a chance's ceiling below 1, any ceiling on a timing) (numbers#2): the card never states, saves or diffs a reading
+ * the calculation does not use. Read so on both sides of every change (`postimage.ts`), as unused directions are. Never
+ * anyone's change: the same model when nothing is cleared.
+ */
+export function withUsedBounds<M extends Pick<CanonicalModelT, 'quantities' | 'options' | 'risks'>>(model: M): M {
+  const chances = new Set(model.risks.map((k) => k.occurrence));
+  const timings = new Set([...model.options.flatMap((o) => o.sets.map((s) => s.starts_after_periods)), ...model.risks.map((k) => k.starts_after_periods)]
+    .filter((t): t is string => typeof t === 'string'));
+  const quantities = model.quantities.map((q) => {
+    if (!has(q.floor) && !has(q.ceiling)) return q;
+    if (q.status === 'derived') return { ...q, floor: null, ceiling: null };
+    if (!chances.has(q.id) && !timings.has(q.id)) return q;
+    const u = parseUnit(q.unit), scale = u.ok ? u.unit.scale : 1;
+    const floor = has(q.floor) && q.floor <= 0 ? q.floor : null, ceiling = has(q.ceiling) && chances.has(q.id) && q.ceiling * scale >= 1 ? q.ceiling : null;
+    return floor === q.floor && ceiling === q.ceiling ? q : { ...q, floor, ceiling };
+  });
+  return quantities.some((q, i) => q !== model.quantities[i]) ? { ...model, quantities } : model;
 }
 
 /**
@@ -674,14 +704,16 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
    * WHAT A FIGURE CAN BE (alpha G2): a chance lies in [0, 1] and an elapsed time (a set's or risk's timing) is 0 or more
    * (the PL's ruling, 23 Oct); anything else only within the floor and ceiling the model declares, Olumi's reading, never
    * inferred from its unit's name. An option's setting stands in for the quantity it sets, so it is read within that
-   * quantity's bounds unless it declares its own. Each truncation is Olumi's conversion, disclosed.
+   * quantity's bounds on each side it does not declare itself. Each truncation is Olumi's conversion, disclosed.
    */
   const setsOf = new Map<string, string[]>();
   for (const o of model.options) for (const s of o.sets) if (has(s.to)) setsOf.set(s.to, [...(setsOf.get(s.to) ?? []), s.quantity]);
-  /** In q's own unit: its own bounds; with none, every quantity it sets, each converted into q's unit and all respected at
-   *  once (the highest floor, the lowest ceiling), whatever the options' order (Codex r1 #3771). */
+  /** In q's own unit, side by side: its own floor and ceiling where it declares them (both declared override, Codex r1 #3771);
+   *  each side it leaves undeclared, from every quantity it sets, each converted into q's unit and all respected at once (the
+   *  highest floor, the lowest ceiling), whatever the options' order, so a floor-only setting keeps its target's ceiling
+   *  (numbers#6). */
   const boundsOf = (q: CanonicalQuantityT): Pick<CanonicalQuantityT, 'floor' | 'ceiling'> => {
-    if (has(q.floor) || has(q.ceiling)) return { floor: q.floor ?? null, ceiling: q.ceiling ?? null };
+    if (has(q.floor) && has(q.ceiling)) return { floor: q.floor, ceiling: q.ceiling };
     // A unit's scale is a power of ten, so the conversion is ONE correctly rounded operation: a same-unit bound is itself
     // and 29 % is exactly 0.29, never 28.999…% (Codex r2 #3771) and never rounded away from a large exact figure (r3).
     const into = (v: number, from: string) => {
@@ -690,7 +722,7 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
     };
     const targets = (setsOf.get(q.id) ?? []).flatMap((id) => (Q.has(id) ? [Q.get(id)!] : []));
     const floors = targets.flatMap((t) => (has(t.floor) ? [into(t.floor, t.id)] : [])), ceilings = targets.flatMap((t) => (has(t.ceiling) ? [into(t.ceiling, t.id)] : []));
-    return { floor: floors.length ? Math.max(...floors) : null, ceiling: ceilings.length ? Math.min(...ceilings) : null };
+    return { floor: has(q.floor) ? q.floor : floors.length ? Math.max(...floors) : null, ceiling: has(q.ceiling) ? q.ceiling : ceilings.length ? Math.min(...ceilings) : null };
   };
   const domainOf = (q: CanonicalQuantityT): Domain | undefined => {
     if (chances.has(q.id)) return { min: 0, max: 1 };
@@ -805,6 +837,7 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
     errors, blockers: [], unverified,
     preferences: model.preferences.map((p) => ({ id: p.id, quantity: p.quantity, direction: p.direction, label: Q.get(p.quantity)?.label ?? p.quantity })),
     conversions: [], implicit_as_stated: model.options.length === 0,
+    domains: Object.fromEntries(model.quantities.flatMap((q) => { const d = domainOf(q); return d === undefined ? [] : [[q.id, d] as const]; })),
     in_model: [...new Set([...goalClosure.values(), ...limitClosure.values(),
       ...model.options.filter((o) => o.status === 'live').map((o) => optionClosure.get(o.id)!)].flatMap((c) => [...c]))],
   };
@@ -893,8 +926,9 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
     ...perLimit.filter((p) => limitClosure.get(p.limit_id)?.has(id)).map((p) => p.limit_id),
     ...model.options.filter((o) => o.status === 'live' && optionClosure.get(o.id)!.has(id)).map((o) => o.id),
   ];
-  // What the result waits on, typed and in the model's order (no ranking, no words): the AI asks in its own (A4).
-  const blocker = (id: string, code: BlockerCode, scope: string[]): Blocker => ({ id, code, scope });
+  // What the result waits on, typed and in the model's order (no ranking, no words): the AI asks in its own (A4). A recount
+  // carries Olumi's reading it contradicts, in their unit, so the AI can say which bound, its own or what it sets (words#4).
+  const blocker = (id: string, code: BlockerCode, scope: string[], reason?: string): Blocker => ({ id, code, scope, ...(reason === undefined ? {} : { reason }) });
   result.blockers = [
     ...(model.goals.length === 0 ? [blocker('(model)', 'no_goal', [])] : []),
     ...model.goals.flatMap((g) => [...(!has(g.measure) ? [blocker(g.id, 'measure', [g.id])] : []), ...(goalWin.get(g.id)?.deadline === true ? [blocker(g.id, 'deadline', [g.id])] : [])]),
@@ -904,7 +938,7 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
       // asked, theirs to give; unknown, where a goal, limit or option rests on it, no one's to give yet.
       ...(q.status === 'asked' ? [blocker(q.id, 'asked', feedsOf(q.id))] : q.status === 'unknown' && feedsOf(q.id).length > 0 ? [blocker(q.id, 'unknown', feedsOf(q.id))] : []),
       ...(unresolved.has(q.id) ? [blocker(q.id, 'range_kind', feedsOf(q.id))] : []),
-      ...(recheck.has(q.id) ? [blocker(q.id, 'recount', feedsOf(q.id))] : []),
+      ...(recheck.has(q.id) ? [blocker(q.id, 'recount', feedsOf(q.id), recheck.get(q.id))] : []),
     ]),
   ];
   const withheldList: Withheld[] = [

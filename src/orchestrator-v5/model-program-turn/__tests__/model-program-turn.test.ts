@@ -771,6 +771,93 @@ describe('the model-program turn on the real core route', () => {
     expect(face).toContain('‘promo effect’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 3 member / month / promotion to 7 member / month / promotion, into a bell-shaped spread, kept to Olumi’s reading of what it can be (never below 0 member / month / promotion)');
   });
 
+  it('numbers#2: a bound on a worked-out quantity, which the Run never applies, is never said, saved or diffed; a figure the Run draws keeps its own', async () => {
+    // A first draft declaring floor 0 on the members stock (worked out) and on members today (given).
+    const m = club();
+    setQ(m, 'members', { floor: 0 });
+    setQ(m, 'members_now', { floor: 0 });
+    replies = [JSON.stringify(m)];
+    const r = (await turn({ message: CLUB_BRIEF })).json();
+    expect(r.model_program.saved).toBe(true);
+    const after = (id: string): string => r.cards[0].changes.find((c: Json) => c.id === id).after;
+    expect(after('members')).toBe('in member, a result, worked out from the model');
+    expect(after('members_now')).toBe('300 member (never below 0: Olumi’s reading), a fact, known, in your words "300 members today"');
+    // The saved model, as the agent reads it: no bound on the stock; members today keeps its own.
+    const read = await readProgramContext({ dispatch, proposals: new ProposalStore() }, { scenario_id: SCENARIO, authenticated_user_id: null }) as Json;
+    const rec = (id: string) => (read.data.model.quantities as Json[]).find((x) => x.id === id);
+    expect(rec('members')).not.toHaveProperty('floor');
+    expect(rec('members_now')).toMatchObject({ floor: 0 });
+    // A model saved before held the stock's floor. An update that leaves the stock as saved, or re-reads it without the floor,
+    // shows only the person's change, and what it saves holds no bound on the stock.
+    const saved = club();
+    setQ(saved, 'members', { floor: 0 });
+    setQ(saved, 'members_now', { floor: 0 });
+    const words = 'Now 12 leave each month.';
+    for (const reread of [false, true]) {
+      const post = JSON.parse(JSON.stringify(saved)) as CanonicalModelT;
+      setQ(post, 'leavers', { value: 12, quote: words });
+      if (reread) setQ(post, 'members', { floor: null });
+      const u = validatePostimage(saved, post, { removals: [], words: [CLUB_BRIEF, words], fresh: [words] }) as Json;
+      expect(u.ok, JSON.stringify(u)).toBe(true);
+      expect(u.changes.map((c: Json) => [c.id, c.before, c.after]), `reread ${reread}`).toEqual([['leavers', '10 member/month, in your words "10 leave each month"', '12 member/month, in your words "Now 12 leave each month."']]);
+      expect(u.model.quantities.find((x: Json) => x.id === 'members'), `reread ${reread}`).toMatchObject({ floor: null, ceiling: null });
+      expect(u.model.quantities.find((x: Json) => x.id === 'members_now'), `reread ${reread}`).toMatchObject({ floor: 0 });
+    }
+  });
+
+  it('numbers#2 (Codex r1): a chance is drawn within 0 to 100 % and a timing from 0, so a bound on either that the Run does not keep is never said or saved; one it keeps is', async () => {
+    // Olumi's chance of a quiet month, 10–30 %, declared never below 20 % (the Run draws it from 0) and never above 100 % (it
+    // does); the promotion starts in one month, declared never below 2 months (the Run starts it at 1).
+    const START = 'The promotion starts in one month';
+    const m = club();
+    m.quantities.push(
+      q('quiet_chance', '%', { kind: 'coefficient', status: 'estimated', author: 'olumi', low: 10, high: 30, range_kind: 'plausible', basis: 'Clubs this size have a quiet month in some years.', floor: 20, ceiling: 100 }),
+      q('quiet_extra', 'member/month', { kind: 'coefficient', status: 'estimated', author: 'olumi', low: 3, high: 7, range_kind: 'plausible', basis: 'A quiet month loses a few more members.' }),
+      q('promo_start', 'month', { value: 1, quote: START, floor: 2 }));
+    m.risks.push({ id: 'quiet_month', label: 'A quiet month', occurrence: 'quiet_chance', severity: 'quiet_extra', effect_on: 'leavers', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...at });
+    m.options = m.options.map((o) => (o.id === 'promotion' ? { ...o, sets: o.sets.map((x) => ({ ...x, starts_after_periods: 'promo_start' })) } : o));
+    replies = [JSON.stringify(m)];
+    const r = (await turn({ message: `${CLUB_BRIEF} ${START}.` })).json();
+    expect(r.model_program.saved).toBe(true);
+    // The card: the chance says only the ceiling the Run keeps, the timing no floor; members today keeps its own (contrast).
+    const after = (id: string): string => r.cards[0].changes.find((c: Json) => c.id === id).after;
+    expect(after('quiet_chance')).toBe('from 10 to 30 % (a plausible range) (never above 100: Olumi’s reading), a rate, an estimate, based on "Clubs this size have a quiet month in some years."');
+    expect(after('promo_start')).toBe(`1 month, a fact, known, in your words "${START}"`);
+    // What is saved, and what the Run reads from it: the chance drawn within 0 to 100 %, the promotion set from month 1.
+    const saved = persisted!.living_model.canonical as CanonicalModelT;
+    expect(saved.quantities.find((x) => x.id === 'quiet_chance')).toMatchObject({ floor: null, ceiling: 100 });
+    expect(saved.quantities.find((x) => x.id === 'promo_start')).toMatchObject({ floor: null, value: 1 });
+    const x = compile(saved, { sourceText: `${CLUB_BRIEF} ${START}.` }).executable!;
+    expect(x.quantities.find((y) => y.id === 'quiet_chance')!.dist).toMatchObject({ kind: 'range', low: 0.1, high: 0.3, domain: { min: 0, max: 1 } });
+    expect(x.options.find((o) => o.id === 'promotion')!.sets.map((s) => s.from_period)).toEqual([1, 1]);
+    const face = ((persisted!.living_model.runs.at(-1).result.canonical_analysis_view as Json).options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
+    expect(face).toContain('‘quiet chance’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 10% to 30%, into a bell-shaped spread, kept to Olumi’s reading of what it can be (0% to 100%)');
+    // A model saved before held both bounds: an update that leaves them shows only the person's change, and saves neither.
+    const before = JSON.parse(JSON.stringify(m)) as CanonicalModelT;
+    const post = JSON.parse(JSON.stringify(m)) as CanonicalModelT;
+    const words = 'Now 12 leave each month.';
+    setQ(post, 'leavers', { value: 12, quote: words });
+    const u = validatePostimage(before, post, { removals: [], words: [CLUB_BRIEF, START, words], fresh: [words] }) as Json;
+    expect(u.ok, JSON.stringify(u)).toBe(true);
+    expect(u.changes.map((c: Json) => c.id)).toEqual(['leavers']);
+    expect(u.model.quantities.find((y: Json) => y.id === 'quiet_chance')).toMatchObject({ floor: null, ceiling: 100 });
+    expect(u.model.quantities.find((y: Json) => y.id === 'promo_start')).toMatchObject({ floor: null });
+  });
+
+  it('words#4: a recount carries the bound the person\'s figure contradicts, in their unit, into what the agent reads', async () => {
+    // Olumi reads base sales as never above 250 a week; the person says 300.
+    const m = bakery();
+    setQ(m, 'base_sales', { ceiling: 250 });
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const read = await readProgramContext({ dispatch, proposals: new ProposalStore() }, { scenario_id: SCENARIO, authenticated_user_id: null }) as Json;
+    const blockers = read.data.blockers as Json[];
+    expect(blockers.filter((b) => b.code === 'recount')).toEqual([{ id: 'base_sales', code: 'recount', scope: ['more_loaves'],
+      reason: '"base sales" is given as 300 loaf/week, but Olumi reads it as never above 250 loaf/week' }]);
+    // Contrast: an asked figure's blocker carries no reason of the code's (the AI asks in its own words).
+    expect(blockers.find((b) => b.id === 'oven_price')).toEqual({ id: 'oven_price', code: 'asked', scope: ['within_budget'] });
+  });
+
   it('issue 40: a first draft with an Olumi link of unknown size and a stated direction shows its reading card, the direction said as an arrow and words on what it moves', async () => {
     const m = withOlumiLinks(bakery());
     replies = [JSON.stringify(m)];

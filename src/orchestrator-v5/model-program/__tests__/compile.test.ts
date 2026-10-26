@@ -712,7 +712,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const withMembers = (f: Partial<CanonicalQuantityT>) => { const g = gymFilled(); g.quantities = g.quantities.map((q) => (q.id === 'members_now' ? { ...q, floor: 0, ...f } : q)); return compile(g); };
     const why = (r: ReturnType<typeof compile>) => r.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ');
     const fixed = withMembers({ value: -5, low: null, high: null });
-    expect(fixed.blockers).toContainEqual({ id: 'members_now', code: 'recount', scope: ['reach_400'] });
+    expect(fixed.blockers).toContainEqual({ id: 'members_now', code: 'recount', scope: ['reach_400'], reason: '"members now" is given as -5 member, but Olumi reads it as never below 0 member' });
     expect(why(fixed)).toContain('needs "members now" again: "members now" is given as -5 member, but Olumi reads it as never below 0 member.');
     // A ceiling, from above.
     expect(why(withMembers({ value: 900, low: null, high: null, ceiling: 500 }))).toContain('is given as 900 member, but Olumi reads it as never above 500 member');
@@ -740,7 +740,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     // From above: 100–120 % against a ceiling of 100 % leaves one figure, no spread. Asked again, in %, naming Olumi's reading.
     const above = hall({ low: 100, high: 120, range_kind: 'bounds' });
     expect(above.compiled.errors).toEqual([]);
-    expect(above.compiled.blockers).toEqual([{ id: 'occupancy', code: 'recount', scope: ['enough_guests'] }]);
+    expect(above.compiled.blockers).toEqual([{ id: 'occupancy', code: 'recount', scope: ['enough_guests'], reason: '"occupancy" is given as 100–120 %, but Olumi reads it as never above 100 %' }]);
     expect(above.compiled.perGoal.find((p) => p.goal_id === 'enough_guests')).toMatchObject({ status: 'asks', asks: ['occupancy'] });
     const seen = above.view as unknown as View;
     expect(seen.goal_chance.notes).toEqual(['‘enough guests’ waits on ‘occupancy’ again.']);
@@ -749,7 +749,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(JSON.stringify(above.view)).not.toContain('no room');
     // From below: −10–0 % against a floor of 0 %.
     const below = hall({ low: -10, high: 0, range_kind: 'bounds' });
-    expect(below.compiled.blockers).toEqual([{ id: 'occupancy', code: 'recount', scope: ['enough_guests'] }]);
+    expect(below.compiled.blockers).toEqual([{ id: 'occupancy', code: 'recount', scope: ['enough_guests'], reason: '"occupancy" is given as -10–0 %, but Olumi reads it as never below 0 %' }]);
     expect((below.view as unknown as View).options[0]!.cell.reasons[0]!.message).toBe('needs "occupancy" again: "occupancy" is given as -10–0 %, but Olumi reads it as never below 0 %.');
     // Contrast: a firm range INSIDE that ends at the ceiling has room (80–100 %), and a rough estimate touching it is the
     // ruled reading within what it can be (conditioned and disclosed): both calculate, nothing is asked again.
@@ -816,6 +816,15 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     // Codex r3: a large exact bound is kept exactly: a same-unit setting one above it is outside, at it is within.
     expect(recounts(shareModel({ unit: '%', value: 20, ceiling: 9999999999999 }, { value: 10000000000000 }))).toEqual(['boost_share']);
     expect(recounts(shareModel({ unit: '%', value: 20, ceiling: 9999999999999 }, { value: 9999999999999 }))).toEqual([]);
+    // numbers#6: a setting that declares one side of its own keeps the other from what it sets, so a floor-only 150 % is
+    // still above the share's ceiling and a ceiling-only -10 % still below its floor. One that declares both overrides (ruled).
+    const floorOnly = shareModel({ unit: '%', value: 20, floor: 0, ceiling: 100 }, { value: 150, floor: 0 });
+    expect(floorOnly.blockers.filter((b) => b.code === 'recount')).toEqual([{ id: 'boost_share', code: 'recount', scope: ['boost'], reason: '"boost share" is given as 150 %, but Olumi reads it as never above 100 %' }]);
+    expect(floorOnly.perOption.find((o) => o.option_id === 'boost')).toMatchObject({ status: 'asks', asks: ['boost_share'] });
+    const ceilingOnly = shareModel({ unit: '%', value: 20, floor: 0, ceiling: 100 }, { value: -10, ceiling: 100 });
+    expect(ceilingOnly.blockers.filter((b) => b.code === 'recount')).toEqual([{ id: 'boost_share', code: 'recount', scope: ['boost'], reason: '"boost share" is given as -10 %, but Olumi reads it as never below 0 %' }]);
+    expect(recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 100 }, { value: 150, floor: 0, ceiling: 200 }))).toEqual([]);
+    expect(recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 100 }, { value: 50, floor: 0 }))).toEqual([]);
     // One figure setting two quantities, capped at 100 and at 1,000 a month: 200 is outside the first, in either order.
     const shared = (reversed: boolean) => {
       const g = gymFilled();
@@ -827,6 +836,32 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       return compile(g);
     };
     for (const reversed of [false, true]) expect(recounts(shared(reversed)), `reversed ${reversed}`).toEqual(['promo_joins']);
+  });
+
+  it('numbers#4: a card reads its range within the same domain whether or not it is in a Run yet: the waiting first draft says the floor, and a chance in % stays in %', () => {
+    const words = 'between 0 and 30 join each month';
+    // The gym's members goal waits on leavers, so nothing in it is in the Run; class income calculates on its own.
+    const gymWith = (floor: number | null) => {
+      const g = gym();
+      g.quantities = g.quantities.map((q) => (q.id === 'joins' ? { ...q, value: null, low: 0, high: 30, range_kind: 'plausible' as const, quote: words, floor } : q));
+      g.quantities.push(qty('rival_chance', '%', { kind: 'coefficient', status: 'estimated', author: 'olumi', low: 10, high: 30, range_kind: 'plausible', basis: 'A rival opens nearby in some summers.' }),
+        olumi('rival_loss', 'member', -30, -10));
+      g.risks.push({ id: 'rival', label: 'A rival gym opens', occurrence: 'rival_chance', severity: 'rival_loss', effect_on: 'members', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...base });
+      return g;
+    };
+    const nodes = (m: CanonicalModelT) => evaluateCanonical(m, { sourceText: `300 members today. ${words}.`, seed: 7, draws: 2000 }).projection.graph.nodes;
+    const waiting = nodes(gymWith(0));
+    expect(compile(gymWith(0)).conversions.some((c) => c.quantity === 'joins' || c.quantity === 'rival_chance')).toBe(false); // precondition: not in the Run
+    const joins = waiting.find((n) => n.id === 'joins')!;
+    expect(joins.display_value).toBe('0–30 member/month; Olumi reads it as a spread around 15.8 (sd 7.892), never below 0, provisionally');
+    expect((joins.observed_state as { value: number }).value).toBeCloseTo(15.804, 2);
+    expect(waiting.find((n) => n.id === 'rival')!.description).toContain('Chance: 10–30 %, Olumi\'s estimate; Olumi reads it as a spread around 20.01 (sd 5.764), kept between 0 and 100, provisionally.');
+    // Once the goal is calculable (leavers answered) the same unchanged figures read the same.
+    const answeredNodes = nodes(answered(gymWith(0), 'leavers', { value: 20, quote: 'about 20 leave a month', basis: APPROXIMATE_FIGURE }));
+    expect(answeredNodes.find((n) => n.id === 'joins')!.display_value).toBe('0–30 member/month; Olumi reads it as a spread around 15.8 (sd 7.892), never below 0, provisionally');
+    expect(answeredNodes.find((n) => n.id === 'rival')!.description).toContain('Chance: 10–30 %, Olumi\'s estimate; Olumi reads it as a spread around 20.01 (sd 5.764), kept between 0 and 100, provisionally.');
+    // Contrast: with no floor declared, the waiting card's spread is unbounded.
+    expect(nodes(gymWith(null)).find((n) => n.id === 'joins')!.display_value).toBe('0–30 member/month; Olumi reads it as a spread around 15 (sd 8.66), provisionally');
   });
 
   it('DL ruling 4 (S2 law 9d34ef05+): a plausible range is a spread, never a point and never an invented domain; one with no room is HELD; a most likely figure at an end is an error', () => {
@@ -841,7 +876,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     g.quantities = g.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const, floor: 0 } : q));
     const theirs = compile(g);
     expect(theirs.perGoal.find((p) => p.goal_id === 'reach_400')).toMatchObject({ status: 'asks', asks: ['members_now'] });
-    expect(theirs.blockers).toContainEqual({ id: 'members_now', code: 'recount', scope: ['reach_400'] });
+    expect(theirs.blockers).toContainEqual({ id: 'members_now', code: 'recount', scope: ['reach_400'], reason: '"members now" is given as -1010–-990 member, but Olumi reads it as never below 0 member' });
     expect(theirs.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ')).toContain('is given as -1010–-990 member, but Olumi reads it as never below 0 member.');
     expect(theirs.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ')).not.toContain('What is it?');
     expect(theirs.conversions.some((c) => c.quantity === 'members_now')).toBe(false);
@@ -997,7 +1032,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       ['range kind', edit(bakery(), (m) => { m.quantities = m.quantities.map((q) => (q.id === 'costs' ? { ...q, value: null, low: 500, high: 700 } : q)); }),
         [{ id: 'costs', code: 'range_kind', scope: ['weekly_profit', 'cash_buffer'] }]],
       ['recount', edit(gymFilled(), (m) => { m.quantities = m.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const, floor: 0 } : q)); }),
-        [{ id: 'members_now', code: 'recount', scope: ['reach_400'] }]],
+        [{ id: 'members_now', code: 'recount', scope: ['reach_400'], reason: '"members now" is given as -1010–-990 member, but Olumi reads it as never below 0 member' }]],
       ['structure', edit(bakery(), (m) => { m.quantities = m.quantities.map((q) => (q.id === 'costs' ? structure('costs', 'GBP/week', 612.5, 'Costs.') : q)); }),
         [{ id: 'costs', code: 'asked', scope: ['weekly_profit', 'cash_buffer'] }]],
       ['an asked figure with no question of the AI\'s: valid, typed', edit(bakery(), (m) => { m.quantities.push(qty('flour_cost', 'GBP/week', { status: 'asked' })); }),
