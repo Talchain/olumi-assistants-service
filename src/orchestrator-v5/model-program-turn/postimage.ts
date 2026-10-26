@@ -20,7 +20,7 @@
  */
 import { ProposalChangeSchema, type ProposalChange } from '../agent-lane/proposal.js';
 import { readingGroups } from './reading-groups.js';
-import { CanonicalModel, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
+import { CanonicalModel, HOST_OWNED_FIELDS, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
 import { norm } from '../model-program/compile.js';
 import { linkTargets, withUsedDirections } from '../model-program/links.js';
 import { isExactCalendarReexpression, parseUnit, sameDims } from '../model-program/units.js';
@@ -33,7 +33,7 @@ const FAMILIES: readonly (readonly [Family, ProposalChange['kind']])[] = [
 ];
 
 /** Set by the host, never taken from a proposed model. */
-const HOST_FIELDS: ReadonlySet<string> = new Set(['approval', 'author_id']);
+const HOST_FIELDS: ReadonlySet<string> = new Set(HOST_OWNED_FIELDS);
 /**
  * How a changed field is said on the card: the fields of an item that read together are ONE group (a figure's value, range
  * and unit; a goal's measure; its window), said as one plain phrase from the item itself. Every field a change can touch

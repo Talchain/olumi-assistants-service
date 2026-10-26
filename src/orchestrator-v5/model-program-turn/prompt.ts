@@ -6,7 +6,7 @@
  */
 import { createHash } from 'node:crypto';
 import { z } from 'zod-v4';
-import { CanonicalModel } from '../model-program/canonical.js';
+import { CanonicalModel, HOST_OWNED_FIELDS } from '../model-program/canonical.js';
 
 export const DRAFTING_INSTRUCTIONS = [
   'Turn the person\'s brief into ONE canonical model, following the schema. Olumi\'s code compiles, simulates and draws it; never compute results yourself. Olumi\'s own additions (a suggested measure, options, drivers, risks) are made when the model is first drafted; a repair or an update changes only what it asks, and a goal or limit an update adds comes with the relations from the options to it, only where an option plausibly affects it; never added merely to connect.',
@@ -72,10 +72,12 @@ export type CanonicalUpdateT = z.infer<typeof CanonicalUpdate>;
 
 /**
  * The canonical schema as OpenAI's strict json_schema. `z.toJSONSchema` is the shape S1 checks for strict output
- * (`compile.test.ts`, closed objects, every key required, anyOf only); two keys are dropped at this boundary: `$schema`, and
- * the safe-integer bounds `.int()` adds (S1: "no number carries a bound"; the compiler checks bounds in sentences).
+ * (`compile.test.ts`, closed objects, every key required, anyOf only); dropped at this boundary: `$schema`, the safe-integer
+ * bounds `.int()` adds (S1: "no number carries a bound"; the compiler checks bounds in sentences), and the host's own fields
+ * (`HOST_OWNED_FIELDS`, from every object's properties and required), which the drafter never writes (Paul 26 Oct).
  */
 function strictSchema(schema: z.ZodType): Record<string, unknown> {
+  const host: ReadonlySet<string> = new Set(HOST_OWNED_FIELDS);
   const walk = (n: unknown): unknown => {
     if (Array.isArray(n)) return n.map(walk);
     if (n === null || typeof n !== 'object') return n;
@@ -83,7 +85,11 @@ function strictSchema(schema: z.ZodType): Record<string, unknown> {
     for (const [k, v] of Object.entries(n as Record<string, unknown>)) {
       if (k === '$schema') continue;
       if ((k === 'minimum' || k === 'maximum') && Math.abs(Number(v)) === Number.MAX_SAFE_INTEGER) continue;
-      out[k] = walk(v);
+      if (k === 'properties' && v !== null && typeof v === 'object' && !Array.isArray(v)) {
+        out[k] = Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([p]) => !host.has(p)).map(([p, s]) => [p, walk(s)]));
+      } else if (k === 'required' && Array.isArray(v)) {
+        out[k] = v.filter((p) => !host.has(String(p)));
+      } else out[k] = walk(v);
     }
     return out;
   };

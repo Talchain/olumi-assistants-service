@@ -49,6 +49,11 @@ export type AuthorT = (typeof AUTHORS)[number];
 /** A quantity's figure may also be STRUCTURE: an exact constant the model's form needs (phase 0b: 40 zero-width "estimates"). */
 export const QUANTITY_AUTHORS = ['person', 'olumi', 'structure'] as const;
 export const APPROVALS = ['proposed', 'approved'] as const;
+/**
+ * The fields only Olumi's host sets (Paul 26 Oct: the AI does no unnecessary work): never in the schema the drafter is sent
+ * (`prompt.ts`), and set by the host when a draft is read (`draft.ts` withHostFields). The stored model keeps them.
+ */
+export const HOST_OWNED_FIELDS = ['approval', 'author_id'] as const;
 
 /** Who asserted it, in whose words, and whether the person has accepted it. Separate facts, never one. */
 const attribution = {
