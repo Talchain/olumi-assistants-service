@@ -759,6 +759,11 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const back = (v: number) => recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 100 }, { unit: '1', value: v }));
     expect(back(2)).toEqual(['boost_share']);
     expect(back(0.5)).toEqual([]);
+    // Codex r2: a setting AT its inherited bound, in the same unit, is within it (29 % with a 29 % ceiling); and across
+    // units (0.29 with a 29 % ceiling).
+    expect(recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 29 }, { value: 29 }))).toEqual([]);
+    expect(recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 29 }, { unit: '1', value: 0.29 }))).toEqual([]);
+    expect(recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 29 }, { value: 29.5 }))).toEqual(['boost_share']);
     // One figure setting two quantities, capped at 100 and at 1,000 a month: 200 is outside the first, in either order.
     const shared = (reversed: boolean) => {
       const g = gymFilled();

@@ -682,7 +682,9 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
    *  once (the highest floor, the lowest ceiling), whatever the options' order (Codex r1 #3771). */
   const boundsOf = (q: CanonicalQuantityT): Pick<CanonicalQuantityT, 'floor' | 'ceiling'> => {
     if (has(q.floor) || has(q.ceiling)) return { floor: q.floor ?? null, ceiling: q.ceiling ?? null };
-    const into = (v: number, from: string) => (v * (U.get(from)?.scale ?? 1)) / (U.get(q.id)?.scale ?? 1);
+    // By the ratio of scales (exactly 1 in the same unit), with float noise rounded away so a bound at a figure's own
+    // value never reads as outside it (Codex r2 #3771: 29 % became 28.999…%).
+    const into = (v: number, from: string) => Number((v * ((U.get(from)?.scale ?? 1) / (U.get(q.id)?.scale ?? 1))).toPrecision(12));
     const targets = (setsOf.get(q.id) ?? []).flatMap((id) => (Q.has(id) ? [Q.get(id)!] : []));
     const floors = targets.flatMap((t) => (has(t.floor) ? [into(t.floor, t.id)] : [])), ceilings = targets.flatMap((t) => (has(t.ceiling) ? [into(t.ceiling, t.id)] : []));
     return { floor: floors.length ? Math.max(...floors) : null, ceiling: ceilings.length ? Math.min(...ceilings) : null };
