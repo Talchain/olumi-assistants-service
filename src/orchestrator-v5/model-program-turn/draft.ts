@@ -5,7 +5,7 @@
  * (`ledgeredAgentsClient`: every attempt is a `_provider_calls` row), at the core budget's model with reasoning effort
  * MEDIUM. The draft is compiled; while it has errors, the compiler's own sentences go back to the SAME conversation (the
  * draft as the assistant's turn, the errors as the next user turn: phase 0b's repair shape), at most twice. Nothing here
- * edits the model: what compiles is the AI's own draft.
+ * edits the model but the host's own fields (`withHostFields`): what compiles is the AI's own draft.
  */
 import { streamedLedgeredResponse, type StreamedResponsesBody } from '../../adapters/llm/openai-agents-client.js';
 import { coreBudget } from '../agent-lane/model-budgets.js';
@@ -80,6 +80,20 @@ export const repairMessage = (errors: readonly CompileError[], prefix = REPAIR_P
 type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'period' | 'history'>;
 const FAMILIES = Object.keys(CanonicalModel.shape).filter((k) => !['version', 'question', 'period', 'history'].includes(k)) as Family[];
 /**
+ * THE HOST'S FIELDS ON A DRAFT (Paul 26 Oct: no unnecessary AI work). The drafter is never sent approval or author_id
+ * (`prompt.ts`), so before its JSON is read, every record, every link in a relation and every history entry takes the
+ * host's values: proposed, approved by no one. Nothing else in the draft changes, and a shape the schema refuses stays
+ * refused. The saved form is set later, as before (`postimage.ts` asDrafted, accepted).
+ */
+export function withHostFields(json: unknown): unknown {
+  const isRec = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+  if (!isRec(json)) return json;
+  const host = (r: unknown): unknown => (isRec(r) ? { ...r, approval: 'proposed', author_id: null } : r);
+  const record = (r: unknown): unknown => { const x = host(r); return isRec(x) && Array.isArray(x['terms']) ? { ...x, terms: x['terms'].map(host) } : x; };
+  return { ...json, ...Object.fromEntries(FAMILIES.filter((f) => Array.isArray(json[f])).map((f) => [f, (json[f] as unknown[]).map(record)])),
+    ...(Array.isArray(json['history']) ? { history: json['history'].map((h) => (isRec(h) ? { ...h, author_id: null } : h)) } : {}) };
+}
+/**
  * AN UPDATE, MERGED BY ID onto the saved model (DL 24 Oct, DoD-G classes 12 and 4): in each family a returned id replaces
  * that record where it stands, a new id is added after the saved ones, and an id in remove is deleted; every record not
  * returned is the saved one, exactly. The question and the time step change only when returned. A returned id given twice,
@@ -147,7 +161,7 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
     const ms = Date.now() - t0;
     if (out.text === null) { attempts.push({ attempt: a, errors: null, failed: `no output (${out.status ?? 'unknown'}${out.incomplete ? `: ${out.incomplete}` : ''})`, status: out.status, usage: out.usage, ms }); break; }
     let json: unknown;
-    try { json = JSON.parse(out.text); } catch { attempts.push({ attempt: a, errors: null, failed: 'output is not JSON', status: out.status, usage: out.usage, ms }); break; }
+    try { json = withHostFields(JSON.parse(out.text)); } catch { attempts.push({ attempt: a, errors: null, failed: 'output is not JSON', status: out.status, usage: out.usage, ms }); break; }
     // An update returns only its changes: the model it proposes is the saved one with them merged by id.
     const update = onto === undefined ? null : CanonicalUpdate.safeParse(json);
     const whole = update?.success ? mergeUpdate(onto!, update.data) : json;

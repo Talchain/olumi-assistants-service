@@ -21,7 +21,8 @@ import { simulate } from '../../model-program/simulate/simulate.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_JSON_SCHEMA, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX } from '../prompt.js';
 import { runModelProgramTurn } from '../turn.js';
 import { evaluateCanonical, seedOf, RUN_DRAWS } from '../evaluate.js';
-import { livingModelOf, programReadOf, reopenProgram, savedProgramOf, sourceTextOf } from '../program-store.js';
+import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, sourceTextOf } from '../program-store.js';
+import { proposePostimage, withHostFields } from '../draft.js';
 import { applyCanvasFigure, applyProgramChange, holdProgramCard, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
 import { log as staticLog } from '../../../utils/telemetry.js';
 import { GROUPS, readingOf, validatePostimage } from '../postimage.js';
@@ -711,6 +712,93 @@ describe('the model-program turn on the real core route', () => {
     expect(JSON.stringify(saved).match(/"approval":/g)).toHaveLength(19);
     // Contrast: everything else, who authored each item and in whose words included, is the drafter's, untouched.
     expect(withoutHostFields(saved)).toEqual(withoutHostFields(m));
+  });
+
+  describe('lean draft (Paul 26 Oct, "we do not make the AI do any unnecessary, complicated work or data generation"): the drafter never writes a host-owned field', () => {
+    const HOST = new Set(['approval', 'author_id']);
+    /** The draft as the drafter now writes it: every approval and author_id left out, at any depth. */
+    const unhosted = (m: unknown): Json => JSON.parse(JSON.stringify(m), (k, v) => (HOST.has(k) ? undefined : v));
+    /** A stored model a person has approved: every record and link approved, by person-1. */
+    const approvedBakery = (): CanonicalModelT => JSON.parse(JSON.stringify(bakery()).replace(/"approval":"proposed"/g, '"approval":"approved"').replace(/"author_id":null/g, '"author_id":"person-1"'));
+    /** Each place a schema names a host field (a property or a required key), each object strict output would refuse, and the attributed objects walked. */
+    const audit = (schema: unknown) => {
+      const host: string[] = []; const loose: string[] = []; let quoted = 0;
+      const walk = (node: unknown, path: string) => {
+        if (node === null || typeof node !== 'object') return;
+        const n = node as Json;
+        if (n.type === 'object') {
+          const keys = Object.keys(n.properties ?? {});
+          if (keys.includes('quote')) quoted += 1;
+          host.push(...keys.filter((k) => HOST.has(k)).map((k) => `${path}.properties.${k}`), ...((n.required ?? []) as string[]).filter((k) => HOST.has(k)).map((k) => `${path}.required.${k}`));
+          if (n.additionalProperties !== false || JSON.stringify([...(n.required ?? [])].sort()) !== JSON.stringify([...keys].sort())) loose.push(path);
+        }
+        for (const [k, v] of Object.entries(n)) walk(v, `${path}.${k}`);
+      };
+      walk(schema, '$');
+      return { host, loose, quoted };
+    };
+
+    it('(a) neither schema the drafter is sent (first draft, update) holds approval or author_id anywhere, and each stays valid strict output', () => {
+      // Positive control: the walker reaches every attributed object (each record family, the four relation forms, a link, an
+      // option's setting, and a history entry in the first draft's).
+      for (const [name, schema, quoted] of [['draft', CANONICAL_JSON_SCHEMA, 19], ['update', UPDATE_JSON_SCHEMA, 18]] as const) {
+        const a = audit(schema);
+        expect([a.host, a.loose, a.quoted], name).toEqual([[], [], quoted]);
+        expect(JSON.stringify(schema), name).not.toMatch(/approval|author_id/);
+      }
+      // Contrast: the same walker on the STORED format finds every one: approval on 17 objects, author_id on those and the
+      // history entry, each as a property and a required key.
+      const stored = audit(z.toJSONSchema(CanonicalModel));
+      expect([stored.host.length, stored.quoted]).toEqual([70, 19]);
+      expect(stored.host).toEqual(expect.arrayContaining(['$.properties.history.items.properties.author_id', '$.properties.goals.items.properties.approval', '$.properties.goals.items.required.approval']));
+    });
+
+    it('(b) a first draft WITHOUT the host fields parses, compiles and saves with every record proposed and approved by no one; the rest is the drafter\'s, exactly', async () => {
+      const bare = unhosted(bakery());
+      // The probe removed them all (positive control: the stored format refuses this draft as it stands).
+      expect(JSON.stringify(bare)).not.toMatch(/approval|author_id/);
+      expect(CanonicalModel.safeParse(bare).success).toBe(false);
+      replies = [JSON.stringify(bare)];
+      const r = await turn({ message: BRIEF });
+      expect(r.json().model_program.saved).toBe(true);
+      expect(r.json().model_program.draft.attempts.map((x: Json) => x.errors.length)).toEqual([0]);
+      const saved = persisted!.living_model.canonical as CanonicalModelT;
+      expect(hostFieldsOf(saved)).toEqual(new Set(['"approval":"proposed"', '"author_id":null']));
+      // The bakery's 18 records and its one link, each set by the host.
+      expect(JSON.stringify(saved).match(/"approval":/g)).toHaveLength(19);
+      expect(saved).toEqual(bakery());
+    });
+
+    it('(b) an update WITHOUT the host fields is merged and read as before: the record it returns takes the host\'s values, every other record is the saved one', async () => {
+      const saved = approvedBakery();
+      const none = { version: saved.version, question: null, period: null, quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [], claims: [],
+        evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: [] };
+      const link = saved.relations.find((x) => x.form === 'effect')!;
+      const update = unhosted({ ...none, relations: [link] });
+      expect(JSON.stringify(update)).not.toMatch(/approval|author_id/);
+      const out = await proposePostimage(saved, [BRIEF], 'Keep the link as it is.', [], async () => ({ text: JSON.stringify(update), status: 'completed', incomplete: null, usage: null }));
+      expect(out.attempts.map((x) => x.errors?.length ?? x.failed)).toEqual([0]);
+      const back = out.model!.relations.find((x) => x.id === link.id)!;
+      expect(hostFieldsOf(back)).toEqual(new Set(['"approval":"proposed"', '"author_id":null']));
+      expect(withoutHostFields(out.model)).toEqual(withoutHostFields(saved));
+      // Every record it did not return is the saved one, host fields included (positive control: there are such records).
+      const kept = (m: CanonicalModelT) => (Object.keys(m) as (keyof CanonicalModelT)[]).filter((f) => Array.isArray(m[f]) && f !== 'history')
+        .flatMap((f) => (m[f] as { id: string }[]).filter((x) => x.id !== link.id).map((x) => `${f}:${JSON.stringify(x)}`));
+      expect(kept(out.model!)).toEqual(kept(saved));
+      expect(kept(saved).length).toBeGreaterThan(15);
+    });
+
+    it('(c) contrast: a STORED model keeps its host fields and reads unchanged (approved, by someone); the stored format still requires them', () => {
+      const approved = approvedBakery();
+      expect(hostFieldsOf(approved)).toEqual(new Set(['"approval":"approved"', '"author_id":"person-1"']));
+      const graph = (canonical: unknown) => ({ living_model: { model_program: MODEL_PROGRAM, canonical, seed: 1, person_words: [BRIEF], runs: [] } });
+      const read = programReadOf(graph(approved));
+      expect(read.kind === 'program' ? read.program.canonical : read).toEqual(approved);
+      // The host fills only a draft: a stored model without them is not read as a program.
+      expect(programReadOf(graph(unhosted(approved))).kind).toBe('unreadable');
+      // The fill sets the host fields and nothing else.
+      expect(withHostFields(approved)).toEqual(bakery());
+    });
   });
 
   it('verbatim (DL 24 Oct, 6 refused reading cards in the combined measure): an empty unknown slot of theirs states nothing, like an asked one, so the reading card issues; a known figure in words not theirs is still refused; a quote differing only in case or a curly quote is theirs, as compile reads it', async () => {
@@ -2313,6 +2401,14 @@ describe('the model-program turn on the real core route', () => {
     expect(await ask([answer({ id: 'sell_through', quote: same })], ctx(same))).toEqual(unread('sell_through'));
     const until = 'We count until the oven is paid for.';
     replies = [savedWith(() => {})]; // their 8 weeks, not returned: never their new words on the old figure
+    expect(await ask([answer({ id: 'weeks_counted', quote: until })], ctx(until))).toEqual(unread('weeks_counted'));
+    // #3790 review: the same once their record is approved. The drafter no longer writes approval, so a record it returns
+    // unchanged comes back 'proposed' from the host; it is still the saved record, never their new words on the old figure.
+    const canon = persisted!.living_model.canonical as CanonicalModelT;
+    canon.quantities = canon.quantities.map((x) => (x.id === 'weeks_counted' ? { ...x, approval: 'approved' as const, author_id: 'person-1' } : x));
+    const returned = JSON.parse(savedWith(() => {})) as Json; // the drafter returns that record, unchanged
+    returned.quantities = [...((returned.quantities as Json[] | undefined) ?? []), canon.quantities.find((x) => x.id === 'weeks_counted')];
+    replies = [JSON.stringify(returned)];
     expect(await ask([answer({ id: 'weeks_counted', quote: until })], ctx(until))).toEqual(unread('weeks_counted'));
     replies = [savedWith((d) => setQ(d, 'sell_through', { low: 0.6, high: 0.8, basis: 'Read as about last year.' }))]; // Olumi's estimate, and it compiles
     expect(await ask([answer({ id: 'sell_through', quote: same })], ctx(same))).toEqual(unread('sell_through'));

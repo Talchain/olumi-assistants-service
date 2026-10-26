@@ -20,7 +20,7 @@
  */
 import { ProposalChangeSchema, type ProposalChange } from '../agent-lane/proposal.js';
 import { readingGroups } from './reading-groups.js';
-import { CanonicalModel, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
+import { CanonicalModel, HOST_OWNED_FIELDS, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
 import { norm } from '../model-program/compile.js';
 import { linkTargets, withUsedDirections } from '../model-program/links.js';
 import { isExactCalendarReexpression, parseUnit, sameDims } from '../model-program/units.js';
@@ -33,7 +33,7 @@ const FAMILIES: readonly (readonly [Family, ProposalChange['kind']])[] = [
 ];
 
 /** Set by the host, never taken from a proposed model. */
-const HOST_FIELDS: ReadonlySet<string> = new Set(['approval', 'author_id']);
+const HOST_FIELDS: ReadonlySet<string> = new Set(HOST_OWNED_FIELDS);
 /**
  * How a changed field is said on the card: the fields of an item that read together are ONE group (a figure's value, range
  * and unit; a goal's measure; its window), said as one plain phrase from the item itself. Every field a change can touch
@@ -104,7 +104,7 @@ const noFigure = (v: Rec): boolean => v['value'] === null && v['low'] === null &
 const emptyUnknown = (v: Rec): boolean => v['status'] === 'unknown' && noFigure(v);
 const personAttributions = (v: unknown): Rec[] => (Array.isArray(v) ? v.flatMap(personAttributions)
   : isRec(v) ? [...(v['author'] === 'person' && 'quote' in v && !(v['quote'] === null && (v['status'] === 'asked' || emptyUnknown(v))) ? [v] : []), ...Object.values(v).flatMap(personAttributions)] : []);
-const withoutHost = (v: unknown): unknown => (Array.isArray(v) ? v.map(withoutHost)
+export const withoutHost = (v: unknown): unknown => (Array.isArray(v) ? v.map(withoutHost)
   : isRec(v) ? Object.fromEntries(Object.entries(v).filter(([k]) => !HOST_FIELDS.has(k)).map(([k, x]) => [k, withoutHost(x)])) : v);
 /** The host's own fields, set all the way down a record: its approval, and who approved it. Who authored it is unchanged. */
 const hostSet = (v: unknown, approval: 'proposed' | 'approved', by: string | null): unknown => (Array.isArray(v) ? v.map((x) => hostSet(x, approval, by))
