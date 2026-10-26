@@ -227,12 +227,13 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   };
   /**
    * The existing horizon reader says “within N months”, as the person's own: only a fixed window from now that they stated,
-   * on a goal reached or ended by then, can mean that (integrated review 26 Oct: a "never below" or average goal was read as a
-   * deadline, and Olumi's reading of a date was shown as theirs). Olumi's reading stays in the result's own words.
+   * on a goal reached by then (max), can mean that (integrated review 26 Oct: a "never below" or average goal was read as a
+   * deadline, and Olumi's reading of a date was shown as theirs). A level at the window's end (end) is a different event, met
+   * only if it holds at month N (buddy BLOCK 26 Oct). Every other timing stays in the result's own words.
    */
   const horizonOf = (g: CanonicalModelT['goals'][number]): Rec => {
     const w = g.measure?.window;
-    if (!w || w.origin_event !== null || w.origin_offset !== null || w.start !== 0 || (g.measure!.aggregation !== 'max' && g.measure!.aggregation !== 'end')) return {};
+    if (!w || w.origin_event !== null || w.origin_offset !== null || w.start !== 0 || g.measure!.aggregation !== 'max') return {};
     const q = Q.get(w.periods);
     if (!q || q.status !== 'known' || whoOf(q, q.id) !== 'person' || (has(q.low) && has(q.high) && q.low !== q.high)) return {};
     const value = q.value ?? q.low, u = parseUnit(q.unit);
