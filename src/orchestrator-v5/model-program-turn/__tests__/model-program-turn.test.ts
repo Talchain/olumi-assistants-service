@@ -1609,6 +1609,20 @@ describe('the model-program turn on the real core route', () => {
       expect(faceOf(m, HALL, 'carry_on')).toContain(', in this model, on Olumi’s reading of ‘members’, if your condition ‘The council must let us use the hall’ is met, ‘promo effect’');
     });
 
+    it('integrated review 26 Oct: an applied assumption on a risk is a premise of what the risk reaches: named, never "on your figures"', () => {
+      const RISK = `${OWN} There is a one in five chance of a quiet month when five more leave.`;
+      const m = allTheirs();
+      m.quantities.push(q('quiet_chance', '1', { value: 0.2, quote: 'a one in five chance' }), q('quiet_extra', 'member/month', { value: 5, quote: 'five more leave' }));
+      m.risks.push({ id: 'quiet_month', label: 'A quiet month', occurrence: 'quiet_chance', severity: 'quiet_extra', effect_on: 'leavers', mode: 'add', starts_after_periods: 0,
+        author: 'person', quote: 'a one in five chance of a quiet month', ...at });
+      // Contrast first: the risk is theirs too, so with no premise the result is still on their figures.
+      expect(faceOf(approved(m), RISK)).toContain(', in this model, on your figures');
+      m.assumptions.push({ id: 'quiet_once', text: 'A quiet month happens at most once.', applied: true, concerns: ['quiet_month'], author: 'olumi', quote: null, ...at });
+      const face = faceOf(approved(m), RISK);
+      expect(face).toContain('if Olumi’s assumption ‘A quiet month happens at most once’ holds');
+      expect(face).not.toContain('on your figures');
+    });
+
     it('a situation-wide assumption (concerns []) is named: it bears on every goal', () => {
       const m = approved(allTheirs());
       m.assumptions.push({ id: 'fees', text: 'Membership fees stay the same.', applied: true, concerns: [], author: 'olumi', quote: null, ...at });
