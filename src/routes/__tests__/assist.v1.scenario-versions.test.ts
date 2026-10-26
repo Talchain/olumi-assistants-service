@@ -1770,7 +1770,7 @@ describe("POST /versions/restore — a version the receipt cannot carry is refus
     expect(JSON.stringify(written.living_model)).toBe(JSON.stringify(graph.living_model));
     expect(JSON.stringify(written.nodes)).toBe(JSON.stringify(graph.nodes));
     // CONTRAST: the default (non-program) version still passes through the legacy projection.
-    getVersion.mockResolvedValue({ status: 'ok', value: summary() });
+    getVersion.mockResolvedValue({ status: 'ok', value: { ...summary(), graph: STORED_VERSION_GRAPH } });
     projection.full.mockClear();
     expect((await post(app, '/versions/restore', { version_id: VERSION_A })).statusCode).toBe(200);
     expect(projection.full).toHaveBeenCalledTimes(1);
