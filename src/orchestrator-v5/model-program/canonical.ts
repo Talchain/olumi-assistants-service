@@ -211,7 +211,7 @@ const per = id.nullable().describe('For a rate over the window ("no-shows per bo
 
 export const CanonicalGoal = z.object({
   id,
-  label: z.string().describe("The aim in the person's own words (\"keep weekly profit over £900\"). Never empty."),
+  label: z.string().describe("The aim in the person's own words (\"keep weekly profit over £900\"); for Olumi's working aim, a short plain label. Never empty."),
   measure: z.object({
     quantity: id.describe('The quantity the aim is about. Never an asked quantity: that would ask for the result itself.'),
     per,
@@ -235,7 +235,7 @@ export const CanonicalGoal = z.object({
   question: z.string().nullable().describe('When the measure is null: the one plain question that would give it a measure ("How would you tell the regulars are happy: repeat visits a week?"). When the window is null but the level changes over time: "By when?". Null otherwise.'),
   ...attribution,
 }).strict().describe(
-  'WHAT THE PERSON IS TRYING TO ACHIEVE, in their words. Never a condition the plan must not break (that is a limit), never a preference; a condition is never both a goal and a limit.');
+  'WHAT THE PERSON IS TRYING TO ACHIEVE, in their words, or, when they state none, Olumi\'s one working aim (author olumi) for them to confirm. Never a condition the plan must not break (that is a limit), never a preference; a condition is never both a goal and a limit.');
 export type CanonicalGoalT = z.infer<typeof CanonicalGoal>;
 export type CanonicalMeasureT = NonNullable<CanonicalGoalT['measure']>;
 
@@ -299,7 +299,7 @@ export type CanonicalOptionSetT = z.infer<typeof CanonicalOptionSet>;
 
 export const CanonicalOption = z.object({
   id,
-  label: z.string().describe('The option\'s exact name as the person wrote it; for Olumi\'s own option, a short plain name.'),
+  label: z.string().describe('A short neutral name ("Second oven"); a person\'s option keeps their own words in quote.'),
   sets: z.array(CanonicalOptionSet).describe('What the option changes. [] for "carry on as now".'),
   status: z.enum(OPTION_STATUSES).describe('live: compared. ruled_out: the person rules it out but keeps it in view. removed: taken out of the comparison.'),
   developed_from: id.nullable().describe('The id of the option this is a variant of. A record, not a cause. Null otherwise.'),
@@ -383,10 +383,10 @@ export const CanonicalModel = z.object({
   period: z.enum(PERIOD_UNITS).describe('The model\'s time step, which windows and stocks count in. Period 0 is now.'),
   quantities: z.array(CanonicalQuantity),
   relations: z.array(CanonicalRelation),
-  goals: z.array(CanonicalGoal).describe('Every aim the person stated, each with its own measure (theirs, Olumi\'s suggestion, or null with a question), target and window. Never an aim they did not state.'),
+  goals: z.array(CanonicalGoal).describe('Every aim the person stated, each with its own measure (theirs, Olumi\'s suggestion, or null with a question), target and window; when they state none, ONE working aim of Olumi\'s (author olumi), its target asked. Never an aim of Olumi\'s beside theirs.'),
   limits: z.array(CanonicalLimit).describe('Every condition the plan must not break. A budget or a time cap is a limit, not a goal.'),
   preferences: z.array(CanonicalPreference).describe('Every wish without a threshold ("we\'d like fewer late deliveries").'),
-  options: z.array(CanonicalOption).describe('Every option the person named, by its exact name, and, where they named none or the question is how to divide something, a small set of Olumi\'s own (author olumi) within their stated budgets and scope.'),
+  options: z.array(CanonicalOption).describe('Every option the person named, and, where they name none, one or only two opposites, or ask what they can do, one or two materially different ones of Olumi\'s (author olumi), lower-commitment where it fits; for how to divide something, a small set; always within their stated budgets and scope.'),
   risks: z.array(CanonicalRisk),
   claims: z.array(CanonicalClaim),
   evidence: z.array(CanonicalEvidence),
