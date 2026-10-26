@@ -35,7 +35,31 @@ export type SimResult = {
   // state, intervals for a flow), per option, and which risks fired: the evidence that options share their draws and that a
   // risk acts only where it fires.
   recorded?: RecordedDraw[];
+  // ── Additive (SC0): only when `perDraw` asks. Every draw's own results, in memory only (typed arrays; never stored).
+  per_draw?: PerDraw;
 };
+/**
+ * SC0: every draw's own results on the Run's shared draws, for the methods that read them (a paired comparison, value of
+ * information, an uncertainty share, what failure looks like, a tipping point). Index d of every array is the same draw.
+ */
+export type PerDraw = {
+  /** Each ranged input's value in every draw, by quantity id: the same for every option (common random numbers). */
+  inputs: Record<string, Float64Array>;
+  options: PerDrawOption[];
+};
+export type PerDrawOption = {
+  option_id: string;
+  /** Per goal and per limit, in model order. */
+  goals: PerDrawCondition[];
+  limits: PerDrawCondition[];
+  /** The headline, every goal together within every limit (`joint_within_limits`): 1 met, 0 not, −1 outside the domain. */
+  joint_within_limits: Int8Array;
+  /** Per risk, in model order: 1 fired, 0 did not, −1 never read (its time lies beyond the horizon), −2 its chance outside 0..1. */
+  risks: { risk_id: string; fired: Int8Array }[];
+};
+/** `value`: the aggregated value (a `per` ratio included), NaN outside the domain; `against`: its target or bound where the
+ *  window ends; `met`: 1, 0, or −1 outside the domain. The margin is value − against. */
+export type PerDrawCondition = { id: string; value: Float64Array; against: Float64Array; met: Int8Array };
 export type RecordedDraw = {
   option_id: string;
   draw: number;
