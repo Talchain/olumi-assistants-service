@@ -513,12 +513,12 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const atEnds = new Map<string, { readonly values: readonly number[]; readonly results: readonly SimResult[] }>();
   const endsOf = (x: Quantity & { dist: RangeDist }) => {
     if (!atEnds.has(x.id)) {
-      // Use the Run's own domain, including the mathematical [0, 1] for a risk's occurrence. Never test or describe an
-      // impossible setting. Cache the actual settings with their results so the words name exactly what was tested.
-      const chance = model.risks.some((r) => r.occurrence === x.id);
-      const reading = rangeLaw(x.dist, chance ? { domain: { min: 0, max: 1 } } : {});
-      const values = [x.dist.low, (x.dist.low + x.dist.high) / 2, x.dist.high]
-        .map((value) => reading.kind === 'point' ? reading.value : Math.min(reading.upper, Math.max(reading.lower, value)));
+      // Test the stated ends within the Run's domain, and the middle of that interval. The simulator has already refused
+      // an occurrence range outside [0, 1]. Cache settings with results so the words name exactly what was tested.
+      const reading = rangeLaw(x.dist);
+      const within = (value: number) => reading.kind === 'point' ? reading.value : Math.min(reading.upper, Math.max(reading.lower, value));
+      const low = within(x.dist.low), high = within(x.dist.high);
+      const values = [low, (low + high) / 2, high];
       const results = values.map((value) => simulate({ ...model, quantities: model.quantities
         .map((z) => (z.id === x.id ? { ...z, dist: { kind: 'fixed' as const, value, author: 'olumi' as const } } : z)) }, { seed: result.seed, draws: sweepDraws }));
       atEnds.set(x.id, { values, results });
