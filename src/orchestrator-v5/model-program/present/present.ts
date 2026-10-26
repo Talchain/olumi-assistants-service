@@ -22,8 +22,15 @@
  *     Olumi's own: the person's bounds stay theirs and are never called their probability law (DL ruling 4).
  *   - A chance the simulator withheld for a nonfinite draw (`invalid_domain`, DL ruling 3) is a withheld cell with its count
  *     and quantities, never a figure and never a failure.
- *   - Fields with nothing true to say are absent: no `leader` (no leader licence here; `leader_licence: 'withheld'`), no
- *     `status_quo`, no `historical_figures`. `run` is null and currentness unknown unless the caller passes the Run's facts.
+ *   - WHICH OPTION IS MOST LIKELY TO ACHIEVE THE GOAL (Paul 6 and 14 Oct; W6): with every option's chance worked out and at
+ *     least two options, `leader` names the option with the highest chance (`goal_chance_leader`, `leader_licence: 'permitted'`)
+ *     only under the estate's three science conditions (`LEADER_MIN_PCT`, `SUPERLATIVE_GAP_POINTS`, distinct precision) and
+ *     only when every limit is checked. Otherwise it is withheld, its words naming each option's chance and why: no option is
+ *     likely to achieve it (under 1%), the options are too close to call (`similar_option_ids`), or a limit is not yet checked
+ *     (a target-only chance is not the whole goal). Its `words` say both chances, the basis and what the leading chance is most
+ *     sensitive to. A model-relative finding: never "best", a winner, a recommendation or a win share (`option_id` is null).
+ *   - Fields with nothing true to say are absent: no `leader` with one option, a chance not shown or a Run known not to be
+ *     current, no `status_quo`, no `historical_figures`. `run` is null and currentness unknown unless the caller passes the Run's facts.
  */
 import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
 import { comparatorWords } from '../../goal-target/goal-target-basis.js';
@@ -32,7 +39,7 @@ import { displayedPctAt } from '../../goal-target/goal-chance-display.js';
 import { sayDisplayedPct } from '../../goal-target/goal-targets-joint.js';
 import type { Aggregation, Cmp, Domain, ExecutableModel, FixedAuthor, Goal, Limit, Quantity, Window } from '../executable.js';
 import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
-import { isWithheld, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
+import { isWithheld, type Chance, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
 import { costOf, readingOf, restsOn, simulate } from '../simulate/simulate.js';
 
 /** Whose a figure is: unverified is said to be the person's but their words were not found (compile's `unverified`). */
@@ -62,6 +69,8 @@ export interface PresentPremise {
   readonly id: string;
   readonly text: string;
   readonly author: 'person' | 'olumi';
+  /** Someone whose statement the person reports; acceptance does not make it the person's own premise. */
+  readonly party?: string | null;
   readonly kind: 'assumption' | 'condition';
   /** The same rule as `PresentQuantity.confirmed`. */
   readonly confirmed: boolean;
@@ -149,7 +158,9 @@ export interface PresentedAnalysisView {
     readonly reason: null;
     readonly limitation: 'Hash equality cannot detect brief, framing or stage changes.' | 'Currentness is unknown because an analysis hash is unavailable.';
   };
-  readonly leader_licence: 'withheld';
+  readonly leader_licence: 'permitted' | 'withheld';
+  /** Which option is most likely to achieve the goal in this model, or which are too close to call (see the header). */
+  readonly leader?: PresentedLeader;
   readonly options: readonly { readonly option_id: string; readonly cell: PresentCell; readonly main_driver: PresentMainDriver }[];
   readonly goal_chance?: {
     readonly chance_words?: string;
@@ -168,20 +179,33 @@ export interface PresentedAnalysisView {
 }
 
 /**
+ * The DGAI's `CanonicalRunLeader` shape (`canonicalAnalysisView.ts`), plus CEE's `words`. `option_id` is the comparative (win
+ * share) leader, which this presenter never computes, so it is always null; `goal_chance_leader` is the option most likely to
+ * achieve the goal, only where licensed.
+ */
+export interface PresentedLeader {
+  readonly licence: 'permitted' | 'withheld';
+  readonly option_id: null;
+  readonly goal_chance_leader: string | null;
+  readonly similar_option_ids: readonly string[];
+  readonly words: string;
+}
+
+/**
  * ONE REASON (simplify v1 S4): what a chance not shown yet waits on, said once from the compiler's typed blockers, by label,
  * in their order: the blockers holding up any of `ids` (a no-goal blocker holds up every chance). Undefined when none does:
  * the caller then says the compiler's own reason for a figure no one can give, never a sentence of its own.
  */
 export function waitsOnWords(blockers: readonly PresentBlocker[], ids: ReadonlySet<string>): string | undefined {
   const said = blockers.filter((b) => b.code === 'no_goal' || b.scope.some((s) => ids.has(s))).map((b) => {
-    const name = `‘${b.label.trim()}’`;
+    const name = q(b.label);
     switch (b.code) {
       case 'no_goal': return 'the result you want';
       case 'measure': return `a measure for ${name}`;
       case 'deadline': return `a deadline for ${name}`;
       case 'range_kind': return `how to read the range for ${name}`;
       case 'recount': return `${name} again`;
-      case 'unknown': return `${name}, which no one can size yet${b.basis?.trim() ? ` (${b.basis.trim().replace(/[.!]+$/, '')})` : ''}`;
+      case 'unknown': return `${name}, which no one can size yet${b.basis?.trim() ? ` (${inlineWords(b.basis).replace(/[.!]+$/, '')})` : ''}`;
       default: return name;
     }
   });
@@ -213,6 +237,18 @@ export function driverSweepOperations(model: ExecutableModel, draws: number): nu
 export const NO_DRIVER_REASON = 'Tested one at a time at each figure’s low end, middle and high end, no figure moved this chance by more than 5 points.';
 export const NO_RANGE_REASON = 'No figure this chance rests on has a range to test.';
 export const NOT_SWEPT_REASON = 'This model is too large to test each figure one at a time in one run, so what the chance rests on most is not measured.';
+const whoseRange = (author: 'person' | 'olumi' | 'unverified'): string => (author === 'unverified' ? NOT_IN_THEIR_WORDS : author === 'person' ? '(your range)' : '(Olumi’s estimate)');
+/**
+ * WHEN AN OPTION IS NAMED AS MOST LIKELY TO ACHIEVE THE GOAL (W6 review B1): the estate's existing science conditions, the
+ * same three as the legacy licence's superlative (`goal-target/goal-chance-licence.ts:891`), copied here and never imported
+ * (the program path does not load that layer). All three must hold:
+ *   - the leading option's DISPLAYED chance is at least LEADER_MIN_PCT (whole percentage points);
+ *   - its displayed gap to the next option is at least SUPERLATIVE_GAP_POINTS: "Science's interim superlative gap, in
+ *     displayed whole percentage points (d5 6005279728)" (`goal-chance-licence.ts:87-88`);
+ *   - its 95% simulation-precision interval is distinct from every other option's (ruling 6, `intervalsDistinct`).
+ */
+export const LEADER_MIN_PCT = 1;
+export const SUPERLATIVE_GAP_POINTS = 10;
 /** A setting tried: its value, and the chance there as displayed; null where it could not be worked out (a nonfinite draw). */
 type End = { readonly value: number; readonly display: string | null };
 export type PresentMainDriver =
@@ -225,7 +261,9 @@ export type PresentMainDriver =
 export function listWords(parts: readonly string[]): string {
   return parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
-const q = (label: string): string => `‘${label.trim()}’`;
+/** Display words stay on one line; the authored model and its quoted source are never rewritten. */
+export const inlineWords = (text: string): string => text.trim().replace(/\s+/g, ' ');
+const q = (label: string): string => `‘${inlineWords(label)}’`;
 /** A sentence's full stop, unless it already ends in one (a question keeps its "?"). */
 const stop = (x: string): string => (/[.?!]$/.test(x) ? x : `${x}.`);
 /** A figure in its unit; a pure number (unit "1") is said alone. */
@@ -249,13 +287,16 @@ function horizonWords(aggregation: Aggregation, w: Window, unit: string, reading
   return state ? `at the end of every ${unit} from ${unit} ${first} to ${unit} ${last} ${origin}` : `in every ${unit} from ${unit} ${first} to ${unit} ${last} ${origin}`;
 }
 
+/** A chance from fixed inputs only (exact: no interval), 100% or 0%. */
+const isExact = (c: Chance): boolean => c.precision_95[0] === c.precision_95[1] && (c.chance === 1 || c.chance === 0);
+/** The chance as displayed, in whole percentage points at the simulation's own precision (exact: 0 or 100). */
+const displayedPct = (c: Chance): number => (isExact(c) ? c.chance * 100 : displayedPctAt(c.chance, displayRoundingFor(((c.precision_95[1] - c.precision_95[0]) / 2) * 100)));
 /** The labelled result for an option's chance: display at the simulation's own precision, and the precision's words. */
 function shown(c: ChanceOrWithheld, draws: number): { display: string; precision_words: string } | undefined {
   if (isWithheld(c)) return undefined;
   const [lo, hi] = c.precision_95;
   // S3 smoke fix 2: a chance from fixed inputs only (exact: no interval) is said exactly, 100% or 0%, never "more than 99%".
-  const display = lo === hi && (c.chance === 1 || c.chance === 0) ? `${c.chance * 100}%`
-    : sayDisplayedPct(displayedPctAt(c.chance, displayRoundingFor(((hi - lo) / 2) * 100)));
+  const display = isExact(c) ? `${displayedPct(c)}%` : sayDisplayedPct(displayedPct(c));
   const pct = (x: number): string => `${Number((x * 100).toFixed(1))}%`;
   const precision_words = lo === hi
     ? 'Simulation precision: exact. Every simulated draw gives the same result for this option, so no sampling is involved.'
@@ -326,7 +367,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       if (m?.author === 'unverified') return [`${name} is ${sayOf(x.id, x.dist.value, x.unit)} ${NOT_IN_THEIR_WORDS}`];
       const author: string | undefined = x.dist.author ?? m?.author;
       if (author === 'olumi') return [`${name} is ${sayOf(x.id, x.dist.value, x.unit)}, Olumi’s figure`];
-      if (m?.approximate !== undefined) return [`using ${sayOf(x.id, x.dist.value, x.unit)} for ${name} for now — you said ‘${m.approximate.quote}’`];
+      if (m?.approximate !== undefined) return [`using ${sayOf(x.id, x.dist.value, x.unit)} for ${name} for now — you said ${q(m.approximate.quote)}`];
       return author !== undefined && NOT_ASSUMPTIONS.has(author) ? [] : [`${name} is ${sayOf(x.id, x.dist.value, x.unit)} ${NOT_RECORDED}`];
     }
     // S3 smoke fix 1: only an Olumi-authored EFFECT relation is an assumed relationship. A definition (an identity: a
@@ -336,9 +377,10 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     if (x.equation?.form !== 'effect' || m?.relation_author === 'person') return [];
     return [m?.relation_author === 'olumi' ? `${name} follows Olumi’s assumed relationship` : `${name} follows a relationship ${NOT_RECORDED}`];
   }))];
-  /** R8: each premise in its own words: "your" only when it is the person's and confirmed; theirs not yet confirmed says so. */
+  /** R8: a reported premise keeps its speaker; "your" only when it is the person's own and confirmed. */
   const premiseWords = (p: PresentPremise): string => {
-    const text = q(p.text.trim().replace(/[.!]+$/, '')), whose = p.author === 'olumi' ? 'Olumi’s' : p.confirmed ? 'your' : 'the';
+    const text = q(p.text.trim().replace(/[.!]+$/, '')), party = p.party == null ? '' : inlineWords(p.party);
+    const whose = p.author === 'olumi' ? 'Olumi’s' : party !== '' ? `${party}’s` : p.confirmed ? 'your' : 'the';
     return `${whose} ${p.kind === 'condition' ? `condition ${text} is met` : `assumption ${text} holds`}${p.author === 'person' && !p.confirmed ? ' (not yet confirmed)' : ''}`;
   };
   /** R8 (default deny): what it reads (its goals and limits, each quantity) not `confirmed` is Olumi's reading (a structural constant is nobody's), named
@@ -437,7 +479,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       .map((w) => ({ limit_id: w.id, label: w.label, status: 'withheld' as const, reasons: [w.reason], asks: [] }))];
   const uncheckedWords = unchecked.map((l) => {
     const waits = l.asks.map((id) => askOf.get(id)?.label).filter((x): x is string => x !== undefined);
-    return `${q(l.label)} — ${waits.length > 0 ? `waits on ${listWords(waits.map(q))}` : l.reasons.join(' ')}`;
+    // #3789 review: the compiler's reasons quote labels and bases as written; display words stay on one line.
+    return `${q(l.label)} — ${waits.length > 0 ? `waits on ${listWords(waits.map(q))}` : inlineWords(l.reasons.join(' '))}`;
   });
   const uncheckedLine = uncheckedWords.length > 0 ? `Not yet checked: ${uncheckedWords.join('; ')}` : undefined;
   /** "‘Customer cost’ is at most £1,100 at 1 month from the start of this model: about 81%", one per limit, for one option. */
@@ -456,7 +499,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const blockers = input.blockers ?? [];
   const limitIds = new Set([...model.limits.map((l) => l.id), ...givenLimits.map((l) => l.limit_id), ...unchecked.map((l) => l.limit_id)]);
   /** A goal's own reason, from the blockers; for a figure no one can give (no blocker), the compiler's own words for it. */
-  const goalWaits = (g: PresentGoal): string => waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${g.reasons.join(' ')}`;
+  const goalWaits = (g: PresentGoal): string => waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${inlineWords(g.reasons.join(' '))}`;
   const waitingWords = waitsOnWords(blockers, new Set(waiting.map((g) => g.goal_id)));
   const withheldCell = (): Extract<PresentCell, { kind: 'withheld' }> => ({
     kind: 'withheld', face: waitingWords !== undefined && needsAnswer(blockers, new Set(waiting.map((g) => g.goal_id))) ? NEEDS_ANSWER_FACE : NOT_SHOWN_FACE,
@@ -505,15 +548,19 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const switches = new Set(model.options.flatMap((o) => o.sets.map((s) => s.quantity)));
   const SETTINGS = ['low end', 'middle', 'high end'];
   const sweepDraws = Math.min(SWEEP_DRAWS, result.draws);
-  /** Its low end, middle and high end, within what it is drawn within (spec §3.7): never a setting it can never be. */
-  const settingsOf = (x: Quantity & { dist: RangeDist }): [number, number, number] => {
-    const r = lawOf(x.id, x.dist).reading, low = r.kind === 'normal' ? Math.max(x.dist.low, r.lower) : x.dist.low, high = r.kind === 'normal' ? Math.min(x.dist.high, r.upper) : x.dist.high;
-    return [low, (low + high) / 2, high];
-  };
-  const atEnds = new Map<string, readonly SimResult[]>();
-  const endsOf = (x: Quantity & { dist: RangeDist }): readonly SimResult[] => {
-    if (!atEnds.has(x.id)) atEnds.set(x.id, settingsOf(x).map((value) => simulate({ ...model, quantities: model.quantities
-      .map((z) => (z.id === x.id ? { ...z, dist: { kind: 'fixed' as const, value, author: 'olumi' as const } } : z)) }, { seed: result.seed, draws: sweepDraws })));
+  const atEnds = new Map<string, { readonly values: readonly number[]; readonly results: readonly SimResult[] }>();
+  const endsOf = (x: Quantity & { dist: RangeDist }) => {
+    if (!atEnds.has(x.id)) {
+      // Test the stated ends within the Run's domain, and the middle of that interval. The simulator has already refused
+      // an occurrence range outside [0, 1]. Cache settings with results so the words name exactly what was tested.
+      const reading = lawOf(x.id, x.dist).reading;
+      const within = (value: number) => reading.kind === 'point' ? reading.value : Math.min(reading.upper, Math.max(reading.lower, value));
+      const low = within(x.dist.low), high = within(x.dist.high);
+      const values = [low, (low + high) / 2, high];
+      const results = values.map((value) => simulate({ ...model, quantities: model.quantities
+        .map((z) => (z.id === x.id ? { ...z, dist: { kind: 'fixed' as const, value, author: 'olumi' as const } } : z)) }, { seed: result.seed, draws: sweepDraws }));
+      atEnds.set(x.id, { values, results });
+    }
     return atEnds.get(x.id)!;
   };
   const mainDriverOf = (o: OptionResult): PresentMainDriver => {
@@ -524,7 +571,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     // Codex r1 #3728: a setting that cannot be worked out (a nonfinite draw) is never dropped: the swing counts only the
     // settings that computed, the input is named as not tested there, and nothing is concluded about a setting not tested.
     const tested = inputs.map((x) => {
-      const at = endsOf(x).map((r) => r.options.find((p) => p.option_id === o.option_id)!.joint_within_limits);
+      const at = endsOf(x).results.map((r) => r.options.find((p) => p.option_id === o.option_id)!.joint_within_limits);
       const chances = at.flatMap((c) => (isWithheld(c) ? [] : [c.chance]));
       return { x, at, swing: chances.length === 0 ? 0 : Math.max(...chances) - Math.min(...chances), missing: SETTINGS.filter((_, i) => isWithheld(at[i]!)) };
     });
@@ -538,8 +585,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     }
     const { x, at } = best;
     const author = meta(x.id)?.author === 'unverified' ? 'unverified' as const : x.dist.basis === 'person_range' ? 'person' as const : 'olumi' as const;
-    const whose = author === 'unverified' ? NOT_IN_THEIR_WORDS : author === 'person' ? '(your range)' : '(Olumi’s estimate)';
-    const [low, middle, high] = settingsOf(x).map((value, i) => ({ value, display: shown(at[i]!, sweepDraws)?.display ?? null }));
+    const whose = whoseRange(author);
+    const [low, middle, high] = endsOf(x).values.map((value, i) => ({ value, display: shown(at[i]!, sweepDraws)?.display ?? null }));
     const said = (e: End) => `(${sayOf(x.id, e.value, x.unit)}) ${e.display ?? 'could not be tested'}`;
     const others = untested.filter((t) => t.x.id !== x.id);
     return { kind: 'available', driver: { quantity: x.id, author, low: low!, middle: middle!, high: high!, swing_points: Number((best.swing * 100).toFixed(1)), draws: sweepDraws,
@@ -584,7 +631,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     // The 11 Oct decision (:74): what the chance covers (the measured aims it uses) and what it leaves out (aims with no
     // measure, the model's left-out records); never a claim that it covers everything.
     ...(covered.length > 0 && notCovered.length > 0 ? [`Covers: ${listWords(covered)} · Leaves out: ${listWords(notCovered.map(q))}`] : []),
-    ...notInRun.map((w) => `The ${w.kind} ${q(w.label)} is not in this run: ${w.reason}`),
+    ...notInRun.map((w) => `The ${w.kind} ${q(w.label)} is not in this run: ${inlineWords(w.reason)}`),
     ...(uncheckedLine !== undefined ? [stop(uncheckedLine)] : []),
   ];
   const several = allGoals.length >= 2;
@@ -612,8 +659,55 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
         return s === undefined ? [] : [{ option_id: o.option_id, display: s.display }];
       }) }]) } : {}),
     ...(unchecked.length > 0 ? { unchecked_limits: unchecked.map((l, i) => ({ limit_id: l.limit_id, words: uncheckedWords[i]! })) } : {}),
-    ...((input.blockers ?? []).length > 0 ? { waits_on: input.blockers } : {}),
+    ...((input.blockers ?? []).length > 0 ? { waits_on: input.blockers!.map((b) => ({ ...b, label: inlineWords(b.label) })) } : {}),
   };
+  // ── Which option is most likely to achieve the goal, in this model (Paul 6 and 14 Oct: say it; never choose for them) ──
+  const leader = ((): PresentedLeader | undefined => {
+    // W6 review B3: a Run known not to be current names no leader (run-facts.ts: "a Run that is not current names no leader").
+    if (input.current === false || waiting.length > 0 || jointWords === undefined || options.length < 2) return undefined;
+    const said = options.flatMap((o, at) => {
+      const c = result.options[at]!.joint_within_limits;
+      return o.cell.kind === 'figure' && !isWithheld(c) ? [{ id: o.option_id, at, c: c as Chance, pct: displayedPct(c as Chance), display: o.cell.display, driver: o.main_driver }] : [];
+    });
+    if (said.length < options.length) return undefined;
+    const ranked = [...said].sort((a, b) => b.c.chance - a.c.chance || a.at - b.at), top = ranked[0]!, rest = ranked.slice(1);
+    const name = (id: string): string => q(optionLabel.get(id) ?? id);
+    const basis = sharedBasisWords(roots, [...new Map([...premisesOf(model.goals.map((g) => g.id)), ...model.limits.flatMap((l) => input.limit_premises?.[l.id] ?? [])]
+      .map((p) => [p.id, p] as const)).values()], [...model.goals, ...model.limits].map((c) => c.id));
+    const aim = model.goals.length === 1 ? 'the goal' : 'every goal together';
+    /** Each option's chance, in the model's order (a withheld finding ranks nothing). */
+    const each = listWords(said.map((x) => `${x.display} for ${name(x.id)}`));
+    const withheld = (similar: readonly string[], words: string): PresentedLeader => ({ licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: similar, words });
+    // W6 review B2: a limit this Run could not check is left out of every chance, and a target-only chance is not the whole
+    // goal (run-facts.ts RUN_FACTS_USE; the legacy rule 3 withholds the leader on an unscored limit): no option is named.
+    if (unchecked.length > 0) {
+      const them = unchecked.length === 1 ? 'a limit is not yet checked and these chances leave it out' : 'limits are not yet checked and these chances leave them out';
+      return withheld([], `In this model, which option is most likely to achieve ${aim} is not said yet, as ${them}: the chance of ${jointWords} is ${each}, ${basis}. ${stop(uncheckedLine!)}`);
+    }
+    // W6 review B1, the three science conditions (LEADER_MIN_PCT, SUPERLATIVE_GAP_POINTS, distinct precision intervals).
+    if (top.pct < LEADER_MIN_PCT) return withheld([], `In this model, no option is likely to achieve ${aim}: the chance of ${jointWords} is ${each}, ${basis}.`);
+    const distinct = (a: Chance, b: Chance): boolean => a.precision_95[0] > b.precision_95[1] || b.precision_95[0] > a.precision_95[1];
+    const near = (x: typeof top): boolean => top.pct - x.pct < SUPERLATIVE_GAP_POINTS;
+    const close = rest.filter((x) => near(x) || !distinct(top.c, x.c));
+    if (close.length > 0) {
+      const tied = said.filter((x) => x.id === top.id || close.includes(x));
+      // Each reason says only what was tested, and only where it is true of every option named (science session, 26 Oct: the
+      // intervals are each option's own, so overlapping ones never show the simulation cannot tell the chances apart; a paired
+      // test on the same draws can, e.g. 34.9% against 33.4%, a gap of 1.47 ± 0.63 points).
+      const why = close.every((x) => !distinct(top.c, x.c)) ? `for their chances of ${jointWords}, their precision ranges overlap`
+        : close.every(near) ? `their chances of ${jointWords} are less than ${SUPERLATIVE_GAP_POINTS} points apart`
+          : `their chances of ${jointWords} are less than ${SUPERLATIVE_GAP_POINTS} points apart, or their precision ranges overlap`;
+      return withheld(tied.map((x) => x.id), `In this model, ${listWords(tied.map((x) => `${name(x.id)} (${x.display})`))} are too close to call: ${why}, ${basis}.`);
+    }
+    const next = rest[0]!, d = top.driver;
+    const there = (e: End): string => e.display ?? 'could not be tested';
+    const rests = d.kind === 'available'
+      ? ` Its chance is most sensitive to ${q(label(d.driver.quantity) ?? d.driver.quantity)} ${whoseRange(d.driver.author)}: ${there(d.driver.low)} at its low end, ${there(d.driver.middle)} at its middle and ${there(d.driver.high)} at its high end.`
+      : d.kind === 'none_licensed' ? ` ${d.reason}` : '';
+    return { licence: 'permitted', option_id: null, goal_chance_leader: top.id, similar_option_ids: [],
+      words: `In this model, ${name(top.id)} is the option most likely to achieve ${aim}: ${top.display} chance of ${jointWords}, against ${next.display} for ${name(next.id)}, the next most likely, ${basis}.`
+        + (top.c.precision_95[1] < 0.5 ? ` Even so, in this model it is more likely to miss ${aim} than to meet it.` : '') + rests };
+  })();
   const known = input.current !== undefined && input.run !== undefined;
   return {
     schema: 'canonical_analysis_view.v1', source: 'stored_run_facts',
@@ -624,7 +718,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       run_revision: null, basis: 'analysis_graph_hash_interim', reason: null,
       limitation: known ? 'Hash equality cannot detect brief, framing or stage changes.' : 'Currentness is unknown because an analysis hash is unavailable.',
     },
-    leader_licence: 'withheld',
+    leader_licence: leader?.licence ?? 'withheld',
+    ...(leader !== undefined ? { leader } : {}),
     options,
     ...(Object.keys(goal_chance).length > 0 ? { goal_chance } : {}),
   };

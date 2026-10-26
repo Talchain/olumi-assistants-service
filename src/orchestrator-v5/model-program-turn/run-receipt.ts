@@ -103,7 +103,11 @@ export const RUN_AGAIN_AFTER_UPDATE = 'This result is from before an update. Run
  */
 function viewOf(view: unknown, run: { readonly run_id: string; readonly graph_hash_at_run: string; readonly computed_at: string }, current: boolean, updated = false): unknown {
   if (!isRec(view) || !isRec(view['staleness'])) return view;
-  const { face_when_stale: _face, ...rest } = view;
+  const { face_when_stale: _face, ...all } = view;
+  // W6 review B3: a Run that is not current names no leader (run-facts.ts; DGAI canonicalAnalysisView.ts: "CEE nulls it for
+  // a Run that is not current"), on every path that serves a stale view (reopen, card-edit turns, the agent's read).
+  const { leader: _leader, ...notCurrent } = all;
+  const rest = current ? all : { ...notCurrent, leader_licence: 'withheld' };
   return { ...rest, run, ...(current ? {} : { face_when_stale: updated ? RUN_AGAIN_AFTER_UPDATE : RUN_AGAIN_FOR_CHANCE }),
     staleness: { ...view['staleness'], stale: !current, reason: current ? 'graph_hash_match' : updated ? 'engine_or_format_updated' : 'graph_hash_diverged',
       limitation: 'Hash equality cannot detect brief, framing or stage changes.' } };

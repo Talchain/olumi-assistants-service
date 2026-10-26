@@ -20,7 +20,7 @@ import type { ExecutableModel } from '../model-program/executable.js';
 import { costOf, simulate } from '../model-program/simulate/simulate.js';
 import type { SimResult } from '../model-program/simulate/result.js';
 import {
-  driverSweepOperations, needsAnswer, presentAnalysisView, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentPremise, type PresentQuantity,
+  driverSweepOperations, inlineWords, needsAnswer, presentAnalysisView, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentPremise, type PresentQuantity,
   type PresentedAnalysisView,
 } from '../model-program/present/present.js';
 
@@ -116,8 +116,8 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   const labelOf = new Map(read.goals.map((g) => [g.id, g.label] as const));
   const records = recordsOf(read, compiled), confirmed = records.confirmed;
   // R8: the compiler's premises for each goal (`rests_on`), in their own words, whose they are and whether confirmed.
-  const premiseOf = new Map<string, PresentPremise>([...read.assumptions.map((a) => [a.id, { id: a.id, text: a.text, author: a.author, kind: 'assumption' as const, confirmed: confirmed.has(a.id) }] as const),
-    ...read.conditions.map((c) => [c.id, { id: c.id, text: c.text, author: c.author, kind: 'condition' as const, confirmed: confirmed.has(c.id) }] as const)]);
+  const premiseOf = new Map<string, PresentPremise>([...read.assumptions.map((a) => [a.id, { id: a.id, text: a.text, author: a.author, party: a.party, kind: 'assumption' as const, confirmed: confirmed.has(a.id) }] as const),
+    ...read.conditions.map((c) => [c.id, { id: c.id, text: c.text, author: c.author, party: c.party, kind: 'condition' as const, confirmed: confirmed.has(c.id) }] as const)]);
   const premisesFor = (ids: readonly string[]) => ids.flatMap((id) => (premiseOf.has(id) ? [premiseOf.get(id)!] : []));
   // Aims with no measure yet are left out of the chance (said in `leaves_out`), never a goal that waits.
   const goals: PresentGoal[] = compiled.perGoal.filter((p) => !p.needs_measure)
@@ -184,7 +184,8 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
     const ids = goals.length > 0 ? new Set([...goals.map((g) => g.goal_id), optionId])
       : new Set(blockers.flatMap((b) => b.scope).filter((id) => !limitIds.has(id)));
     const waits = waitsOnWords(blockers, ids);
-    const withheldWhy = [...goals.filter((g) => g.status === 'withheld').flatMap((g) => g.reasons), ...(own?.reasons ?? [])].join(' ');
+    // #3789 review: the compiler's reasons quote labels and bases as written; display words stay on one line.
+    const withheldWhy = inlineWords([...goals.filter((g) => g.status === 'withheld').flatMap((g) => g.reasons), ...(own?.reasons ?? [])].join(' '));
     const why = refused !== undefined ? refused : failing ? 'The model does not compile yet, so no chance can be worked out.'
       : waits !== undefined ? `The chance ${waits}.` : withheldWhy || 'The chance cannot be worked out yet.';
     return { kind: 'withheld' as const, face: refused === undefined && waits !== undefined && !failing && needsAnswer(blockers, ids) ? 'Not shown yet: needs your answer' : 'Chance not shown yet', why,
@@ -197,8 +198,8 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
     staleness: { stale: null, revision: null, run_revision: null, basis: 'analysis_graph_hash_interim', reason: null, limitation: 'Currentness is unknown because an analysis hash is unavailable.' },
     leader_licence: 'withheld',
     options: ids.map((option_id) => ({ option_id, cell: cellOf(option_id), main_driver: { kind: 'not_recorded' as const } })),
-    goal_chance: { notes: [...(refused !== undefined ? [refused] : []), ...goals.filter((g) => g.status !== 'calculable').map((g) => sentence(`‘${g.label}’ ${waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${g.reasons.join(' ')}`}`)),
-    ], ...(blockers.length > 0 ? { waits_on: blockers } : {}) },
+    goal_chance: { notes: [...(refused !== undefined ? [refused] : []), ...goals.filter((g) => g.status !== 'calculable').map((g) => sentence(`‘${inlineWords(g.label)}’ ${waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${inlineWords(g.reasons.join(' '))}`}`)),
+    ], ...(blockers.length > 0 ? { waits_on: blockers.map((b) => ({ ...b, label: inlineWords(b.label) })) } : {}) },
   };
 }
 

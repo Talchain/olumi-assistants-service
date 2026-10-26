@@ -63,12 +63,14 @@ export const REPLY_QUESTIONS = 3;
 /** The id of the drafter's left-out note on an aim not stated (the drafting prompt declares it): its question is the AI's. */
 export const NO_AIM_NOTE = 'aim';
 /**
- * The reply: what calculates (S2's own words per option); then at most three of the AI's OWN questions on what the Run waits
+ * The reply: what calculates (S2's own words per option, then which option is most likely to achieve the goal, or why none
+ * is named, in the view's own words); then at most three of the AI's OWN questions on what the Run waits
  * on, in the model's order (the drafter puts the most consequential first; no code ranking); then one line counting the rest. The code
  * writes no question: a blocker with no question of the AI's (a reading, a recount) is counted, never worded.
  */
 function replyOf(model: CanonicalModelT, run: StoredRun, kind: TurnKind, words: readonly string[], readingHeld = false): string {
-  const view = run.result.canonical_analysis_view as { options?: readonly { cell: { kind: string; face?: string; reasons?: readonly { code: string; message: string | null }[] } }[] };
+  const view = run.result.canonical_analysis_view as { options?: readonly { cell: { kind: string; face?: string; reasons?: readonly { code: string; message: string | null }[] } }[];
+    leader?: { words?: unknown } };
   const options = view.options ?? [];
   // A Run refused for its size withholds every cell for that one reason: said once, in the view's own words, and a Run press
   // never says it is an analysis (words#11).
@@ -80,6 +82,8 @@ function replyOf(model: CanonicalModelT, run: StoredRun, kind: TurnKind, words: 
   if (counted !== null) lines.push(counted);
   if (tooLarge !== null) lines.push(tooLarge);
   for (const o of options) if (o.cell.kind === 'figure' && typeof o.cell.face === 'string') lines.push(o.cell.face);
+  // Which option is most likely to achieve the goal in this model, or why none is named: the view's own words (W6).
+  if (typeof view.leader?.words === 'string' && view.leader.words.trim() !== '') lines.push(view.leader.words);
   const compiled = run.result.compile as { blockers?: readonly Blocker[] };
   // A Run stored before blockers (reused while current) gets them from the model as it stands: the same compiler, typed.
   const blockers = compiled.blockers ?? compile(model).blockers;

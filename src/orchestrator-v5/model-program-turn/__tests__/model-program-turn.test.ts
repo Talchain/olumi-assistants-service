@@ -15,7 +15,7 @@ import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
 import { APPROXIMATE_FIGURE, CanonicalModel, withDeclaredTiming, type CanonicalModelT, type CanonicalQuantityT } from '../../model-program/canonical.js';
 import { compile, isStructuralConstant, normalise } from '../../model-program/compile.js';
-import { CORE_ALIGNED_INSTRUCTIONS } from '../../core-route/instructions.js';
+import { CORE_ALIGNED_INSTRUCTIONS, PROGRAM_TOOL_DESCRIPTIONS } from '../../core-route/instructions.js';
 import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_JSON_SCHEMA, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX } from '../prompt.js';
@@ -642,6 +642,98 @@ describe('the model-program turn on the real core route', () => {
     expect(display).toEqual(JSON.parse(JSON.stringify(project(bakery(), compile(bakery(), { sourceText: BRIEF })).graph)));
   });
 
+  /** The bakery's chance words and basis as the view says them (step 3), written out by hand. */
+  const BAKERY_SALES = '‘sales’ being at least 380 loaf / week with each option in effect';
+  const BAKERY_BASIS = 'on Olumi’s reading of your figures (not yet confirmed), if ‘sell through’ follows Olumi’s provisional conversion of Olumi’s own estimated range, '
+    + '0.5 to 0.9, into a bell-shaped spread and ‘sales’ follows Olumi’s assumed relationship';
+  /** The bakery with the oven's price given: the £3,000 limit is then checked, and the second oven is within it in every draw. */
+  const PRICED = `${BRIEF} The oven costs £2,500.`;
+  const priced = (): CanonicalModelT => {
+    const m = bakery();
+    m.quantities = m.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known', value: 2500, question: null, quote: 'The oven costs £2,500' } : x));
+    return m;
+  };
+  const FORBIDDEN_CHOICE = /\b(best|winner|wins?|recommend\w*|should|go with)\b|comes out on top/i;
+
+  it('W6 review B2 (Paul 6 and 14 Oct): with the £3,000 limit not yet checked, the first Run names no option as most likely, says why with each chance, in the view and in the reply', async () => {
+    replies = [JSON.stringify(bakery())];
+    const r = (await turn({ message: BRIEF })).json();
+    const view = r.canonical_analysis_view;
+    const oven = view.options.find((o: Json) => o.option_id === 'second_oven').cell, keep = view.options.find((o: Json) => o.option_id === 'keep_one').cell;
+    // A second oven: about 19% (step 3), on the sales target alone; our one oven: 0% in every draw. Spend = price × ovens, so
+    // only the second oven can break the budget, and its price is not known: a target-only chance is not the whole goal.
+    expect(oven.display).toMatch(/^about (1[2-9]|2[0-6])%$/);
+    expect(keep.display).toBe('0%');
+    expect(view.goal_chance.unchecked_limits).toEqual([{ limit_id: 'within_budget', words: '‘Within the £3,000’ — needs "oven price".' }]);
+    expect(view.leader_licence).toBe('withheld');
+    const words = 'In this model, which option is most likely to achieve the goal is not said yet, as a limit is not yet checked and these chances leave it out: '
+      + `the chance of ${BAKERY_SALES} is ${oven.display} for ‘A second oven’ and 0% for ‘Keep our one oven’, ${BAKERY_BASIS}. Not yet checked: ‘Within the £3,000’ — needs "oven price".`;
+    expect(view.leader).toEqual({ licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: [], words });
+    // The reply says the view's own words, once, after the options' chances; the stored Run holds the same view.
+    const paragraphs = (r.assistant_text as string).split('\n\n');
+    expect(paragraphs.filter((x) => x === words)).toHaveLength(1);
+    expect(paragraphs.indexOf(words)).toBe(paragraphs.indexOf(keep.face) + 1);
+    expect(persisted!.living_model.runs[0].result.canonical_analysis_view.leader).toEqual(view.leader);
+    // Olumi's own words (every paragraph after the one quoting the person's question) never choose for them.
+    for (const said of [words, ...paragraphs.slice(1)]) expect(said).not.toMatch(FORBIDDEN_CHOICE);
+  });
+
+  it('W6 (Paul 6 and 14 Oct; contrast to B2): with the oven price given the limit is checked, and the first Run says which option is most likely to achieve the goal, with both chances, in the view and in the reply', async () => {
+    replies = [JSON.stringify(priced())];
+    const r = (await turn({ message: PRICED })).json();
+    const view = r.canonical_analysis_view;
+    const oven = view.options.find((o: Json) => o.option_id === 'second_oven'), keep = view.options.find((o: Json) => o.option_id === 'keep_one');
+    expect(view.goal_chance.unchecked_limits).toBeUndefined();
+    // The second oven's 95% precision is far above 0 (our one oven's, exact) and below 50%: more likely to miss than meet it.
+    expect(oven.cell.detail.precision_95[0]).toBeGreaterThan(keep.cell.detail.precision_95[1]);
+    expect(oven.cell.detail.precision_95[1]).toBeLessThan(0.5);
+    expect(view.leader_licence).toBe('permitted');
+    const d = oven.main_driver.driver;
+    expect([oven.main_driver.kind, d.quantity, d.author]).toEqual(['available', 'sell_through', 'olumi']);
+    const words = `In this model, ‘A second oven’ is the option most likely to achieve the goal: ${oven.cell.display} ${view.goal_chance.chance_words}, against 0% for ‘Keep our one oven’, `
+      + `the next most likely, ${BAKERY_BASIS}. Even so, in this model it is more likely to miss the goal than to meet it. `
+      + `Its chance is most sensitive to ‘sell through’ (Olumi’s estimate): ${d.low.display} at its low end, ${d.middle.display} at its middle and ${d.high.display} at its high end.`;
+    expect(view.goal_chance.chance_words).toBe(`chance of ${BAKERY_SALES}, while ‘spend’ is at most £3,000 with each option in effect`);
+    expect(view.leader).toEqual({ licence: 'permitted', option_id: null, goal_chance_leader: 'second_oven', similar_option_ids: [], words });
+    const paragraphs = (r.assistant_text as string).split('\n\n');
+    expect(paragraphs.filter((x) => x === words)).toHaveLength(1);
+    expect(paragraphs.indexOf(words)).toBe(paragraphs.indexOf(keep.cell.face) + 1);
+    for (const said of [words, ...paragraphs.slice(1)]) expect(said).not.toMatch(FORBIDDEN_CHOICE);
+  });
+
+  it('W6 review B3: a stored Run that is not current carries no leader on any path that serves it (engine update, model moved, the agent\'s read); current, it does', async () => {
+    replies = [JSON.stringify(priced())];
+    const r = (await turn({ message: PRICED })).json();
+    const stored = r.canonical_analysis_view as Json;
+    expect([stored.leader_licence, stored.leader.goal_chance_leader]).toEqual(['permitted', 'second_oven']);
+    // Reopen on today's engine: current, the stored leader as stored.
+    expect((reopenProgram(JSON.parse(JSON.stringify(persisted)))!.view as Json).leader).toEqual(stored.leader);
+    // An engine update (the card-edit turn and the scenario read serve the same `reopenProgram`): stale, no leader.
+    const bumped = { ...ENGINE_VERSIONS, engine: `${ENGINE_VERSIONS.engine}-bumped` };
+    const updated = reopenProgram(JSON.parse(JSON.stringify(persisted)), bumped)!.view as Json;
+    expect([updated.staleness.stale, updated.face_when_stale, Object.hasOwn(updated, 'leader'), updated.leader_licence]).toEqual([true, RUN_AGAIN_AFTER_UPDATE, false, 'withheld']);
+    // The model moved since the Run: stale, no leader, and the agent's read of it names none either.
+    const moved = JSON.parse(JSON.stringify(persisted)) as Json;
+    moved.living_model.canonical.quantities = moved.living_model.canonical.quantities.map((x: Json) => (x.id === 'base_sales' ? { ...x, value: 310, quote: 'We bake 310 loaves a week' } : x));
+    const diverged = reopenProgram(moved)!.view as Json;
+    expect([diverged.staleness.stale, diverged.face_when_stale, Object.hasOwn(diverged, 'leader'), diverged.leader_licence]).toEqual([true, RUN_AGAIN_FOR_CHANCE, false, 'withheld']);
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null };
+    const fresh = await readProgramContext({ dispatch, proposals: new ProposalStore() }, ctx) as Json;
+    expect([fresh.data.run.current, fresh.data.run.leader]).toEqual([true, { licence: 'permitted', words: stored.leader.words }]);
+    persisted = moved;
+    const old = await readProgramContext({ dispatch, proposals: new ProposalStore() }, ctx) as Json;
+    expect([old.data.run.current, Object.hasOwn(old.data.run, 'leader')]).toEqual([false, false]);
+  });
+
+  it('W6 chat: the agent can say on a later turn which option is most likely, from the Run\'s own words; its tool descriptions say how, with no choosing word', () => {
+    const rule = 'When the person asks which option is most likely to achieve the goal, say run.leader.words as given: they name that option as a finding in this model, '
+      + 'or say why none is named; with no run.leader, say this Run names none; never pick, rank or advise on an option yourself.';
+    for (const [name, text] of Object.entries(PROGRAM_TOOL_DESCRIPTIONS)) {
+      expect(text.split(rule), name).toHaveLength(2);
+      for (const banned of ['recommend', 'best', 'winner', 'you should']) expect(text.toLowerCase(), `${name}: ${banned}`).not.toContain(banned);
+    }
+  });
+
   it('step 4, save → readback → cold reopen: the canonical model and its stored Run come back byte-identical; the reopen SHOWS that Run', async () => {
     replies = [JSON.stringify(bakery())];
     const r = (await turn({ message: BRIEF })).json();
@@ -672,7 +764,11 @@ describe('the model-program turn on the real core route', () => {
     const bumped = { ...ENGINE_VERSIONS, engine: `${ENGINE_VERSIONS.engine}-bumped` };
     const cold = reopenProgram(JSON.parse(JSON.stringify(persisted)), bumped)!;
     const { staleness, face_when_stale, ...result } = cold.view as Json;
-    const { staleness: was, ...stored } = r.canonical_analysis_view as Json;
+    // W6 review B3: everything the Run showed, byte for byte, except that a Run not current names no leader (stored withheld here:
+    // its limit is not yet checked; the permitted case is the B3 row's).
+    const { staleness: was, leader: storedLeader, ...stored } = r.canonical_analysis_view as Json;
+    expect(storedLeader).toMatchObject({ licence: 'withheld' });
+    expect([Object.hasOwn(result, 'leader'), result.leader_licence, stored.leader_licence]).toEqual([false, 'withheld', 'withheld']);
     expect(stableStringify(result)).toBe(stableStringify(stored));
     expect([was.stale, staleness.stale, staleness.reason, face_when_stale]).toEqual([false, true, 'engine_or_format_updated', RUN_AGAIN_AFTER_UPDATE]);
     expect(RUN_AGAIN_AFTER_UPDATE).toBe('This result is from before an update. Run again to see the chance.');
@@ -879,6 +975,27 @@ describe('the model-program turn on the real core route', () => {
     expect(compile(saved, { sourceText: CLUB_BRIEF }).executable!.quantities.find((x) => x.id === 'members')).toMatchObject({ domain: { min: 0 } });
     const stored = persisted!.living_model.runs.at(-1).result.chances as Json[];
     expect(stored.map((o) => [o.option_id, typeof o.per_goal[0].chance])).toEqual([['promotion', 'number'], ['carry_on', 'number']]);
+  });
+
+  it('the real Run tests the middle of an 80–120% range inside its declared 100% ceiling: 80%, 90%, 100%', () => {
+    const m = bakery(), rangeWords = 'between 80 and 120 percent';
+    m.quantities = m.quantities.map((x) => x.id === 'sell_through'
+      ? { ...x, unit: '%', status: 'known', value: null, low: 80, high: 120, range_kind: 'bounds', ceiling: 100, author: 'person', quote: rangeWords, basis: null }
+      : x.id === 'sales_target' ? { ...x, value: 390, quote: 'reach 390 loaves a week' }
+      : x.id === 'oven_price' ? { ...x, status: 'known', value: 2500, question: null, quote: 'The oven costs £2,500' } : x);
+    m.goals = m.goals.map((g) => ({ ...g, label: 'Reach 390 loaves a week', quote: 'want to reach 390 loaves a week' }));
+    const source = `${BRIEF.replace('380', '390')} Sell-through is ${rangeWords}. The oven costs £2,500.`;
+    const result = evaluateCanonical(m, { sourceText: source, seed: 7 });
+    expect(result.sim).not.toBeNull();
+    const d = (result.view as Json).options.find((o: Json) => o.option_id === 'second_oven').main_driver;
+    expect(d.kind).toBe('available');
+    expect(d.driver.quantity).toBe('sell_through');
+    expect(d.driver.low.value).toBe(0.8);
+    expect(d.driver.middle.value).toBe(0.9);
+    expect(d.driver.high.value).toBe(1);
+    expect(d.detail).toContain('at the middle (90%)');
+    expect(d.detail).not.toContain('(120%)');
+    expect(m.quantities.find((x) => x.id === 'sell_through')).toMatchObject({ low: 80, high: 120, ceiling: 100 });
   });
 
   it('issue 40: a first draft with an Olumi link of unknown size and a stated direction shows its reading card, the direction said as an arrow and words on what it moves', async () => {
@@ -2054,6 +2171,84 @@ describe('the model-program turn on the real core route', () => {
     };
     /** Their prerequisite, accepted. */
     const hall = { id: 'hall', text: 'The council must let us use the hall.', kind: 'prerequisite' as const, concerns: ['reach_340'], author: 'person' as const, quote: 'The council must let us use the hall', ...at, approval: 'approved' as const };
+
+    it('a confirmed reported assumption or condition keeps its named speaker in the real result, never becoming yours', () => {
+      for (const kind of ['assumption', 'condition'] as const) {
+        const m = approved(allTheirs()), party = 'Our treasurer';
+        const text = kind === 'assumption' ? 'Membership fees stay the same.' : hall.text;
+        const quote = text.slice(0, -1), source = `${OWN} ${party} says: ${text} And keep at least 320 members.`;
+        m.quantities.push(q('floor', 'member', { value: 320, quote: 'at least 320 members', approval: 'approved' }));
+        m.goals.push({ ...m.goals[0]!, id: 'keep_320', label: 'Keep at least 320 members', measure: { ...m.goals[0]!.measure!, target: 'floor' }, quote: 'keep at least 320 members' });
+        if (kind === 'assumption') m.assumptions.push({ id: 'fees', text, applied: true, concerns: ['reach_340'], author: 'person', quote, ...at, party, approval: 'approved' });
+        else m.conditions.push({ ...hall, party });
+        const v = evaluateCanonical(m, { sourceText: source, seed: 7 }).view as Json;
+        const face = (v.options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
+        const premise = `${party}’s ${kind} ‘${quote}’ ${kind === 'assumption' ? 'holds' : 'is met'}`;
+        expect(face).toContain(premise);
+        expect(v.goal_chance.targets.per_target[0].words).toContain(premise);
+        expect(face).not.toContain(`your ${kind}`);
+        expect(face).not.toContain('(not yet confirmed)');
+      }
+    });
+
+    it('a wrapped prerequisite stays on one line throughout a multi-goal result, including its joint and notes', () => {
+      const m = approved(allTheirs()), wrapped = 'The council must let us\nuse the hall.';
+      m.quantities.push(q('floor', 'member', { value: 320, quote: 'at least 320 members', approval: 'approved' }));
+      m.goals.push({ ...m.goals[0]!, id: 'keep_320', label: 'Keep at least 320 members', measure: { ...m.goals[0]!.measure!, target: 'floor' }, quote: 'keep at least 320 members' });
+      m.conditions.push({ ...hall, text: wrapped, quote: wrapped.slice(0, -1), concerns: ['reach_340', 'keep_320'] });
+      const source = `${OWN} ${wrapped} And keep at least 320 members.`;
+      const v = evaluateCanonical(m, { sourceText: source, seed: 7 }).view as Json;
+      const detail = v.goal_chance, premise = 'your condition ‘The council must let us use the hall’ is met';
+      expect(detail.targets.per_target).toHaveLength(2);
+      for (const target of detail.targets.per_target) {
+        expect(target.words).toContain(premise);
+        expect(target.words).not.toMatch(/[\r\n]/);
+      }
+      expect(detail.targets.joint.status).toBe('licensed');
+      expect(detail.targets.joint.words).not.toMatch(/[\r\n]/);
+      expect(detail.chance_words).not.toMatch(/[\r\n]/);
+      for (const o of v.options) {
+        expect(o.cell.face).toContain(premise);
+        expect(o.cell.face).not.toMatch(/[\r\n]/);
+      }
+      // An unmeasured aim withholds the whole chance: it has a joint line, never joint words or a partial chance.
+      m.goals.push({ ...m.goals[0]!, id: 'welcoming', label: 'Keep the hall\nwelcoming', measure: null, question: 'How would you measure a welcoming hall?', quote: 'Keep the hall\nwelcoming' });
+      const waiting = evaluateCanonical(m, { sourceText: `${source} Keep the hall\nwelcoming.`, seed: 7 }).view as Json;
+      expect(waiting.goal_chance.targets.joint.status).toBe('withheld');
+      expect(waiting.goal_chance.targets.joint.line).not.toMatch(/[\r\n]/);
+      expect(waiting.goal_chance.chance_words).toBeUndefined();
+      expect(waiting.goal_chance.notes.length).toBeGreaterThan(0);
+      for (const note of waiting.goal_chance.notes) expect(note).not.toMatch(/[\r\n]/);
+      expect(waiting.goal_chance.notes.join(' ')).toContain('Keep the hall welcoming');
+      expect(waiting.goal_chance.waits_on.find((b: Json) => b.id === 'welcoming').label).toBe('Keep the hall welcoming');
+      for (const target of waiting.goal_chance.targets.per_target) expect(target.words).not.toMatch(/[\r\n]/);
+      for (const o of waiting.options) {
+        expect(o.cell.kind).toBe('withheld');
+        expect(o.cell.why).not.toMatch(/[\r\n]/);
+      }
+      expect(m.conditions[0]!.text).toBe(wrapped);
+    });
+
+    it('a waiting-only result also keeps its blocker labels and notes on one line without changing the model', () => {
+      // Keep the option's spending limit and settings intact. Both the sales and oven-price inputs are asked, so this
+      // compiles but has no calculable goal or limit; removing the limit instead would orphan its option setting.
+      const m = bakery(), label = 'Current\n sales';
+      m.quantities = m.quantities.map((x) => x.id === 'base_sales'
+        ? { ...x, label, value: null, status: 'asked', quote: null, question: 'How many loaves do you sell a week now?' } : x);
+      const result = evaluateCanonical(m, { sourceText: BRIEF.replace('300 loaves a week', 'our current sales'), seed: 7 });
+      expect(result.compiled.errors).toEqual([]);
+      expect(result.sim).toBeNull();
+      const v = result.view as Json;
+      expect(v.goal_chance.waits_on.find((b: Json) => b.id === 'base_sales').label).toBe('Current sales');
+      expect(v.goal_chance.notes.length).toBeGreaterThan(0);
+      for (const note of v.goal_chance.notes) expect(note).not.toMatch(/[\r\n]/);
+      for (const o of v.options) {
+        expect(o.cell.kind).toBe('withheld');
+        expect(o.cell.why).toContain('‘Current sales’');
+        expect(o.cell.why).not.toMatch(/[\r\n]/);
+      }
+      expect(m.quantities.find((x) => x.id === 'base_sales')!.label).toBe(label);
+    });
 
     it('a stated condition and an Olumi estimate: the basis names both, never "on your figures"', () => {
       const m = approved(club());
@@ -3695,6 +3890,65 @@ describe('the model-program turn on the real core route', () => {
       expect([card.base_graph_identity_hash, card.base_model_identity]).toEqual([hashOf(persisted), computeGraphIdentityHash(persisted as never)!.value]);
       expect(countLines(out.assistantText)).toEqual([COUNT_LINE]);
     });
+  });
+});
+
+// ── #3789 review (probes A–E2, kept at reviews/CLAUDE-3789-8edef114-probes): every reason the display reads is on one line ─
+describe('display words stay on one line: the compiler\'s reasons quote labels and bases as written (#3789 review probes A–E2)', () => {
+  /** DGAI `sayable` (canonicalAnalysisView.ts:83) refuses the whole goal_chance block on a line break: every display string, listed. */
+  const broken = (v: Json): string[] => [...(v.goal_chance?.notes ?? []), v.goal_chance?.chance_words, ...(v.goal_chance?.unchecked_limits ?? []).map((u: Json) => u.words),
+    ...(v.options ?? []).flatMap((o: Json) => [o.cell.face, o.cell.why]), v.leader?.words].filter((t): t is string => typeof t === 'string' && /[\r\n]/.test(t));
+  const known = (m: CanonicalModelT) => { m.quantities = m.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known', value: 2500, question: null, quote: 'The oven costs £2,500' } : x)); return m; };
+  const PRICED_BRIEF = `${BRIEF} The oven costs £2,500.`;
+
+  it('A: an asked figure with a wrapped label behind a limit: its unchecked line, every cell and the notes say it on one line', () => {
+    const m = bakery();
+    m.quantities = m.quantities.map((x) => (x.id === 'oven_price' ? { ...x, label: 'Oven\n price' } : x));
+    const v = evaluateCanonical(m, { sourceText: BRIEF, seed: 7 }).view as Json;
+    expect(v.goal_chance.unchecked_limits).toEqual([{ limit_id: 'within_budget', words: '‘Within the £3,000’ — needs "Oven price".' }]);
+    expect(v.goal_chance.notes).toContain('Not yet checked: ‘Within the £3,000’ — needs "Oven price".');
+    for (const o of v.options as Json[]) expect(o.cell.face.endsWith(' Not yet checked: ‘Within the £3,000’ — needs "Oven price".'), o.option_id).toBe(true);
+    expect(broken(v)).toEqual([]);
+  });
+
+  it('B: a ruled-out option with a wrapped label: its note says it on one line', () => {
+    const m = known(bakery());
+    m.options = m.options.map((o) => (o.id === 'keep_one' ? { ...o, label: 'Keep our\n one oven', status: 'ruled_out' } : o));
+    const v = evaluateCanonical(m, { sourceText: PRICED_BRIEF, seed: 7 }).view as Json;
+    expect(v.goal_chance.notes).toContain('The option ‘Keep our one oven’ is not in this run: "Keep our one oven" is ruled out, kept in view.');
+    expect(broken(v)).toEqual([]);
+  });
+
+  it('C: a limit whose label wraps and has no measure: its unchecked line says it on one line', () => {
+    const m = known(bakery());
+    m.limits = m.limits.map((l) => ({ ...l, label: 'Within the\n£3,000', measure: null, question: 'How would you check the budget?' }));
+    const v = evaluateCanonical(m, { sourceText: PRICED_BRIEF, seed: 7 }).view as Json;
+    expect(v.goal_chance.unchecked_limits).toEqual([{ limit_id: 'within_budget', words: '‘Within the £3,000’ — "Within the £3,000" has no measure yet, so the result does not cover it.' }]);
+    expect(v.goal_chance.notes).toContain('Not yet checked: ‘Within the £3,000’ — "Within the £3,000" has no measure yet, so the result does not cover it.');
+    expect(broken(v)).toEqual([]);
+  });
+
+  it('D: a limit resting on an unknown figure whose basis wraps: its unchecked line says the basis on one line', () => {
+    const m = bakery();
+    m.quantities = m.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'unknown', question: null, basis: 'Oven prices vary widely.\nNo supplier has quoted yet.' } : x));
+    const v = evaluateCanonical(m, { sourceText: BRIEF, seed: 7 }).view as Json;
+    const line = '‘Within the £3,000’ — rests on "oven price", which is unknown: Oven prices vary widely. No supplier has quoted yet.';
+    expect(v.goal_chance.unchecked_limits).toEqual([{ limit_id: 'within_budget', words: line }]);
+    expect(v.goal_chance.notes).toContain(`Not yet checked: ${line}`);
+    expect(broken(v)).toEqual([]);
+  });
+
+  const HELD = 'rests on "Sell through": "Sell through" is given as 1.2–1.5 1, but Olumi reads it as never above 1 1; Olumi\'s range is unsupported; give a most likely figure, or ask';
+  for (const priced of [false, true]) it(`E${priced ? 2 : 1}: a goal held by a range with no room and a wrapped label (${priced ? 'a Run of the limit alone' : 'nothing calculates: the waiting view'}): its note and each cell say it on one line`, () => {
+    const m = bakery();
+    m.quantities = m.quantities.map((x) => (x.id === 'sell_through' ? { ...x, label: 'Sell\n through', ceiling: 1, low: 1.2, high: 1.5, value: null } : x));
+    const r = evaluateCanonical(priced ? known(m) : m, { sourceText: PRICED_BRIEF, seed: 7 });
+    expect(r.sim !== null).toBe(priced);
+    const v = r.view as Json;
+    expect(v.goal_chance.notes).toContain(`‘Reach 380 loaves a week’ is not in the chance yet: ${HELD}.`);
+    for (const o of v.options as Json[]) expect(o.cell.why, o.option_id).toBe(priced
+      ? `‘Reach 380 loaves a week’ is not in the chance yet: ${HELD}. This run checks only the limits, each on its own: ‘spend’ within its limit: 100%.` : HELD);
+    expect(broken(v)).toEqual([]);
   });
 });
 
