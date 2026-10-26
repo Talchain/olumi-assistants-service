@@ -1535,6 +1535,97 @@ describe('the model-program turn on the real core route', () => {
     expect((await hostTurn(`${BRIEF} Our staff may not like longer shifts. Our supplier says deliveries only on weekdays.`)).assistant_text.split('\n\n')[1]).toBe('I used 11 things from your brief, added 1 of my own for you to check, and left 3 out of the calculation.');
   });
 
+  // ── D4: per-item approval on the reading card: the ticked rows, ONE checked write, no AI call ─────────────────────────
+  describe('D4: the reading card\'s ticked rows', () => {
+    const recordsOf = (m: CanonicalModelT) => (['quantities', 'relations', 'goals', 'limits', 'preferences', 'options', 'risks', 'claims', 'evidence', 'assumptions', 'dissent', 'conditions', 'left_out'] as const)
+      .flatMap((f) => (m[f] as readonly { id: string; author: string; approval: string; author_id: string | null }[]).map((r) => [r.id, r] as const));
+    const approvals = () => Object.fromEntries(recordsOf(persisted!.living_model.canonical as CanonicalModelT).map(([id, r]) => [id, r.approval]));
+    const drafted = async () => {
+      replies = [JSON.stringify(bakery())];
+      const r = await turn({ message: BRIEF });
+      expect(r.statusCode, r.body).toBe(200);
+      return r.json().cards[0] as Json;
+    };
+    const tick = (card: Json, ids: unknown, extra: Json = {}) => turn({ message: 'Confirm ticked.', chip: card.approve_action, approve_ids: ids, ...extra });
+
+    it('a partial approval saves exactly the ticked ids (an Olumi estimate stays Olumi\'s), the rest stay proposed, with no AI call; the card is offered again for what is open; it survives a cold reopen and a resend', async () => {
+      const card = await drafted();
+      const before = persisted!.living_model.canonical as CanonicalModelT;
+      const [calls, writes] = [sent.length, registered.length];
+      const turnId = randomUUID();
+      const res = await tick(card, ['sell_through', 'more_loaves'], { turn_id: turnId });
+      expect(res.statusCode, res.body).toBe(200);
+      const body = res.json();
+      // No AI call and no Conversation; ONE write, receipted as the person's.
+      expect([sent.length, creates.length, registered.length]).toEqual([calls, 0, writes + 1]);
+      expect(registered.at(-1)!.expected_graph_identity_hash).toBe(computeGraphIdentityHash(registered.at(-2)!.graph as never)!.value);
+      expect(body.receipts.map((x: Json) => x.authorised_by)).toEqual(['person']);
+      // Exactly those two are approved; every other record is still Olumi's reading, proposed.
+      const ids = card.changes.map((c: Json) => c.id) as string[];
+      expect(approvals()).toEqual(Object.fromEntries(ids.map((id) => [id, ['sell_through', 'more_loaves'].includes(id) ? 'approved' : 'proposed'])));
+      const saved = persisted!.living_model.canonical as CanonicalModelT;
+      // Approval is not authorship: Olumi's estimate is still Olumi's, the person's goal still theirs, in their words.
+      expect(saved.quantities.find((x) => x.id === 'sell_through')).toMatchObject({ author: 'olumi', quote: null, approval: 'approved', author_id: null });
+      expect(saved.goals.find((g) => g.id === 'more_loaves')).toMatchObject({ author: 'person', quote: before.goals.find((g) => g.id === 'more_loaves')!.quote, approval: 'approved' });
+      // Nothing else moved: the model but for the host's own fields is the draft's, and the drafted Run is kept, a new one after it.
+      expect(withoutHostFields(saved)).toEqual(withoutHostFields(before));
+      expect(persisted!.living_model.runs).toHaveLength(2);
+      expect(persisted!.living_model.runs[0]).toEqual(registered[0]!.graph.living_model.runs[0]);
+      expect(body.assistant_text).toBe(`Saved: 2 items confirmed. ${ids.length - 2} still to check.`);
+      // Offered again, for the open rows only, in the card's order, on the new model.
+      expect(body.cards.map((c: Json) => [c.reading, c.approve_action.label])).toEqual([[true, 'Yes, that’s what I meant']]);
+      expect(body.cards[0].proposal_id).not.toBe(card.proposal_id);
+      expect(body.cards[0].changes).toEqual(card.changes.filter((c: Json) => !['sell_through', 'more_loaves'].includes(c.id)));
+      const held = agentProposalOf([...turnRows.values()].at(-1).pending_actions[0])!;
+      expect(held.base_model_identity).toBe(computeGraphIdentityHash(persisted as never)!.value);
+      const whole = savedProgramOf({ living_model: held.living_model })!.canonical;
+      // Its approve would accept the open rows; the two approved now keep who approved them.
+      expect(withoutHostFields(whole)).toEqual(withoutHostFields(saved));
+      expect(new Set(Object.values(Object.fromEntries(recordsOf(whole).map(([id, r]) => [id, r.approval]))))).toEqual(new Set(['approved']));
+      // A cold reopen: the stored model and Run come back as saved, the Run current; a later turn carries the same card.
+      const cold = reopenProgram(JSON.parse(JSON.stringify(persisted)))!;
+      expect([cold.current, cold.run!.run_id]).toEqual([true, persisted!.living_model.runs[1].run_id]);
+      const later = (await turn({ message: 'Run the analysis', chip: { id: 'run', action_type: 'run_analysis', label: 'Run' } })).json();
+      expect(later.cards.map((c: Json) => c.proposal_id)).toEqual([body.cards[0].proposal_id]);
+      expect(approvals()).toEqual(Object.fromEntries(ids.map((id) => [id, ['sell_through', 'more_loaves'].includes(id) ? 'approved' : 'proposed'])));
+      // The same press resent is that press: replayed, never a second write.
+      const replay = await tick(card, ['sell_through', 'more_loaves'], { turn_id: turnId });
+      expect([replay.statusCode, replay.json().durability, registered.length, sent.length]).toEqual([200, 'replayed', writes + 1, calls]);
+      // The rest ticked on the card offered again: all approved, no card left, still no AI call.
+      const rest = await tick(body.cards[0], ids.filter((id) => !['sell_through', 'more_loaves'].includes(id)));
+      expect(rest.statusCode, rest.body).toBe(200);
+      expect([rest.json().cards, rest.json().assistant_text, sent.length, registered.length]).toEqual([[], `Saved: ${ids.length - 2} items confirmed.`, calls, writes + 2]);
+      expect(new Set(Object.values(approvals()))).toEqual(new Set(['approved']));
+      expect(withoutHostFields(persisted!.living_model.canonical)).toEqual(withoutHostFields(before));
+    });
+
+    it('a stale base is refused: the model moved since the card was offered, so nothing is saved (contrast: the same press on the unmoved model saves)', async () => {
+      const card = await drafted();
+      const moved = await applyCanvasFigure({ dispatch }, SCENARIO, { target: { quantity_id: 'base_sales' }, value: 320, operation_key: randomUUID() });
+      expect(moved.status).toBe('saved');
+      const [snapshot, writes, calls] = [JSON.stringify(persisted), registered.length, sent.length];
+      const res = await tick(card, ['sell_through']);
+      expect(res.statusCode, res.body).toBe(409);
+      expect(res.json().error).toMatchObject({ code: 'SUPERSEDED', nothing_saved: true });
+      expect([JSON.stringify(persisted), registered.length, sent.length]).toEqual([snapshot, writes, calls]);
+    });
+
+    it('only the card\'s own rows, only with its press, never widened to the whole card: an id off the card, an empty or repeated list, or ids with no press are refused with nothing saved; the card\'s own words with ids approve only those ids', async () => {
+      const card = await drafted();
+      const [snapshot, writes, calls] = [JSON.stringify(persisted), registered.length, sent.length];
+      const off = await tick(card, ['sell_through', 'not_on_the_card']);
+      expect([off.statusCode, off.json().error.code]).toEqual([409, 'CARD_NOT_WAITING']);
+      for (const bad of [[], ['sell_through', 'sell_through'], 'sell_through', [7]]) expect((await tick(card, bad)).statusCode).toBe(422);
+      expect((await turn({ message: 'Confirm ticked.', approve_ids: ['sell_through'] })).statusCode).toBe(422);
+      expect([JSON.stringify(persisted), registered.length, sent.length]).toEqual([snapshot, writes, calls]);
+      // The card's own approve words, with ids: those ids only, by the host, no AI call (never the whole card's apply_change).
+      const res = await tick(card, ['sell_through'], { message: card.approve_action.message });
+      expect(res.statusCode, res.body).toBe(200);
+      expect([sent.length, registered.length]).toEqual([calls, writes + 1]);
+      expect(Object.entries(approvals()).filter(([, a]) => a === 'approved').map(([id]) => id)).toEqual(['sell_through']);
+    });
+  });
+
   // ── The card in plain words (DL 24 Oct, after the staging reading card): one phrase per item, no keys or codes ─────────
   /** Text outside quoted words (their words and labels may hold anything). */
   const outsideQuotes = (x: string) => x.replace(/"[^"]*"/g, '"…"').replace(/“[^”]*”/g, '“…”');
