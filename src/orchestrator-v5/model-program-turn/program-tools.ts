@@ -31,6 +31,7 @@ import { validatePostimage, verbatimIn, withoutHost } from './postimage.js';
 import { isSaved, postimageOf, programOperationId, savePostimage, withNewRun } from './program-save.js';
 import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, sourceTextOf, unreadableWords, type SavedProgram } from './program-store.js';
 import { shownRun, shownView, type StoredRun } from './run-receipt.js';
+import { programCardApplies, programDigestOf, runsExtend } from './program-card.js';
 import { log } from '../../utils/telemetry.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 
@@ -205,7 +206,7 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   if (errors.length > 0) return refused('does_not_compile', errors.slice(0, 3).map((e) => e.message).join(' '));
   // The person's words this turn are kept with the model: what it was changed from, in their words.
   const next = withNewRun({ ...program, canonical: v.model, person_words: words });
-  const p = holdProgramCard(deps.proposals, { scenarioId: ctx.scenario_id, userId: ctx.authenticated_user_id, graphHash: base.saved.graphHash, identity: base.saved.identity! },
+  const p = holdProgramCard(deps.proposals, { scenarioId: ctx.scenario_id, userId: ctx.authenticated_user_id, graphHash: base.saved.graphHash, identity: base.saved.identity!, base: program },
     { label: args.public_label, basis: args.basis, program: next.program, changes: v.changes });
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash, changes: v.changes, would_show: runWords(next.run) });
 }
@@ -235,13 +236,19 @@ function answered(canonical: CanonicalModelT, answers: readonly AnswerT[]): { re
   return { model };
 }
 
-/** A program card, held for the person's approval on its base revision: the complete program (model and Run) it would write, and every change. */
-export function holdProgramCard(proposals: ProposalStore, at: { readonly scenarioId: string; readonly userId: string | null; readonly graphHash: string; readonly identity: string },
+/**
+ * A program card, held for the person's approval on its base revision: the complete program (model and Run) it would write, and
+ * every change. `base`, the saved program it was made on, records that revision's digest (`program-card.ts`): the card applies
+ * while the saved program's is the same. A card held without it keeps the rule it was made under.
+ */
+export function holdProgramCard(proposals: ProposalStore, at: { readonly scenarioId: string; readonly userId: string | null; readonly graphHash: string; readonly identity: string;
+  readonly base?: SavedProgram },
   card: { readonly label: string; readonly basis: string; readonly program: SavedProgram; readonly changes: readonly ProposalChange[]; readonly reading?: true }): StructuredProposal {
   return proposals.put(createProposal({ scenario_id: at.scenarioId, user_id: at.userId, base_graph_identity_hash: at.graphHash, base_model_identity: at.identity,
     operations: card.changes.map((c): ProposalOperation => ({ op: 'living_change', path: `${c.kind}:${c.id}`, value: { change: c.action } })),
     provenance: { authored_by: 'model_proposed', basis: card.basis }, validation: { admitted: true, loss_count: 0, refusals: [] },
-    public_label: card.label, living_model: livingModelOf(card.program), changes: card.changes, ...(card.reading === true ? { reading: true as const } : {}) }));
+    public_label: card.label, living_model: livingModelOf(card.program), changes: card.changes, ...(card.reading === true ? { reading: true as const } : {}),
+    ...(at.base !== undefined ? { base_revision_digest: programDigestOf(at.base) } : {}) }));
 }
 
 /** A proposal this module prepared: it carries the complete program (model and Run) it would write. */
@@ -265,18 +272,27 @@ export async function applyProgramChange(deps: ProgramToolDeps, ctx: Ctx, propos
   if (prior !== null) return alreadySaved(prior);
   const before = await readSaved(deps, ctx.scenario_id);
   if (!isSavedRead(before)) return before;
+  // A card that carries its base revision holds while the saved program's is the same (`program-card.ts`); one held before it
+  // was recorded keeps its full-identity rule.
+  const holds = programCardApplies(p, before.graph);
   const decision = deps.proposals.authorise({ proposal_id: p.proposal_id, scenario_id: ctx.scenario_id,
-    authenticated_user_id: ctx.authenticated_user_id, current_graph_identity_hash: before.graphHash, typed_approval_of: p.proposal_id });
+    authenticated_user_id: ctx.authenticated_user_id, current_graph_identity_hash: before.graphHash, typed_approval_of: p.proposal_id,
+    ...(holds === true ? { scoped_precondition_holds: () => true } : {}) });
   if (decision.status === 'already_applied') return alreadySaved(decision.receipts[0] ?? null);
   if (decision.status !== 'execute') return refused(decision.status);
-  if (p.base_model_identity !== before.identity) return refused('superseded');
+  if (holds === undefined ? p.base_model_identity !== before.identity : !holds) return refused('superseded');
   // The approved program, exactly: its model (the display graph is that model's projection) and the Run the card showed, while
   // that Run is still this model's on today's engine. A card outlives a deploy (it is held for a day and restored on restart),
   // so the Run it showed may be from before an update, one a reopen says is "from before an update" (seam#3): its model is
   // saved exactly, with the Run today's engine computes for it in that Run's place (as run_analysis would), never the card's.
   // Computed once, before the write, so a retry of this operation sends these bytes or finds its own save; never a second Run.
+  // A Run stored since the card was made, on the same revision (a Run press after an engine update), stays: the card's model is
+  // saved on the Runs saved now, with the Run today's engine computes for it.
+  const now = holds === true ? savedProgramOf(before.graph) : undefined;
   const shown = shownRun(program.runs, program.canonical, program.person_words);
-  const { program: saved, graph } = shown === undefined || (shown.current && shown.engine_current) ? { program, graph: postimageOf(program) }
+  const { program: saved, graph } = now !== undefined && !runsExtend(program.runs, now.runs, (a, b) => stableStringify(a) === stableStringify(b))
+    ? withNewRun({ ...now, canonical: program.canonical, person_words: program.person_words })
+    : shown === undefined || (shown.current && shown.engine_current) ? { program, graph: postimageOf(program) }
     : withNewRun({ ...program, runs: program.runs.slice(0, -1) });
   const commit = async (): Promise<ToolOutcome> => {
     const { write } = await savePostimage(deps.dispatch, { scenarioId: ctx.scenario_id, operationId, expectedIdentity: before.identity, ownVersion }, graph);

@@ -227,6 +227,12 @@ export interface StructuredProposal {
    * to confirm or correct. CEE's own flag; the card never infers it. Part of the id when present.
    */
   readonly reading?: true;
+  /**
+   * A model program's card (inventory F6): the program revision it was made on (`revisionDigest` of its canonical model and the
+   * person's words, `model-program-turn/program-card.ts`). The card applies while the saved program's digest is this one. Part
+   * of the id when present; a card held before it was recorded carries none and keeps the rule it was made under.
+   */
+  readonly base_revision_digest?: string;
 }
 
 /**
@@ -308,6 +314,7 @@ export function computeProposalId(c: ProposalContent): string {
     ...(c.living_model === undefined ? [] : [['living_model', c.living_model]]),
     ...(c.changes === undefined ? [] : [['changes', c.changes]]),
     ...(c.reading === undefined ? [] : [['reading', c.reading]]),
+    ...(c.base_revision_digest === undefined ? [] : [['base_revision_digest', c.base_revision_digest]]),
   ]));
   return 'prop_' + createHash('sha256').update(canonical).digest('hex').slice(0, 32);
 }

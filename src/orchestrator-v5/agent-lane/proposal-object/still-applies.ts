@@ -17,6 +17,8 @@
  *    before its subject was recorded keeps the whole-model rule.
  *  · a new link with its level: the link is still absent and the option still sets nothing on that factor (`newLinkLevelsStillApply`);
  * Initial build: session 4's staged work (`/private/tmp/b-lapse`, 14 Oct), extended to the complete goal subject.
+ *  · a model program's card: its program revision is still the saved program's (`programCardApplies`, inventory F6), whatever
+ *    the analysis hash says; a program card held before its revision was recorded keeps the rule below.
  * Any other card keeps the whole-model rule.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -32,6 +34,7 @@ import { riskOccurrenceCardHolds, SET_RISK_OCCURRENCE_OP } from '../risk-occurre
 import { asMemberOp } from '../../statement-door/door.js';
 import { applyGoalHorizonEdit } from '../../goal-target/goal-horizon-write.js';
 import { cohortForecastCardHolds, statementRecordCardHolds, SET_COHORT_FORECAST_OP, SET_STATEMENT_RECORD_OP } from '../../goal-target/cohort-forecast-write.js';
+import { programCardApplies } from '../../model-program-turn/program-card.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -109,6 +112,8 @@ function newLinkLevelsStillApply(ops: StructuredProposal['operations'], graph: u
 }
 
 export function heldCardStillApplies(p: Pick<StructuredProposal, 'operations'>, graph: unknown): boolean {
+  const program = programCardApplies(p, graph);
+  if (program !== undefined) return program;
   if (teamTimeReadHolds(p, graph)) return true;
   const newLink = newLinkLevelsStillApply(p.operations, graph);
   if (newLink !== undefined) return newLink;
@@ -148,6 +153,9 @@ function limitRowReadsAsMade(op: { readonly path?: string; readonly value?: unkn
  * with no recorded subject is never judged here (the whole-model rule owns it).
  */
 export function heldCardSubjectMoved(p: Pick<StructuredProposal, 'operations'>, graph: unknown): boolean {
+  // A program card's subject is its program revision: one that moved outside the analysis hash (a label, a quote, an approval).
+  const program = programCardApplies(p, graph);
+  if (program !== undefined) return !program;
   if (p.operations.length !== 1) return false;
   const op = asMemberOp(p.operations[0]!) ?? p.operations[0]!;
   if (op.op === SET_RISK_OCCURRENCE_OP) return !riskOccurrenceCardHolds(op, graph);
@@ -204,11 +212,17 @@ export function heldCardForReview(pa: PendingAction, modelNow: string | null | u
     [AWAITING_REVIEW]: { reason: 'model_changed', ...(typeof modelNow === 'string' && modelNow !== '' ? { model: modelNow } : {}) } } } } as PendingAction;
 }
 
+/** A held model program's card whose program revision moved (`programCardApplies`); any other pending is never judged here. */
+export function heldProgramCardMoved(pa: PendingAction, graph: unknown): boolean {
+  return pa.action.kind === 'apply_proposed_change' && programCardApplies((pa.action.inline_patch as Rec | undefined)?.['agent_proposal'], graph) === false;
+}
+
 export function heldAgentCardStillApplies(pa: PendingAction, graph: unknown): boolean {
   if (pa.action.kind !== 'apply_proposed_change') return false;
   const proposal = (pa.action.inline_patch as Rec | undefined)?.['agent_proposal'];
   const operations = isRec(proposal) ? proposal['operations'] : undefined;
-  return Array.isArray(operations) && heldCardStillApplies({ operations } as Pick<StructuredProposal, 'operations'>, graph);
+  // The whole stored proposal: a program card is judged by its revision; every other rule reads its operations alone.
+  return Array.isArray(operations) && heldCardStillApplies({ ...(proposal as Rec), operations } as Pick<StructuredProposal, 'operations'>, graph);
 }
 
 /**
@@ -218,5 +232,7 @@ export function heldAgentCardStillApplies(pa: PendingAction, graph: unknown): bo
  */
 export function heldCardAppliesAt(p: Pick<StructuredProposal, 'operations' | 'base_graph_identity_hash'>, graph: unknown, graphHash: string | undefined): boolean {
   if (graphHash === undefined || graphHash === '') return false;
+  const program = programCardApplies(p, graph);
+  if (program !== undefined) return program;
   return p.base_graph_identity_hash === graphHash ? !heldCardSubjectMoved(p, graph) : heldCardStillApplies(p, graph);
 }

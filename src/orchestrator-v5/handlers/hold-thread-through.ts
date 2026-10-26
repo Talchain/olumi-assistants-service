@@ -60,7 +60,7 @@
  * commit carry-forward (single decrement site preserved).
  */
 
-import { heldAgentCardStillApplies, heldCardForReview, isHeldAgentCard, isHeldCardBeingApplied } from '../agent-lane/proposal-object/still-applies.js';
+import { heldAgentCardStillApplies, heldCardForReview, heldProgramCardMoved, isHeldAgentCard, isHeldCardBeingApplied } from '../agent-lane/proposal-object/still-applies.js';
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 import {
   CONFIRMATION_EXPECTING_ACTION_TYPES,
@@ -297,7 +297,9 @@ export function threadHoldsThroughMutatingCommit(
     // Unpinned, or pinned to the very graph this commit persists (an edit
     // that does not move the analysis-affecting hash): nothing invalidated.
     if (typeof pin !== 'string' || pin.length === 0 || pin === newHash) {
-      threaded.push(pa);
+      // ⭐ A model program's card whose revision this commit moved where the analysis hash cannot see (a label, a quote, an
+      // approval) is kept for review, never carried as approvable (inventory F6: its press was refused `superseded`).
+      threaded.push(pin === newHash && heldProgramCardMoved(pa, input.graphAfterCommit) && !isHeldCardBeingApplied(pa) ? heldCardForReview(pa, newHash) : pa);
       continue;
     }
     // Already dead by wall/turn TTL: thread untouched — expiry bookkeeping
