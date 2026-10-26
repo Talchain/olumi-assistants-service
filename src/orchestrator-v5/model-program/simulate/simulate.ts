@@ -8,8 +8,8 @@
  *   - Every goal, the joint and the limits read the SAME draws; the joint is counted draw by draw, never a product of marginals.
  *   - A `range` is read with CEE's existing range conversion, reused (`range-law.ts`, which cites mapper.ts), as the PL ruled
  *     (AMEND, 23 Oct): a person's 'bounds' conditioned on [low, high]; otherwise unbounded unless a domain applies, and a
- *     risk's occurrence is conditioned on [0, 1]; low = high is that figure. A chance worked out by an equation is clipped to
- *     [0, 1] where a risk reads it.
+ *     risk's occurrence is conditioned on [0, 1]; low = high is that figure. A chance worked out by an equation is never
+ *     clipped: outside [0, 1] it is outside the domain (below).
  *   - Time (DL ruling 1, 23 Oct; a quantity's `reading` is 'state' or 'flow'): a model of N periods has boundaries 0..N and
  *     intervals 0..N−1. At each time k = 0..N, (1) the option's sets and the risk effects active at k apply, and (2) every
  *     quantity is evaluated, in dependency order, from the stocks' boundary levels S[k]; then (3) S[k+1] = S[k] + Σ inflows −
@@ -24,6 +24,10 @@
  *   - A nonfinite draw (NaN, e.g. a `ratio` by zero, or ±Infinity) is outside the model's domain, never a failed outcome
  *     (DL ruling 3): any such draw in what a goal or limit reads withholds that chance, the joint (for a goal) or within_limits
  *     (for a limit), and joint_within_limits, typed 'invalid_domain' with the count and the quantities. No draw is dropped.
+ *     So is a value outside what it can be (executable.ts `domain`, and a risk's chance within [0, 1]; spec §3.7), after the
+ *     options and risks act, with a rounding allowance at each end (SLACK): NaN at that time, never clamped, and the WHOLE
+ *     draw is outside the domain for every condition resting on it, however the value later recovers; named among the
+ *     quantities.
  *     Every chance the simulator withholds is listed once in `SimResult.withheld_chances`; the compiler's `withheld[]` (what
  *     is not in this run) is echoed unchanged into `SimResult.withheld` (executable.ts r3).
  *   - `per` (executable.ts r3): a goal or limit read as agg(quantity) ÷ agg(per), the same aggregation over the same window,
@@ -130,6 +134,9 @@ interface Compiled {
   /** Every quantity any option sets: a switch, never a driver. */
   readonly switches: ReadonlySet<number>;
   readonly periods: number;
+  /** What each value can be (executable.ts `domain`), ±Infinity where nothing is declared. */
+  readonly lo: Float64Array;
+  readonly hi: Float64Array;
 }
 interface PlanSet { readonly from: Timing; readonly to: number }
 interface Plan {
@@ -139,7 +146,9 @@ interface Plan {
   readonly risksOn: readonly (readonly number[])[];
   /** Slots (into `Compiled.ranged`) reported as drivers for this option. */
   readonly drivers: readonly number[];
-  /** Per goal and per limit: whether what it rests on, under this option, includes a risk (then never exact). */
+  /** Per goal and per limit: what it rests on under this option, and whether that includes a risk (then never exact). */
+  readonly goalReach: readonly ReadonlySet<number>[];
+  readonly limitReach: readonly ReadonlySet<number>[];
   readonly goalRisky: readonly boolean[];
   readonly limitRisky: readonly boolean[];
 }
@@ -223,7 +232,12 @@ function compile(model: ExecutableModel): Compiled {
     return { id: r.id, occurrence, severity: ref(r.severity, where), on: ref(r.effect_on, where), add: r.mode === 'add', from: timing(fromOf(r), where) };
   });
   const switches = new Set(model.options.flatMap((o) => o.sets.flatMap((s) => (index.has(s.quantity) ? [index.get(s.quantity)!] : []))));
-  return { ids: model.quantities.map((q) => q.id), index, nodes, ranged, stocks, goals, limits, risks, switches, periods };
+  // What each value can be: its domain, and a risk's chance within [0, 1] whatever it records (spec §3.7). A value within
+  // rounding of an end is on it (0.1 + 0.2 against a ceiling of 0.3): SLACK of the end, at least SLACK.
+  const slack = (x: number): number => SLACK * Math.max(1, Math.abs(x));
+  const lo = Float64Array.from(model.quantities, (q) => { const m = Math.max(q.domain?.min ?? -Infinity, chances.has(q.id) ? 0 : -Infinity); return m - slack(m); });
+  const hi = Float64Array.from(model.quantities, (q) => { const m = Math.min(q.domain?.max ?? Infinity, chances.has(q.id) ? 1 : Infinity); return m + slack(m); });
+  return { ids: model.quantities.map((q) => q.id), index, nodes, ranged, stocks, goals, limits, risks, switches, periods, lo, hi };
 }
 
 function unique(ids: readonly string[], what: string): void {
@@ -351,10 +365,11 @@ function planOption(c: Compiled, option: Option, model: ExecutableModel): Plan {
     new Set([...restsOn(model, roots.map((q) => c.ids[q]!), option.id)].flatMap((id) => (c.index.has(id) ? [c.index.get(id)!] : [])));
   /** A goal's or limit's own roots: its quantity, its target or bound, and its denominator (`per`), as present.ts reads them. */
   const roots = (k: Check): number[] => [k.q, k.ref, ...(k.per !== undefined ? [k.per.q] : [])];
-  const risky = (k: Check): boolean => [...closure(roots(k))].some((q) => risksOn[q]!.length > 0);
+  const goalReach = c.goals.map((k) => closure(roots(k))), limitReach = c.limits.map((k) => closure(roots(k)));
+  const risky = (on: ReadonlySet<number>): boolean => [...on].some((q) => risksOn[q]!.length > 0);
   const reach = closure([...c.goals, ...c.limits].flatMap(roots));
   const drivers = c.ranged.flatMap((r, slot) => (reach.has(r.q) && !c.switches.has(r.q) ? [slot] : []));
-  return { option_id: option.id, order, sets, risksOn, drivers, goalRisky: c.goals.map(risky), limitRisky: c.limits.map(risky) };
+  return { option_id: option.id, order, sets, risksOn, drivers, goalReach, limitReach, goalRisky: goalReach.map(risky), limitRisky: limitReach.map(risky) };
 }
 
 function drawInputs(c: Compiled, seed: number, draws: number): Inputs {
@@ -375,8 +390,8 @@ function drawInputs(c: Compiled, seed: number, draws: number): Inputs {
   };
 }
 
-/** A chance worked out by an equation is clipped to [0, 1] where a risk reads it (DL ruling, 23 Oct). NaN stays NaN. */
-const clip01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
+/** The rounding allowance at a domain's end, relative (fixed before execution, spec C9). */
+const SLACK = 1e-9;
 
 /** A period in draw d: a whole number, or the strict ceil of the timing quantity's one draw; below 0 or NaN is NaN (invalid). */
 function periodOf(t: Timing, c: Compiled, inputs: Inputs, d: number): number {
@@ -454,7 +469,8 @@ export function exactInitialValues(model: ExecutableModel): ReadonlyMap<string, 
     const node = c.nodes[q]!;
     if (node.kind === 'drawn' || risky.has(c.ids[q]!)) continue;
     const value = node.kind === 'stock' ? vals[node.start]! : evaluate(node, vals, 0, inputs, 0, finiteUncertain);
-    if (Number.isFinite(value)) vals[q] = value;
+    // Outside what it can be (spec §3.7), as the run reads it: no level, so nothing resting on it has one either.
+    if (Number.isFinite(value) && value >= c.lo[q]! && value <= c.hi[q]!) vals[q] = value;
   }
   return new Map(c.ids.flatMap((id, q) => Number.isFinite(vals[q]) ? [[id, vals[q]!] as const] : []));
 }
@@ -506,16 +522,19 @@ class Tally {
   readonly badIds = new Set<string>();
   private lo = Infinity; private hi = -Infinity; private tLo = Infinity; private tHi = -Infinity;
   constructor(draws: number) { this.met = new Uint8Array(draws); this.agg = new Float64Array(draws); }
-  /** Records draw d; returns 1 met, 0 not met, -1 outside the domain. */
-  add(k: Check, vals: Float64Array, n: number, d: number, ids: readonly string[]): number {
+  /** Records draw d; returns 1 met, 0 not met, -1 outside the domain. `left`: the values that left their domain at any time in
+   *  this draw; one the condition rests on (`reach`) makes the whole draw outside the domain for it, however the value
+   *  later recovers (spec §3.7), and is named. */
+  add(k: Check, vals: Float64Array, n: number, d: number, ids: readonly string[], left: readonly number[], reach: ReadonlySet<number>): number {
     const top = aggregate(k, vals, n), bottom = k.per === undefined ? 1 : aggregate(k, vals, n, k.per);
     const ratio = top === null || bottom === null || bottom === 0 ? null : top / bottom;
     const a = ratio !== null && Number.isFinite(ratio) ? ratio : null, target = vals[k.last * n + k.ref]!;
-    if (a === null || !Number.isFinite(target)) {
+    if (a === null || !Number.isFinite(target) || left.some((q) => reach.has(q))) {
       this.bad++;
       if (top === null || (a === null && bottom !== null && bottom !== 0)) this.badIds.add(ids[k.q]!);
       if (k.per !== undefined && (bottom === null || bottom === 0)) this.badIds.add(ids[k.per.q]!);
       if (!Number.isFinite(target)) this.badIds.add(ids[k.ref]!);
+      for (const q of left) if (reach.has(q)) this.badIds.add(ids[q]!);
       return -1;
     }
     this.lo = Math.min(this.lo, a); this.hi = Math.max(this.hi, a); this.tLo = Math.min(this.tLo, target); this.tHi = Math.max(this.tHi, target);
@@ -545,10 +564,14 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
   const setFrom = new Float64Array(nSets);
   const goals = c.goals.map(() => new Tally(draws)), limits = c.limits.map(() => new Tally(draws));
   const joint = new Uint8Array(draws), within = new Uint8Array(draws), both = new Uint8Array(draws);
+  /** The values that left their domain in this draw, once each (`off` marks them). */
+  const off = new Uint8Array(n), left: number[] = [];
   let jointBad = 0, withinBad = 0, bothBad = 0;
 
   for (let d = 0; d < draws; d++) {
     fired.fill(-1);
+    for (const q of left) off[q] = 0;
+    left.length = 0;
     for (let q = 0; q < n; q++) p.sets[q]!.forEach((s, i) => { setFrom[setBase[q]! + i] = periodOf(s.from, c, inputs, d); });
     c.risks.forEach((r, i) => { riskFrom[i] = periodOf(r.from, c, inputs, d); });
     for (let k = 0; k <= N; k++) {
@@ -568,16 +591,21 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
           // A stock takes its one shock at boundary from_period, which the next boundaries then carry.
           if (k < from || (node.kind === 'stock' && k !== from)) continue;
           if (fired[r]! < 0) {
-            // Read once, at from_period, under this option. A finite chance is clipped to [0, 1]; a nonfinite one (an overflow
-            // such as 1e200 × 1e200) is outside the domain, never a certain or an impossible event (Codex r1 #3709).
+            // Read once, at from_period, under this option. A chance outside [0, 1] is already NaN here (its domain, below), as
+            // is a nonfinite one (an overflow such as 1e200 × 1e200): outside the domain, never a certain or an impossible
+            // event, never clipped (Codex r1 #3709, spec §3.7).
             const raw = vals[row + risk.occurrence]!;
-            const chance = Number.isFinite(raw) ? clip01(raw) : NaN;
+            const chance = Number.isFinite(raw) ? raw : NaN;
             fired[r] = Number.isNaN(chance) ? 2 : inputs.riskU[r]![d]! < chance ? 1 : 0;
             severity[r] = vals[row + risk.severity]!;
           }
           if (fired[r] === 2) v = NaN;
           else if (fired[r] === 1) v = risk.add ? v + severity[r]! : v * severity[r]!;
         }
+        // A value outside what it can be (a stock below its floor, a chance above 1, a level a shock takes below 0) is outside
+        // the model's domain in this draw (spec §3.7): NaN, and the draw is withheld for what rests on it, with the count;
+        // never clamped, never dropped.
+        if (v < c.lo[q]! || v > c.hi[q]!) { v = NaN; if (off[q] === 0) { off[q] = 1; left.push(q); } }
         vals[row + q] = v;
       }
       // (3) S[k+1] = S[k] + Σ inflows − Σ outflows, every flow read in interval k (from S[k]).
@@ -593,8 +621,8 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
     }
 
     let allGoals = 1, allLimits = 1, badGoal = false, badLimit = false;
-    c.goals.forEach((g, i) => { const m = goals[i]!.add(g, vals, n, d, c.ids); if (m < 0) badGoal = true; else allGoals &= m; });
-    c.limits.forEach((l, i) => { const m = limits[i]!.add(l, vals, n, d, c.ids); if (m < 0) badLimit = true; else allLimits &= m; });
+    c.goals.forEach((g, i) => { const m = goals[i]!.add(g, vals, n, d, c.ids, left, p.goalReach[i]!); if (m < 0) badGoal = true; else allGoals &= m; });
+    c.limits.forEach((l, i) => { const m = limits[i]!.add(l, vals, n, d, c.ids, left, p.limitReach[i]!); if (m < 0) badLimit = true; else allLimits &= m; });
     if (badGoal) jointBad++;
     if (badLimit) withinBad++;
     if (badGoal || badLimit) bothBad++;

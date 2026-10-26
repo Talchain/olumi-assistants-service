@@ -446,6 +446,27 @@ describe('present: what each computed chance rests on most (one figure at a time
     expect(five.reason).not.toContain(NO_DRIVER_REASON);
   });
 
+  it('Codex r2 numbers#2 (6), spec §3.7: a chance drawn within Olumi’s floor is said kept to that floor, and swept only within it', () => {
+    // Capacity 110, less 50 when the outage happens; the target is 100, so the goal is met exactly when it does not happen. Its
+    // chance is Olumi's 10 % to 60 % with Olumi's floor of 20 % (as the compiler gives it: the floor and a chance's 0 to 1): drawn
+    // within 20 % to 100 %, so said kept to "0.2 to 1", never "0 to 1". The sweep sets it at the low end, middle and high end of
+    // what it is drawn within, 0.2, 0.4 and 0.6 (chances about 80 %, 60 % and 40 %), never at 0.1, which it can never be.
+    const within = { min: 0.2, max: 1 };
+    const m = { periods: 1, period_unit: 'month', withheld: [], limits: [],
+      quantities: [fixed('base', 110, 'tickets'), fixed('loss', -50, 'tickets'), fixed('target', 100, 'tickets'),
+        { id: 'p', label: 'p', unit: '', reading: 'state', domain: within, dist: { kind: 'range', low: 0.1, high: 0.6, basis: 'olumi_estimate', range_kind: 'plausible', domain: within } }],
+      goals: [goal('g', 'base', '>=', 'target')], options: [option('plan', 'Plan')],
+      risks: [{ id: 'outage', occurrence: 'p', severity: 'loss', effect_on: 'base', mode: 'add', from_period: 0 }] } as unknown as ExecutableModel;
+    const v = present(m, { p: { label: 'Outage chance', author: 'olumi' }, base: person('Capacity'), loss: person('Loss'), target: person('Target') });
+    expect(cell(v, 'plan').face).toContain('‘Outage chance’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 0.1 to 0.6, into a bell-shaped spread, kept to Olumi’s reading of what it can be (0.2 to 1)');
+    const d = driver(v, 'plan');
+    expect(d.kind).toBe('available');
+    expect([d.driver.quantity, d.driver.low.value, d.driver.middle.value, d.driver.high.value]).toEqual(['p', 0.2, 0.4, 0.6]);
+    expect(d.driver.untested).toEqual([]);
+    expect(d.detail).toContain('at the low end (0.2)');
+    expect(d.detail).not.toContain('0.1');
+  });
+
   it('Codex r1 #3728: the sweep reads the Run’s own seed: its swing equals one worked out inline on that seed', () => {
     // PAIR(30) at the Run's seed 20261023 and 4,000 draws: c set to 10, 20 and 30 in turn, each simulated inline on the SAME
     // seed and draws; the swing is the highest chance less the lowest. Another seed draws e differently, so its swing differs.

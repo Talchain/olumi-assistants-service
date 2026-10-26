@@ -207,32 +207,8 @@ export function normalise(model: CanonicalModelT): CanonicalModelT {
   // to give: always asked of them, never Olumi's fixed figure nor read as theirs (Codex r4–r7 #3709).
   const asked = named.quantities.map((q) => (q.author === 'structure' && q.kind === 'fact' && q.status === 'known' && has(q.value) && !has(q.low) && !has(q.high)
     && !isStructuralConstant(named, q) ? structureAsked(q) : q));
-  // A direction the model does not use is not kept, so the card never states a sign the model does not use (issue 40); nor
-  // a bound the Run does not apply (numbers#2).
-  return withUsedDirections(withUsedBounds(asked.some((q, i) => q !== named.quantities[i]) ? { ...named, quantities: asked } : named));
-}
-
-/**
- * The Run reads a floor or ceiling only where it draws a figure within it: a worked-out quantity's figure is its relation's,
- * and a chance is drawn within [0, 1] and a timing 0 or more, whatever the model declares (the PL's ruling, 23 Oct). So a
- * bound on a worked-out quantity is cleared, and so is one on a chance or a timing that those draws do not keep (a floor
- * above 0; a chance's ceiling below 1, any ceiling on a timing) (numbers#2): the card never states, saves or diffs a reading
- * the calculation does not use. Read so on both sides of every change (`postimage.ts`), as unused directions are. Never
- * anyone's change: the same model when nothing is cleared.
- */
-export function withUsedBounds<M extends Pick<CanonicalModelT, 'quantities' | 'options' | 'risks'>>(model: M): M {
-  const chances = new Set(model.risks.map((k) => k.occurrence));
-  const timings = new Set([...model.options.flatMap((o) => o.sets.map((s) => s.starts_after_periods)), ...model.risks.map((k) => k.starts_after_periods)]
-    .filter((t): t is string => typeof t === 'string'));
-  const quantities = model.quantities.map((q) => {
-    if (!has(q.floor) && !has(q.ceiling)) return q;
-    if (q.status === 'derived') return { ...q, floor: null, ceiling: null };
-    if (!chances.has(q.id) && !timings.has(q.id)) return q;
-    const u = parseUnit(q.unit), scale = u.ok ? u.unit.scale : 1;
-    const floor = has(q.floor) && q.floor <= 0 ? q.floor : null, ceiling = has(q.ceiling) && chances.has(q.id) && q.ceiling * scale >= 1 ? q.ceiling : null;
-    return floor === q.floor && ceiling === q.ceiling ? q : { ...q, floor, ceiling };
-  });
-  return quantities.some((q, i) => q !== model.quantities[i]) ? { ...model, quantities } : model;
+  // A direction the model does not use is not kept, so the card never states a sign the model does not use (issue 40).
+  return withUsedDirections(asked.some((q, i) => q !== named.quantities[i]) ? { ...named, quantities: asked } : named);
 }
 
 /**
@@ -701,10 +677,12 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   // ── the ruled range law, for every range (a held range withholds what rests on it) ─────────────────────────────────
   const chances = new Set(model.risks.map((k) => k.occurrence));
   /**
-   * WHAT A FIGURE CAN BE (alpha G2): a chance lies in [0, 1] and an elapsed time (a set's or risk's timing) is 0 or more
-   * (the PL's ruling, 23 Oct); anything else only within the floor and ceiling the model declares, Olumi's reading, never
-   * inferred from its unit's name. An option's setting stands in for the quantity it sets, so it is read within that
-   * quantity's bounds on each side it does not declare itself. Each truncation is Olumi's conversion, disclosed.
+   * WHAT A FIGURE CAN BE (alpha G2, spec §3.7): within the floor and ceiling the model declares, Olumi's reading, never
+   * inferred from its unit's name; a chance also lies in [0, 1] and an elapsed time (a set's or risk's timing) is 0 or more
+   * (the PL's ruling, 23 Oct), so theirs is that range within what it declares. An option's setting stands in for the
+   * quantity it sets, so it is read within that quantity's bounds on each side it does not declare itself. Each truncation is
+   * Olumi's conversion, disclosed. A worked-out figure carries its declared bounds into the Run, where a draw that leaves
+   * them is outside the domain (`simulate.ts`), never clamped.
    */
   const setsOf = new Map<string, string[]>();
   for (const o of model.options) for (const s of o.sets) if (has(s.to)) setsOf.set(s.to, [...(setsOf.get(s.to) ?? []), s.quantity]);
@@ -724,11 +702,30 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
     const floors = targets.flatMap((t) => (has(t.floor) ? [into(t.floor, t.id)] : [])), ceilings = targets.flatMap((t) => (has(t.ceiling) ? [into(t.ceiling, t.id)] : []));
     return { floor: has(q.floor) ? q.floor : floors.length ? Math.max(...floors) : null, ceiling: has(q.ceiling) ? q.ceiling : ceilings.length ? Math.min(...ceilings) : null };
   };
-  const domainOf = (q: CanonicalQuantityT): Domain | undefined => {
-    if (chances.has(q.id)) return { min: 0, max: 1 };
-    if (timingQs.has(q.id)) return { min: 0 };
+  /** What it declares, in the engine's scale (none: undefined). */
+  const declaredOf = (q: CanonicalQuantityT): Domain | undefined => {
     const { floor, ceiling } = boundsOf(q), scale = U.get(q.id)?.scale ?? 1;
     return floor === null && ceiling === null ? undefined : { ...(floor === null ? {} : { min: floor * scale }), ...(ceiling === null ? {} : { max: ceiling * scale }) };
+  };
+  const domainOf = (q: CanonicalQuantityT): Domain | undefined => {
+    const own = declaredOf(q);
+    if (!chances.has(q.id) && !timingQs.has(q.id)) return own;
+    const max = Math.min(chances.has(q.id) ? 1 : Infinity, own?.max ?? Infinity);
+    return { min: Math.max(0, own?.min ?? 0), ...(max === Infinity ? {} : { max }) };
+  };
+  /**
+   * Bounds that leave a figure nothing it can be (a floor above its ceiling, or above a chance's 100 %; a ceiling below a
+   * chance's or a timing's 0) are Olumi's own contradiction (spec §3.7): what rests on it is held with the reason, in its
+   * unit, never run with the bound ignored and never asked of the person, whose figure is not what is wrong.
+   */
+  const roomless = (q: CanonicalQuantityT): string | undefined => {
+    const d = domainOf(q);
+    if (d?.min === undefined || d.max === undefined || !(d.min > d.max)) return undefined;
+    const { floor, ceiling } = boundsOf(q), at = (v: number) => `${v} ${q.unit}`, read = `Olumi reads "${q.label}" as never`;
+    if (floor !== null && ceiling !== null && floor > ceiling) return `${read} below ${at(floor)} and never above ${at(ceiling)}, which leaves nothing it can be`;
+    const role = chances.has(q.id) ? 'a chance' : 'a timing';
+    return ceiling !== null && ceiling < 0 ? `${read} above ${at(ceiling)}, but ${role} is never below ${at(0)}`
+      : `${read} below ${at(floor!)}, but a chance is never above ${at(1 / (U.get(q.id)?.scale ?? 1))}`;
   };
   /**
    * A figure given WHOLLY outside what it can be (its fixed value, or its whole range) contradicts Olumi's reading of it
@@ -749,18 +746,22 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
     if (ceiling !== null && (firm ? lo * s >= ceiling * s : lo > ceiling)) return `"${q.label}" is given as ${given}, but Olumi reads it as never above ${ceiling} ${q.unit}`;
     return undefined;
   };
-  const contradictory = new Map(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && !chances.has(q.id) && !timingQs.has(q.id) && outside(q) !== undefined)
+  const nothing = new Map(model.quantities.flatMap((q) => { const why = roomless(q); return why === undefined ? [] : [[q.id, why] as const]; }));
+  // A chance and a timing are read against what they declare as any figure is (spec §3.7): the timing reader never uses one
+  // outside it, as an option or risk resting on it is asked or held.
+  const contradictory = new Map(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && !nothing.has(q.id) && outside(q) !== undefined)
     .map((q) => [q.id, outside(q)!] as const));
   /** A person's range whose words do not say whether its ends are hard: an UNRESOLVED reading, a blocker (PL ruling B). */
-  const unresolved = new Set(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && q.author === 'person' && has(q.low) && has(q.high) && q.low < q.high && !has(q.range_kind) && !windowQs.has(q.id) && !contradictory.has(q.id))
-    .map((q) => q.id));
+  const unresolved = new Set(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && q.author === 'person' && has(q.low) && has(q.high) && q.low < q.high && !has(q.range_kind) && !windowQs.has(q.id)
+    && !contradictory.has(q.id) && !nothing.has(q.id)).map((q) => q.id));
   const readings = new Map<string, LawReading>();
   for (const q of model.quantities) if (FIGURE_STATUSES.has(q.status) && has(q.low) && has(q.high) && q.low < q.high && U.has(q.id) && !windowQs.has(q.id)
-    && !contradictory.has(q.id) && (!has(q.value) || (q.low < q.value && q.value < q.high))) {
+    && !contradictory.has(q.id) && !nothing.has(q.id) && (!has(q.value) || (q.low < q.value && q.value < q.high))) {
     readings.set(q.id, readRange(rangeDistOf(q, U.get(q.id)!.scale, domainOf(q))));
   }
   const held = new Map([...[...readings].filter(([, r]) => r.kind === 'held').map(([id, r]) => [id, (r as { reason: string }).reason] as const),
-    ...[...contradictory].filter(([id]) => Q.get(id)!.author !== 'person').map(([id, why]) => [id, `${why}; Olumi's ${has(Q.get(id)!.low) ? 'range' : 'figure'} is unsupported`] as const)]);
+    ...[...contradictory].filter(([id]) => Q.get(id)!.author !== 'person').map(([id, why]) => [id, `${why}; Olumi's ${has(Q.get(id)!.low) ? 'range' : 'figure'} is unsupported`] as const),
+    ...nothing]);
   /** The person's figures given outside what they can be: theirs to give again, with the reason. */
   const recheck = new Map([...contradictory].filter(([id]) => Q.get(id)!.author === 'person'));
 
@@ -769,7 +770,7 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   const withholds = (q: CanonicalQuantityT) => WITHHOLDING_STATUSES.has(q.status) || held.has(q.id);
   const isAsk = (q: CanonicalQuantityT) => q.status === 'asked' || unresolved.has(q.id) || recheck.has(q.id);
   const blockersOf = (closure: Iterable<string>) => [...closure].map((x) => Q.get(x)).filter((q): q is CanonicalQuantityT => !!q && (isAsk(q) || withholds(q)));
-  const describe = (q: CanonicalQuantityT) => (q.status === 'asked' ? `needs "${q.label}".` : held.has(q.id) ? `rests on "${q.label}": ${held.get(q.id)}; give a most likely figure, or ask`
+  const describe = (q: CanonicalQuantityT) => (q.status === 'asked' ? `needs "${q.label}".` : held.has(q.id) ? `rests on "${q.label}": ${held.get(q.id)}${nothing.has(q.id) ? '.' : '; give a most likely figure, or ask'}`
     : unresolved.has(q.id) ? `needs how to read "${q.label}" (firm ends, or a rough estimate).` : recheck.has(q.id) ? `needs "${q.label}" again: ${recheck.get(q.id)}.`
       : `rests on "${q.label}", which is ${q.status.replace('_', ' ')}: ${q.basis}`);
   const outcomeOf = (closure: Set<string>, win?: WinState): { status: Outcome; reasons: string[]; asks: string[] } => {
@@ -801,27 +802,30 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
 
   /** A window's own figures that are unknown (no figure, no question): what the goal or limit rests on, so it is listed (#3723). */
   const unknownWindowRefs = (w: CanonicalWindowT | null | undefined) => [w?.periods, w?.origin_offset].filter((x): x is string => has(x) && Q.get(x)?.status === 'unknown');
+  /** A window's own figures that break what Olumi reads them as (a bound, or bounds leaving nothing): the window is read from
+   *  them, so the goal or limit rests on them, asked or held, never run on that window (spec §3.7). */
+  const outsideWindowRefs = (w: CanonicalWindowT | null | undefined) => [w?.periods, w?.origin_offset].filter((x): x is string => has(x) && (contradictory.has(x) || nothing.has(x)));
   const goalClosure = new Map<string, Set<string>>();
   const perGoal: GoalOutcome[] = model.goals.map((g) => {
     if (!has(g.measure)) {
       return { goal_id: g.id, status: 'asks', reasons: [`"${g.label}" has no measure yet, so it is left out of the chance.`], asks: [], cancelled: [], needs_measure: true, needs_deadline: false, olumi_inputs: [], unverified_inputs: unverifiedIds.has(g.id) ? [g.id] : [], rests_on: restsOn(new Set([g.id])), excludes: [] };
     }
     const closure = upstream(goalRoots(g));
-    const w = goalWin.get(g.id);
-    goalClosure.set(g.id, new Set([...closure, ...(w?.blockers ?? []), ...unknownWindowRefs(g.measure.window)]));
+    const w = goalWin.get(g.id), outsideWin = outsideWindowRefs(g.measure.window);
+    goalClosure.set(g.id, new Set([...closure, ...(w?.blockers ?? []), ...unknownWindowRefs(g.measure.window), ...outsideWin]));
     const touched = touchedBy(closure, g.id);
     for (const x of [g.measure.window?.periods, g.measure.window?.origin_offset]) if (has(x)) touched.add(x);
-    return { goal_id: g.id, ...outcomeOf(closure, w), cancelled: [], needs_measure: false, needs_deadline: w?.deadline === true, olumi_inputs: olumiInputs(closure), unverified_inputs: [...touched].filter((x) => unverifiedIds.has(x)), rests_on: restsOn(touched, g.measure.assumptions), excludes: [...g.measure.exclusions] };
+    return { goal_id: g.id, ...outcomeOf(new Set([...closure, ...outsideWin]), w), cancelled: [], needs_measure: false, needs_deadline: w?.deadline === true, olumi_inputs: olumiInputs(closure), unverified_inputs: [...touched].filter((x) => unverifiedIds.has(x)), rests_on: restsOn(touched, g.measure.assumptions), excludes: [...g.measure.exclusions] };
   });
   const limitClosure = new Map<string, Set<string>>();
   const perLimit: LimitOutcome[] = model.limits.map((l) => {
     if (!has(l.measure)) return { limit_id: l.id, status: 'asks', reasons: [`"${l.label}" has no measure yet, so the result does not cover it.`], asks: [], cancelled: [], needs_measure: true, rests_on: restsOn(new Set([l.id])) };
     const closure = upstream(limitRoots(l));
-    const w = limitWin.get(l.id);
-    limitClosure.set(l.id, new Set([...closure, ...(w?.blockers ?? []), ...unknownWindowRefs(l.measure.window)]));
+    const w = limitWin.get(l.id), outsideWin = outsideWindowRefs(l.measure.window);
+    limitClosure.set(l.id, new Set([...closure, ...(w?.blockers ?? []), ...unknownWindowRefs(l.measure.window), ...outsideWin]));
     const touched = touchedBy(closure, l.id);
     for (const x of [l.measure.window?.periods, l.measure.window?.origin_offset]) if (has(x)) touched.add(x);
-    return { limit_id: l.id, ...outcomeOf(closure, w), cancelled: [], needs_measure: false, rests_on: restsOn(touched) };
+    return { limit_id: l.id, ...outcomeOf(new Set([...closure, ...outsideWin]), w), cancelled: [], needs_measure: false, rests_on: restsOn(touched) };
   });
   const optionClosure = new Map(model.options.map((o) => [o.id, upstream([...o.sets.map((s) => s.to).filter(has), ...o.sets.map((s) => s.starts_after_periods).filter((t): t is string => typeof t === 'string')])] as const));
   const perOption: OptionOutcome[] = model.options.map((o) => {
@@ -874,10 +878,15 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
       const law = readings.get(q.id);
       if (conversions && law?.kind === 'normal') conversions.push({ kind: 'range_law', quantity: q.id, low: q.low! * u.scale, high: q.high! * u.scale, range_kind: q.range_kind ?? 'plausible', domain: domainOf(q) ?? null, reading: law, author: 'olumi', provisional: true });
       const base = { id: q.id, label: q.label, unit, reading: 'state' as const }; // readings are set by `setReadings` once the subset is final
-      if (r === undefined) quantities.push({ ...base, dist: distOf(q, u.scale, domainOf(q)) });
-      else if (r.form === 'stock') quantities.push({ ...base, stock: { start: r.start, inflows: [...r.inflows], outflows: [...r.outflows] } });
-      else if (r.form === 'effect') quantities.push({ ...base, equation: { form: 'effect', base: r.base, terms: r.terms.map((t) => ({ coefficient: t.coefficient, driver: t.driver })) } });
-      else quantities.push(...lowerDefinition(base, r, fresh, (ids) => showUnit({ dims: ids.reduce((a, i) => multiply(a, U.get(i)!), { dims: {}, scale: 1 } as Unit).dims, scale: 1 })));
+      // What it can be (spec §3.7): what it declares, and a chance's 0 to 1 or a timing's 0 or more, on every figure, given or
+      // worked out, so a value an option, a risk or its relation takes outside it is outside the domain in that draw, never
+      // clamped; never on its lowering's working figures (`__plus`, `__times`).
+      const can = domainOf(q), within = can === undefined ? {} : { domain: can };
+      if (r === undefined) quantities.push({ ...base, ...within, dist: distOf(q, u.scale, can) });
+      else if (r.form === 'stock') quantities.push({ ...base, ...within, stock: { start: r.start, inflows: [...r.inflows], outflows: [...r.outflows] } });
+      else if (r.form === 'effect') quantities.push({ ...base, ...within, equation: { form: 'effect', base: r.base, terms: r.terms.map((t) => ({ coefficient: t.coefficient, driver: t.driver })) } });
+      else quantities.push(...lowerDefinition(base, r, fresh, (ids) => showUnit({ dims: ids.reduce((a, i) => multiply(a, U.get(i)!), { dims: {}, scale: 1 } as Unit).dims, scale: 1 }))
+        .map((x) => (x.id === q.id ? { ...x, ...within } : x)));
     }
     const xOptions: XOption[] = model.options.length === 0
       ? [{ id: AS_STATED_OPTION_ID, label: 'As things stand', sets: [] }]

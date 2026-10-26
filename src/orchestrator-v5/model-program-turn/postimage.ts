@@ -21,7 +21,7 @@
 import { ProposalChangeSchema, type ProposalChange } from '../agent-lane/proposal.js';
 import { readingGroups } from './reading-groups.js';
 import { CanonicalModel, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
-import { norm, withUsedBounds } from '../model-program/compile.js';
+import { norm } from '../model-program/compile.js';
 import { linkTargets, withUsedDirections } from '../model-program/links.js';
 import { isExactCalendarReexpression, parseUnit, sameDims } from '../model-program/units.js';
 
@@ -155,11 +155,10 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
   opts: { readonly removals: readonly string[]; readonly words: readonly string[]; readonly fresh: readonly string[]; readonly approver?: string | null }): PostimageResult {
   const parsed = CanonicalModel.safeParse(raw);
   if (!parsed.success) return { ok: false, code: 'schema', reason: 'The proposed model is not in the model format.', ids: [] };
-  // The host's reading of directions (`links.ts`) and bounds (`compile.ts`) on BOTH sides first, so only the change's own
-  // fields are compared: a direction the model does not use, or a bound on a worked-out figure the Run never applies, cleared
-  // by the host, never shows as a change nor refuses one (issue 40, numbers#2).
-  const base = withUsedDirections(withUsedBounds(saved));
-  const post = withUsedDirections(withUsedBounds(parsed.data));
+  // The host's reading of directions (`links.ts`) on BOTH sides first, so only the change's own fields are compared: a
+  // direction the model does not use, cleared by the host, never shows as a change nor refuses one (issue 40).
+  const base = withUsedDirections(saved);
+  const post = withUsedDirections(parsed.data);
   const refuse = (code: Exclude<PostimageResult, { ok: true }>['code'], ids: readonly string[], reason: string, check?: 'their_words' | 'this_turn'): PostimageResult =>
     ({ ok: false, code, reason, ids, ...(check ? { check } : {}) });
   // Preservation by (family, id), before anything is compared.
@@ -405,7 +404,7 @@ function wordsIn(m: CanonicalModelT) {
         const w = isRec(mm['window']) ? mm['window'] : null, agg = String(mm['aggregation']);
         if (w === null) return `${agg === 'end' ? '' : `${of(AGG_ALONE, agg)}, `}no deadline set`;
         return `${of(AGG_WORDS, agg)} ${timed(String(w['periods']))}${typeof w['start'] === 'number' && w['start'] > 0 ? `, starting after ${w['start']} ${m.period}s` : ''}`
-          + `${typeof w['origin_event'] === 'string' ? `, counted from "${w['origin_event']}"` : ''}${typeof w['origin_offset'] === 'string' ? `, which is ${timed(w['origin_offset'])} from now` : ''}`;
+          + `${typeof w['origin_event'] === 'string' ? `, counted from "${w['origin_event']}"` : ''}${typeof w['origin_offset'] === 'string' ? `, which is ${timed(w['origin_offset'])} from the start of this model` : ''}`;
       });
       case 'measure_by': return measured(r, (mm) => (mm['measure_by'] === 'olumi' ? 'Olumi’s suggested measure' : 'the measure you named'));
       case 'rests': return measured(r, (mm) => (list(mm['assumptions']).length > 0 ? `resting on ${and(list(mm['assumptions']))}` : 'resting on nothing stated'));

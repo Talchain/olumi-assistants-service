@@ -864,6 +864,246 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(nodes(gymWith(null)).find((n) => n.id === 'joins')!.display_value).toBe('0–30 member/month; Olumi reads it as a spread around 15 (sd 8.66), provisionally');
   });
 
+  it('numbers#2 (a), spec §3.7: a worked-out stock below Olumi\'s floor in a draw withholds every chance resting on it, with that draw counted and the stock named; never clamped, never dropped', () => {
+    // The gym losing members: 300 today, 25 join and 80 leave a month, so carrying on as now members is 300 − 55k after k
+    // months: 245, 190, 135, 80, 25, then −30 at month 6, down to −360 at month 12. Mean over months 1–12: −690 / 12 = −57.5.
+    // With the promotion (40 join): 300 − 40k, −20 at month 8, mean (260 − 180) / 2 = 40. Fees are members × £30.
+    const falling = (floor: number | null, joins?: Partial<CanonicalQuantityT>) => {
+      const g = answered(gym(), 'leavers', { value: 80, quote: 'about 80 leave a month', basis: APPROXIMATE_FIGURE });
+      g.quantities = g.quantities.map((q) => (q.id === 'members' ? { ...q, floor } : q.id === 'joins' && joins ? { ...q, ...joins } : q));
+      g.quantities.push(person('fifty', 'member', 50, 'at least 50 members on average'), person('year', 'month', 12, 'over the next year'),
+        person('fee', 'GBP/member/month', 30, '£30 a month each'), derived('fees', 'GBP/month'), person('fee_floor', 'GBP/month', 1500, 'at least £1,500 a month in fees'));
+      g.relations.push(def('fees_rel', 'fees', 'product', ['members', 'fee']));
+      g.goals = [goal('mean_members', 'members', '>=', 'fifty', 'mean', 'year', 'at least 50 members on average'),
+        goal('mean_fees', 'fees', '>=', 'fee_floor', 'mean', 'year', 'at least £1,500 a month in fees')];
+      return compile(g);
+    };
+    const bounded = falling(0);
+    expect(bounded.errors).toEqual([]);
+    expect(bounded.blockers).toEqual([]);
+    // The stock carries Olumi's floor into the Run; what is worked out from it declares nothing of its own (contrast).
+    expect(xq(bounded).get('members')).toMatchObject({ stock: { start: 'members_now' }, domain: { min: 0 } });
+    expect(xq(bounded).get('fees')).not.toHaveProperty('domain');
+    const sim = simulate(bounded.executable!, { seed: 7, draws: 200 });
+    for (const o of sim.options) {
+      // Every draw leaves the floor, so every chance is withheld with all 200 draws counted and the stock named, the fees
+      // goal too (it reads members through the fees): never a chance over the draws that remain, never a clamped 0.
+      expect(o.per_goal, o.option_id).toEqual([
+        { goal_id: 'mean_members', withheld: { reason: 'invalid_domain', count: 200, quantities: ['members'] } },
+        { goal_id: 'mean_fees', withheld: { reason: 'invalid_domain', count: 200, quantities: ['fees', 'members'] } },
+      ]);
+      expect(o.joint).toEqual({ withheld: { reason: 'invalid_domain', count: 200, quantities: ['members', 'fees'] } });
+    }
+    // Contrast: the same model with no floor computes both chances, as today: 0 (the means are −57.5 and 40, under 50).
+    const free = simulate(falling(null).executable!, { seed: 7, draws: 200 });
+    expect(xq(falling(null)).get('members')).not.toHaveProperty('domain');
+    for (const o of free.options) expect(o.per_goal.map((g) => [g.goal_id, isWithheld(g) ? g.withheld : g.chance]), o.option_id).toEqual([['mean_members', 0], ['mean_fees', 0]]);
+    // The count is exactly the draws that leave the floor, never fewer: joins a firm 20–80 a month (their bounds), so carrying
+    // on as now members ends below 0 only where joins < 55. Counted on the same seed from the unbounded run's own draws.
+    const firm = { value: null, low: 20, high: 80, range_kind: 'bounds' as const, quote: 'between 20 and 80 join each month' };
+    const draws = 400, all = Array.from({ length: draws }, (_, d) => d);
+    const unbounded = simulate(falling(null, firm).executable!, { seed: 7, draws, record: all });
+    const below = unbounded.recorded!.filter((r) => r.option_id === 'carry_on' && r.values.members!.slice(1, 13).some((v) => v < 0)).length;
+    expect(below).toBeGreaterThan(0);
+    expect(below).toBeLessThan(draws);
+    const carry = simulate(falling(0, firm).executable!, { seed: 7, draws }).options.find((o) => o.option_id === 'carry_on')!;
+    expect(carry.per_goal[0]).toEqual({ goal_id: 'mean_members', withheld: { reason: 'invalid_domain', count: below, quantities: ['members'] } });
+  });
+
+  it('numbers#2 (b), spec §3.7: a chance is drawn within 0 to 100 % AND within the floor Olumi declares on it; the card reads the same law', () => {
+    // Olumi's 10–30 % chance of a rival opening (a rough estimate: centre 20 %, sd 20/√12 = 5.774 %) with its floor at 20 %:
+    // conditioned on [20 %, 100 %], a half-Normal above 20 %: mean 20 + 5.774 × 0.7979 = 24.61, sd 5.774 × 0.6028 = 3.480.
+    const rival = (f: Partial<CanonicalQuantityT>) => {
+      const g = gymFilled();
+      g.quantities.push(qty('rival_chance', '%', { kind: 'coefficient', status: 'estimated', author: 'olumi', low: 10, high: 30, range_kind: 'plausible', basis: 'A rival opens nearby in some summers.', ...f }),
+        olumi('rival_loss', 'member', -30, -10));
+      g.risks.push({ id: 'rival', label: 'A rival gym opens', occurrence: 'rival_chance', severity: 'rival_loss', effect_on: 'members', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...base });
+      return g;
+    };
+    const drawn = (m: CanonicalModelT) => {
+      const r = compile(m), draws = 400;
+      const rec = simulate(r.executable!, { seed: 7, draws, record: Array.from({ length: draws }, (_, d) => d) }).recorded!.filter((x) => x.option_id === 'carry_on');
+      return { r, chances: rec.map((x) => x.values.rival_chance![0]!) };
+    };
+    const floored = drawn(rival({ floor: 20 }));
+    expect(floored.r.errors).toEqual([]);
+    expect(lawIn(floored.r, 'rival_chance')).toMatchObject({ domain: { min: 0.2, max: 1 }, reading: { lower: 0.2, upper: 1 } });
+    expect(lawIn(floored.r, 'rival_chance').reading.mean).toBeCloseTo(0.2461, 3);
+    expect(Math.min(...floored.chances)).toBeGreaterThanOrEqual(0.2);
+    expect(Math.max(...floored.chances)).toBeLessThanOrEqual(1);
+    const node = (m: CanonicalModelT) => evaluateCanonical(m, { sourceText: 'about 20 leave a month', seed: 7, draws: 200 }).projection.graph.nodes.find((n) => n.id === 'rival')!.description;
+    expect(node(rival({ floor: 20 }))).toContain('Chance: 10–30 %, Olumi\'s estimate; Olumi reads it as a spread around 24.61 (sd 3.48), kept between 20 and 100, provisionally.');
+    // Contrast: with no floor it is drawn within 0 to 100 % only, about half the draws below 20 %.
+    const free = drawn(rival({}));
+    expect(lawIn(free.r, 'rival_chance')).toMatchObject({ domain: { min: 0, max: 1 }, reading: { lower: 0, upper: 1 } });
+    expect(free.chances.filter((x) => x < 0.2).length).toBeGreaterThan(100);
+    expect(node(rival({}))).toContain('kept between 0 and 100, provisionally.');
+    // The person's FIRM 10–30 % with the same floor: drawn only where both hold, 20 % to 30 %.
+    const theirs = drawn(rival({ author: 'person', status: 'known', kind: 'fact', basis: null, range_kind: 'bounds', quote: 'between 10 and 30 % chance a rival opens', floor: 20 }));
+    expect(lawIn(theirs.r, 'rival_chance').reading).toMatchObject({ lower: 0.2, upper: 0.3 });
+    expect(Math.min(...theirs.chances)).toBeGreaterThanOrEqual(0.2);
+    expect(Math.max(...theirs.chances)).toBeLessThanOrEqual(0.3);
+    expect(lawIn(drawn(rival({ author: 'person', status: 'known', kind: 'fact', basis: null, range_kind: 'bounds', quote: 'between 10 and 30 % chance a rival opens' })).r, 'rival_chance').reading)
+      .toMatchObject({ lower: 0.1, upper: 0.3 }); // contrast: their bounds alone
+  });
+
+  it('numbers#2 (c), spec §3.7: a timing given below the floor Olumi declares on it is asked again, with the reason in their unit, and never used; at or above it, it is', () => {
+    const starting = (floor: number | null) => {
+      const g = gymFilled();
+      g.quantities.push(qty('promo_start', 'month', { value: 1, quote: 'the promotion starts in a month', floor }));
+      g.options = g.options.map((o) => (o.id === 'promo' ? { ...o, sets: o.sets.map((s) => ({ ...s, starts_after_periods: 'promo_start' })) } : o));
+      return compile(g);
+    };
+    const early = starting(2);
+    expect(early.errors).toEqual([]);
+    expect(early.blockers).toEqual([{ id: 'promo_start', code: 'recount', scope: ['promo'], reason: '"promo start" is given as 1 month, but Olumi reads it as never below 2 month' }]);
+    expect(early.perOption.find((o) => o.option_id === 'promo')).toMatchObject({ status: 'asks', asks: ['promo_start'] });
+    expect(early.perOption.find((o) => o.option_id === 'promo')!.reasons).toEqual(['needs "promo start" again: "promo start" is given as 1 month, but Olumi reads it as never below 2 month.']);
+    // Never used: the promotion is not in the Run, so no setting starts at month 1 against the reading.
+    expect(early.executable!.options.map((o) => o.id)).toEqual(['carry_on']);
+    // Contrast: at its floor, or with none, the timing is read and the promotion starts at month 1.
+    for (const floor of [1, null]) {
+      const r = starting(floor);
+      expect(r.blockers, `floor ${floor}`).toEqual([]);
+      expect(r.executable!.options.find((o) => o.id === 'promo')!.sets.map((s) => s.from_period), `floor ${floor}`).toEqual([1]);
+    }
+  });
+
+  it('numbers#2, spec §3.7: bounds that leave a figure nothing it can be withhold what rests on it, named in its unit; never run with the bound ignored, never asked of the person', () => {
+    const why = (r: ReturnType<typeof compile>) => r.perGoal.find((p) => p.goal_id === 'reach_400')!;
+    // Olumi's floor above its ceiling on the members stock.
+    const g = gymFilled();
+    g.quantities = g.quantities.map((q) => (q.id === 'members' ? { ...q, floor: 10, ceiling: 5 } : q));
+    const reversed = compile(g);
+    expect(why(reversed)).toMatchObject({ status: 'withheld', asks: [] });
+    expect(why(reversed).reasons).toEqual(['rests on "members": Olumi reads "members" as never below 10 member and never above 5 member, which leaves nothing it can be.']);
+    expect(reversed.blockers.filter((b) => b.code === 'recount')).toEqual([]);
+    // A chance's floor above its 100 %: what the rival affects is withheld, said in %, never the law's "no room" in fractions.
+    const c = gymFilled();
+    c.quantities.push(qty('rival_chance', '%', { kind: 'coefficient', status: 'estimated', author: 'olumi', low: 10, high: 30, range_kind: 'plausible', basis: 'A rival opens nearby in some summers.', floor: 120 }),
+      olumi('rival_loss', 'member', -30, -10));
+    c.risks.push({ id: 'rival', label: 'A rival gym opens', occurrence: 'rival_chance', severity: 'rival_loss', effect_on: 'members', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...base });
+    expect(why(compile(c)).reasons).toEqual(['rests on "rival chance": Olumi reads "rival chance" as never below 120 %, but a chance is never above 100 %.']);
+    // Contrast: bounds with room calculate.
+    const roomy = gymFilled();
+    roomy.quantities = roomy.quantities.map((q) => (q.id === 'members' ? { ...q, floor: 0, ceiling: 5000 } : q));
+    expect(why(compile(roomy))).toMatchObject({ status: 'calculable', reasons: [] });
+  });
+
+  it('Codex r2 numbers#2 (1a), spec §3.7: a worked-out chance above 100 % is outside the domain in that draw, never clipped to a certain event; within 0 to 100 % it is a chance', () => {
+    // A rival's chance worked out as the sum of two parts, with Olumi's floor of 0 declared on it: 80 % + 80 % = 160 %, never a
+    // certain rival (160 % clipped to 100 %): every draw of reach_400 is outside the domain, the chance named. 30 % + 40 % = 70 %.
+    const rival = (a: number, b: number) => {
+      const g = gymFilled();
+      g.quantities.push(person('rival_a', '%', a, `${a} % from one rival`), person('rival_b', '%', b, `${b} % from another`),
+        { ...derived('rival_chance', '%'), floor: 0 }, person('rival_loss', 'member', -10, 'we would lose 10 members'));
+      g.relations.push(def('rival_rel', 'rival_chance', 'sum', ['rival_a', 'rival_b']));
+      g.risks.push({ id: 'rival', label: 'A rival gym opens', occurrence: 'rival_chance', severity: 'rival_loss', effect_on: 'members', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...base });
+      return compile(g);
+    };
+    const over = rival(80, 80);
+    expect(over.errors).toEqual([]);
+    // What it can be is its floor AND a chance's 0 to 1, never its declared floor alone.
+    expect(xq(over).get('rival_chance')).toMatchObject({ equation: { form: 'definition', op: 'sum' }, domain: { min: 0, max: 1 } });
+    for (const o of simulate(over.executable!, { seed: 7, draws: 100 }).options) {
+      expect(o.per_goal[0], o.option_id).toEqual({ goal_id: 'reach_400', withheld: { reason: 'invalid_domain', count: 100, quantities: ['members', 'rival_chance'] } });
+      expect(o.per_goal[1], o.option_id).toMatchObject({ goal_id: 'class_income', chance: 1 }); // unaffected: 8 × 450 = £3,600 every month
+      expect(isWithheld(o.joint), o.option_id).toBe(true);
+    }
+    // Contrast: 70 % is a chance, and reach_400 computes for every option.
+    for (const o of simulate(rival(30, 40).executable!, { seed: 7, draws: 100 }).options) expect(isWithheld(o.per_goal[0]!), o.option_id).toBe(false);
+  });
+
+  it('Codex r2 numbers#2 (1b), spec §3.7: a given figure a risk takes below Olumi\'s floor is outside the domain in that draw; never a chance on a level it cannot be', () => {
+    // 450 class visits a month, floor 0; a certain (100 %) closure takes 500 a month off: −50 visits, never a chance on revenue
+    // of 8 × −50 = −£400. Taking 100 off leaves 350 visits: £2,800, below £3,000 every month, a chance of 0.
+    const closing = (loss: number) => {
+      const g = gymFilled();
+      g.quantities = g.quantities.map((q) => (q.id === 'attendances' ? { ...q, floor: 0 } : q));
+      g.quantities.push(person('closure_chance', '%', 100, 'the studio will certainly close for works'), person('closure_loss', 'attendance/month', -loss, `${loss} fewer class visits a month`));
+      g.risks.push({ id: 'closure', label: 'The studio closes for works', occurrence: 'closure_chance', severity: 'closure_loss', effect_on: 'attendances', mode: 'add', starts_after_periods: 0, author: 'person', quote: 'the studio will certainly close for works', ...base });
+      return compile(g);
+    };
+    const deep = closing(500);
+    expect(deep.errors).toEqual([]);
+    expect(xq(deep).get('attendances')).toMatchObject({ dist: { kind: 'fixed', value: 450 }, domain: { min: 0 } });
+    for (const o of simulate(deep.executable!, { seed: 7, draws: 50 }).options) {
+      expect(o.per_goal[1], o.option_id).toEqual({ goal_id: 'class_income', withheld: { reason: 'invalid_domain', count: 50, quantities: ['class_revenue', 'attendances'] } });
+    }
+    for (const o of simulate(closing(100).executable!, { seed: 7, draws: 50 }).options) expect(o.per_goal[1], o.option_id).toMatchObject({ goal_id: 'class_income', chance: 0 });
+  });
+
+  it('Codex r2 numbers#2 (2), spec §3.7: a draw whose worked-out value leaves its floor stays outside the domain however the value later recovers; never counted as met', () => {
+    // total = start + bump × change: −1 member until "Make the change" turns change from 0 to 1 at month 1, then −1 + 2 = 1.
+    // The goal reads the end of month 3 (1 ≥ 1, met), but at month 0 total is −1 against Olumi's floor of 0: every draw is
+    // outside the domain for the goal, the joint and joint_within_limits, the total named; never "met in every draw".
+    const recovering = (floor: number | null) => compile(model({
+      question: 'Should we make the change?', period: 'month',
+      quantities: [person('start', 'member', -1, 'one member short today'), qty('bump', 'member', { kind: 'coefficient', value: 2, quote: 'the change adds two members' }),
+        structure('change', '1', 0, 'No change before the option.'), structure('on', '1', 1, 'The option is on.'),
+        { ...derived('total', 'member'), floor }, person('one_member', 'member', 1, 'at least one member'), person('three', 'month', 3, 'in three months')],
+      relations: [eff('total_rel', 'total', 'start', [['change', 'bump']])],
+      goals: [goal('enough', 'total', '>=', 'one_member', 'end', 'three', 'at least one member in three months')],
+      options: [option('make', 'Make the change', [set('change', 'on', 'make the change', { starts_after_periods: 1 })], 'make the change')],
+    }));
+    const floored = recovering(0);
+    expect(floored.errors).toEqual([]);
+    const sim = simulate(floored.executable!, { seed: 7, draws: 20, record: [0] });
+    const make = sim.options.find((o) => o.option_id === 'make')!;
+    expect(sim.recorded![0]!.values.total).toEqual([NaN, 1, 1, 1]);
+    const out = { withheld: { reason: 'invalid_domain', count: 20, quantities: ['total'] } };
+    expect(make.per_goal[0]).toEqual({ goal_id: 'enough', ...out });
+    expect(make.joint).toEqual(out);
+    expect(make.joint_within_limits).toEqual(out);
+    // Contrast: with no floor, −1 is a value it can be, and the goal is met in every draw.
+    const free = simulate(recovering(null).executable!, { seed: 7, draws: 20 }).options.find((o) => o.option_id === 'make')!;
+    expect(free.per_goal[0]).toEqual({ goal_id: 'enough', chance: 1, precision_95: [1, 1] });
+  });
+
+  it('Codex r2 numbers#2 (3), spec §3.7: a worked-out value on its ceiling up to rounding is within it (£0.10 + £0.20 against £0.30); one genuinely above it is not', () => {
+    // £0.10 + £0.20 is 0.30000000000000004 in binary floating point: on Olumi's ceiling of £0.30, never outside it, so the goal
+    // (spend at most £1) and the joint are met in both draws. Against a ceiling of £0.29 the £0.30 is outside: both draws withheld.
+    const spending = (ceiling: number) => compile(model({
+      question: 'Can we keep spend under £1?', period: 'month',
+      quantities: [person('tea', 'GBP', 0.1, '10p on tea'), person('milk', 'GBP', 0.2, '20p on milk'), { ...derived('spend', 'GBP'), ceiling },
+        person('pound', 'GBP', 1, 'at most £1'), person('one_month', 'month', 1, 'this month')],
+      relations: [def('spend_rel', 'spend', 'sum', ['tea', 'milk'])],
+      goals: [goal('under_a_pound', 'spend', '<=', 'pound', 'end', 'one_month', 'at most £1')],
+      options: [option('as_is', 'Carry on', [], 'carry on')],
+    }));
+    expect(0.1 + 0.2).toBeGreaterThan(0.3); // the rounding this row is about
+    const on = spending(0.3);
+    expect(on.errors).toEqual([]);
+    const at = simulate(on.executable!, { seed: 7, draws: 2 }).options[0]!;
+    expect(at.per_goal[0]).toEqual({ goal_id: 'under_a_pound', chance: 1, precision_95: [1, 1] });
+    expect(at.joint).toEqual({ chance: 1, precision_95: [1, 1] });
+    const above = simulate(spending(0.29).executable!, { seed: 7, draws: 2 }).options[0]!;
+    expect(above.per_goal[0]).toEqual({ goal_id: 'under_a_pound', withheld: { reason: 'invalid_domain', count: 2, quantities: ['spend'] } });
+  });
+
+  it('Codex r2 numbers#2 (4), spec §3.7: a window length given outside Olumi\'s reading of it is asked again before any Run on that window; reversed bounds on it withhold; never run for the given length', () => {
+    const windowed = (f: Partial<CanonicalQuantityT>) => {
+      const g = gymFilled();
+      g.quantities = g.quantities.map((q) => (q.id === 'half_year' ? { ...q, value: 12, quote: 'within a year', ...f } : q));
+      return compile(g);
+    };
+    const capped = windowed({ ceiling: 6 });
+    expect(capped.errors).toEqual([]);
+    const why = '"half year" is given as 12 month, but Olumi reads it as never above 6 month';
+    expect(capped.blockers).toEqual([{ id: 'half_year', code: 'recount', scope: ['reach_400', 'class_income'], reason: why }]);
+    for (const p of capped.perGoal) expect(p, p.goal_id).toMatchObject({ status: 'asks', asks: ['half_year'], reasons: [`needs "half year" again: ${why}.`] });
+    expect(capped.executable).toBeNull();
+    const reversed = windowed({ floor: 10, ceiling: 5 });
+    for (const p of reversed.perGoal) {
+      expect(p, p.goal_id).toMatchObject({ status: 'withheld', asks: [], reasons: ['rests on "half year": Olumi reads "half year" as never below 10 month and never above 5 month, which leaves nothing it can be.'] });
+    }
+    expect(reversed.executable).toBeNull();
+    // Contrast: within its reading the window is read, and run for 12 months.
+    const roomy = windowed({ ceiling: 12 });
+    expect(roomy.blockers).toEqual([]);
+    expect(roomy.executable!.goals.map((x) => x.window)).toEqual([{ start_period: 0, periods: 12 }, { start_period: 0, periods: 12 }]);
+  });
+
   it('DL ruling 4 (S2 law 9d34ef05+): a plausible range is a spread, never a point and never an invented domain; one with no room is HELD; a most likely figure at an end is an error', () => {
     const withCosts = (f: Partial<CanonicalQuantityT>) => { const m = bakery(); m.quantities = m.quantities.map((q) => (q.id === 'costs' ? { ...q, value: null, ...f } : q)); return compile(m); };
     // A wide money range with no most likely figure: read unbounded (money carries no invented domain), so it calculates.

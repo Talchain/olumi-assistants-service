@@ -286,6 +286,11 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
    * dependency authority (`restsOn`), timings included, so a basis and a driver never miss what the chance rests on. */
   const upstream = (roots: readonly string[], optionId: string | null): Set<string> => restsOn(model, roots, optionId);
 
+  /** A range's law as the simulator draws it, and what it is kept to: its declared domain, a chance's within 0 to 1 (spec §3.7). */
+  const lawOf = (id: string, d: RangeDist): { domain: Domain | undefined; reading: ReturnType<typeof rangeLaw> } => {
+    const domain = model.risks.some((r) => r.occurrence === id) ? { min: Math.max(0, d.domain?.min ?? 0), max: Math.min(1, d.domain?.max ?? 1) } : d.domain;
+    return { domain, reading: rangeLaw(d, domain === undefined ? {} : { domain }) };
+  };
   /** A domain's ends in plain words (alpha G2): "never below 0 member", "0 to 1". */
   const canBe = (id: string, unit: string, d: Domain | undefined): string => {
     const min = d?.min !== undefined && Number.isFinite(d.min) ? sayOf(id, d.min, unit) : null, max = d?.max !== undefined && Number.isFinite(d.max) ? sayOf(id, d.max, unit) : null;
@@ -300,8 +305,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       // probability law; the person's bounds stay theirs and are named as such.
       // The PL's range law (AMEND): conditioned on the person's bounds, or on a domain, as the simulator draws it.
       const d: RangeDist = x.dist;
-      const chance = model.risks.some((r) => r.occurrence === x.id), domain = chance ? { min: 0, max: 1 } : d.domain;
-      const reading = rangeLaw(d, chance ? { domain: { min: 0, max: 1 } } : {});
+      const { domain, reading } = lawOf(x.id, d);
       const ends = `${sayOf(x.id, d.low, x.unit)} to ${sayOf(x.id, d.high, x.unit)}`;
       // DL ruling (author not recorded): a range whose basis is neither the person's nor Olumi's is listed as such, never
       // passed as the person's; `rangeLaw` draws it unbounded (only a person's stated bounds condition the draw).
@@ -501,9 +505,14 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const switches = new Set(model.options.flatMap((o) => o.sets.map((s) => s.quantity)));
   const SETTINGS = ['low end', 'middle', 'high end'];
   const sweepDraws = Math.min(SWEEP_DRAWS, result.draws);
+  /** Its low end, middle and high end, within what it is drawn within (spec §3.7): never a setting it can never be. */
+  const settingsOf = (x: Quantity & { dist: RangeDist }): [number, number, number] => {
+    const r = lawOf(x.id, x.dist).reading, low = r.kind === 'normal' ? Math.max(x.dist.low, r.lower) : x.dist.low, high = r.kind === 'normal' ? Math.min(x.dist.high, r.upper) : x.dist.high;
+    return [low, (low + high) / 2, high];
+  };
   const atEnds = new Map<string, readonly SimResult[]>();
   const endsOf = (x: Quantity & { dist: RangeDist }): readonly SimResult[] => {
-    if (!atEnds.has(x.id)) atEnds.set(x.id, [x.dist.low, (x.dist.low + x.dist.high) / 2, x.dist.high].map((value) => simulate({ ...model, quantities: model.quantities
+    if (!atEnds.has(x.id)) atEnds.set(x.id, settingsOf(x).map((value) => simulate({ ...model, quantities: model.quantities
       .map((z) => (z.id === x.id ? { ...z, dist: { kind: 'fixed' as const, value, author: 'olumi' as const } } : z)) }, { seed: result.seed, draws: sweepDraws })));
     return atEnds.get(x.id)!;
   };
@@ -530,7 +539,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const { x, at } = best;
     const author = meta(x.id)?.author === 'unverified' ? 'unverified' as const : x.dist.basis === 'person_range' ? 'person' as const : 'olumi' as const;
     const whose = author === 'unverified' ? NOT_IN_THEIR_WORDS : author === 'person' ? '(your range)' : '(Olumi’s estimate)';
-    const [low, middle, high] = [x.dist.low, (x.dist.low + x.dist.high) / 2, x.dist.high].map((value, i) => ({ value, display: shown(at[i]!, sweepDraws)?.display ?? null }));
+    const [low, middle, high] = settingsOf(x).map((value, i) => ({ value, display: shown(at[i]!, sweepDraws)?.display ?? null }));
     const said = (e: End) => `(${sayOf(x.id, e.value, x.unit)}) ${e.display ?? 'could not be tested'}`;
     const others = untested.filter((t) => t.x.id !== x.id);
     return { kind: 'available', driver: { quantity: x.id, author, low: low!, middle: middle!, high: high!, swing_points: Number((best.swing * 100).toFixed(1)), draws: sweepDraws,

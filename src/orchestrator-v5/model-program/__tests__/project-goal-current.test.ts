@@ -128,6 +128,24 @@ describe('exact current levels on the canonical projection', () => {
     expect(node(graph, 'goal').observed_state).toBeUndefined();
   });
 
+  it('Codex r2 numbers#2 (5), spec §3.7: a worked-out level outside Olumi’s floor has no exact level today, as the Run reads it; within it, it does', () => {
+    // −1 + 25 × 0 = −1 orders a week today, against Olumi's floor of 0 on orders: never projected as today's level (the canvas
+    // reads raw_value as the goal's worked-out level). With no floor, −1 is a level it can be, and is projected.
+    const at = (floor: number | null) => {
+      const model = scenario();
+      Object.assign(model.quantities.find((q) => q.id === 'base')!, { value: -1 });
+      Object.assign(model.quantities.find((q) => q.id === 'orders')!, { floor });
+      return projected(model);
+    };
+    const floored = at(0);
+    expect(floored.compiled.executable!.quantities.find((q) => q.id === 'orders')!.domain).toEqual({ min: 0 });
+    expect(exactInitialValues(floored.compiled.executable!).has('orders')).toBe(false);
+    for (const id of ['orders', 'goal']) expect(node(floored.graph, id).observed_state, id).toBeUndefined();
+    const free = at(null);
+    expect(exactInitialValues(free.compiled.executable!).get('orders')).toBe(-1);
+    for (const id of ['orders', 'goal']) expect(node(free.graph, id).observed_state, id).toEqual({ value: -1, raw_value: -1, unit: 'order/week' });
+  });
+
   it('returns the displayed percent scale, not the engine’s fraction', () => {
     const model = scenario();
     for (const q of model.quantities) if (['base', 'gain', 'orders', 'target'].includes(q.id)) q.unit = '%';
