@@ -303,7 +303,7 @@ describe('a model program\'s postimage through the real /graph/register', () => 
     expect(append).toHaveBeenCalledTimes(1);
   });
 
-  it('KEPT NEGATIVES (storage integrity on a program save): CAS, the held cards\' read, schema, size and the structural floor each still refuse, and nothing is written', async () => {
+  it('KEPT NEGATIVES (storage integrity on a program save): CAS, the held cards\' read, schema and the graph contract each still refuse, and nothing is written (S1 strip: no size cap, W11 off)', async () => {
     const first = withNewRun({ model_program: MODEL_PROGRAM, canonical: olumisSetting(), seed: seedOf(SCENARIO), person_words: [BRIEF], runs: [] });
     const next = withNewRun({ ...first.program, canonical: askedSetting(first.program.canonical) }).graph;
     const nodes = next.nodes as Rec[], edges = next.edges as Rec[];
@@ -315,8 +315,6 @@ describe('a model program\'s postimage through the real /graph/register', () => 
       ['nodes not a list', { ...next, nodes: 'none' }, 422, 'GRAPH_SHAPE_INVALID', () => {}],
       // The graph contract refuses it (the legacy kind repair never runs on a program: DL 26 Oct, spec §3).
       ['a node with no kind', { ...next, nodes: nodes.map((n, i) => (i === 0 ? { ...n, kind: undefined } : n)) }, 422, 'GRAPH_CONTRACT_INVALID', () => {}],
-      // A program's own cap (W11): CEE analyses it, never PLoT, so PLoT's 50 does not bind it; past its own 150 it still refuses.
-      ['too many nodes', { ...next, nodes: [...nodes, ...Array.from({ length: PROGRAM_GRAPH_MAX_NODES }, (_, i) => ({ id: `extra_${i}`, kind: 'factor', label: 'x' }))] }, 422, 'GRAPH_TOO_LARGE', () => {}],
       ['a duplicate node id', { ...next, nodes: [...nodes, { ...nodes.find((n) => n.kind === 'factor')! }] }, 422, 'GRAPH_INVARIANT_VIOLATION', () => {}],
       ['a link to no node', { ...next, edges: [...edges, { ...edges[0]!, id: 'dangling', to: 'no_such_node' }] }, 422, 'GRAPH_INVARIANT_VIOLATION', () => {}],
     ];
@@ -391,14 +389,16 @@ describe('a model program\'s postimage through the real /graph/register', () => 
       expect(out.assistantText.split('\n\n')[0]).toBe('I\'ve drafted a first model of: Should the bakery buy a second oven?');
     });
 
-    it('(b) a program first draft past 150 cards is still refused GRAPH_TOO_LARGE at the program cap, nothing is written, and the code reaches the tool call (the words unchanged)', async () => {
-      const { out, read, answers, cards } = await firstDraft(PROGRAM_GRAPH_MAX_NODES);
-      expect(cards).toBeGreaterThan(PROGRAM_GRAPH_MAX_NODES);
-      expect(answers.map((a) => a.details)).toEqual([{ code: 'GRAPH_TOO_LARGE', nodes: cards, max_nodes: PROGRAM_GRAPH_MAX_NODES }]);
-      expect(out.toolCalls).toEqual([{ name: 'draft_canonical_model', ok: false, outcome: 'refused', mutated: false, refusal: 'save_refused', code: 'GRAPH_TOO_LARGE' }]);
-      expect(out.assistantText).toBe('The model could not be saved (refused). Nothing was changed.');
-      expect(out.payload.model_program).toMatchObject({ turn: 'draft', saved: false, write: 'refused' });
-      expect([out.mutated, out.verifiedSave, append.mock.calls.length, isSavedRead(read)]).toEqual([false, false, 0, false]);
+    it('(b) S1 strip (W11 off): a program first draft past the old 150-card cap saves, with its receipt; the readback is every card', async () => {
+      expect(PROGRAM_GRAPH_MAX_NODES).toBe(Number.POSITIVE_INFINITY);
+      const { out, read, answers, cards } = await firstDraft(150);
+      expect(cards).toBeGreaterThan(150);
+      expect(answers).toHaveLength(1);
+      expect(answers[0]!.registered, JSON.stringify(answers[0])).toBe(true);
+      expect(out.payload.model_program).toMatchObject({ turn: 'draft', saved: true, write: 'saved' });
+      expect(append).toHaveBeenCalledTimes(1);
+      if (!isSavedRead(read)) throw new Error('no readback');
+      expect((read.graph.nodes as Rec[]).length).toBe(cards);
     });
 
     it('(c) CONTRAST: a legacy (non-program) graph of 51 cards is refused exactly as today, from CEE\'s writer or a client; the same graph as a program saves', async () => {

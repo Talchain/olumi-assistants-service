@@ -34,7 +34,6 @@ vi.mock('../../orchestrator/user-identity.js', async (importOriginal) => ({ ...(
 
 import registerRoute from '../assist.v1.scenario-graph-register.js';
 import scenarioGraphRoute from '../assist.v1.scenario-graph.js';
-import { PROGRAM_GRAPH_MAX_NODES } from '../../config/graphCaps.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { seedOf } from '../../orchestrator-v5/model-program-turn/evaluate.js';
 import { withNewRun } from '../../orchestrator-v5/model-program-turn/program-save.js';
@@ -81,10 +80,11 @@ async function realRoutes() {
 }
 
 /**
- * The bakery saved, and a pressed card on it: `tooLarge`, a program the store will not take (more figures than a saved model
- * may hold: a program's own cap, W11); otherwise one ordinary new figure.
+ * The bakery saved, and a pressed card on it: `refusedByStore`, a program the store will not take (a figure whose id is an
+ * option's, so its graph holds one node id twice; the size cap W11 that used to refuse here is off the path, S1 strip);
+ * otherwise one ordinary new figure.
  */
-async function pressedCard(tooLarge: boolean) {
+async function pressedCard(refusedByStore: boolean) {
   const routes = await realRoutes();
   const first = withNewRun({ model_program: MODEL_PROGRAM, canonical: bakery(), seed: seedOf(SCENARIO), person_words: [BRIEF], runs: [] });
   const created = await routes.dispatch(`/assist/v1/scenarios/${SCENARIO}/graph/register`, { graph: first.graph, thin_core: true, expected_graph_identity_hash: null, brief_text: BRIEF });
@@ -92,7 +92,8 @@ async function pressedCard(tooLarge: boolean) {
   const base = await readSaved({ dispatch: routes.dispatch }, SCENARIO);
   if (!isSavedRead(base)) throw new Error('no saved base');
   const big = bakery();
-  big.quantities.push(...Array.from({ length: tooLarge ? PROGRAM_GRAPH_MAX_NODES : 1 }, (_, i) => q(`stall_${i}`, 'loaf/week', { status: 'asked', question: `How many loaves does stall ${i} sell?` })));
+  big.quantities.push(refusedByStore ? q('second_oven', 'loaf/week', { status: 'asked', question: 'How many loaves does the second oven sell?' })
+    : q('stall_0', 'loaf/week', { status: 'asked', question: 'How many loaves does stall 0 sell?' }));
   const next: SavedProgram = withNewRun({ ...first.program, canonical: big }).program;
   const proposals = new ProposalStore();
   const card = holdProgramCard(proposals, { scenarioId: SCENARIO, userId: null, graphHash: base.graphHash, identity: base.identity! },
@@ -113,7 +114,7 @@ describe('a pressed program card whose save is refused, as the agent reads it', 
     const told = await press();
     expect(told).toEqual({ status: 'refused', reason: 'registration_refused',
       detail: 'The person’s approval of this card was received; the save itself was refused by the model store’s check, so nothing was written and the saved model is unchanged. Pressing the card again would be refused the same way.',
-      data: { code: 'GRAPH_TOO_LARGE', written: false } });
+      data: { code: 'GRAPH_INVARIANT_VIOLATION', written: false } });
     // Nothing was written: one append (the first save), and the read serves the base, byte for byte.
     expect(append).toHaveBeenCalledTimes(1);
     const after = await readSaved({ dispatch }, SCENARIO);

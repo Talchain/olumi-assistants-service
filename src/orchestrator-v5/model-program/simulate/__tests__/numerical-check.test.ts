@@ -373,12 +373,17 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     expect(between.filter((v) => v < 10 || v > 30)).toEqual([]);
     expect(between.filter((v) => v === 10 || v === 30)).toEqual([]);
 
-    const olumi = (d?: Domain): Quantity => kinded({ id: 'k', label: 'k', unit: '', reading: 'state', dist: { kind: 'range', low: -2.2, high: -1.4, mode: -1.8, basis: 'olumi_estimate', range_kind: 'plausible' } }, 'bounds', d);
-    for (const k of [drawsOf(olumi()), drawsOf(olumi({ max: 0 }))]) {
-      const outside = k.filter((v) => v < -2.2 || v > -1.4).length / N;
-      expect(Math.abs(outside - 0.2)).toBeLessThanOrEqual(0.00554);
+    // M1 (S1 strip, Paul 26 Oct): Olumi's range declared 'bounds' is read by its declared kind, as hard ends, exactly as a
+    // person's: every draw within [−2.2, −1.4], none on an end; with a domain too. Contrast: declared plausible, 1 in 5 falls outside.
+    const olumi = (kind: RangeKind, d?: Domain): Quantity => kinded({ id: 'k', label: 'k', unit: '', reading: 'state', dist: { kind: 'range', low: -2.2, high: -1.4, mode: -1.8, basis: 'olumi_estimate', range_kind: 'plausible' } }, kind, d);
+    for (const k of [drawsOf(olumi('bounds')), drawsOf(olumi('bounds', { max: 0 }))]) {
+      expect(k.filter((v) => v < -2.2 || v > -1.4)).toEqual([]);
+      expect(k.filter((v) => v === -2.2 || v === -1.4)).toEqual([]);
     }
-    expect(Math.max(...drawsOf(olumi({ max: 0 })))).toBeLessThanOrEqual(0);
+    expect(rangeLaw(olumi('bounds').dist as RangeDist)).toMatchObject({ ends: 'hard_bounds', lower: -2.2, upper: -1.4 });
+    const loose = drawsOf(olumi('plausible')).filter((v) => v < -2.2 || v > -1.4).length / N;
+    expect(Math.abs(loose - 0.2)).toBeLessThanOrEqual(0.00554);
+    expect(Math.max(...drawsOf(olumi('plausible', { max: 0 })))).toBeLessThanOrEqual(0);
 
     const law = (q: Quantity, opts = {}) => {
       const r = rangeLaw(q.dist as RangeDist, opts);

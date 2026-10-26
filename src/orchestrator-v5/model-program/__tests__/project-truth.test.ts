@@ -116,14 +116,15 @@ describe('W3b 2 · a risk card reads the chance the model holds', () => {
     expect(nodeOf(projected(yearly, CLUB_BRIEF), 'rival_opens').event_risk?.horizon).toEqual({ months: 24 });
   });
 
-  it('no chance is said where the model cannot say it over months, or the figure is no one\'s or not in their words', () => {
+  it('no chance is said where the model cannot say it over months, or the figure is no one\'s; S1 strip (A25 off): words not in theirs are the AI\'s to claim', () => {
     const weekly = rival();
     weekly.period = 'week';
     weekly.quantities = weekly.quantities.map((x) => (x.id === 'months' ? { ...x, unit: 'week', value: 12, quote: 'within twelve weeks' } : x));
     expect(nodeOf(projected(weekly, CLUB_BRIEF), 'rival_opens')).not.toHaveProperty('event_risk');
     const unverified = rival();
     unverified.quantities = unverified.quantities.map((x) => (x.id === 'rival_chance' ? { ...x, status: 'known', author: 'person', value: 0.25, low: null, high: null, range_kind: null, quote: 'words they never wrote', basis: null } : x));
-    expect(nodeOf(projected(unverified, CLUB_BRIEF), 'rival_opens')).not.toHaveProperty('event_risk');
+    expect(nodeOf(projected(unverified, CLUB_BRIEF), 'rival_opens').event_risk)
+      .toEqual({ version: 1, occurrence: { p_low: 0.25, p_high: 0.25, meaning: 'at_least_once_within_horizon', basis: 'user' }, horizon: { months: 3 } });
     const asked = rival();
     asked.quantities = asked.quantities.map((x) => (x.id === 'rival_chance' ? { ...x, status: 'asked', author: 'person', value: null, low: null, high: null, range_kind: null, question: 'How likely is a rival to open?', basis: null } : x));
     expect(nodeOf(projected(asked, CLUB_BRIEF), 'rival_opens')).not.toHaveProperty('event_risk');

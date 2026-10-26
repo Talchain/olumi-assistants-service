@@ -14,7 +14,7 @@ import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
 import { APPROXIMATE_FIGURE, CanonicalModel, withDeclaredTiming, type CanonicalModelT, type CanonicalQuantityT } from '../../model-program/canonical.js';
-import { compile, isStructuralConstant, normalise } from '../../model-program/compile.js';
+import { compile, normalise } from '../../model-program/compile.js';
 import { CORE_ALIGNED_INSTRUCTIONS, PROGRAM_TOOL_DESCRIPTIONS } from '../../core-route/instructions.js';
 import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
@@ -540,7 +540,7 @@ describe('the model-program turn on the real core route', () => {
     const r = await turn({ message: BRIEF });
     expect(sent).toHaveLength(2);
     const errors = compile(bakeryWithDefect(), { sourceText: BRIEF }).errors;
-    expect(errors.map((e) => e.code)).toEqual(['olumi_no_range']);
+    expect(errors.map((e) => e.code)).toEqual(['range_order']);
     expect(sent[1]!.input).toEqual([{ role: 'user', content: BRIEF }, { role: 'assistant', content: bad },
       { role: 'user', content: `${REPAIR_PREFIX}\n- ${errors[0]!.message}` }]);
     expect(sent[1]!.instructions).toBe(sent[0]!.instructions);
@@ -979,7 +979,7 @@ describe('the model-program turn on the real core route', () => {
     });
   });
 
-  it('verbatim (DL 24 Oct, 6 refused reading cards in the combined measure): an empty unknown slot of theirs states nothing, like an asked one, so the reading card issues; a known figure in words not theirs is still refused; a quote differing only in case or a curly quote is theirs, as compile reads it', async () => {
+  it('verbatim (DL 24 Oct), S1 strip (A2 off): an empty unknown slot of theirs issues the reading card; a known figure in words not theirs, or none, is no longer refused: it is shown as the AI wrote it', async () => {
     // The measured class: their figure with no figure, no question and no words, not known yet.
     const m = bakery();
     m.quantities.push(q('other_costs', 'GBP', { status: 'unknown', basis: 'Nobody has said what else the oven costs to run.', quote: null }));
@@ -990,11 +990,13 @@ describe('the model-program turn on the real core route', () => {
     expect(r.cards[0].reading).toBe(true);
     expect(r.cards[0].changes.find((c: Json) => c.id === 'other_costs')).toMatchObject({ action: 'add', author: 'person' });
     const read = (edit: (d: CanonicalModelT) => void) => { const d = bakery(); edit(d); return readingOf(d, { words: [BRIEF], approver: null }); };
-    // Still refused: a KNOWN figure of theirs in words they did not write, one with no words, and an unknown slot holding a figure.
-    expect(read((d) => setQ(d, 'base_sales', { quote: 'We bake about 300 loaves' }))).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['base_sales'] });
-    expect(read((d) => setQ(d, 'base_sales', { quote: null }))).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['base_sales'] });
-    expect(read((d) => { d.quantities.push(q('other_costs', 'GBP', { status: 'unknown', value: 50, basis: 'Synthetic.', quote: null })); }))
-      .toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['other_costs'] });
+    // No longer refused (A2 off): a KNOWN figure of theirs in words they did not write, one with no words, and an unknown slot
+    // holding a figure. The card shows each as the AI wrote it, theirs, and their press is what accepts it.
+    const shown = (r: ReturnType<typeof read>, id: string) => (r.ok ? r.changes.find((c) => c.id === id) : r);
+    expect(shown(read((d) => setQ(d, 'base_sales', { quote: 'We bake about 300 loaves' })), 'base_sales')).toMatchObject({ action: 'add', author: 'person' });
+    expect(shown(read((d) => setQ(d, 'base_sales', { quote: 'We bake about 300 loaves' })), 'base_sales')!.after).toContain('in your words "We bake about 300 loaves"');
+    expect(shown(read((d) => setQ(d, 'base_sales', { quote: null })), 'base_sales')).toMatchObject({ action: 'add', author: 'person' });
+    expect(read((d) => { d.quantities.push(q('other_costs', 'GBP', { status: 'unknown', value: 50, basis: 'Synthetic.', quote: null })); }).ok).toBe(true);
     // One form with compile: a quote differing only in case, or in a curly quote for their straight one, is theirs, on the card
     // as in compile.
     const folded = bakery();
@@ -1002,7 +1004,7 @@ describe('the model-program turn on the real core route', () => {
     setQ(folded, 'budget', { quote: 'We have £3,000 to spend and don’t know' });
     expect(compile(folded, { sourceText: BRIEF }).unverified).toEqual([]);
     expect(readingOf(folded, { words: [BRIEF], approver: null }).ok).toBe(true);
-    expect(read((d) => setQ(d, 'base_sales', { quote: 'We bake 300 loaves a week’' })).ok).toBe(false); // contrast: an extra mark is not theirs
+    expect(read((d) => setQ(d, 'base_sales', { quote: 'We bake 300 loaves a week’' })).ok).toBe(true); // S1 strip: an extra mark is no longer refused either
   });
 
   it('DL 24 Oct (#3728): on the reading card a pure-number unit reads plainly ("1/oven" is "per oven"); a real unit is unchanged', () => {
@@ -1099,7 +1101,7 @@ describe('the model-program turn on the real core route', () => {
     expect(said(null)).toBe(`no figure yet (in loaf/week/oven), a rate, not known yet, based on "${LOST_BASIS}"`);
   });
 
-  it('issue 40 (Codex #3742): a direction on a per-unit rate written as a two-part product (one size times one driver) is kept and worded, unknown or across zero, as on an effect\'s link; times another size it is no link, and its direction is cleared', () => {
+  it('issue 40 (Codex #3742): a direction on a per-unit rate written as a two-part product (one size times one driver) is kept and worded, unknown or across zero, as on an effect\'s link; times another size it is no link, and S1 strip (B3 off): its direction is kept and said alone', () => {
     const BASIS = 'Nobody has said how many loaves a new oven loses.';
     /** The draft path (read as `normalise` reads it, then the reading card): the rate's direction kept, and its card words. */
     const rated = (f: Partial<CanonicalQuantityT>, driver = 'ovens_added') => {
@@ -1114,9 +1116,9 @@ describe('the model-program turn on the real core route', () => {
       .toEqual({ direction: 'lowers', after: `no figure yet (in loaf/week/oven), ↓ lowers extra loss, a rate, not known yet, based on "${BASIS}"` });
     expect(rated({ status: 'estimated', low: -20, high: 10, range_kind: 'plausible', basis: BASIS, direction: 'raises' }))
       .toEqual({ direction: 'raises', after: `from -20 to 10 loaf/week/oven (a plausible range), ↑ raises extra loss, a rate, an estimate, based on "${BASIS}"` });
-    // Contrast: times another size ("sell through", a coefficient) it is no per-unit rate and no link: cleared, never worded.
+    // Contrast: times another size ("sell through", a coefficient) it is no per-unit rate and no link: kept as written, said alone.
     expect(rated({ status: 'unknown', basis: BASIS, direction: 'lowers' }, 'sell_through'))
-      .toEqual({ direction: null, after: `no figure yet (in loaf/week/oven), a rate, not known yet, based on "${BASIS}"` });
+      .toEqual({ direction: 'lowers', after: `no figure yet (in loaf/week/oven), ↓ lowers, a rate, not known yet, based on "${BASIS}"` });
   });
 
   it('alpha G16: approval records WHO approved (author_id) and never who said it: author, party and quote stay each item\'s own', () => {
@@ -1137,7 +1139,7 @@ describe('the model-program turn on the real core route', () => {
     expect((v.model.quantities as Json[]).filter((q) => q.author === 'olumi').length).toBeGreaterThan(0);
   });
 
-  it('issue 40: a direction the host clears (on a sized link, or on a figure no link has) never shows as a change nor refuses one: a saved program holding them takes an unrelated update; the AI\'s change to a direction the model uses still shows', async () => {
+  it('issue 40, S1 strip (B3 off): a direction the saved program holds (on a sized link, or on a figure no link has) is kept and never shows as a change nor refuses one: a saved program holding them takes an unrelated update; the AI\'s change to a direction the model uses still shows', async () => {
     const m = withOlumiLinks(bakery(), q('oven_delay', 'loaf/week/oven', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: -10, low: -20, high: -5, range_kind: 'plausible',
       basis: 'A new oven takes a few weeks to bed in.' }));
     replies = [JSON.stringify(m)];
@@ -1180,18 +1182,18 @@ describe('the model-program turn on the real core route', () => {
   /** The size's own entry when its direction goes: said on what it moved, before. */
   const SIZE_SIGN_GOES = { id: 'lost_bake_time', kind: 'quantity', action: 'change', label: 'lost bake time', before: 'no figure yet (in loaf/week/oven), ↓ lowers sales', after: 'no figure yet (in loaf/week/oven)', author: 'olumi', family: 'quantity' };
 
-  it('issue 40 (marketing-r3): unlinking a link sized by Olumi\'s unknown with a stated direction, the size kept, is on the card and saved, never refused for the direction no drawn link then uses', async () => {
+  it('issue 40 (marketing-r3), S1 strip (B3 off): unlinking a link sized by Olumi\'s unknown with a stated direction, the size kept, is on the card and saved, its direction kept as the AI wrote it', async () => {
     const { deps, propose } = await linkUpdate();
-    // The link taken off sales, its size kept as saved: the host clears the direction no drawn link now uses.
+    // The link taken off sales, its size kept as saved, direction and all: the host clears nothing, so only the link changes.
     const p = await propose((d) => { d.relations = d.relations.map((r) => (r.form === 'effect' ? { ...r, terms: r.terms.filter((t) => t.coefficient !== 'lost_bake_time') } : r)); });
     expect(p.status, JSON.stringify(p)).toBe('ok');
     const LINKS = 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "sold per oven" for each "ovens added" 0 oven';
-    expect(p.data.changes).toEqual([SIZE_SIGN_GOES, { id: 'sales_rel', kind: 'relation', action: 'change', label: 'sales',
+    expect(p.data.changes).toEqual([{ id: 'sales_rel', kind: 'relation', action: 'change', label: 'sales',
       before: `${LINKS}, changes by "lost bake time" (no figure yet loaf/week/oven) for each "ovens added" 0 oven`, after: `${LINKS}, no link 2`, author: 'olumi', family: 'relation' }]);
-    // Approved, the unlink is saved: the size kept, with no direction, and the link gone.
+    // Approved, the unlink is saved: the size kept, with its direction, and the link gone.
     expect(await applyProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const saved = persisted!.living_model.canonical as CanonicalModelT;
-    expect(saved.quantities.find((x) => x.id === 'lost_bake_time')).toMatchObject({ status: 'unknown', author: 'olumi', basis: LOST_BASIS, direction: null });
+    expect(saved.quantities.find((x) => x.id === 'lost_bake_time')).toMatchObject({ status: 'unknown', author: 'olumi', basis: LOST_BASIS, direction: 'lowers' });
     expect(saved.relations.find((r) => r.id === 'sales_rel')).toMatchObject({ terms: [{ driver: 'ovens_added', coefficient: 'sold_per_oven' }] });
   });
 
@@ -1478,9 +1480,13 @@ describe('the model-program turn on the real core route', () => {
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
     const args = { public_label: 'Oven price £2,500', basis: 'their answer', request: 'The oven price is their answer: about £2,500.', remove: [] };
     const answer = (quote: string) => savedWith((m) => setQ(m, 'oven_price', { status: 'known', value: 2500, question: null, quote, basis: APPROXIMATE_FIGURE }));
-    // Contrast first: a figure of theirs whose words are not theirs, verbatim, is refused, and nothing is proposed.
+    // S1 strip (A2 off): a figure of theirs whose words are not theirs, verbatim, is no longer refused: the card shows the
+    // AI's own words as theirs, and only the person's press accepts it (its own store, so it holds no card of this turn's).
     replies = [answer('about £2,500 I think')];
-    expect(await proposeProgramChange(deps, ctx, args)).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['oven_price'], check: 'their_words' } });
+    const loose = await proposeProgramChange({ dispatch, proposals: new ProposalStore() }, { ...ctx, turn_id: randomUUID() }, args) as Json;
+    expect(loose.status, JSON.stringify(loose)).toBe('ok');
+    expect(loose.data.changes[0]).toMatchObject({ id: 'oven_price', author: 'person' });
+    expect(loose.data.changes[0].after).toContain('in your words "about £2,500 I think"');
     replies = [answer(words)];
     const proposed = await proposeProgramChange(deps, ctx, args) as Json;
     expect(proposed.status, JSON.stringify(proposed)).toBe('ok');
@@ -1656,12 +1662,13 @@ describe('the model-program turn on the real core route', () => {
     expect(asked(ah.runs.at(-1) as Json)).toEqual([]);
     expect(others(ah.canonical, 'oven_price', 'landlord_agrees')).toEqual(others(saved, 'oven_price'));
 
-    // (5) A returned record that fails a words check is refused, by its id alone, whatever else is returned beside it:
-    // words not theirs; their figure moved under their earlier words (not this turn's).
-    expect(await propose({ quantities: [{ ...baseSales, quote: 'about 320 loaves I think' }], conditions: [landlord] }))
-      .toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['base_sales'], check: 'their_words' } });
-    expect(await propose({ quantities: [{ ...baseSales, quote: 'We bake 300 loaves a week' }], conditions: [landlord] }))
-      .toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['base_sales'], check: 'this_turn' } });
+    // (5) S1 strip (A2, A2b off): no words check refuses a returned record: words not theirs, or their figure moved under their
+    // earlier words, are proposed as the AI wrote them, on the card for the person's press.
+    for (const [quote, after] of [['about 320 loaves I think', '320 loaf/week, in your words "about 320 loaves I think"'], ['We bake 300 loaves a week', '320 loaf/week']]) {
+      const p = await propose({ quantities: [{ ...baseSales, quote }], conditions: [landlord] });
+      expect(p.status, JSON.stringify(p)).toBe('ok');
+      expect(p.data.changes.find((c: Json) => c.id === 'base_sales')).toMatchObject({ action: 'change', author: 'person', after });
+    }
 
     // (6) A merged model that does not compile is refused as today, after the drafter's two repairs; each repair asks for
     // the changes again (never the whole model), after the changes it returned.
@@ -1680,7 +1687,7 @@ describe('the model-program turn on the real core route', () => {
     expect(registered).toHaveLength(1); // proposing saves nothing
   });
 
-  it('Codex BLOCK on #3740: an update is read as a first draft is only where it speaks: a structure figure it returns takes the compiler\'s reading; a saved one it did not return stays exactly as saved, though its new context would read it otherwise', async () => {
+  it('Codex BLOCK on #3740: an update is read as a first draft is only where it speaks: S1 strip (B2 off): a structure figure it returns is read as written; a saved one it did not return stays exactly as saved', async () => {
     replies = [JSON.stringify(club())];
     expect((await turn({ message: CLUB_BRIEF })).json().model_program.saved).toBe(true);
     const read = programReadOf(persisted!);
@@ -1702,8 +1709,8 @@ describe('the model-program turn on the real core route', () => {
     const onePromo = saved.quantities.find((x) => x.id === 'one_promo')!;
     expect(onePromo).toMatchObject({ author: 'structure', status: 'known', value: 1 });
     expect(JSON.stringify(held.quantities.find((x) => x.id === 'one_promo'))).toBe(JSON.stringify(onePromo));
-    // Contrast: returned, the figure takes the first draft's reading (a 2 no structure defines is theirs to give).
-    expect(held.quantities.find((x) => x.id === 'two_promos')).toMatchObject({ author: 'person', status: 'asked', value: null });
+    // Returned, the figure is the AI's as written (the structure rewrite is off the path).
+    expect(held.quantities.find((x) => x.id === 'two_promos')).toMatchObject({ author: 'structure', status: 'known', value: 2 });
   });
 
   it('THE WITNESS: a stock, a limit and one Olumi estimate, with known answers, through draft, an in-card change, a chat correction, Runs and cold reopens', async () => {
@@ -2245,44 +2252,35 @@ describe('the model-program turn on the real core route', () => {
     expect(stableStringify(read.data.run.goal_chance)).toBe(stableStringify(stored.goal_chance));
   });
 
-  it('buddy #3709 r7: a first draft is saved, receipted and read back AS THE COMPILER READ IT — a structure figure no one stated is their question, never known/structure/12', async () => {
+  it('buddy #3709 r7, S1 strip (B2, B7 off): a first draft is saved, receipted and read back AS THE AI WROTE IT — a structure figure no one stated stays the AI\'s structure, with no repair', async () => {
     const m = bakery();
     m.quantities.push(q('current_output', 'loaf/week', { author: 'structure', value: 12 }), q('extra', 'loaf/week', { kind: 'derived', status: 'derived', author: 'olumi' }));
     m.relations.push({ form: 'definition', id: 'extra_rel', defines: 'extra', op: 'sum', parts: [{ id: 'current_output', sign: 1 }], author: 'olumi', quote: null, ...at });
-    // AIE §5 AMEND (DL 24 Oct): read as theirs, it waits on them with no question, so a FIRST draft is refused and repaired:
-    // the AI gives the question. The code still writes no question of its own, and never keeps 12 as known or structure.
-    const repaired = JSON.parse(JSON.stringify(m)) as CanonicalModelT;
-    setQ(repaired, 'current_output', { author: 'person', status: 'asked', value: null, basis: null, quote: null, question: 'How many loaves a week does the oven make now?' });
-    replies = [JSON.stringify(m), JSON.stringify(repaired)];
+    replies = [JSON.stringify(m)];
     const r = (await turn({ message: BRIEF })).json();
     expect(r.model_program.saved).toBe(true);
-    const first = r.model_program.draft.attempts[0].errors as Json[];
-    expect(first.map((e) => [e.code, e.items])).toEqual([['asked_no_question', ['current_output']]]);
-    expect(String(sent[1]!.input.at(-1).content)).toContain('"current output" (current_output) waits on the person but has no question.');
-    const asked = { author: 'person', status: 'asked', value: null, question: 'How many loaves a week does the oven make now?', basis: null };
-    expect(persisted!.living_model.canonical.quantities.find((x: Json) => x.id === 'current_output')).toMatchObject(asked);
+    expect(sent).toHaveLength(1);
+    expect(r.model_program.draft.attempts.map((a: Json) => a.errors.length)).toEqual([0]);
+    const asWritten = { author: 'structure', status: 'known', value: 12 };
+    expect(persisted!.living_model.canonical.quantities.find((x: Json) => x.id === 'current_output')).toMatchObject(asWritten);
     vi.resetModules();
     const tools = await import('../program-tools.js');
     const read = await tools.readProgramContext({ dispatch, proposals: new ProposalStore() }, { scenario_id: SCENARIO, authenticated_user_id: null }) as Json;
-    expect((read.data.model as Json).quantities.find((x: Json) => x.id === 'current_output')).toMatchObject({ author: 'person', status: 'asked', question: 'How many loaves a week does the oven make now?' });
-    expect((read.data.blockers as Json[]).find((b) => b.id === 'current_output')).toMatchObject({ code: 'asked' });
-    expect(JSON.stringify(read.data)).not.toContain('What is "current output"?');
-    expect(JSON.stringify(read.data.model)).not.toMatch(/"id":"current_output"[^}]*"author":"structure"/);
+    expect((read.data.model as Json).quantities.find((x: Json) => x.id === 'current_output')).toMatchObject(asWritten);
+    expect(((read.data.blockers ?? []) as Json[]).find((b) => b.id === 'current_output')).toBeUndefined();
   });
 
-  it('issue 40 (marketing-r1): a first draft whose repairs keep a structural 0 as a limit\'s floor is saved on the last attempt, the floor their ask, never refused whole', async () => {
+  it('issue 40 (marketing-r1), S1 strip (B2, B7 off): a first draft with a structural 0 as a limit\'s floor is saved on its first attempt, the floor as written', async () => {
     const m = bakery();
     m.quantities.push(q('spend_floor', 'GBP', { author: 'structure', value: 0, basis: 'Nothing spent yet.' }));
     m.limits.push({ ...m.limits[0]!, id: 'floor', label: 'Spend no less than the floor', measure: { ...m.limits[0]!.measure!, cmp: '>=', bound: 'spend_floor' } });
-    // The drafter follows each repair's hint (structure, known, one exact figure), so every attempt returns the same draft.
-    replies = [JSON.stringify(m), JSON.stringify(m), JSON.stringify(m)];
+    replies = [JSON.stringify(m)];
     const r = (await turn({ message: BRIEF })).json();
     const attempts = (r.model_program.draft.attempts as Json[]).map((a) => (a.errors as Json[]).map((e) => [e.code, e.items]));
-    // The earlier attempts still need its question; the last falls back to the base behaviour (an ask is a typed blocker).
-    expect(attempts).toEqual([[['asked_no_question', ['spend_floor']]], [['asked_no_question', ['spend_floor']]], []]);
-    expect(sent).toHaveLength(3);
+    expect(attempts).toEqual([[]]);
+    expect(sent).toHaveLength(1);
     expect(r.model_program.saved).toBe(true);
-    expect(persisted!.living_model.canonical.quantities.find((x: Json) => x.id === 'spend_floor')).toMatchObject({ author: 'person', status: 'asked', value: null, question: null });
+    expect(persisted!.living_model.canonical.quantities.find((x: Json) => x.id === 'spend_floor')).toMatchObject({ author: 'structure', status: 'known', value: 0 });
   });
 
   it('several goals: each goal\'s own chance and the joint ride the Run\'s goal_chance unchanged through read, propose, apply and run', async () => {
@@ -2333,7 +2331,7 @@ describe('the model-program turn on the real core route', () => {
     expect(blockers.some((x) => x.id === 'extra_per_oven')).toBe(false);
   });
 
-  it('words#4 + Codex B1: a recount the agent reads carries the compiler\'s reason, naming their figure and Olumi\'s bound; an asked figure carries none; a Run stored before reasons is read as stored, no bound filled in', async () => {
+  it('words#4, S1 strip (A20b off): a figure outside Olumi\'s bound is no recount; the agent reads the stored Run\'s blockers as stored, an older Run\'s recount and reason included, no bound filled in', async () => {
     // Olumi's reading of what the bakery sells today (synthetic): never above 250 loaves a week, so their 300 is outside it.
     const m = bakery();
     m.quantities = m.quantities.map((x) => (x.id === 'base_sales' ? { ...x, ceiling: 250 } : x));
@@ -2342,20 +2340,21 @@ describe('the model-program turn on the real core route', () => {
     const deps = { dispatch, proposals: new ProposalStore() };
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null };
     const read = await readProgramContext(deps, ctx) as Json;
-    expect(read.data.blockers).toEqual([
-      { id: 'base_sales', code: 'recount', scope: ['more_loaves'], reason: '"base sales" is given as 300 loaf/week, but Olumi reads it as never above 250 loaf/week' },
-      // Contrast: an asked figure's blocker has no reason; what to ask is the AI's.
-      { id: 'oven_price', code: 'asked', scope: ['within_budget'] },
-    ]);
-    // A Run stored before blockers carried reasons: read as it was stored, with no bound filled in (the agent is told to name none).
-    for (const b of (persisted!.living_model.runs.at(-1).result.compile as Json).blockers as Json[]) delete b.reason;
+    // An asked figure's blocker has no reason; what to ask is the AI's.
+    expect(read.data.blockers).toEqual([{ id: 'oven_price', code: 'asked', scope: ['within_budget'] }]);
+    // A Run stored before the strip, holding a recount (with its reason, then without): read as it was stored.
+    const stored = { id: 'base_sales', code: 'recount', scope: ['more_loaves'], reason: '"base sales" is given as 300 loaf/week, but Olumi reads it as never above 250 loaf/week' };
+    const blockers = (persisted!.living_model.runs.at(-1).result.compile as Json).blockers as Json[];
+    blockers.unshift(stored);
+    expect(((await readProgramContext(deps, ctx)) as Json).data.blockers).toEqual([stored, { id: 'oven_price', code: 'asked', scope: ['within_budget'] }]);
+    for (const b of blockers) delete b.reason;
     const old = await readProgramContext(deps, ctx) as Json;
     expect(old.data.blockers).toEqual([{ id: 'base_sales', code: 'recount', scope: ['more_loaves'] }, { id: 'oven_price', code: 'asked', scope: ['within_budget'] }]);
   });
 
-  it('Codex r1 #3709 (2): the PRESENTED Run never says "on your figures" for a figure said to be theirs whose words were not found', () => {
-    // The club with the promotion's effect given as the person's own figure (5 a month): on their words it is theirs; with
-    // words that are not in what they wrote it is listed as not found, in the Run's own sentence, never "on your figures".
+  it('Codex r1 #3709 (2), S1 strip (A25 off): the PRESENTED Run says "on your figures" for a figure the AI labels theirs, whether or not its words are found', () => {
+    // The club with the promotion's effect given as the person's own figure (5 a month): theirs by its label, with or without
+    // their words (authorship is the AI's alone; misattribution is a known issue, not corrected by code).
     const m = club();
     m.quantities = m.quantities.map((x) => (x.id === 'promo_effect' ? { ...x, status: 'known', author: 'person', low: null, high: null, range_kind: null, basis: null, quote: 'five extra joins a month' } : x));
     // Both relations and the term are the person's too, so every other input is theirs.
@@ -2365,9 +2364,9 @@ describe('the model-program turn on the real core route', () => {
     const confirmed = JSON.parse(JSON.stringify(m).replaceAll('"approval":"proposed"', '"approval":"approved"')) as CanonicalModelT;
     const face = (sourceText: string) => ((evaluateCanonical(confirmed, { sourceText, seed: 7 }).view as Json).options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
     expect(face(`${CLUB_BRIEF} The promotion brings five extra joins a month.`)).toContain(', in this model, on your figures');
-    const unverified = face(CLUB_BRIEF);
-    expect(unverified).not.toContain('on your figures');
-    expect(unverified).toContain('‘promo effect’ is 5 member / month / promotion (not found in your words)');
+    const unfound = face(CLUB_BRIEF);
+    expect(unfound).toContain(', in this model, on your figures');
+    expect(unfound).not.toContain('not found in your words');
   });
 
   describe('R8: a result\'s basis names the premises and Olumi\'s figures it rests on (real path: compile → simulate → present)', () => {
@@ -2562,8 +2561,6 @@ describe('the model-program turn on the real core route', () => {
     const aimCases: readonly (readonly [string, (g: Goal) => Goal, (m: CanonicalModelT) => void, string])[] = [
       ['the goal proposed', (g) => ({ ...g, approval: 'proposed' }), () => {}, `on Olumi’s reading of ${GOAL} (not yet confirmed)`],
       ['the goal Olumi-authored (accepted)', (g) => ({ ...g, author: 'olumi', quote: null }), () => {}, `on Olumi’s reading of ${GOAL}`],
-      ['the goal not found in their words', (g) => ({ ...g, quote: 'grow to 340 members by spring' }), () => {}, `on Olumi’s reading of ${GOAL} (not yet confirmed)`],
-      ['the goal measured by Olumi\'s suggestion', (g) => ({ ...g, measure: { ...g.measure!, measure_by: 'olumi' } }), () => {}, `on Olumi’s reading of ${GOAL}`],
       ['the goal\'s window figure proposed', (g) => g, (m) => { m.quantities = m.quantities.map((x) => (x.id === 'months' ? { ...x, approval: 'proposed' } : x)); }, `on Olumi’s reading of ${GOAL} (not yet confirmed)`],
       ['a limit proposed', (g) => g, (m) => { m.limits = m.limits.map((l) => ({ ...l, approval: 'proposed' })); }, 'on Olumi’s reading of ‘Within the £800’ (not yet confirmed)'],
     ];
@@ -2578,13 +2575,23 @@ describe('the model-program turn on the real core route', () => {
       });
     }
 
-    it('buddy #3738: their premise not found in their words, or not yet accepted, is never "your" and never Olumi\'s', () => {
-      for (const [m, words] of [[approved(allTheirs()), OWN], [approved(allTheirs()), `${OWN} The council must let us use the hall.`]] as const) {
-        m.conditions.push(words === OWN ? hall : { ...hall, approval: 'proposed' });
-        const face = faceOf(m, words);
-        expect(face).toContain(', in this model, if the condition ‘The council must let us use the hall’ is met (not yet confirmed): in every simulated draw');
-        expect(face).not.toMatch(/your condition|Olumi’s condition|on your figures/);
+    it('S1 strip (A25 off): the goal\'s own label decides: one not found in their words, or measured by Olumi\'s suggestion, is "on your figures" when theirs and accepted', () => {
+      for (const goal of [(g: Goal): Goal => ({ ...g, quote: 'grow to 340 members by spring' }), (g: Goal): Goal => ({ ...g, measure: { ...g.measure!, measure_by: 'olumi' } })]) {
+        const m = approved(allTheirs());
+        m.goals = m.goals.map((g) => (g.id === 'reach_340' ? goal(g) : g));
+        expect(faceOf(m, OWN)).toContain(', in this model, on your figures');
       }
+    });
+
+    it('buddy #3738: their premise not yet accepted is never "your" and never Olumi\'s; S1 strip (A25 off): accepted, it is theirs whether or not its words are found', () => {
+      const proposed = approved(allTheirs());
+      proposed.conditions.push({ ...hall, approval: 'proposed' });
+      const face = faceOf(proposed, `${OWN} The council must let us use the hall.`);
+      expect(face).toContain(', in this model, if the condition ‘The council must let us use the hall’ is met (not yet confirmed): in every simulated draw');
+      expect(face).not.toMatch(/your condition|Olumi’s condition|on your figures/);
+      const unfound = approved(allTheirs());
+      unfound.conditions.push(hall);
+      expect(faceOf(unfound, OWN)).toContain('if your condition ‘The council must let us use the hall’ is met');
     });
 
     it('Codex #3738: the same premise reaching the chance twice (both goals rest on it, one also names it) is named once', () => {
@@ -2689,9 +2696,12 @@ describe('the model-program turn on the real core route', () => {
     });
     const propose = (c = ctx()) => proposeProgramChange(deps, c, ProgramChangeParams.parse({ public_label: 'Measure the aim', basis: 'their answer',
       request: 'The aim is measured by sales: at least 380 loaves a week, within 4 weeks.', remove: [] })) as Promise<Json>;
-    // Negative first: a figure of theirs under words they did not write is refused, and nothing is proposed.
+    // S1 strip (A2 off): a figure of theirs under words they did not write is proposed as the AI wrote it (its own store).
     replies = [measured('at least 400 loaves a week')];
-    expect(await propose()).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['more_loaves_target'] } });
+    const loose = await proposeProgramChange({ dispatch, proposals: new ProposalStore() }, ctx(), ProgramChangeParams.parse({ public_label: 'Measure the aim', basis: 'their answer',
+      request: 'The aim is measured by sales: at least 380 loaves a week, within 4 weeks.', remove: [] })) as Json;
+    expect(loose.status, JSON.stringify(loose)).toBe('ok');
+    expect(loose.data.changes.find((x: Json) => x.id === 'more_loaves_target')).toMatchObject({ author: 'person', after: '380 loaf/week, a fact, known, in your words "at least 400 loaves a week"' });
     replies = [measured(words)];
     const c = ctx();
     const p = await propose(c);
@@ -2979,10 +2989,16 @@ describe('the model-program turn on the real core route', () => {
     expect(await ask('Unassigned costs are £10,000.', [answer({ id: 'unassigned_first_year_cost', status: 'known', value: 10000, quote: 'Unassigned costs are £10,000.' })]))
       .toMatchObject({ status: 'refused', reason: 'not_an_answer' });
     expect(sent).toHaveLength(0);
-    // On the redraft path too (buddy 24 Oct): a person's figure whose status the drafter changes needs their words this turn.
+    // On the redraft path, S1 strip (A2b off): a person's figure whose status the drafter changes under their earlier words is
+    // proposed as the AI wrote it (its own store), for the person's press.
     replies = [savedWith((d) => setQ(d, 'developer_hiring_cost', { status: 'unknown', question: null, quote: saved.brief.slice(0, 40), basis: 'They do not know it yet.' }))];
-    expect(await ask('They do not know it.', [], { request: 'Mark the developer cost as not known yet.' })).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['developer_hiring_cost'] } });
+    const redraft = await proposeProgramChange({ dispatch, proposals: new ProposalStore() }, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(),
+      verified_user_messages: ['They do not know it.'], user_turn_text: 'They do not know it.' }, ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer',
+      request: 'Mark the developer cost as not known yet.', remove: [], answers: [] })) as Json;
+    expect(redraft.status, JSON.stringify(redraft)).toBe('ok');
+    expect(redraft.data.changes.map((c: Json) => [c.id, c.author])).toEqual([['developer_hiring_cost', 'person']]);
     expect(sent).toHaveLength(1);
+    sent.length = 0;
     // A structural change still goes to Olumi's drafter: one call, what it changes.
     replies = [savedWith((d) => { d.options.push({ ...d.options[0]!, id: 'contractor', label: 'Hire a contractor', sets: [], quote: 'a contractor option' }); })];
     const structural = await ask('Also add a contractor option.', [], { request: 'Add a contractor option.' });
@@ -3072,7 +3088,7 @@ describe('the model-program turn on the real core route', () => {
     expect(JSON.stringify(removed)).not.toContain('the change removed what you answered');
   });
 
-  it('European fix request (CEE bb11fd62, scenario 7a46b31e, turn 31fc7c00): Olumi\'s own figures for an option\'s setting, and the structure\'s figure, withdrawn into questions of theirs need no words this turn; a new figure of theirs, or a figure kept under the question, still does', async () => {
+  it('European fix request (CEE bb11fd62, scenario 7a46b31e, turn 31fc7c00): Olumi\'s own figures for an option\'s setting, and the structure\'s figure, withdrawn into questions of theirs need no words this turn; S1 strip (A2, A2b off): nor does a new figure of theirs, or a figure kept under the question', async () => {
     // The drafter's first model: Olumi's option, its setting Olumi's figure, and the setting's off state the structure's.
     const m = bakery();
     m.quantities = m.quantities.map((x) => (x.id === 'one_oven' ? { ...x, author: 'olumi' as const, quote: null, basis: 'Olumi’s proposed setting for its option.' }
@@ -3082,7 +3098,7 @@ describe('the model-program turn on the real core route', () => {
     expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
     const deps = { dispatch, proposals: new ProposalStore() };
     const words = 'Can you sort out the figures you made up for me?';
-    const propose = (edit: (d: CanonicalModelT) => void) => { replies = [savedWith(edit)]; return proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null,
+    const propose = (edit: (d: CanonicalModelT) => void, on = deps) => { replies = [savedWith(edit)]; return proposeProgramChange(on, { scenario_id: SCENARIO, authenticated_user_id: null,
       turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words },
       ProgramChangeParams.parse({ public_label: 'Ask for the settings', basis: 'Olumi’s figures were placeholders', request: 'Ask them for the settings Olumi made up.', remove: [] })) as Promise<Json>; };
     const asked = (question: string): Partial<CanonicalQuantityT> => ({ status: 'asked', author: 'person', value: null, low: null, high: null, range_kind: null, quote: null, question, basis: null });
@@ -3090,20 +3106,21 @@ describe('the model-program turn on the real core route', () => {
     const p = await propose((d) => { setQ(d, 'one_oven', asked('How many ovens would you add?')); setQ(d, 'ovens_added', asked('How many ovens are you adding today?')); });
     expect(p.status, JSON.stringify(p)).toBe('ok');
     expect(p.data.changes.map((c: Json) => [c.id, c.action, c.author])).toEqual([['ovens_added', 'change', 'person'], ['one_oven', 'change', 'person']]);
-    // Still refused: a NEW figure of theirs with no words; one quoting only their earlier words; and a figure kept under the question.
-    expect(await propose((d) => setQ(d, 'one_oven', { author: 'person', status: 'known', value: 2, quote: null, basis: null })))
-      .toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['one_oven'], check: 'their_words' } });
-    expect(await propose((d) => setQ(d, 'one_oven', { author: 'person', status: 'known', value: 2, quote: 'A second oven', basis: null })))
-      .toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['one_oven'], check: 'this_turn' } });
-    expect(await propose((d) => setQ(d, 'one_oven', { ...asked('How many ovens would you add?'), value: 1 })))
-      .toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['one_oven'], check: 'this_turn' } });
+    // No longer refused (A2, A2b off; each in its own store): a NEW figure of theirs with no words; one quoting only their
+    // earlier words; and a figure kept under the question. Each is on the card as the AI wrote it, theirs.
+    for (const f of [{ author: 'person' as const, status: 'known' as const, value: 2, quote: null, basis: null }, { author: 'person' as const, status: 'known' as const, value: 2, quote: 'A second oven', basis: null },
+      { ...asked('How many ovens would you add?'), value: 1 }]) {
+      const loose = await propose((d) => setQ(d, 'one_oven', f), { dispatch, proposals: new ProposalStore() });
+      expect(loose.status, JSON.stringify(loose)).toBe('ok');
+      expect(loose.data.changes.map((c: Json) => [c.id, c.author])).toEqual([['one_oven', 'person']]);
+    }
     // Saved as approved: their questions, no words put in their mouth.
     expect(await applyProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'one_oven'))
       .toMatchObject({ status: 'asked', author: 'person', value: null, quote: null, question: 'How many ovens would you add?' });
   });
 
-  it('issue 37 (marketing at 485ee1af, 3 of 5 runs): a figure of theirs said EXACTLY in another calendar unit (their 1 year as 12 month, the time step moved to month for a 3-month goal) is the same figure, so the goals are saved; any other change of its amount still needs their words this turn, and the refusal names the check and the id', async () => {
+  it('issue 37 (marketing at 485ee1af, 3 of 5 runs): a figure of theirs said EXACTLY in another calendar unit (their 1 year as 12 month, the time step moved to month for a 3-month goal) is the same figure, so the goals are saved; S1 strip (A2b off): any other change of its amount is proposed too, shown before and after, for their press', async () => {
     const brief = `${BRIEF} The £3,000 is for 1 year.`;
     const m = bakery();
     m.period = 'year';
@@ -3122,13 +3139,17 @@ describe('the model-program turn on the real core route', () => {
       d.goals.push({ ...d.goals[0]!, id: 'early_loaves', label: '340 loaves a week within 3 months', quote: words.slice(0, -1),
         measure: { ...d.goals[0]!.measure!, target: 'early_target', window: { origin_event: null, origin_offset: null, start: 0, periods: 'early_months' } } });
     });
-    const propose = (reply: string) => { replies = [reply]; return proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words],
+    const propose = (reply: string, on = deps) => { replies = [reply]; return proposeProgramChange(on, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words],
       user_turn_text: words }, ProgramChangeParams.parse({ public_label: 'An early goal', basis: 'their goal', request: 'Add their goal: 340 loaves a week within the first 3 months.', remove: [] })) as Promise<Json>; };
-    // Refused, by check and id: their 1 year said as 1 month (only the unit changes, so the amount does), as 13 months, or as
-    // 52 weeks (weeks in a year is an average, not exact); and their figure turned into a question.
-    for (const moved of [{ unit: 'month' }, { unit: 'month', value: 13 }, { unit: 'week', value: 52 }, { unit: 'month', status: 'asked' as const, value: null, quote: null }]) {
-      expect(await propose(early(moved)), JSON.stringify(moved)).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['budget_window'], check: 'this_turn' } });
+    // No longer refused (each in its own store): their 1 year said as 1 month, or as 13 months; and their figure turned into a
+    // question. Each is on the card as a change of theirs, for their press.
+    for (const moved of [{ unit: 'month' }, { unit: 'month', value: 13 }, { unit: 'month', status: 'asked' as const, value: null, quote: null }]) {
+      const loose = await propose(early(moved), { dispatch, proposals: new ProposalStore() });
+      expect(loose.status, JSON.stringify(moved)).toBe('ok');
+      expect(loose.data.changes.find((c: Json) => c.id === 'budget_window'), JSON.stringify(moved)).toMatchObject({ action: 'change', author: 'person' });
     }
+    // Contrast (MATHS, kept): as 52 weeks a window in a monthly model is no whole number of its periods, so the compiler refuses it.
+    expect(await propose(early({ unit: 'week', value: 52 }), { dispatch, proposals: new ProposalStore() })).toMatchObject({ status: 'refused', reason: 'does_not_compile' });
     // The same figure, said exactly in months: the card goes ahead and shows it, still theirs in their words.
     const p = await propose(early({ unit: 'month', value: 12 }));
     expect(p.status, JSON.stringify(p)).toBe('ok');
@@ -3140,21 +3161,20 @@ describe('the model-program turn on the real core route', () => {
     expect(saved.goals.map((g) => g.id)).toEqual(['more_loaves', 'early_loaves']);
     expect(saved.period).toBe('month');
     expect(saved.quantities.find((x) => x.id === 'budget_window')).toMatchObject({ unit: 'month', value: 12, low: null, high: null, status: 'known', author: 'person', quote: 'The £3,000 is for 1 year' });
-    // The one validator, unit by unit: 1 week said as 7 day is the same figure; 13 weeks as 3 months is an average (weeks in a
-    // month), so it is a change that needs their words this turn.
+    // The one validator, unit by unit: every re-expression is shown (A1b) and none is refused for their words (A2b off).
     const said = (from: Partial<CanonicalQuantityT>, to: Partial<CanonicalQuantityT>) => {
       const was = JSON.parse(JSON.stringify(saved)) as CanonicalModelT; setQ(was, 'budget_window', from);
       const now = JSON.parse(JSON.stringify(was)) as CanonicalModelT; setQ(now, 'budget_window', to);
       return validatePostimage(was, now, { removals: [], words: [brief, words], fresh: [words] });
     };
     expect(said({ unit: 'week', value: 1 }, { unit: 'day', value: 7 })).toMatchObject({ ok: true, changes: [{ id: 'budget_window', action: 'change', before: '1 week', after: '7 day' }] });
-    expect(said({ unit: 'week', value: 13 }, { unit: 'month', value: 3 })).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['budget_window'], check: 'this_turn' });
+    expect(said({ unit: 'week', value: 13 }, { unit: 'month', value: 3 })).toMatchObject({ ok: true, changes: [{ id: 'budget_window', action: 'change', before: '13 week', after: '3 month' }] });
     // A range converts end by end: every one of value, low and high exactly, or it is a change (Codex BLOCK on #3739).
     const range = { unit: 'year', value: 1, low: 1, high: 2 };
     expect(said(range, { unit: 'month', value: 12, low: 12, high: 24 }).ok).toBe(true);
     expect(said({ ...range, value: null }, { unit: 'month', value: null, low: 12, high: 24 }).ok).toBe(true);
     for (const to of [{ value: 12, low: 12, high: 25 }, { value: 12, low: 11, high: 24 }, { value: 13, low: 12, high: 24 }, { value: 12, low: null, high: null }]) {
-      expect(said(range, { unit: 'month', ...to }), JSON.stringify(to)).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['budget_window'], check: 'this_turn' });
+      expect(said(range, { unit: 'month', ...to }).ok, JSON.stringify(to)).toBe(true);
     }
     // Exact is the float product in the conversion's direction, nothing looser (Codex BLOCK ×2 on #3739): 1 year as 12 month and
     // 6 month as 0.5 year are the same figure; 10^15 years as 12×10^15 + 8 or + 100 months is not, as a value or as either end of
@@ -3163,11 +3183,11 @@ describe('the model-program turn on the real core route', () => {
     expect(said({ unit: 'year', value: 1 }, { unit: 'month', value: 12 }).ok).toBe(true);
     expect(said({ unit: 'month', value: 6 }, { unit: 'year', value: 0.5 }).ok).toBe(true);
     expect(0.1 * 12).not.toBe(1.2);
-    expect(said({ unit: 'year', value: 0.1 }, { unit: 'month', value: 1.2 })).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['budget_window'], check: 'this_turn' });
+    expect(said({ unit: 'year', value: 0.1 }, { unit: 'month', value: 1.2 }).ok).toBe(true);
     for (const plus of [8, 100]) {
       for (const [from, to] of [[{ value: 1e15 }, { value: 12e15 + plus }], [{ value: null, low: 1e15, high: 2e15 }, { value: null, low: 12e15 + plus, high: 24e15 }],
         [{ value: null, low: 1e15, high: 2e15 }, { value: null, low: 12e15, high: 24e15 + plus }]] as const) {
-        expect(said({ unit: 'year', ...from }, { unit: 'month', ...to }), JSON.stringify(to)).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['budget_window'], check: 'this_turn' });
+        expect(said({ unit: 'year', ...from }, { unit: 'month', ...to }).ok, JSON.stringify(to)).toBe(true);
         expect(said({ unit: 'year', ...from }, { unit: 'month', ...Object.fromEntries(Object.entries(from).map(([k, v]) => [k, v === null ? null : v * 12])) }).ok, `${JSON.stringify(from)} ×12`).toBe(true);
       }
     }
@@ -3209,7 +3229,7 @@ describe('the model-program turn on the real core route', () => {
     const deps = { dispatch, proposals: new ProposalStore() };
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
     // Each attempt is its own turn (a turn shows one card).
-    const propose = () => proposeProgramChange(deps, { ...ctx, turn_id: randomUUID() }, ProgramChangeParams.parse({ public_label: 'Measure productivity', basis: 'their answer',
+    const propose = (on = deps) => proposeProgramChange(on, { ...ctx, turn_id: randomUUID() }, ProgramChangeParams.parse({ public_label: 'Measure productivity', basis: 'their answer',
       request: 'Productivity is measured by the features shipped each month; work that out from the hires.', remove: [] })) as Promise<Json>;
     // The drafter's update: their measure on the aim, and what works it out (synthetic Olumi figures, never a test sheet's); whole, the model it makes.
     const completed = (edit: (m: CanonicalModelT) => void = () => undefined, whole = false): string => {
@@ -3232,55 +3252,36 @@ describe('the model-program turn on the real core route', () => {
     };
     const cardModel = (r: Json) => savedProgramOf({ living_model: deps.proposals.get(r.data.proposal_id)!.living_model })!.canonical;
 
-    // Codex r4 #3709: the update is read as a first draft is. A figure labelled structure that is no structural constant
-    // ("current output = 12", stated by no one) comes back as the person's question; a calendar conversion stays structural.
+    // S1 strip (B2 off): the update's structure figures are read as the AI wrote them, never rewritten into their questions.
     replies = [completed((d) => { d.quantities.push(q('current_output', 'feature/month', { author: 'structure', value: 12 }), q('months_per_year', 'month/year', { author: 'structure', value: 12 }));
       (d.relations.find((r) => r.id === 'features_rel') as { base: string }).base = 'current_output'; })];
     const structured = await propose();
     expect(structured.status, JSON.stringify(structured)).toBe('ok');
     const sm = cardModel(structured);
-    expect(sm.quantities.find((x) => x.id === 'current_output')).toMatchObject({ author: 'person', status: 'asked', value: null, quote: null, question: null, basis: null });
+    expect(sm.quantities.find((x) => x.id === 'current_output')).toMatchObject({ author: 'structure', status: 'known', value: 12 });
     expect(sm.quantities.find((x) => x.id === 'months_per_year')).toMatchObject({ author: 'structure', status: 'known', value: 12 });
-    expect(compile(sm, { sourceText: `${saved.brief}\n${words}` }).perGoal.find((g) => g.goal_id === 'increase_productivity')!.asks).toContain('current_output');
-    // Codex r5: 1 in unit "1" is no unit scale, so an unstated "current utilisation = 1" is not structural; 0/1 is, only as a
-    // live option's switch; 100 % (a unit's scale) still is.
-    const base = JSON.parse(completed(undefined, true)) as CanonicalModelT;
-    expect(isStructuralConstant(base, q('current_utilisation', '1', { author: 'structure', value: 1 }))).toBe(false);
-    expect(isStructuralConstant(base, q('tech_leads_hired', 'tech_lead', { author: 'structure', value: 1 }))).toBe(true);
-    expect(isStructuralConstant(base, q('percent_scale', '%', { author: 'structure', value: 100 }))).toBe(true);
+    expect(compile(sm, { sourceText: `${saved.brief}\n${words}` }).perGoal.find((g) => g.goal_id === 'increase_productivity')!.asks).not.toContain('current_output');
     const read = (edit: (d: CanonicalModelT) => void) => normalise(JSON.parse(completed(edit, true)) as CanonicalModelT);
-    expect(read((d) => { d.quantities.push(q('current_utilisation', '1', { author: 'structure', value: 1 })); }).quantities.find((x) => x.id === 'current_utilisation'))
-      .toMatchObject({ status: 'asked', author: 'person', value: null });
-    // Codex r6/r7: a 1 as the effect's base ("current features = 1") is their question, even with their words beside it; a × 1 factor stays Olumi's constant.
     const onBase = (quote: string | null, value: number) => (d: CanonicalModelT) => { d.quantities.push(q('current_features', 'feature/month', { author: 'structure', value, quote }));
       (d.relations.find((r) => r.id === 'features_rel') as { base: string }).base = 'current_features'; };
-    expect(read(onBase(null, 1)).quantities.find((x) => x.id === 'current_features')).toMatchObject({ status: 'asked', author: 'person', value: null });
-    expect(read(onBase('We ship 4 features a month', 4)).quantities.find((x) => x.id === 'current_features')).toMatchObject({ status: 'asked', author: 'person', value: null, quote: null });
-    expect(read((d) => {
-      d.quantities.push(q('features_scale', '1', { author: 'structure', value: 1 }), q('features_base', 'feature/month', { kind: 'derived', status: 'derived', author: 'olumi' }));
-      d.relations.push({ form: 'definition', id: 'features_base_rel', defines: 'features_base', op: 'product', parts: [{ id: 'features_now', power: 1 }, { id: 'features_scale', power: 1 }], author: 'olumi', quote: null, ...at });
-      (d.relations.find((r) => r.id === 'features_rel') as { base: string }).base = 'features_base';
-    }).quantities.find((x) => x.id === 'features_scale')).toMatchObject({ author: 'structure', status: 'known', value: 1 });
-    // Codex #3710: a new index base 1 whose effect's coefficient is itself new (unit 1/tech_lead) stays structure.
-    expect(read((d) => {
-      d.quantities.push(q('features_index_now', '1', { author: 'structure', value: 1 }), q('features_index', '1', { kind: 'derived', status: 'derived', author: 'olumi' }),
-        q('index_per_lead', '1/tech_lead', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.1, low: 0, high: 0.2, range_kind: 'plausible', basis: 'Synthetic.' }));
-      d.relations.push({ form: 'effect', id: 'features_index_rel', defines: 'features_index', base: 'features_index_now',
-        terms: [{ driver: 'tech_leads_hired', coefficient: 'index_per_lead', author: 'olumi', quote: null, ...at }], author: 'olumi', quote: null, ...at });
-    }).quantities.find((x) => x.id === 'features_index_now')).toMatchObject({ author: 'structure', status: 'known', value: 1 });
+    expect(read(onBase('We ship 4 features a month', 4)).quantities.find((x) => x.id === 'current_features')).toMatchObject({ author: 'structure', status: 'known', value: 4, quote: 'We ship 4 features a month' });
 
     // Refused: a note naming a record that is not there, after the drafter's two repairs (its sentence goes back each time).
     replies = Array.from({ length: 3 }, () => completed((d) => { d.assumptions[d.assumptions.length - 1]!.concerns.push('no_such_record'); }));
     sent.length = 0;
     expect(await propose()).toMatchObject({ status: 'refused', reason: 'does_not_compile' });
     expect(sent).toHaveLength(3);
-    // Refused: a figure only they know, INVENTED as theirs (words they never wrote).
+    // S1 strip (A2, A2b off; each in its own store): a figure only they know given as theirs in words they never wrote, and one
+    // of their figures rewritten under their EARLIER words, are proposed as the AI wrote them, shown on the card for their press.
     replies = [completed((d) => setQ(d, 'features_now', { status: 'known', value: 12, question: null, quote: 'about 12 a month' }))];
-    expect(await propose()).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['features_now'] } });
-    // Refused: one of their figures rewritten under their EARLIER words (their budget, quoted from the brief).
+    const invented = await propose({ dispatch, proposals: new ProposalStore() });
+    expect(invented.status, JSON.stringify(invented)).toBe('ok');
+    expect(invented.data.changes.find((c: Json) => c.id === 'features_now')).toMatchObject({ author: 'person' });
     const budget = before.quantities.find((x) => x.author === 'person' && x.value !== null && x.kind === 'fact')!;
     replies = [completed((d) => setQ(d, budget.id, { value: budget.value! + 1 }))];
-    expect(await propose()).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: [budget.id], check: 'this_turn' } });
+    const rewritten = await propose({ dispatch, proposals: new ProposalStore() });
+    expect(rewritten.status, JSON.stringify(rewritten)).toBe('ok');
+    expect(rewritten.data.changes.find((c: Json) => c.id === budget.id)).toMatchObject({ action: 'change', author: 'person' });
     // Refused: a record left out without a listed removal; nothing is removed unless the person asks.
     const dropped = before.options[0]!.id;
     replies = [completed((d) => { d.options = d.options.filter((o) => o.id !== dropped); })];
@@ -3496,14 +3497,14 @@ describe('the model-program turn on the real core route', () => {
     expect(costNode('oven_price')).toMatchObject({ provenance: 'from_brief', source_quote: '$40,000 to $50,000' });
     expect(costNode('delivery').observed_state).toEqual({ value: 10000, raw_value: 10000, unit: 'USD', source: 'brief_extraction', extractionType: 'explicit' });
 
-    // Codex r1 #3709 (5): "yours" (user_override) only for words found in what the person wrote. The same later answer,
-    // compiled against the brief alone, is unverified and carries no source at all.
+    // Codex r1 #3709 (5), S1 strip (A25 off): a later answer of theirs is "yours" (user_override) by the AI's label, whether or
+    // not its words are found in what the person wrote (the brief decides only brief vs later, J-AUTHOR-VOCAB).
     const words = 'The oven would cost about £2,500.';
     const answered = bakery();
     answered.quantities = answered.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known', value: 2500, question: null, quote: words } : x));
     const sourceOf = (text: string) => nodeOf(project(answered, compile(answered, { sourceText: text }), { brief: BRIEF }).graph)('oven_price').observed_state;
     expect(sourceOf(`${BRIEF}\n${words}`)).toMatchObject({ source: 'user_override' });
-    expect(sourceOf(BRIEF)).not.toHaveProperty('source');
+    expect(sourceOf(BRIEF)).toMatchObject({ source: 'user_override' });
   });
 
   it('notes and preferences are not cards (DL 24 Oct, the canvas glyph): a draft with each family saves none of them in graph.nodes, and the model keeps every word the card showed', async () => {
@@ -3616,7 +3617,7 @@ describe('the model-program turn on the real core route', () => {
     expect(chance()).toBeGreaterThan(first);
   });
 
-  it('Codex r4–r8 + buddy #3709: ONE structural admission on the first draft — 0 is the only additive identity; 1 only in unit "1", by exact unit algebra; any other is their question', () => {
+  it('Codex r4–r8 + buddy #3709, S1 strip (B2 off): no structural admission on the first draft — every figure the AI labels structure is read as written', () => {
     const saved = savedDraft('./hiring-alpha3.saved.json');
     const m = JSON.parse(JSON.stringify(saved.canonical)) as CanonicalModelT;
     const derived = (id: string, unit: string) => q(id, unit, { kind: 'derived', status: 'derived', author: 'olumi' });
@@ -3643,34 +3644,18 @@ describe('the model-program turn on the real core route', () => {
       product('scaled_percent_rel', 'scaled_percent', [['extra_output', 1], ['one_percent', 1]]),
       { form: 'effect', id: 'index_rel', defines: 'productivity_index', base: 'productivity_indexed', terms: [{ driver: 'developers_hired', coefficient: 'index_per_developer', author: 'olumi', quote: null, ...at }], author: 'olumi', quote: null, ...at },
       { form: 'definition', id: 'growth_rel', defines: 'growth_factor', op: 'sum', parts: [{ id: 'one', sign: 1 }, { id: 'growth', sign: 1 }], author: 'olumi', quote: null, ...at });
+    // S1 strip (B2 off): there is no structural admission. Every figure the AI labels structure is read exactly as written, a
+    // stated 12, a 1 with a unit or a calendar conversion alike, and nothing is turned into their question.
     const n = new Map(normalise(m).quantities.map((x) => [x.id, x] as const));
-    // Asked: an integer no one stated, an unused 1 in unit "1", a 1 with a unit added in a sum, and a 1 with a unit in a product.
-    for (const id of ['current_output', 'current_utilisation', 'current_customers', 'output_per_developer', 'one_customer', 'one_percent']) expect(n.get(id), id).toMatchObject({ author: 'person', status: 'asked', value: null, question: null, basis: null });
-    // Kept: an option's switch (0 hires until an option sets one), a calendar conversion, 0 as a sum's part, and the unit-free 1.
-    for (const id of ['developers_hired', 'tech_leads_hired', 'months_per_year', 'no_extra_output', 'new_customers', 'output_scale', 'productivity_indexed', 'one']) expect(n.get(id), id).toMatchObject({ author: 'structure', status: 'known' });
-    // The compiler reads the question as one: what rests on it waits for the person, and no error asks the drafter to repair it.
+    for (const id of ['current_output', 'current_utilisation', 'current_customers', 'output_per_developer', 'one_customer', 'one_percent', 'months_per_year', 'no_extra_output',
+      'new_customers', 'output_scale', 'productivity_indexed', 'one']) expect(n.get(id), id).toEqual(m.quantities.find((x) => x.id === id));
     const c = compile(m, { sourceText: saved.brief });
     expect(c.errors).toEqual([]);
-    expect(c.blockers.map((b) => b.id)).not.toContain('months_per_year');
-    expect(c.blockers.filter((b) => b.code === 'asked').map((b) => b.id)).toEqual(expect.arrayContaining(['current_output']));
-    // Exact unit algebra: a unit-free 1 beside a term with a unit (a sum with loaves, an effect adding loaves) is no identity.
-    const mixed = bakery();
-    mixed.quantities.push(q('base_one', '1', { author: 'structure', value: 1 }), derived('mixed_sum', 'loaf/week'), derived('mixed_effect', 'loaf/week'));
-    mixed.relations.push({ form: 'definition', id: 'mixed_sum_rel', defines: 'mixed_sum', op: 'sum', parts: [{ id: 'base_one', sign: 1 }, { id: 'sales', sign: 1 }], author: 'olumi', quote: null, ...at });
-    expect(isStructuralConstant(mixed, mixed.quantities.find((x) => x.id === 'base_one')!)).toBe(false);
-    mixed.relations = [...mixed.relations.filter((r) => r.id !== 'mixed_sum_rel'), { form: 'effect', id: 'mixed_effect_rel', defines: 'mixed_effect', base: 'base_one', terms: [{ driver: 'ovens_added', coefficient: 'sold_per_oven', author: 'olumi', quote: null, ...at }], author: 'olumi', quote: null, ...at }];
-    expect(isStructuralConstant(mixed, mixed.quantities.find((x) => x.id === 'base_one')!)).toBe(false);
-    // The capacity shape: a zero base of an effect stays structural; a 1 as an effect's base is the person's figure.
+    expect(c.blockers.filter((b) => b.code === 'asked').map((b) => b.id)).not.toEqual(expect.arrayContaining(['current_output']));
+    // A figure labelled structure where their words write it stays the AI's structure, its words kept.
     const cap = bakery();
-    cap.quantities.push(q('no_extra', 'loaf/week', { author: 'structure', value: 0 }), derived('extra_sales', 'loaf/week'),
-      q('sales_index', 'loaf/week', { author: 'structure', value: 1 }), derived('indexed_sales', 'loaf/week'));
-    cap.relations.push({ form: 'effect', id: 'extra_rel', defines: 'extra_sales', base: 'no_extra', terms: [{ driver: 'ovens_added', coefficient: 'sold_per_oven', author: 'olumi', quote: null, ...at }], author: 'olumi', quote: null, ...at },
-      { form: 'effect', id: 'indexed_rel', defines: 'indexed_sales', base: 'sales_index', terms: [{ driver: 'ovens_added', coefficient: 'sold_per_oven', author: 'olumi', quote: null, ...at }], author: 'olumi', quote: null, ...at });
-    expect(normalise(cap).quantities.find((x) => x.id === 'no_extra')).toMatchObject({ author: 'structure', status: 'known', value: 0 });
-    expect(normalise(cap).quantities.find((x) => x.id === 'sales_index')).toMatchObject({ author: 'person', status: 'asked', value: null });
-    // Codex r7: a figure labelled structure is never read as theirs, even where their words write it: always their question.
     cap.quantities.push(q('weekly_bake', 'loaf/week', { author: 'structure', value: 300, quote: 'We bake 300 loaves a week' }));
-    expect(normalise(cap).quantities.find((x) => x.id === 'weekly_bake')).toMatchObject({ author: 'person', status: 'asked', value: null, quote: null });
+    expect(normalise(cap).quantities.find((x) => x.id === 'weekly_bake')).toMatchObject({ author: 'structure', status: 'known', value: 300, quote: 'We bake 300 loaves a week' });
   });
 
   it('S4 class 7 (one reason): with no aim in the chance, the result says what it waits on from the typed blockers (an aim\'s measure, or the result they want), never "checks the limits only"', () => {
@@ -4066,12 +4051,13 @@ describe('the model-program turn on the real core route', () => {
 
     it('a reading readingOf refuses holds no card, and the reply has no count line', async () => {
       const m = bakery();
-      setQ(m, 'base_sales', { quote: 'We bake about 300 loaves' }); // not the brief's words: readingOf refuses unverified_person_words
+      // A note the card cannot name (no words): readingOf refuses it (S1 strip: the quote check that used to refuse here is off).
+      m.claims.push({ id: 'blank_note', text: '', concerns: [], author: 'olumi', quote: null, party: null, approval: 'proposed', author_id: null });
       replies = [JSON.stringify(m)];
       const proposals = new ProposalStore();
       const out = await runModelProgramTurn({ scenarioId: SCENARIO, turnId: randomUUID(), message: BRIEF, saved: { graph: null, identity: null }, dispatch, proposals });
       expect(out.payload.model_program).toMatchObject({ turn: 'draft', saved: true, write: 'saved' });
-      expect(out.toolCalls[1]).toEqual({ name: 'confirm_reading', ok: false, outcome: 'refused', refusal: 'unverified_person_words', mutated: false });
+      expect(out.toolCalls[1]).toEqual({ name: 'confirm_reading', ok: false, outcome: 'refused', refusal: 'invalid_change_entry', mutated: false });
       expect(countLines(out.assistantText)).toEqual([]);
       expect(out.assistantText.split('\n\n')[0]).toBe('I\'ve drafted a first model of: Should the bakery buy a second oven?');
     });
@@ -4102,6 +4088,40 @@ describe('the model-program turn on the real core route', () => {
       const card = proposals.get(out.toolCalls[1]!.proposal_id!)!;
       expect([card.base_graph_identity_hash, card.base_model_identity]).toEqual([hashOf(persisted), computeGraphIdentityHash(persisted as never)!.value]);
       expect(countLines(out.assistantText)).toEqual([COUNT_LINE]);
+    });
+
+    it('S1 strip, the real path: drafted model → save → reopen → press → apply, every one of the AI\'s own labels passing through unchanged', async () => {
+      // What the stripped rules used to rewrite or refuse: a structure figure no one stated (B2), a person's figure in words not
+      // in the brief (A2, A25), Olumi's point figure (B8) and a direction beside a sized link (B3).
+      const m = bakery();
+      m.quantities.push(q('current_output', 'loaf/week', { author: 'structure', value: 12, basis: 'Synthetic.' }));
+      setQ(m, 'base_sales', { quote: 'We bake roughly 300 loaves' });
+      setQ(m, 'sell_through', { low: null, high: null, range_kind: null, direction: 'raises' });
+      replies = [JSON.stringify(m)];
+      const proposals = new ProposalStore();
+      const out = await runModelProgramTurn({ scenarioId: SCENARIO, turnId: randomUUID(), message: BRIEF, saved: { graph: null, identity: null }, dispatch, proposals });
+      expect(out.payload.model_program).toMatchObject({ turn: 'draft', saved: true, write: 'saved' });
+      const labels = (c: CanonicalModelT) => ['current_output', 'base_sales', 'sell_through'].map((id) => {
+        const x = c.quantities.find((y) => y.id === id)!;
+        return [id, x.author, x.status, x.value, x.low, x.high, x.quote, x.direction];
+      });
+      const drafted = labels(m);
+      expect(labels(persisted!.living_model.canonical as CanonicalModelT)).toEqual(drafted);
+      // Reopen: the saved program reads back as written.
+      const reopened = programReadOf(persisted!);
+      expect(reopened.kind).toBe('program');
+      expect(labels((reopened as { program: { canonical: CanonicalModelT } }).program.canonical)).toEqual(drafted);
+      // Press: the reading card shows them as written, and approving it applies exactly that card.
+      expect(out.toolCalls[1]).toMatchObject({ name: 'confirm_reading', ok: true, outcome: 'ok' });
+      const card = proposals.get(out.toolCalls[1]!.proposal_id!)!;
+      expect(card.changes.find((c) => c.id === 'base_sales')).toMatchObject({ author: 'person' });
+      expect(card.changes.find((c) => c.id === 'base_sales')!.after).toContain('in your words "We bake roughly 300 loaves"');
+      expect(card.changes.find((c) => c.id === 'sell_through')!.after).toContain('↑ raises');
+      expect(await applyProgramChange({ dispatch, proposals }, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, out.toolCalls[1]!.proposal_id!))
+        .toMatchObject({ status: 'ok', data: { saved: true } });
+      const applied = persisted!.living_model.canonical as CanonicalModelT;
+      expect(labels(applied)).toEqual(drafted);
+      expect(applied.quantities.find((x) => x.id === 'current_output')!.approval).toBe('approved');
     });
   });
 });
@@ -4151,10 +4171,11 @@ describe('display words stay on one line: the compiler\'s reasons quote labels a
     expect(broken(v)).toEqual([]);
   });
 
-  const HELD = 'rests on "Sell through": "Sell through" is given as 1.2–1.5 1, but Olumi reads it as never above 1 1; Olumi\'s range is unsupported; give a most likely figure, or ask';
+  // S1 strip (A20b off): no re-route; a range the law has no room for (a ceiling far below it) is held with the law's reason.
+  const HELD = 'rests on "Sell through": the range 1.2 to 1.5 has no room inside what it can be (−∞ to -5); give a most likely figure, or ask';
   for (const priced of [false, true]) it(`E${priced ? 2 : 1}: a goal held by a range with no room and a wrapped label (${priced ? 'a Run of the limit alone' : 'nothing calculates: the waiting view'}): its note and each cell say it on one line`, () => {
     const m = bakery();
-    m.quantities = m.quantities.map((x) => (x.id === 'sell_through' ? { ...x, label: 'Sell\n through', ceiling: 1, low: 1.2, high: 1.5, value: null } : x));
+    m.quantities = m.quantities.map((x) => (x.id === 'sell_through' ? { ...x, label: 'Sell\n through', ceiling: -5, low: 1.2, high: 1.5, value: null } : x));
     const r = evaluateCanonical(priced ? known(m) : m, { sourceText: PRICED_BRIEF, seed: 7 });
     expect(r.sim !== null).toBe(priced);
     const v = r.view as Json;

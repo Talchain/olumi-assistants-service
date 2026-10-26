@@ -29,10 +29,9 @@
  *     and quantities, never a figure and never a failure.
  *   - WHICH OPTION IS MOST LIKELY TO ACHIEVE THE GOAL (Paul 6 and 14 Oct; W6): with every option's chance worked out and at
  *     least two options, `leader` names the option with the highest chance (`goal_chance_leader`, `leader_licence: 'permitted'`)
- *     only under the estate's three science conditions (`LEADER_MIN_PCT`, `SUPERLATIVE_GAP_POINTS`, and the shared draws
- *     separating it from every other option: SC2, `paired.ts`, never two separate intervals) and
- *     only when every limit is checked. Otherwise it is withheld, its words naming each option's chance and why: no option is
- *     likely to achieve it (under 1%), the options are too close to call (`similar_option_ids`), or a limit is not yet checked
+ *     only where the Run's shared draws separate it from every other option (SC2, `paired.ts`: the difference is real in this
+ *     model; the 1% and 10-point gates are off the path, S1 strip, Paul 26 Oct) and only when every limit is checked. Otherwise
+ *     it is withheld, its words naming each option's chance and why: the options are too close to call (`similar_option_ids`), or a limit is not yet checked
  *     (a target-only chance is not the whole goal). Its `words` say both chances, the basis and what the leading chance is most
  *     sensitive to. A model-relative finding: never "best", a winner, a recommendation or a win share (`option_id` is null).
  *   - Fields with nothing true to say are absent: no `leader` with one option, a chance not shown or a Run known not to be
@@ -47,13 +46,11 @@ import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
 import { isWithheld, type Chance, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
 import { costOf, readingOf, restsOn, simulate } from '../simulate/simulate.js';
 
-/** Whose a figure is: unverified is said to be the person's but their words were not found (compile's `unverified`). */
-type Author = 'person' | 'olumi' | 'structure' | 'unverified';
+/** Whose a figure is, as the AI wrote it (the A25 'unverified' label is off the path, S1 strip, Paul 26 Oct). */
+type Author = 'person' | 'olumi' | 'structure';
 /** Recorded authors whose fixed values are no one's assumption: the person's own figure, a structural constant. */
 const NOT_ASSUMPTIONS: ReadonlySet<string> = new Set<FixedAuthor>(['person', 'structure']);
 const NOT_RECORDED = '(author not recorded)';
-/** Said to be the person's, but their words for it were not found (compile's `unverified`): never "on your figures". */
-const NOT_IN_THEIR_WORDS = '(not found in your words)';
 
 /** The canonical model's label and author for a quantity (S1 `CanonicalQuantity`), and the author of the relation defining it. */
 export interface PresentQuantity {
@@ -248,23 +245,17 @@ export const EIGHT_IN_TEN_WORDS = 'the range it falls in 8 times out of 10';
 const TAIL_ROOM = 4;
 /** W10: once per result, where the chances shown rest on two or more uncertain inputs (each drawn on its own stream, prng.ts). */
 export const INDEPENDENCE_WORDS = 'Olumi treats these figures as varying independently, except where the model links them.';
-const whoseRange = (author: 'person' | 'olumi' | 'unverified'): string => (author === 'unverified' ? NOT_IN_THEIR_WORDS : author === 'person' ? '(your range)' : '(Olumi’s estimate)');
+const whoseRange = (author: 'person' | 'olumi'): string => (author === 'person' ? '(your range)' : '(Olumi’s estimate)');
 /**
- * WHEN AN OPTION IS NAMED AS MOST LIKELY TO ACHIEVE THE GOAL (W6 review B1): the estate's existing science conditions, the
- * same three as the legacy licence's superlative (`goal-target/goal-chance-licence.ts:891`), copied here and never imported
- * (the program path does not load that layer). All three must hold:
- *   - the leading option's DISPLAYED chance is at least LEADER_MIN_PCT (whole percentage points);
- *   - its displayed gap to the next option is at least SUPERLATIVE_GAP_POINTS: "Science's interim superlative gap, in
- *     displayed whole percentage points (d5 6005279728)" (`goal-chance-licence.ts:87-88`);
- *   - the Run's shared draws separate it from every other option: the paired gap's 95% simulation precision is clear of 0
- *     (SC2, `paired.ts`; it replaced two separate intervals, `intervalsDistinct`, which say less than the shared draws do).
+ * WHEN AN OPTION IS NAMED AS MOST LIKELY TO ACHIEVE THE GOAL (W6): the Run's shared draws separate it from every other option,
+ * the paired gap's 95% simulation precision clear of 0 (SC2, `paired.ts`, which replaced two separate intervals,
+ * `intervalsDistinct`), so the difference is real in this model and no leader is named inside simulation noise (MATHS). The
+ * legacy 1% floor and 10-point gap (LEADER_MIN_PCT, SUPERLATIVE_GAP_POINTS) are off the path (S1 strip, Paul 26 Oct).
  */
-export const LEADER_MIN_PCT = 1;
-export const SUPERLATIVE_GAP_POINTS = 10;
 /** A setting tried: its value, and the chance there as displayed; null where it could not be worked out (a nonfinite draw). */
 type End = { readonly value: number; readonly display: string | null };
 export type PresentMainDriver =
-  | { readonly kind: 'available'; readonly detail: string; readonly driver: { readonly quantity: string; readonly author: 'person' | 'olumi' | 'unverified';
+  | { readonly kind: 'available'; readonly detail: string; readonly driver: { readonly quantity: string; readonly author: 'person' | 'olumi';
       readonly low: End; readonly middle: End; readonly high: End; readonly swing_points: number; readonly draws: number;
       readonly untested: readonly { readonly quantity: string; readonly settings: readonly string[] }[] } }
   | { readonly kind: 'none_licensed'; readonly reason: string }
@@ -363,10 +354,9 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       const ends = `${sayOf(x.id, d.low, x.unit)} to ${sayOf(x.id, d.high, x.unit)}`;
       // DL ruling (author not recorded): a range whose basis is neither the person's nor Olumi's is listed as such, never
       // passed as the person's; `rangeLaw` draws it unbounded (only a person's stated bounds condition the draw).
-      const unverified = m?.author === 'unverified';
-      const whose = unverified ? `a range ${NOT_IN_THEIR_WORDS}` : d.basis === 'person_range' ? 'your range' : d.basis === 'olumi_estimate' ? 'Olumi’s own estimated range' : `a range ${NOT_RECORDED}`;
+      const whose = d.basis === 'person_range' ? 'your range' : d.basis === 'olumi_estimate' ? 'Olumi’s own estimated range' : `a range ${NOT_RECORDED}`;
       if (reading.kind === 'point') {
-        return d.basis === 'person_range' && !unverified ? [] : [`${name} is ${sayOf(x.id, reading.value, x.unit)}${unverified ? ` ${NOT_IN_THEIR_WORDS}` : d.basis === 'olumi_estimate' ? ', Olumi’s estimate' : ` ${NOT_RECORDED}`}`];
+        return d.basis === 'person_range' ? [] : [`${name} is ${sayOf(x.id, reading.value, x.unit)}${d.basis === 'olumi_estimate' ? ', Olumi’s estimate' : ` ${NOT_RECORDED}`}`];
       }
       const kept = `, kept to Olumi’s reading of what it can be (${canBe(x.id, x.unit, domain)})`;
       if (reading.ends === 'hard_bounds') {
@@ -396,8 +386,6 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       // executable.ts r3: the author of every fixed value. A structural constant (a conversion, a switch, a count) and a
       // placeholder that cancels out of every result are no one's assumption.
       // DL ruling (author not recorded): a value with no recorded author is listed as an assumption, never read as the person's.
-      // Codex r1 #3709: words said to be the person's but not found in what they wrote outrank the figure's recorded author.
-      if (m?.author === 'unverified') return [`${name} is ${sayOf(x.id, x.dist.value, x.unit)} ${NOT_IN_THEIR_WORDS}`];
       const author: string | undefined = x.dist.author ?? m?.author;
       if (author === 'olumi') return [`${name} is ${sayOf(x.id, x.dist.value, x.unit)}, Olumi’s figure`];
       if (m?.approximate !== undefined) return [`using ${sayOf(x.id, x.dist.value, x.unit)} for ${name} for now — you said ${q(m.approximate.quote)}`];
@@ -617,7 +605,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
         ? ' Of the settings that could be tested, none moved this chance by more than 5 points.' : ''}` };
     }
     const { x, at } = best;
-    const author = meta(x.id)?.author === 'unverified' ? 'unverified' as const : x.dist.basis === 'person_range' ? 'person' as const : 'olumi' as const;
+    const author = x.dist.basis === 'person_range' ? 'person' as const : 'olumi' as const;
     const whose = whoseRange(author);
     const [low, middle, high] = endsOf(x).values.map((value, i) => ({ value, display: shown(at[i]!, sweepDraws)?.display ?? null }));
     const said = (e: End) => `(${sayOf(x.id, e.value, x.unit)}) ${e.display ?? 'could not be tested'}`;
@@ -725,8 +713,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       const them = unchecked.length === 1 ? 'a limit is not yet checked and these chances leave it out' : 'limits are not yet checked and these chances leave them out';
       return withheld([], `In this model, which option is most likely to achieve ${aim} is not said yet, as ${them}: the chance of ${jointWords} is ${each}, ${basis}. ${stop(uncheckedLine!)}`);
     }
-    // W6 review B1, the three science conditions (LEADER_MIN_PCT, SUPERLATIVE_GAP_POINTS, separated on the shared draws: SC2).
-    if (top.pct < LEADER_MIN_PCT) return withheld([], `In this model, no option is likely to achieve ${aim}: the chance of ${jointWords} is ${each}, ${basis}.`);
+    // W6: separated on the Run's shared draws only (SC2; MATHS: the difference is real in this model); the 1% and 10-point gates are off (S1).
     /** SC2: the top option's gap over x on the Run's shared draws (paired.ts), oriented top − x; apart only where it is clear of 0. */
     const gapOver = (x: typeof top): PairedDifference | undefined => {
       const p = (result.paired ?? []).find((g) => (g.a === top.id && g.b === x.id) || (g.a === x.id && g.b === top.id));
@@ -740,16 +727,12 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       const g = gapOver(x);
       return g !== undefined && separated(g) && (g.kind === 'exact' ? g.difference > 0 : g.kind === 'sampled' && g.precision_95[0] > 0);
     };
-    const near = (x: typeof top): boolean => top.pct - x.pct < SUPERLATIVE_GAP_POINTS;
-    const close = rest.filter((x) => near(x) || !apart(x));
+    const close = rest.filter((x) => !apart(x));
     if (close.length > 0) {
       const tied = said.filter((x) => x.id === top.id || close.includes(x));
-      // Each reason says only what was tested, and only where it is true of every option named. SC2: the test is the paired one
-      // on the Run's shared draws, so "cannot tell them apart" is now what was tested (34.9% against 33.4% overlap as two
-      // intervals, yet the shared draws separate them by 1.47 ± 0.63 points).
-      const why = close.every((x) => !apart(x)) ? `for their chances of ${jointWords}, the simulation cannot tell them apart on its shared draws`
-        : close.every(near) ? `their chances of ${jointWords} are less than ${SUPERLATIVE_GAP_POINTS} points apart`
-          : `their chances of ${jointWords} are less than ${SUPERLATIVE_GAP_POINTS} points apart, or the simulation cannot tell them apart on its shared draws`;
+      // The reason says only what was tested (SC2): the paired test on the Run's shared draws, so "cannot tell them apart" is
+      // what was tested (34.9% against 33.4% overlap as two intervals, yet the shared draws separate them by 1.47 ± 0.63 points).
+      const why = `for their chances of ${jointWords}, the simulation cannot tell them apart on its shared draws`;
       return withheld(tied.map((x) => x.id), `In this model, ${listWords(tied.map((x) => `${name(x.id)} (${x.display})`))} are too close to call: ${why}, ${basis}.`);
     }
     const next = rest[0]!, d = top.driver;

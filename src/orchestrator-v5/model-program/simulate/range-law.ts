@@ -5,8 +5,7 @@
  * W10, INTERIM (the DL on Paul's instruction, 26 Oct: "make good assumptions and ensure they're reasonably optimal"), until
  * Neil and Jinghui review the method. Three readings, by what the ends mean (canonical.ts RANGE_KIND):
  *
- *  1. A PLAUSIBLE range (range_kind 'plausible', and every Olumi range whatever its kind: "Olumi's own estimates are
- *     plausible") is read so that EXACTLY 1 draw in 10 falls below its low end and 1 in 10 above its high end: the figure falls
+ *  1. A PLAUSIBLE range (range_kind 'plausible'; a range with no kind is read as one, compile.ts rangeDistOf) is read so that EXACTLY 1 draw in 10 falls below its low end and 1 in 10 above its high end: the figure falls
  *     inside it 8 times out of 10. Stated ranges are usually too narrow, so its ends are never read as near-certain (before
  *     W10 the √12 law below made a plausible range about a 92% interval), and a most likely value off the middle no longer
  *     puts the spread on the wrong side (low 0, most likely 2, high 10: the √12 Normal had 24% below 0 and 0.3% above 10).
@@ -27,7 +26,8 @@
  *     0.6 with a floor of 0.2) is never below the edge, and the domain then cuts into that half's core (the part between m
  *     and its end), so its share is ½ × its own draws inside the domain ÷ 0.8: continuous as the end reaches the edge (where
  *     it is ½, rule 2) and as the edge reaches m (where it is 0). Only then is m not the median.
- *  3. A person's HARD BOUNDS (range_kind 'bounds', basis person_range: "between 10 and 30") are drawn EXACTLY as before W10:
+ *  3. HARD BOUNDS (range_kind 'bounds', whoever declared it: "between 10 and 30"; M1, S1 strip, Paul 26 Oct, honours an
+ *     Olumi range declared 'bounds' too) are drawn EXACTLY as before W10:
  *     CEE's existing conversion, `rangeSpread` in `src/orchestrator-v5/path-b/living-model/mapper.ts:104-110` (#3678, #3688),
  *     a Normal with uniform-matched moments, sd = (high − low)/√12 (mapper.ts:106), centred on the most likely value or, with
  *     none, on the middle (mapper.ts:861), CONDITIONED on [low, high] and any domain (PL ruling, AMEND, 23 Oct).
@@ -95,7 +95,7 @@ export function rangeLaw(d: RangeDist, opts: { readonly domain?: Domain } = {}):
   if (mode !== undefined && !(Number.isFinite(mode) && low < mode && mode < high)) {
     throw new Error(`range ${low} to ${high}: most likely value ${mode} is not strictly inside it`);
   }
-  const bounded = d.range_kind === 'bounds' && d.basis === 'person_range';
+  const bounded = d.range_kind === 'bounds';
   const domains = [d.domain, opts.domain].filter((x): x is Domain => x !== undefined);
   const lower = Math.max(bounded ? low : -Infinity, ...domains.map((x) => x.min ?? -Infinity));
   const upper = Math.min(bounded ? high : Infinity, ...domains.map((x) => x.max ?? Infinity));

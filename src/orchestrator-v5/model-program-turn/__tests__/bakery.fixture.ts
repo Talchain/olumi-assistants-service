@@ -42,7 +42,8 @@ export function bakery(): CanonicalModelT {
 /** The same bakery with one draft defect the compiler names: Olumi's estimate given without its range. */
 export function bakeryWithDefect(): CanonicalModelT {
   const m = bakery();
-  m.quantities = m.quantities.map((x) => (x.id === 'sell_through' ? { ...x, low: null, high: null, range_kind: null } : x));
+  // A MATHS defect (one end of a range only: the law cannot read it). S1 strip: B8's olumi_no_range is off the path.
+  m.quantities = m.quantities.map((x) => (x.id === 'sell_through' ? { ...x, high: null } : x));
   return m;
 }
 

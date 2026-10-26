@@ -326,17 +326,15 @@ describe('present: the canonical analysis view from a simulated model', () => {
     expect(v.goal_chance.notes).toContain(`${unchecked}.`);
   });
 
-  it('Codex r1 #3709: a figure said to be the person\u2019s whose words were not found is never "on your figures", whatever its recorded author', () => {
-    // Weather = 10 + 2 × 1 = £12 ≥ £5 (exact). The coefficient's dist says person, but its words were not found (unverified).
+  it('S1 strip (A25 off): a figure is the person\u2019s as the AI labels it, so it is "on your figures"; there is no "not found in your words"', () => {
+    // Weather = 10 + 2 × 1 = £12 ≥ £5 (exact). The coefficient is the person's by its label: no quote check outranks it.
     const m = model([fixed('base', 10, '£'), fixed('per_degree', 2, '£'), fixed('temperature', 1, 'degrees'),
       effect('weather', 'base', [{ coefficient: 'per_degree', driver: 'temperature' }], '£'), fixed('floor', 5, '£')],
     [{ ...goal('g', 'weather', '>=', 'floor'), label: 'Weather takings' }], [option('hold', 'Hold')]);
     const relation = { ...confirmedFigures(m), weather: { label: 'weather', author: 'person' as const, relation_author: 'person' as const, confirmed: true } };
-    const v = present(m, { ...relation, per_degree: { label: 'per_degree', author: 'unverified' as const } });
-    expect(cell(v, 'hold').face).toBe('‘Hold’: 100% chance of ‘weather’ being at least £5 at 1 month from the start of this model, in this model, '
-      + 'if ‘per_degree’ is £2 (not found in your words): in every simulated draw ‘weather’ is £12 at 1 month from the start of this model, at least £5.');
-    // Contrast: the same figure, its words found, is theirs.
-    expect(cell(present(m, { ...relation, per_degree: person('per_degree') }), 'hold').face).toContain(', in this model, on your figures:');
+    const face = cell(present(m, { ...relation, per_degree: person('per_degree') }), 'hold').face;
+    expect(face).toContain(', in this model, on your figures:');
+    expect(face).not.toContain('not found in your words');
   });
 
   it('Lenses fit 2 (DL 23 Oct): 0% only when the outcome is FIXED, with why; 0 of N sampled draws is "less than 1%", never 0%', () => {
@@ -552,13 +550,11 @@ describe('present: what each computed chance rests on most (one figure at a time
     expect(d.driver.draws).toBe(4000);
   });
 
-  it('whose figure the driver is: Olumi’s estimate, the person’s range, or words not found in theirs', () => {
+  it('whose figure the driver is: Olumi’s estimate or the person’s range, by the range\'s own basis (S1 strip: no "not found in your words")', () => {
     const theirs = present(SPEC(range('c', 10, 30, undefined, 'tickets', 'person_range')), { ...SPEC_LABELS, c: person('Capacity per specialist') });
     expect(driver(theirs, 'add').driver.author).toBe('person');
     expect(driver(theirs, 'add').detail).toBe(SPEC_DETAIL('your range'));
-    const unverified = present(SPEC(range('c', 10, 30, undefined, 'tickets', 'person_range')), { ...SPEC_LABELS, c: { label: 'Capacity per specialist', author: 'unverified' } });
-    expect(driver(unverified, 'add').driver.author).toBe('unverified');
-    expect(driver(unverified, 'add').detail).toContain('‘Capacity per specialist’ (not found in your words):');
+    expect(driver(theirs, 'add').detail).not.toContain('not found in your words');
   });
 
   it('a chance resting on no range says so; a withheld chance records no driver', () => {
@@ -622,10 +618,10 @@ describe('present: which option is most likely to achieve the goal, in this mode
     expect(v.leader.words.startsWith(`In this model, ‘Hold’ (${hold.display}) and ‘Nudge’ (${nudge.display}) are too close to call: for their chances of `
       + '‘Total’ being at least 5 tickets at 1 month from the start of this model, the simulation cannot tell them apart on its shared draws, ')).toBe(true);
     // Contrast: NUDGE shares x, so Nudge meets the target wherever Hold does. Its two intervals overlap just as much, yet the
-    // shared draws separate them, so only the 10-point condition holds it back and the words never say "cannot tell".
+    // shared draws separate them, so (the 10-point gate off, S1) Nudge is named, and the words never say "cannot tell".
     const coupled = present(NUDGE(0.2), NUDGE_LABELS);
     expect(cell(coupled, 'hold').detail.precision_95[0]).toBeLessThanOrEqual(cell(coupled, 'nudge').detail.precision_95[1]);
-    expect(coupled.leader.words).toContain(' are less than 10 points apart, ');
+    expect([coupled.leader_licence, coupled.leader.goal_chance_leader]).toEqual(['permitted', 'nudge']);
     expect(coupled.leader.words).not.toMatch(/cannot tell/);
   });
 
@@ -635,8 +631,6 @@ describe('present: which option is most likely to achieve the goal, in this mode
     def('total', 'sum', ['x', 'extra'], 'tickets'), fixed('t', target, 'tickets')], [goal('g', 'total', '>=', 't')],
   [option('hold', 'Hold'), option('nudge', 'Nudge', [{ quantity: 'extra', to: 'tiny', from_period: 0 }])]);
   const NUDGE_LABELS = { x: person('Tickets'), extra: { label: 'Extra', author: 'structure' as const }, tiny: person('Nudge size'), total: person('Total', true), t: person('Target') };
-  const NUDGE_BASIS = 'if ‘Tickets’ follows Olumi’s provisional reading of your range, 0 tickets to 10 tickets, as the range it falls in 8 times out of 10, '
-    + 'with 5 tickets as the middle value';
   /** As NUDGE, but Nudge reads its own count ‘y’ (the same 0 to 10, drawn separately): the options share no draw of what decides them. */
   const INDEP = (by: number) => model([range('x', 0, 10, undefined, 'tickets', 'person_range'), range('y', 0, 10, undefined, 'tickets', 'person_range'),
     def('base', 'sum', ['x'], 'tickets'), fixed('extra', 0, 'tickets', 'state', 'structure'), fixed('tiny', by, 'tickets'),
@@ -645,22 +639,23 @@ describe('present: which option is most likely to achieve the goal, in this mode
   const INDEP_LABELS = { ...NUDGE_LABELS, y: person('Second count'), base: person('Counted', true) };
   const pctOf = (display: string): number => (display === 'less than 1%' ? 0 : display === 'more than 99%' ? 100 : Number(display.replace(/^about /, '').replace('%', '')));
 
-  it('B1: a leading chance displayed under 1% names no option, though its precision interval is apart from the next (the probe "less than 1% against less than 1%")', () => {
+  it('S1 strip (the 1% gate off): a leading chance displayed under 1% whose precision interval is apart from the next names that option, and says it is more likely to miss', () => {
     // Target 120 (W10: at the old 115, Add's 1 − Φ(15/7.8030) = 2.7% is no longer under 1%): Add needs c ≥ 40 − d, c read as
     // 10 to 30 eight times out of 10 (median 20, sd 7.8030): 1 − Φ(20/7.8030 = 2.5631) = 0.52% (table Φ(2.56) = 0.99477,
     // Φ(2.57) = 0.99492), shown "less than 1%"; Keep (80 + d) never reaches it. On 10,000 draws Add's interval (about 52
-    // draws) sits above Keep's (none), so only the 1% condition withholds it.
+    // draws) sits above Keep's (none): the difference is real in this model, so Add is named (only the interval condition stands).
     const v = present(HIRE(120), SPEC_LABELS, {}, 10_000);
     const add = cell(v, 'add'), keep = cell(v, 'keep');
     expect([add.display, keep.display]).toEqual(['less than 1%', 'less than 1%']);
     expect(add.detail.precision_95[0]).toBeGreaterThan(keep.detail.precision_95[1]);
-    expect(v.leader_licence).toBe('withheld');
-    expect(v.leader).toEqual({ licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: [],
-      words: 'In this model, no option is likely to achieve the goal: the chance of ‘Weekly capacity’ being at least 120 tickets at 1 month from the start of this model '
-        + `is less than 1% for ‘Keep’ and less than 1% for ‘Add one specialist’, ${HIRE_BASIS}.` });
+    expect(v.leader_licence).toBe('permitted');
+    expect(v.leader.goal_chance_leader).toBe('add');
+    expect(v.leader.words.startsWith('In this model, ‘Add one specialist’ is the option most likely to achieve the goal: less than 1% chance of ‘Weekly capacity’ being at least 120 tickets')).toBe(true);
+    expect(v.leader.words).toContain('Even so, in this model it is more likely to miss the goal than to meet it.');
+    expect(v.leader.words).not.toContain('no option is likely');
   });
 
-  it('B1: a displayed gap under 10 points is too close to call, though the precision intervals are apart (the probe "about 54% against about 50%")', () => {
+  it('S1 strip (the 10-point gate off): a displayed gap under 10 points with distinct precision intervals names the leader (the probe "about 54% against about 50%")', () => {
     // Nudge adds 0.5: P(x ≥ 4.5) = Φ(0.5 / 3.9015) = Φ(0.1282) ≈ 55% against P(x ≥ 5) = 50% (W10; before it, 57%); on 10,000
     // draws each interval is about ±1 point.
     const v = present(NUDGE(0.5), NUDGE_LABELS, {}, 10_000);
@@ -668,12 +663,11 @@ describe('present: which option is most likely to achieve the goal, in this mode
     expect(nudge.detail.precision_95[0]).toBeGreaterThan(hold.detail.precision_95[1]);
     expect(pctOf(nudge.display) - pctOf(hold.display)).toBeGreaterThan(0);
     expect(pctOf(nudge.display) - pctOf(hold.display)).toBeLessThan(10);
-    expect(v.leader_licence).toBe('withheld');
-    expect(v.leader).toEqual({ licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: ['hold', 'nudge'],
-      words: `In this model, ‘Hold’ (${hold.display}) and ‘Nudge’ (${nudge.display}) are too close to call: their chances of `
-        + `‘Total’ being at least 5 tickets at 1 month from the start of this model are less than 10 points apart, ${NUDGE_BASIS}.` });
-    // Contrast: Nudge adds 3, P(x ≥ 2) = Φ(3/3.9015) = Φ(0.7689) ≈ 78% against 50% (W10; before it, 85%): more than 10 points
-    // apart and distinct, so it is named.
+    expect(v.leader_licence).toBe('permitted');
+    expect(v.leader.goal_chance_leader).toBe('nudge');
+    expect(v.leader.words.startsWith(`In this model, ‘Nudge’ is the option most likely to achieve the goal: ${nudge.display} chance of `)).toBe(true);
+    expect(v.leader.words).not.toContain('points apart');
+    // Contrast: Nudge adds 3, P(x ≥ 2) = Φ(3/3.9015) = Φ(0.7689) ≈ 78% against 50% (W10; before it, 85%): distinct, so it is named too.
     const apart = present(NUDGE(3), NUDGE_LABELS, {}, 10_000);
     expect(apart.leader_licence).toBe('permitted');
     expect(apart.leader.goal_chance_leader).toBe('nudge');
