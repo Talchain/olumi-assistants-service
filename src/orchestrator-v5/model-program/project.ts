@@ -17,9 +17,13 @@
  * fields: a value's `observed_state.source` (the brief's, the person's later figure, or Olumi's estimate), a goal's
  * `threshold_source`. Every figure an editor can change is on the field that editor reads, under its quantity's id
  * (a coefficient's id rides its link as `coefficient_id`), so an edit maps back to that ONE quantity.
+ * A link carries NO strength (W3b, 26 Oct): the model holds no β for any link, and a bare ±1 drew every link at the canvas's
+ * strongest band ("Very strong"). A link's sign is its `effect_direction`, and only where the model gives one; a causal
+ * link's size is its coefficient in natural units (`natural_effect`, `coefficient_id`); a definition's part and a goal's
+ * measure hold by arithmetic, so they say no size at all.
  * The projection is derived, never read back: the canonical model is the one saved meaning.
  */
-import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
+import { EventRiskV1 } from '../../schemas/event-risk.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../utils/goal-threshold-cap.js';
 import type { CanonicalModelT, CanonicalQuantityT, QualitativeFamilyT } from './canonical.js';
 import { QUALITATIVE_FAMILIES } from './canonical.js';
@@ -246,6 +250,26 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     return months === null || !Number.isInteger(months) ? {} : { goal_horizon: { months }, goal_horizon_months: months };
   };
   /**
+   * The goal as the model reads it, in the model's own terms (W3b, 26 Oct: the card said "from today" for a change measured
+   * against "carry on as now", and dropped the window and who chose the measure): what a change is measured FROM, the window
+   * it is read over (its periods as given, or null while asked), and whether the person or Olumi chose the measure. Facts
+   * the model holds, nothing worked out; `goal_threshold_frame` keeps the contract's meaning for the target's figure.
+   */
+  const goalFactsOf = (g: CanonicalModelT['goals'][number]): Rec => {
+    const m = g.measure;
+    if (!m) return {};
+    const ref = m.reference;
+    const reference = m.frame === 'level' || ref === null ? {}
+      : { goal_reference: ref.kind === 'now' ? { kind: 'now' }
+        : ref.kind === 'option' ? { kind: 'option', option_id: ref.option, label: model.options.find((o) => o.id === ref.option)?.label ?? null }
+          : { kind: 'value', quantity_id: ref.quantity, label: has(ref.quantity) ? Q.get(ref.quantity)?.label ?? null : null } };
+    const w = m.window;
+    const p = w ? Q.get(w.periods) : undefined;
+    const periods = p && (p.status === 'known' || p.status === 'estimated') && has(p.value) && !(has(p.low) && has(p.high) && p.low !== p.high) ? p.value : null;
+    const window = w ? { goal_window: { aggregation: m.aggregation, start: w.start, periods, period_unit: model.period, origin_event: w.origin_event } } : {};
+    return { ...reference, ...window, goal_measure_by: m.measure_by };
+  };
+  /**
    * An option's setting in the canvas's intervention vocabulary: the figure's own author, or, for a structural switch (0 or
    * 1, none or one), the option's, since setting it IS what the option says ("set by ‘Add one specialist’, from your brief").
    */
@@ -276,6 +300,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
         ...(point !== null && target ? goalTarget(point, target, g.measure.frame) : {}) } : {}),
       ...(has(g.question) ? { user_questions: [g.question] } : {}),
       ...horizonOf(g),
+      ...goalFactsOf(g),
       // A total over a window or a per-quantity ratio is not the measured quantity's level today, and a change from a stated
       // value or from an option is not a change from today (integrated review 26 Oct: "Today: X" beside "up N% from today").
       ...(metric?.status === 'derived' && g.measure?.per === null && g.measure.aggregation !== 'sum' && goalUnit
@@ -283,8 +308,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
         ? { ...derivedObservation(metric, goalUnit), ...basisOf(metric) } : {}),
     });
     items.push({ record_id: g.id, family: 'goal', shown_as: { node: g.id }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: g.approval });
+    // What the goal measures: no size and no sign ("keep costs under £8,000" was drawn as a "+").
     if (g.measure && Q.has(g.measure.quantity)) {
-      edges.push({ ...link(g.measure.quantity, g.id, 1, who, inCalc, { definitional: true }), id: edgeId(g.measure.quantity, g.id) });
+      edges.push({ ...link(g.measure.quantity, g.id, null, who, inCalc, { definitional: true }), id: edgeId(g.measure.quantity, g.id) });
     }
   }
   for (const o of model.options) {
@@ -366,8 +392,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     // coefficient's own unit scale applied (a 40 % rate moves 0.4 loaf/week per loaf/week; Codex r4 #3709), as lawFor does.
     const scaleOf = (unit: string) => { const u = parseUnit(unit); return u.ok ? u.unit.scale : 1; };
     const k = c ? scaleOf(c.unit) * scaleOf(driverUnit) / scaleOf(definedUnit) : 1;
+    // Its real size, in natural units. No β is keyed to it: the model holds none, and the link carries no strength (W3b).
     const natural = c && has(c.value)
-      ? { natural_effect: { amount: c.value * k, amount_unit: definedUnit, per_source_change: 1, per_source_change_unit: driverUnit, strength_mean: sign, strength_mean_frame: 'edge_strength',
+      ? { natural_effect: { amount: c.value * k, amount_unit: definedUnit, per_source_change: 1, per_source_change_unit: driverUnit,
         ...(has(c.low) && has(c.high) && c.low !== c.high ? { stated_range: { low: c.low * k, high: c.high * k, text: `${fmt(c.low)}–${fmt(c.high)}`, end: 'centre' } } : {}) } }
       : {};
     const reasoning = c ? `${display(c)} per ${driverUnit || 'unit'}${straddles ? '; its direction is not settled' : ''}${mid === null ? '; its size is not given yet' : ''}` : '';
@@ -435,6 +462,39 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   }
 
   // ── risks ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+  /**
+   * A risk's chance on the field the risk card reads (W3b, 26 Oct: the card said "Likelihood and impact not set yet" over a
+   * chance the model holds): the canvas's event_risk.v1, its range (or point) as a fraction, whose it is, over the model's
+   * own horizon, which is the window the model reads the chance over. Only where that horizon is a whole number of months
+   * (a weekly model's is not) and the figure is someone's: never converted, never an unverified figure called theirs.
+   */
+  const eventRiskOf = (occ: CanonicalQuantityT | undefined): Rec => {
+    if (!occ || x === null || (occ.status !== 'known' && occ.status !== 'estimated')) return {};
+    const who = whoOf(occ, occ.id);
+    const basis = who === 'person' ? 'user' : who === 'olumi' ? 'olumi' : null;
+    const u = parseUnit(occ.unit);
+    if (basis === null || !u.ok || Object.keys(u.unit.dims).length > 0) return {};
+    const ranged = has(occ.low) && has(occ.high) && occ.low !== occ.high;
+    const [lo, hi] = ranged ? [occ.low!, occ.high!] : has(occ.value) ? [occ.value, occ.value] : [null, null];
+    const months = x.period_unit === 'month' ? x.periods : x.period_unit === 'year' ? x.periods * 12 : null;
+    if (lo === null || hi === null || months === null) return {};
+    const block = { version: 1, occurrence: { p_low: lo * u.unit.scale, p_high: hi * u.unit.scale, meaning: 'at_least_once_within_horizon', basis }, horizon: { months } };
+    return EventRiskV1.safeParse(block).success ? { event_risk: block } : {};
+  };
+  /**
+   * The sign of what a risk does if it happens, from its own figure against no change (0 added, × 1): a risk that multiplies
+   * by 0.5 lowers what it moves. A given figure keeps its own sign; a range wholly on one side has that side's; one across no
+   * change, or no figure at all, has none (W3b: every multiplying risk was drawn as a boost).
+   */
+  const riskSign = (k: CanonicalModelT['risks'][number], sev: CanonicalQuantityT | undefined): 1 | -1 | null => {
+    if (!sev) return null;
+    const u = parseUnit(sev.unit), scale = k.mode === 'multiply' && u.ok ? u.unit.scale : 1;
+    const none = k.mode === 'multiply' ? 1 : 0;
+    const side = (v: number): 1 | -1 | null => (v * scale < none ? -1 : v * scale > none ? 1 : null);
+    if (has(sev.value)) return side(sev.value);
+    if (!has(sev.low) || !has(sev.high)) return null;
+    return side(sev.high) === -1 ? -1 : side(sev.low) === 1 ? 1 : null;
+  };
   for (const k of model.risks) {
     const inCalc = xr.has(k.id);
     const who = whoOf(k, k.id);
@@ -442,10 +502,11 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const sev = Q.get(k.severity);
     nodes.push({
       id: k.id, kind: 'risk', label: k.label, ...provenanceOf(who), ...quoteOf(k, k.id), ...participation(inCalc || (!notCompiling && inModel.has(k.effect_on))),
+      ...eventRiskOf(occ),
       description: `Chance: ${occ ? display(occ) : 'not given'}. If it happens: ${k.mode === 'add' ? 'adds' : 'multiplies by'} ${sev ? display(sev) : 'not given'}, ${typeof k.starts_after_periods === 'number' ? (k.starts_after_periods === 0 ? 'from the start' : `after ${k.starts_after_periods} ${model.period}s`) : `from "${Q.get(k.starts_after_periods)?.label ?? k.starts_after_periods}"`}.`,
     });
     items.push({ record_id: k.id, family: 'risk', shown_as: { node: k.id }, in_calculation: inCalc, why_out: why(inCalc, 'What it affects is not used by anything that can be worked out yet.'), author: who, approval: k.approval });
-    if (Q.has(k.effect_on)) edges.push({ ...link(k.id, k.effect_on, k.mode === 'add' && sev && (sev.value ?? sev.high ?? 0) < 0 ? -1 : 1, who, inCalc, { reasoning: 'if it happens' }), id: edgeId(k.id, k.effect_on) });
+    if (Q.has(k.effect_on)) edges.push({ ...link(k.id, k.effect_on, riskSign(k, sev), who, inCalc, { reasoning: 'if it happens' }), id: edgeId(k.id, k.effect_on) });
   }
 
   // ── qualitative records: not cards; the canvas draws them by id from the model ────────────────────────────────────────
@@ -456,14 +517,15 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   return { graph: { nodes, edges, goal_constraints }, items };
 }
 
-function link(from: string, to: string, sign: 1 | -1, who: DisplayAuthor, inCalc: boolean, extra: Rec): Rec {
+/** A link: no strength (the model holds no β), its sign only where the model gives one (null: no direction is drawn). */
+function link(from: string, to: string, sign: 1 | -1 | null, who: DisplayAuthor, inCalc: boolean, extra: Rec): Rec {
   const { reasoning, magnitude, definitional, ...rest } = extra;
   const provenance = who === 'unverified' ? undefined : {
     source: who === 'person' ? 'brief_extraction' : 'cee_hypothesis',
     ...(has(reasoning) ? { reasoning } : {}), ...(has(magnitude) ? { magnitude } : {}), ...(definitional === true ? { definitional: true } : {}), ...rest,
   };
   return {
-    from, to, strength: { mean: sign, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1, effect_direction: sign > 0 ? 'positive' : 'negative',
+    from, to, exists_probability: 1, ...(sign === null ? {} : { effect_direction: sign > 0 ? 'positive' : 'negative' }),
     ...(provenance ? { provenance } : {}), origin: inCalc ? 'model_program:calculation' : who === 'unverified' ? 'model_program:unverified' : 'model_program:display',
   };
 }

@@ -35,6 +35,7 @@ vi.mock('../../orchestrator/user-identity.js', async (importOriginal) => ({ ...(
 import registerRoute from '../assist.v1.scenario-graph-register.js';
 import scenarioGraphRoute from '../assist.v1.scenario-graph.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
+import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import { seedOf } from '../../orchestrator-v5/model-program-turn/evaluate.js';
 import { withNewRun } from '../../orchestrator-v5/model-program-turn/program-save.js';
 import { MODEL_PROGRAM, reopenProgram } from '../../orchestrator-v5/model-program-turn/program-store.js';
@@ -167,8 +168,12 @@ describe('a model program\'s postimage through the real /graph/register', () => 
     expect(((program.canonical_analysis_view as Rec).options as Rec[]).map((o) => (o.cell as Rec).kind)).toEqual(['figure', 'figure']);
     expect((program.current_read as Rec).analysis_ready).toMatchObject({ status: 'ready', may_run: true });
     expect(JSON.stringify({ ...program, graph: null })).not.toMatch(LEGACY_ASKS);
-    // Contrast: the SAME graph with no program (a Living Model) still gets the legacy readiness and its range asks.
-    const { living_model: _program, ...plain } = written;
+    // Contrast: the SAME graph with no program (a Living Model) still gets the legacy readiness and its range asks. A Living
+    // Model's links carry a strength each, so the copy has the legacy shape the projection drew before W3b (a program link
+    // carries none: the model holds no β).
+    const { living_model: _program, ...rest } = written;
+    const plain = { ...rest, edges: (rest.edges as Rec[]).map((e) => ({ ...e, strength: { mean: e.effect_direction === 'negative' ? -1 : 1, std: LLM_STRENGTH_STD_FLOOR },
+      effect_direction: e.effect_direction ?? 'positive' })) };
     expect(JSON.stringify(buildCanonicalAnalysisReadyFromGraph(plain))).toMatch(LEGACY_ASKS);
     expect(JSON.stringify({ ...(await readOf(plain)), graph: null })).toMatch(LEGACY_ASKS);
   });

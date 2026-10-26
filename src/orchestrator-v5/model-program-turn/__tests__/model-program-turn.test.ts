@@ -1072,7 +1072,7 @@ describe('the model-program turn on the real core route', () => {
     const p = await propose(sales);
     expect(p.status, JSON.stringify(p)).toBe('ok');
     expect(p.data.changes).toEqual([{ id: 'base_sales', kind: 'quantity', action: 'change', label: 'base sales', before: '300 loaf/week, in your words "We bake 300 loaves a week"',
-      after: '320 loaf/week, in your words "We now bake 320 loaves a week"', author: 'person' }]);
+      after: '320 loaf/week, in your words "We now bake 320 loaves a week"', author: 'person', family: 'quantity' }]);
     // Contrast: the AI's own change to a direction the model uses (a linked size with no figure) is on the card.
     const flipped = await propose((d) => { sales(d); setQ(d, 'lost_bake_time', { direction: 'raises' }); });
     expect(flipped.status, JSON.stringify(flipped)).toBe('ok');
@@ -1093,7 +1093,7 @@ describe('the model-program turn on the real core route', () => {
     } };
   };
   /** The size's own entry when its direction goes: said on what it moved, before. */
-  const SIZE_SIGN_GOES = { id: 'lost_bake_time', kind: 'quantity', action: 'change', label: 'lost bake time', before: 'no figure yet (in loaf/week/oven), ↓ lowers sales', after: 'no figure yet (in loaf/week/oven)', author: 'olumi' };
+  const SIZE_SIGN_GOES = { id: 'lost_bake_time', kind: 'quantity', action: 'change', label: 'lost bake time', before: 'no figure yet (in loaf/week/oven), ↓ lowers sales', after: 'no figure yet (in loaf/week/oven)', author: 'olumi', family: 'quantity' };
 
   it('issue 40 (marketing-r3): unlinking a link sized by Olumi\'s unknown with a stated direction, the size kept, is on the card and saved, never refused for the direction no drawn link then uses', async () => {
     const { deps, propose } = await linkUpdate();
@@ -1102,7 +1102,7 @@ describe('the model-program turn on the real core route', () => {
     expect(p.status, JSON.stringify(p)).toBe('ok');
     const LINKS = 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "sold per oven" for each "ovens added" 0 oven';
     expect(p.data.changes).toEqual([SIZE_SIGN_GOES, { id: 'sales_rel', kind: 'relation', action: 'change', label: 'sales',
-      before: `${LINKS}, changes by "lost bake time" (no figure yet loaf/week/oven) for each "ovens added" 0 oven`, after: `${LINKS}, no link 2`, author: 'olumi' }]);
+      before: `${LINKS}, changes by "lost bake time" (no figure yet loaf/week/oven) for each "ovens added" 0 oven`, after: `${LINKS}, no link 2`, author: 'olumi', family: 'relation' }]);
     // Approved, the unlink is saved: the size kept, with no direction, and the link gone.
     expect(await applyProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const saved = persisted!.living_model.canonical as CanonicalModelT;
@@ -1224,14 +1224,14 @@ describe('the model-program turn on the real core route', () => {
     // reads "Leaves out ‘…’ (after)"); every part it has is said, and none it lacks.
     expect(card.changes[5]).toEqual({ id: 'longer_shifts', kind: 'left_out', action: 'add', label: 'Longer shifts for the staff', before: null,
       after: 'It is not measured in this model. Olumi asks: “How will staff feel?”. It concerns Reach 380 loaves a week and A second oven. Your words: “Our staff may not like longer shifts”',
-      author: 'person', group: 'left_out' });
+      author: 'person', group: 'left_out', family: 'left_out' });
     // Words the person reports from someone else are that someone's, by name, never "Your words".
     expect(card.changes[6]).toEqual({ id: 'delivery_days', kind: 'left_out', action: 'add', label: 'Which days flour is delivered', before: null,
-      after: 'Nobody has said how it changes sales. Our supplier’s words: “deliveries only on weekdays”', author: 'person', group: 'left_out' });
+      after: 'Nobody has said how it changes sales. Our supplier’s words: “deliveries only on weekdays”', author: 'person', group: 'left_out', family: 'left_out' });
     // Contrast: a left-out item with only its why says only its why, as written.
     expect(card.changes[4]).toEqual({ id: 'staff_morale', kind: 'left_out', action: 'add', label: 'Staff morale while the second oven beds in', before: null,
-      after: 'It has no measure in this model.', author: 'olumi', group: 'left_out' });
-    expect(card.changes[0]).toEqual({ id: 'more_loaves', kind: 'goal', action: 'add', label: 'Reach 380 loaves a week', before: null, after: '"sales" at least "sales target" 380 loaf/week, no deadline set, the measure you named, in your words "want to reach 380 loaves a week"', author: 'person' , group: 'used' });
+      after: 'It has no measure in this model.', author: 'olumi', group: 'left_out', family: 'left_out' });
+    expect(card.changes[0]).toEqual({ id: 'more_loaves', kind: 'goal', action: 'add', label: 'Reach 380 loaves a week', before: null, after: '"sales" at least "sales target" 380 loaf/week, no deadline set, the measure you named, in your words "want to reach 380 loaves a week"', author: 'person' , group: 'used', family: 'goal' });
     // The held card's model: the saved draft accepted by its approver (a guest here), authorship and words untouched; a new Run.
     const held = agentProposalOf([...turnRows.values()].at(-1).pending_actions[0])!;
     expect(held.proposal_id).toBe(card.proposal_id);
@@ -1405,7 +1405,7 @@ describe('the model-program turn on the real core route', () => {
     expect(sent[1]!.input[2].content).toBe(`${UPDATE_PREFIX}\nThe change: The oven price is their answer: about £2,500.\nRemove: nothing`);
     // The card shows the change's substance, before and after, and whose it is.
     expect(proposed.data.changes).toEqual([{ id: 'oven_price', kind: 'quantity', action: 'change', label: 'oven price', before: 'no figure yet (in GBP/oven), still to be given, Olumi asks "What would the second oven cost?", no basis given, not in your words',
-      after: `2,500 GBP/oven, known, no question, based on "${APPROXIMATE_FIGURE}", in your words "The oven would cost about £2,500."`, author: 'person' }]);
+      after: `2,500 GBP/oven, known, no question, based on "${APPROXIMATE_FIGURE}", in your words "The oven would cost about £2,500."`, author: 'person', family: 'quantity' }]);
     expect(deps.proposals.get(proposed.data.proposal_id)!.changes).toEqual(proposed.data.changes);
     expect(registered).toHaveLength(1); // proposing saves nothing
     const applied = await applyProgramChange(deps, ctx, proposed.data.proposal_id) as Json;
@@ -1756,10 +1756,10 @@ describe('the model-program turn on the real core route', () => {
     expect(p.status, JSON.stringify(p)).toBe('ok');
     const changes: ProposalChange[] = [
       { id: 'oven_price', kind: 'quantity', action: 'change', label: 'oven price', before: 'no figure yet (in GBP/oven), still to be given, Olumi asks "What would the second oven cost?", not in your words',
-        after: '2,000 GBP/oven, known, no question, in your words "the oven is £2,000"', author: 'person' },
-      { id: 'keep_one', kind: 'option', action: 'remove', label: 'Keep our one oven', before: 'carries on as now, compared, in your words "keep our one oven"', after: null, author: 'person' },
+        after: '2,000 GBP/oven, known, no question, in your words "the oven is £2,000"', author: 'person', family: 'quantity' },
+      { id: 'keep_one', kind: 'option', action: 'remove', label: 'Keep our one oven', before: 'carries on as now, compared, in your words "keep our one oven"', after: null, author: 'person', family: 'option' },
       { id: 'landlord_agrees', kind: 'record', action: 'add', label: 'Only once the landlord agrees.', before: null,
-        after: 'a prerequisite, about "A second oven", in your words "our landlord must agree first"', author: 'person' },
+        after: 'a prerequisite, about "A second oven", in your words "our landlord must agree first"', author: 'person', family: 'conditions' },
     ];
     expect(p.data.changes).toEqual(changes);
     // The card the UI reads carries the same changes, on the held proposal's own projection (and in its digest).
@@ -1807,7 +1807,7 @@ describe('the model-program turn on the real core route', () => {
     const shown = await propose(timing('opening_later'));
     expect(shown.status, JSON.stringify(shown)).toBe('ok');
     expect(shown.data.changes).toEqual([{ id: 'more_loaves', kind: 'goal', action: 'change', label: 'Reach 380 loaves a week', before: 'by the end of "four weeks" 4 week, counted from "the opening", which is "opening in" 2 week from the start of this model',
-      after: 'by the end of "four weeks" 4 week, counted from "the opening", which is "opening later" 3 week from the start of this model', author: 'person' }]);
+      after: 'by the end of "four weeks" 4 week, counted from "the opening", which is "opening later" 3 week from the start of this model', author: 'person', family: 'goal' }]);
     // Words that would read the same on both sides (two timings named and sized alike): not proposed.
     expect(await propose(timing('opening_twin'))).toMatchObject({ status: 'refused', reason: 'unshown_change', data: { ids: ['more_loaves (measure.window.origin_offset)'] } });
     // (c) The drafter's approval and author_id are never taken: on an untouched item they change nothing; a changed item is
@@ -1840,7 +1840,7 @@ describe('the model-program turn on the real core route', () => {
     expect(both.status, JSON.stringify(both)).toBe('ok');
     expect(both.data.changes).toEqual([{ id: 'base_sales', kind: 'quantity', action: 'change', label: 'base sales',
       before: '300 loaf/week, no question, in your words "We bake 300 loaves a week"',
-      after: '320 loaf/week, Olumi asks "Is that every week of the year?", in your words "We now bake 320 loaves a week"', author: 'person' }]);
+      after: '320 loaf/week, Olumi asks "Is that every week of the year?", in your words "We now bake 320 loaves a week"', author: 'person', family: 'quantity' }]);
     // (2) A link's size moved to the figure named and sized alike, while who it is from also changes: refused, naming the
     // field that would read the same; the other change does not carry it through.
     const swap = (to: string) => (d: CanonicalModelT) => {
@@ -1853,7 +1853,7 @@ describe('the model-program turn on the real core route', () => {
     expect(named.data.changes).toEqual([{ id: 'sales_rel', kind: 'relation', action: 'change', label: 'sales',
       before: 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "sold per oven" for each "ovens added" 0 oven, link 1 is yours, in your words "A second oven adds about 100 loaves a week"',
       after: 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "extra per oven" 100 loaf/week/oven for each "ovens added" 0 oven, link 1 is yours, '
-        + 'in our baker’s words "A second oven adds about 100 loaves a week"', author: 'olumi' }]);
+        + 'in our baker’s words "A second oven adds about 100 loaves a week"', author: 'olumi', family: 'relation' }]);
   });
 
   it('simplify v1 (buddy 22:47Z): a list of another length is compared entry by entry: a link moved to another figure of the same name is said with both figures while a link is added in full; moved to one named and sized alike, refused', async () => {
@@ -1882,7 +1882,7 @@ describe('the model-program turn on the real core route', () => {
     expect(shown.data.changes).toEqual([{ id: 'sales_rel', kind: 'relation', action: 'change', label: 'sales',
       before: 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "impact" 1 loaf/week/oven for each "ovens added" 0 oven, no link 2',
       after: 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "impact" 9 loaf/week/oven for each "ovens added" 0 oven, '
-        + 'changes by "other" 2–4 loaf/week/oven for each "one oven" 1 oven', author: 'olumi' }]);
+        + 'changes by "other" 2–4 loaf/week/oven for each "one oven" 1 oven', author: 'olumi', family: 'relation' }]);
     // Moved to the twin (named and sized alike) while link 2 is added: refused, naming the field that would read the same.
     expect(await relink('impact_twin')()).toMatchObject({ status: 'refused', reason: 'unshown_change', data: { ids: ['sales_rel (terms.0.coefficient)'] } });
   });
@@ -1900,7 +1900,7 @@ describe('the model-program turn on the real core route', () => {
     // Contrast: the timing alone is on the card, before and after.
     const timing = check(club(), (m) => { m.options[0]!.sets[0]!.starts_after_periods = 2; });
     expect(timing.ok ? timing.changes : timing).toEqual([{ id: 'promotion', kind: 'option', action: 'change', label: 'Run a promotion',
-      before: 'sets "promo on" 0 promotion to "one promo" 1 promotion from the start', after: 'sets "promo on" 0 promotion to "one promo" 1 promotion after 2 months', author: 'person' }]);
+      before: 'sets "promo on" 0 promotion to "one promo" 1 promotion from the start', after: 'sets "promo on" 0 promotion to "one promo" 1 promotion after 2 months', author: 'person', family: 'option' }]);
     // The same figure on a setting that arrives with its own entry, or with a whole new option: refused too.
     expect(check(club(), (m) => { m.options[0]!.sets.push({ ...m.options[0]!.sets[0]!, value: 99 }); })).toMatchObject(unshown(['promotion (sets.2.value)']));
     expect(check(club(), (m) => { m.options.push({ ...m.options[0]!, id: 'promo_twice', label: 'Run two promotions', author: 'olumi', quote: null, sets: [{ ...m.options[0]!.sets[0]!, value: 99, author: 'olumi', quote: null }] }); }))
@@ -1944,7 +1944,7 @@ describe('the model-program turn on the real core route', () => {
     const named = await propose(risky('The oven breaks down'));
     expect(named.status, JSON.stringify(named)).toBe('ok');
     expect(named.data.changes.find((c: Json) => c.id === 'breakdown')).toEqual({ id: 'breakdown', kind: 'risk', action: 'add', label: 'The oven breaks down', before: null,
-      after: 'with a chance of "breakdown chance" 0.05–0.2, adding "lost loaves" -150–-50 loaf/week to "sales", from the start', author: 'olumi' });
+      after: 'with a chance of "breakdown chance" 0.05–0.2, adding "lost loaves" -150–-50 loaf/week to "sales", from the start', author: 'olumi', family: 'risk' });
   });
 
   it('simplify v1 (A3): a typed card edit builds its postimage from its exact target and value with NO AI call, through the same validator: the change on its reply and in history', async () => {
@@ -1956,7 +1956,7 @@ describe('the model-program turn on the real core route', () => {
     expect(r).toMatchObject({ status: 'saved' });
     expect(sent).toHaveLength(0);
     expect(r.changes).toEqual([{ id: 'base_sales', kind: 'quantity', action: 'change', label: 'base sales', before: '300 loaf/week, in your words "We bake 300 loaves a week"',
-      after: '320 loaf/week, in your words "base sales: 320 loaf/week"', author: 'person' }]);
+      after: '320 loaf/week, in your words "base sales: 320 loaf/week"', author: 'person', family: 'quantity' }]);
     const after = persisted!.living_model.canonical as CanonicalModelT;
     expect(after.history.at(-1)).toEqual({ id: 'base_sales', change: 'superseded', old: JSON.stringify(before.quantities.find((x) => x.id === 'base_sales')), quote: 'base sales: 320 loaf/week', author_id: null });
     expect(after.quantities.find((x) => x.id === 'base_sales')).toMatchObject({ value: 320, author: 'person', quote: 'base sales: 320 loaf/week', approval: 'approved', status: 'known' });
@@ -2108,7 +2108,7 @@ describe('the model-program turn on the real core route', () => {
     const p = await proposeProgramChange(deps, ctx, ProgramChangeParams.parse({ public_label: 'Read 80–120 as firm', basis: 'their answer', request: 'Their 80 to 120 are firm ends.', remove: [] })) as Json;
     expect(p.status, JSON.stringify(p)).toBe('ok');
     expect(p.data.changes).toEqual([{ id: 'extra_per_oven', kind: 'quantity', action: 'change', label: 'extra per oven', before: 'from 80 to 120 loaf/week/oven',
-      after: 'from 80 to 120 loaf/week/oven (firm ends)', author: 'person' }]);
+      after: 'from 80 to 120 loaf/week/oven (firm ends)', author: 'person', family: 'quantity' }]);
     expect(await applyProgramChange(deps, ctx, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const after = (persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'extra_per_oven')!;
     expect(after).toMatchObject({ low: 80, high: 120, range_kind: 'bounds', author: 'person', quote: 'between 80 and 120 loaves a week' });
@@ -2806,7 +2806,7 @@ describe('the model-program turn on the real core route', () => {
     expect(p.status, JSON.stringify(p)).toBe('ok');
     expect(sent).toHaveLength(0);
     expect(p.data.changes).toEqual([{ id: 'sell_through', kind: 'quantity', action: 'change', label: 'sell through', before: 'from 0.5 to 0.9, most likely 0.7 (a plausible range), an estimate, based on "New capacity sells only as far as demand grows.", Olumi’s, not in your words',
-      after: '1, known, based on "Olumi reads “all” as 100%.", yours, in your words "All of the new loaves sell"', author: 'person' }]);
+      after: '1, known, based on "Olumi reads “all” as 100%.", yours, in your words "All of the new loaves sell"', author: 'person', family: 'quantity' }]);
   });
 
   it('targeted answers with a structural change in ONE call (DoD 24 Oct, marketing: refusing the pair dropped their goals): ONE card holds the answers, set exactly, and Olumi\'s drafter writes the change on the model that holds them', async () => {
@@ -3145,8 +3145,9 @@ describe('the model-program turn on the real core route', () => {
     twice.quantities.push(q('net_zero', 'loaf/week', { kind: 'derived', status: 'derived', author: 'olumi' }));
     twice.relations.push({ form: 'definition', id: 'zero_rel', defines: 'net_zero', op: 'sum', parts: [{ id: 'base_sales', sign: 1 }, { id: 'base_sales', sign: -1 }], author: 'olumi', quote: null, ...at });
     const tg = project(twice, compile(twice, { sourceText: BRIEF })).graph;
-    const zero = tg.edges.filter((e) => e.to === 'net_zero').map((e) => [e.id, (e.strength as Json).mean, e.effect_direction]);
-    expect(zero).toEqual([['base_sales__net_zero', 1, 'positive'], ['base_sales__net_zero__2', -1, 'negative']]);
+    // W3b: each link's sign is its direction alone; no link carries a strength (a bare ±1 drew it "Very strong").
+    const zero = tg.edges.filter((e) => e.to === 'net_zero').map((e) => [e.id, 'strength' in e, e.effect_direction]);
+    expect(zero).toEqual([['base_sales__net_zero', false, 'positive'], ['base_sales__net_zero__2', false, 'negative']]);
     expect(new Set(tg.edges.map((e) => e.id)).size).toBe(tg.edges.length);
 
     // A later answer of the person's is theirs as entered, never "from your brief".
@@ -3164,7 +3165,10 @@ describe('the model-program turn on the real core route', () => {
     expect(node('sales').observed_state).toBeUndefined();
     expect(g.edges.find((e) => e.id === 'ovens_added__sales')).toMatchObject({ coefficient_id: 'sold_per_oven' });
     // The canvas's goal target on a reload: the canonical readiness builder reads it off this graph.
-    expect(buildCanonicalAnalysisReadyFromGraph({ ...g, living_model: {} })).toMatchObject({ goal_node_id: 'more_loaves', goal_threshold_raw: 380 });
+    // W3b: a program graph is read as a program (its links carry no strength, so it is no legacy Living Model graph): on a
+    // reload the builder reads the goal target off the goal card through the program's own readiness.
+    const living = livingModelOf({ model_program: MODEL_PROGRAM, canonical: answered, seed: 1, person_words: [BRIEF, words], runs: [] });
+    expect(buildCanonicalAnalysisReadyFromGraph({ ...g, living_model: living })).toMatchObject({ goal_node_id: 'more_loaves', goal_threshold_raw: 380 });
   });
 
   it('DL 23 Oct (alpha3 fit): a per-unit rate is drawn ONE way however the draft wrote it, on its driver\'s link with its coefficient_id, never as its own card with a second link', () => {
