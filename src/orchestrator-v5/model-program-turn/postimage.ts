@@ -295,7 +295,7 @@ export function readingOf(model: CanonicalModelT, opts: { readonly words: readon
   const rank = new Map(READING_ORDER.flatMap((f, i) => idsOf(model, f).map((id) => [id, i] as const)));
   const at = (id: string) => rank.get(id) ?? READING_ORDER.length;
   // Each row carries its group: the same map the first reply counts (alpha G13), so the two can never disagree.
-  const groups = readingGroups(model);
+  const groups = readingGroups(model, (quote) => verbatimIn(quote, opts.words));
   return { ...v, changes: [...v.changes].sort((a, b) => at(a.id) - at(b.id)).map((c) => ({ ...c, group: groups.get(c.id) ?? 'other' })) };
 }
 

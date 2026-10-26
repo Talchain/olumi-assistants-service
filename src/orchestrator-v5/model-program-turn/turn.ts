@@ -14,7 +14,7 @@ import type { CanonicalModelT } from '../model-program/canonical.js';
 import { compile, normalise, type Blocker } from '../model-program/compile.js';
 import { draftCanonicalModel, ledgeredResponsesCall, type ResponsesCall } from './draft.js';
 import { seedOf } from './evaluate.js';
-import { asDrafted, readingOf } from './postimage.js';
+import { asDrafted, readingOf, verbatimIn } from './postimage.js';
 import { holdProgramCard } from './program-tools.js';
 import { isSaved, programOperationId, savePostimage, withNewRun } from './program-save.js';
 import { MODEL_PROGRAM, reopenProgram, savedProgramOf, type SavedProgram } from './program-store.js';
@@ -67,11 +67,11 @@ export const NO_AIM_NOTE = 'aim';
  * on, in the model's order (the drafter puts the most consequential first; no code ranking); then one line counting the rest. The code
  * writes no question: a blocker with no question of the AI's (a reading, a recount) is counted, never worded.
  */
-function replyOf(model: CanonicalModelT, run: StoredRun, kind: TurnKind): string {
+function replyOf(model: CanonicalModelT, run: StoredRun, kind: TurnKind, words: readonly string[]): string {
   const lines: string[] = [OPENING[kind](model)];
   // The first draft says, in one line, how much is theirs, how much is Olumi's to check and how much is left out (alpha G13);
   // the reading card under it lists each, in the same groups.
-  const counted = kind === 'draft' ? readingLine(readingGroups(model)) : null;
+  const counted = kind === 'draft' ? readingLine(readingGroups(model, (quote) => verbatimIn(quote, words))) : null;
   if (counted !== null) lines.push(counted);
   const view = run.result.canonical_analysis_view as { options?: readonly { cell: { kind: string; face?: string } }[] };
   for (const o of view.options ?? []) if (o.cell.kind === 'figure' && typeof o.cell.face === 'string') lines.push(o.cell.face);
@@ -116,7 +116,7 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
     // A Run press: the stored Run IS the analysis of this model on this engine, shown as stored, nothing written.
     const shown = reopenProgram(input.saved.graph);
     if (shown?.run && shown.current && shown.engine_current) {
-      return { assistantText: replyOf(prior.canonical, shown.run, 'run'), toolCalls: [{ name: 'run_program', ok: true, outcome: 'stored' }], toolResults: [{ ok: true, mutated: false }],
+      return { assistantText: replyOf(prior.canonical, shown.run, 'run', prior.person_words), toolCalls: [{ name: 'run_program', ok: true, outcome: 'stored' }], toolResults: [{ ok: true, mutated: false }],
         mutated: false, verifiedSave: false, payload: { canonical_analysis_view: shown.view, model_program: { turn: 'run', saved: false, stored: true, run: runOf(shown.run) } } };
     }
     program = prior;
@@ -140,7 +140,7 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
     return { call: { name: CONFIRM_READING, ok: true, outcome: 'ok', mutated: false, proposal_id: p.proposal_id }, result: { ok: true, mutated: false, proposal_id: p.proposal_id, public_label: p.public_label } };
   })() : undefined;
   return {
-    assistantText: saved ? replyOf(next.program.canonical, next.run, kind)
+    assistantText: saved ? replyOf(next.program.canonical, next.run, kind, next.program.person_words)
       // An unknown outcome may have been written: never say nothing changed (alpha review G4); the same operation id reconciles it.
       : write.status === 'unknown' ? 'The save could not be confirmed, so the model may or may not have changed. Reload to see the current model before changing it again.'
         : `The model could not be saved (${write.status}). Nothing was changed.`,
