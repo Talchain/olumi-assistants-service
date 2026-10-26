@@ -2134,22 +2134,24 @@ describe('the model-program turn on the real core route', () => {
     });
 
     it('a waiting-only result also keeps its blocker labels and notes on one line without changing the model', () => {
-      const m = approved(allTheirs()), label = 'Current\n members';
-      m.limits = [];
-      m.quantities = m.quantities.map((x) => x.id === 'members_now'
-        ? { ...x, label, value: null, status: 'asked', quote: null, question: 'How many members are there today?' } : x);
-      const result = evaluateCanonical(m, { sourceText: OWN.replace('300 members today', 'our members today'), seed: 7 });
+      // Keep the option's spending limit and settings intact. Both the sales and oven-price inputs are asked, so this
+      // compiles but has no calculable goal or limit; removing the limit instead would orphan its option setting.
+      const m = bakery(), label = 'Current\n sales';
+      m.quantities = m.quantities.map((x) => x.id === 'base_sales'
+        ? { ...x, label, value: null, status: 'asked', quote: null, question: 'How many loaves do you sell a week now?' } : x);
+      const result = evaluateCanonical(m, { sourceText: BRIEF.replace('300 loaves a week', 'our current sales'), seed: 7 });
+      expect(result.compiled.errors).toEqual([]);
       expect(result.sim).toBeNull();
       const v = result.view as Json;
-      expect(v.goal_chance.waits_on.find((b: Json) => b.id === 'members_now').label).toBe('Current members');
+      expect(v.goal_chance.waits_on.find((b: Json) => b.id === 'base_sales').label).toBe('Current sales');
       expect(v.goal_chance.notes.length).toBeGreaterThan(0);
       for (const note of v.goal_chance.notes) expect(note).not.toMatch(/[\r\n]/);
       for (const o of v.options) {
         expect(o.cell.kind).toBe('withheld');
-        expect(o.cell.why).toContain('‘Current members’');
+        expect(o.cell.why).toContain('‘Current sales’');
         expect(o.cell.why).not.toMatch(/[\r\n]/);
       }
-      expect(m.quantities.find((x) => x.id === 'members_now')!.label).toBe(label);
+      expect(m.quantities.find((x) => x.id === 'base_sales')!.label).toBe(label);
     });
 
     it('a stated condition and an Olumi estimate: the basis names both, never "on your figures"', () => {
