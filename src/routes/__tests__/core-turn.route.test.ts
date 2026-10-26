@@ -712,7 +712,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(again.run).toMatchObject({ run_id: shown!.run_id, run_key: shown!.run_id, state: { kind: 'complete_current' } });
   });
 
-  it('T1 + C12: a Run press\'s reply is the AI\'s own, in the scenario\'s Conversation, so the next typed turn continues it; only when that reply cannot be written are the host\'s words added to the Conversation', async () => {
+  it('T1 + C12: a Run press\'s reply is the AI\'s own, in the scenario\'s Conversation, so the next typed turn continues it; a reply that cannot be written is the turn\'s error, with nothing added in the host\'s words', async () => {
     const press = () => post({ turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } });
     outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
     expect((await typed('What does the model hold now?')).statusCode).toBe(200);
@@ -725,18 +725,15 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     // The AI's reply, in that Conversation: nothing added beside it.
     expect([calls.length, calls[0]!.conversation, (ran.json() as Json).assistant_text]).toEqual([1, conversation, 'The Run, in my words.']);
     expect(conversationItems).toEqual([]);
-    // CONTRAST: the reply call refused, the host's words stand and are added, as the person saw them.
+    // CONTRAST (Paul 26 Oct: "if the AI reply fails, show an error instead"): the reply call refused, the turn is that error,
+    // no words of the host's stand in for it, and nothing is added to the Conversation.
     calls = [];
     outputs = [[{ type: 'refuse' }]];
-    const fallback = await press();
-    expect(fallback.statusCode, fallback.body).toBe(200);
-    const said = String((fallback.json() as Json).assistant_text);
-    expect(said.trim()).not.toBe('');
-    expect(said).not.toBe('The Run, in my words.');
-    expect(conversationItems).toEqual([{ conversation, items: [
-      { type: 'message', role: 'user', content: 'Run the analysis' },
-      { type: 'message', role: 'assistant', content: said },
-    ] }]);
+    const failed = await press();
+    expect(failed.statusCode, failed.body).toBe(502);
+    expect((failed.json() as Json).error).toMatchObject({ code: 'UPSTREAM_ERROR', retry_safe: true, nothing_saved: true });
+    expect((failed.json() as Json).assistant_text).toBe('');
+    expect(conversationItems).toEqual([]);
     // The next typed turn continues that Conversation.
     outputs = [[{ type: 'message', text: 'That Run is the one I described.' }]];
     expect((await typed('What did that Run say?')).statusCode).toBe(200);
