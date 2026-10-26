@@ -992,7 +992,7 @@ describe('the model-program turn on the real core route', () => {
     const read = (edit: (d: CanonicalModelT) => void) => { const d = bakery(); edit(d); return readingOf(d, { words: [BRIEF], approver: null }); };
     // No longer refused (A2 off): a KNOWN figure of theirs in words they did not write, one with no words, and an unknown slot
     // holding a figure. The card shows each as the AI wrote it, theirs, and their press is what accepts it.
-    const shown = (r: ReturnType<typeof read>, id: string) => (r.ok ? r.changes.find((c) => c.id === id) : r);
+    const shown = (r: ReturnType<typeof read>, id: string) => { expect(r.ok, JSON.stringify(r)).toBe(true); return r.ok ? r.changes.find((c) => c.id === id) : undefined; };
     expect(shown(read((d) => setQ(d, 'base_sales', { quote: 'We bake about 300 loaves' })), 'base_sales')).toMatchObject({ action: 'add', author: 'person' });
     expect(shown(read((d) => setQ(d, 'base_sales', { quote: 'We bake about 300 loaves' })), 'base_sales')!.after).toContain('in your words "We bake about 300 loaves"');
     expect(shown(read((d) => setQ(d, 'base_sales', { quote: null })), 'base_sales')).toMatchObject({ action: 'add', author: 'person' });
@@ -4114,9 +4114,9 @@ describe('the model-program turn on the real core route', () => {
       // Press: the reading card shows them as written, and approving it applies exactly that card.
       expect(out.toolCalls[1]).toMatchObject({ name: 'confirm_reading', ok: true, outcome: 'ok' });
       const card = proposals.get(out.toolCalls[1]!.proposal_id!)!;
-      expect(card.changes.find((c) => c.id === 'base_sales')).toMatchObject({ author: 'person' });
-      expect(card.changes.find((c) => c.id === 'base_sales')!.after).toContain('in your words "We bake roughly 300 loaves"');
-      expect(card.changes.find((c) => c.id === 'sell_through')!.after).toContain('↑ raises');
+      expect(card.changes!.find((c) => c.id === 'base_sales')).toMatchObject({ author: 'person' });
+      expect(card.changes!.find((c) => c.id === 'base_sales')!.after).toContain('in your words "We bake roughly 300 loaves"');
+      expect(card.changes!.find((c) => c.id === 'sell_through')!.after).toContain('↑ raises');
       expect(await applyProgramChange({ dispatch, proposals }, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, out.toolCalls[1]!.proposal_id!))
         .toMatchObject({ status: 'ok', data: { saved: true } });
       const applied = persisted!.living_model.canonical as CanonicalModelT;

@@ -883,8 +883,6 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect((j.cards as Json[]).filter((c) => c.reading === true), 'the first draft\'s reading card is carried').toHaveLength(1);
       return (j.cards as Json[]).filter((c) => c.reading !== true);
     };
-    /** An id as the turn log holds it: never its text, whatever its characters (Codex BLOCK ×2 on #3739). */
-    const hashed = (id: string) => `#${createHash('sha256').update(id, 'utf8').digest('hex').slice(0, 8)}`;
     /** Drafts and saves a program; returns the reply exactly as it was sent to the person. */
     const savedProgram = async (): Promise<string> => {
       SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(bakery()); calls.length = 0;
