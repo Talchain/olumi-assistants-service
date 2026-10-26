@@ -26,6 +26,7 @@ import { draftCanonicalModel, proposePostimage, withHostFields } from '../draft.
 import { applyCanvasFigure, applyProgramChange, holdProgramCard, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
 import { log as staticLog } from '../../../utils/telemetry.js';
 import { GROUPS, readingOf, validatePostimage, withoutHost } from '../postimage.js';
+import { approveReadingRows } from '../approve-rows.js';
 import { proposalPendingAction } from '../../agent-lane/durable-proposal.js';
 import { agentProposalOf, proposalFieldsWire, proposalRecord } from '../../agent-lane/proposal-object/record.js';
 import { ProposalChangeSchema, ProposalStore, type ProposalChange } from '../../agent-lane/proposal.js';
@@ -1597,6 +1598,21 @@ describe('the model-program turn on the real core route', () => {
       expect([rest.json().cards, rest.json().assistant_text, sent.length, registered.length]).toEqual([[], `Saved: ${ids.length - 2} items confirmed.`, calls, writes + 2]);
       expect(new Set(Object.values(approvals()))).toEqual(new Set(['approved']));
       expect(withoutHostFields(persisted!.living_model.canonical)).toEqual(withoutHostFields(before));
+    });
+
+    it('a record already approved is never approved again, so who approved it stays: refused by its id, nothing written', async () => {
+      const card = await drafted();
+      expect((await tick(card, ['sell_through'])).statusCode).toBe(200);
+      // A card that still lists it, held on the model as it now is (the route never offers one; this binds the write's own check).
+      const proposals = new ProposalStore();
+      const p = holdProgramCard(proposals, { scenarioId: SCENARIO, userId: null, graphHash: hashOf(persisted), identity: computeGraphIdentityHash(persisted as never)!.value },
+        { label: 'x', basis: 'x', program: savedProgramOf({ living_model: persisted!.living_model })!, changes: card.changes, reading: true });
+      const writes = registered.length;
+      const out = await approveReadingRows({ dispatch, proposals }, { scenario_id: SCENARIO, authenticated_user_id: null }, { proposalId: p.proposal_id, ids: ['sell_through', 'more_loaves'] });
+      expect(out.outcome).toMatchObject({ status: 'refused', reason: 'not_proposed', data: { ids: ['sell_through'] } });
+      expect(registered).toHaveLength(writes);
+      // Contrast: the open one alone, on the same card, saves.
+      expect((await approveReadingRows({ dispatch, proposals }, { scenario_id: SCENARIO, authenticated_user_id: null }, { proposalId: p.proposal_id, ids: ['more_loaves'] })).outcome).toMatchObject({ status: 'ok', data: { saved: true } });
     });
 
     it('a stale base is refused: the model moved since the card was offered, so nothing is saved (contrast: the same press on the unmoved model saves)', async () => {
