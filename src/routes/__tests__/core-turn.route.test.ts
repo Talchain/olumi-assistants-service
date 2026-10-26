@@ -131,6 +131,28 @@ vi.mock('../../orchestrator-v5/session/index.js', () => ({ getSessionStore: () =
 vi.mock('../../orchestrator/user-identity.js', async (original) => ({
   ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
 }));
+/** Spies that call the real legacy functions, so a row can say a program turn never reaches them (spec §3, DL 26 Oct). */
+const legacy = vi.hoisted(() => ({ livingView: vi.fn(), capabilities: vi.fn(), rank: vi.fn(), restoreRun: vi.fn() }));
+vi.mock('../../orchestrator-v5/path-b/living-model/view.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/path-b/living-model/view.js')>();
+  legacy.livingView.mockImplementation(actual.livingViewOf);
+  return { ...actual, livingViewOf: legacy.livingView };
+});
+vi.mock('../../orchestrator-v5/core-route/deps.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/core-route/deps.js')>();
+  legacy.capabilities.mockImplementation(actual.coreTurnCapabilities);
+  return { ...actual, coreTurnCapabilities: legacy.capabilities };
+});
+vi.mock('../../orchestrator-v5/agent-lane/actions/rank.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/agent-lane/actions/rank.js')>();
+  legacy.rank.mockImplementation(actual.actionBarOf);
+  return { ...actual, actionBarOf: legacy.rank };
+});
+vi.mock('../../orchestrator-v5/agent-lane/run-operation.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/agent-lane/run-operation.js')>();
+  legacy.restoreRun.mockImplementation(actual.restoreRunOperation);
+  return { ...actual, restoreRunOperation: legacy.restoreRun };
+});
 
 let served = 0;
 /** When set, the next provider call waits for it: a turn still running while another is sent. */
@@ -1490,6 +1512,28 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(calls).toHaveLength(1);
       return String(calls[0]!.instructions);
     };
+
+    it('SPEC §3 (DL 26 Oct): a program\'s draft, typed turn and Run press never enter the Living Model reader, the legacy Run pipeline or the action ranker; a Living Model turn still does', async () => {
+      const clear = () => { for (const spy of Object.values(legacy)) spy.mockClear(); };
+      clear();
+      await savedProgram();
+      expect([legacy.livingView.mock.calls.length, legacy.capabilities.mock.calls.length, legacy.rank.mock.calls.length], 'the draft').toEqual([0, 0, 0]);
+      outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
+      const typedTurn = (await typed('What does the model hold now?')).json() as Json;
+      expect([typedTurn.error, typedTurn.action_bar]).toEqual([null, null]);
+      expect([legacy.livingView.mock.calls.length, legacy.capabilities.mock.calls.length, legacy.rank.mock.calls.length], 'the typed turn').toEqual([0, 0, 0]);
+      const press = await post({ turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } });
+      expect(press.statusCode, press.body).toBe(200);
+      expect([legacy.livingView.mock.calls.length, legacy.capabilities.mock.calls.length, legacy.rank.mock.calls.length, legacy.restoreRun.mock.calls.length], 'the Run press')
+        .toEqual([0, 0, 0, 0]);
+      // CONTRAST: a Living Model scenario's typed turn reads its living model, builds the Run pipeline once and ranks its bar.
+      SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); turnRows.clear(); conversationIds.clear(); clear();
+      outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
+      expect((await typed('What does the model hold now?')).statusCode).toBe(200);
+      expect(legacy.livingView).toHaveBeenCalled();
+      expect(legacy.capabilities).toHaveBeenCalledTimes(1);
+      expect(legacy.rank).toHaveBeenCalled();
+    });
 
     it('(7) Codex r1 BLOCK 1 on #3707: a loose figure goes in exactly as said, with no bounds Olumi adds; Olumi asks for their range', async () => {
       const sent = await sentOnce();

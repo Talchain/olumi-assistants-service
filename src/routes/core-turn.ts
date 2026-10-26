@@ -562,7 +562,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       // A model program that cannot be read is refused with its way on, never run as a legacy model or as no model.
       const programRead = programReadOf(saved.graph);
       if (programRead.kind === 'unreadable') return await refuseUnrun(409, 'MODEL_PROGRAM_UNREADABLE', unreadableWords(programRead.reason));
-      if (saved.graph !== null && livingViewOf(saved.graph) === undefined) {
+      // A program's living model is its own: the Living Model reader never runs on one.
+      if (programRead.kind === 'none' && saved.graph !== null && livingViewOf(saved.graph) === undefined) {
         return await refuseUnrun(409, 'legacy_scenario', 'This scenario was saved before the current Olumi model and cannot be opened on this route. Nothing was changed.');
       }
 
@@ -650,20 +651,25 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       const coreCtx = { ...toolCtx, ...(selectionContext != null ? { grounded_selection: selectionContext.grounded,
         ...(selectionContext.links !== undefined ? { grounded_links: selectionContext.links } : {}) } : {}) };
 
-      // ── THE RUN (a Run press spends its ONE Run; a restore's Run is that restore's), ported from the legacy route. ───────
-      const restoreRun = runPress ? await restoreRunOperation(scenarioId) : null;
+      const program = programRead.kind === 'program';
+      // A Run press on a program is the host's own (the stored Run, or a new one): no model call.
+      const modelProgram = saved.graph === null || (program && runPress);
+      // ── THE RUN (a Run press spends its ONE Run; a restore's Run is that restore's), ported from the legacy route. A turn that
+      // drafts or works on a model program runs the program's own Run (`program-tools.ts`), so none of this is built for it. ──
+      const livingModelRun = !program && !modelProgram;
+      const restoreRun = livingModelRun && runPress ? await restoreRunOperation(scenarioId) : null;
       let recoveredRun: RecoveredRun | undefined;
       if (typeof restoreRun === 'string') {
         recoveredRun = await readRecordedRun(store, scenarioId, restoreRun, async () => savedScenarioOf(await readingDispatch(graphPath, { ...FRESH_READ })));
       }
       const runOperationKey = restoreRun === null ? turnId : restoreRun;
       const constructionDeadlineAt = constructionDeadline(startedAt);
-      const capabilities = coreTurnCapabilities(capDispatch, proposals, { ...(recoveredRun !== undefined ? { recoveredRun } : {}),
+      const capabilities = !livingModelRun ? undefined : coreTurnCapabilities(capDispatch, proposals, { ...(recoveredRun !== undefined ? { recoveredRun } : {}),
         ...(runPress && runOperationKey !== undefined ? { runOperationId: runOperationTurnId(scenarioId, runOperationKey) } : {}),
         deadlineAt: constructionDeadlineAt });
       let runPressConsumed = false;
-      const runAnalysis = async (args: Parameters<typeof capabilities.runAnalysis>[1]) => {
-        if (restoreRun === undefined) return { ok: false, mutated: false, ran: false, refusal: 'run_failed' };
+      const runAnalysis = async (args: Parameters<ReturnType<typeof coreTurnCapabilities>['runAnalysis']>[1]) => {
+        if (capabilities === undefined || restoreRun === undefined) return { ok: false, mutated: false, ran: false, refusal: 'run_failed' };
         if (!runPress) return capabilities.runAnalysis(toolCtx, args);
         if (runPressConsumed) return { ok: false, mutated: false, ran: false, refusal: 'run_press_consumed',
           detail: 'This Run press has already been used. No second analysis ran.' };
@@ -673,6 +679,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       // The automatic Run after a committed change: ONCE per request, on the saved revision, when its readiness admits a Run.
       let committedAnalysis: Promise<{ readonly run?: Record<string, unknown>; readonly ready?: unknown; readonly awaitsTiming?: true }> | undefined;
       const analyseCommittedChange = () => committedAnalysis ??= (async () => {
+        if (capabilities === undefined) return {};
         const savedRead = savedScenarioOf(await readingDispatch(graphPath, {}));
         if (!admitsRun(savedRead.analysisReady)) return { ready: savedRead.analysisReady };
         // The AI's timing reading, carried from the Run current when the turn began while this change left its subject as it was.
@@ -693,9 +700,6 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
        * The write goes through this turn's counting dispatch, so the claim, the write accounting and the answer row below are
        * the core route's own.
        */
-      const program = programRead.kind === 'program';
-      // A Run press on a program is the host's own (the stored Run, or a new one): no model call.
-      const modelProgram = saved.graph === null || (program && runPress);
       let programPayload: { readonly canonical_analysis_view: unknown; readonly model_program: Record<string, unknown> } | undefined;
       const programTurn = async (): Promise<AgentTurnResult> => {
         const t0 = Date.now();
@@ -713,7 +717,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         result = { assistant_text: '', items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
           timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
       } else {
-        const canonical = program ? await readProgramContext({ dispatch: readingDispatch, proposals }, { scenario_id: scenarioId, authenticated_user_id: userId })
+        // The agent's view, read only for its turn: a program's own; the Living Model reader only on a Living Model.
+        const canonical = modelProgram ? undefined : program ? await readProgramContext({ dispatch: readingDispatch, proposals }, { scenario_id: scenarioId, authenticated_user_id: userId })
           : await readCanonicalContext({ dispatch: readingDispatch }, { scenario_id: scenarioId });
         // This turn's repairs: a refusal they make is settled as base at the turn's end (`goal-path.ts`).
         const restructure: Restructure = { repairs: 0 };
@@ -741,7 +746,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             briefText: saved.briefText,
             // A program's first agent turn opens its Conversation with the turns before it, the host-written draft reply included.
             ...(program ? { earlierTurns } : {}),
-            canonicalState: canonical.status === 'ok' ? canonical.data : undefined,
+            canonicalState: canonical?.status === 'ok' ? canonical.data : undefined,
             // A Run press permits calculation and reading only; any other press carries no consent to Run.
             withheldTools: runPress ? CORE_RUN_PRESS_WITHHELD : [...(chip !== null ? ['run_analysis'] : []), 'offer_public_research'],
             // A Challenge opens on its note tool on a Living Model board; a program board has no note tool, so the AI answers its

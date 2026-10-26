@@ -10,6 +10,7 @@
 import type { ActionId } from '../agent-lane/actions/registry.js';
 import { actionBarOf, type ActionBarV1, type ActionOffer } from '../agent-lane/actions/rank.js';
 import { actionFactsOf } from '../agent-lane/actions/state.js';
+import { isProgramGraph } from '../model-program-turn/program-store.js';
 
 /** The actions a press on the core route serves today. */
 const CORE_SERVED: ReadonlySet<ActionId> = new Set<ActionId>(['pre_mortem']);
@@ -17,8 +18,12 @@ const CORE_SERVED: ReadonlySet<ActionId> = new Set<ActionId>(['pre_mortem']);
 const rec = (v: unknown): Record<string, unknown> | undefined =>
   (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined);
 
-/** The bar for a core scenario, from a body of `/assist/v1/scenarios/:id/graph`; none when nothing it offers is served. */
+/**
+ * The bar for a core scenario, from a body of `/assist/v1/scenarios/:id/graph`; none when nothing it offers is served. A model
+ * program has none, and the ranker never runs on one: no action here is a program contract (spec §3).
+ */
 export function coreActionBarOf(scenarioId: string, body: Readonly<Record<string, unknown>>): ActionBarV1 | undefined {
+  if (isProgramGraph(body.graph)) return undefined;
   try {
     // The identity-evaluated set is not read (its reader lives in the admission layer the thin core never imports): it feeds
     // the guidance rows' ranking and the strengthen card, never the pre-mortem's offer, whose standard slot is fixed.

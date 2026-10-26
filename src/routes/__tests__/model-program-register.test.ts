@@ -307,7 +307,8 @@ describe('a model program\'s postimage through the real /graph/register', () => 
       ['stale base (the commit\'s own CAS)', next, 409, 'GRAPH_STALE', () => append.mockImplementation(async () => stale())],
       ['the held cards cannot be read', next, 503, undefined, () => store.readMostRecentPendingActions.mockRejectedValue(new Error('unreadable'))],
       ['nodes not a list', { ...next, nodes: 'none' }, 422, 'GRAPH_SHAPE_INVALID', () => {}],
-      ['a node with no kind', { ...next, nodes: nodes.map((n, i) => (i === 0 ? { ...n, kind: undefined } : n)) }, 422, 'GRAPH_NODE_KIND_MISSING', () => {}],
+      // The graph contract refuses it (the legacy kind repair never runs on a program: DL 26 Oct, spec §3).
+      ['a node with no kind', { ...next, nodes: nodes.map((n, i) => (i === 0 ? { ...n, kind: undefined } : n)) }, 422, 'GRAPH_CONTRACT_INVALID', () => {}],
       ['too many nodes', { ...next, nodes: [...nodes, ...Array.from({ length: GRAPH_MAX_NODES }, (_, i) => ({ id: `extra_${i}`, kind: 'factor', label: 'x' }))] }, 422, 'GRAPH_TOO_LARGE', () => {}],
       ['a duplicate node id', { ...next, nodes: [...nodes, { ...nodes.find((n) => n.kind === 'factor')! }] }, 422, 'GRAPH_INVARIANT_VIOLATION', () => {}],
       ['a link to no node', { ...next, edges: [...edges, { ...edges[0]!, id: 'dangling', to: 'no_such_node' }] }, 422, 'GRAPH_INVARIANT_VIOLATION', () => {}],

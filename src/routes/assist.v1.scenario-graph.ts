@@ -495,13 +495,15 @@ export default async function route(app: FastifyInstance) {
       let actionBar: ActionBarV1 | undefined;
       // PATH-B core ranks its own bar (`core-route/action-bar.ts`) from the fields this read sends, as each core turn does from
       // the body of its own read: the graph, its hash, the state, the current read, the result and the option participation.
+      // A program has no bar (spec §3: none of these actions is a program contract), so neither ranker runs on one.
       const coreLane = laneModeFor('full', req.headers['x-olumi-ai-mode'], getRuntimeEnv(), graphPresent && isLegacyGraph(graph)) === 'core';
-      if (conversationRequested && coreLane) {
+      const rankBar = conversationRequested && programRead.kind === 'none';
+      if (rankBar && coreLane) {
         actionBar = coreActionBarOf(scenarioId, { graph: graphPresent ? graph : null,
           graph_hash: graphPresent ? computeAnalysisAffectingGraphHash(graph as GraphStateIngress) : null,
           analysis_state: analysis.analysis_state, current_read: currentReadWire, analysis_result: analysis.analysis_result,
           analysis_option_participation: analysis.analysis_option_participation });
-      } else if (conversationRequested) {
+      } else if (rankBar) {
         let guidance: GuidanceState | null = null;
         try { guidance = typeof store.readGuidanceHistory === 'function' ? await store.readGuidanceHistory(scenarioId) : null; } catch { guidance = null; }
         try {
@@ -544,8 +546,9 @@ export default async function route(app: FastifyInstance) {
       // identity to anchor to, and a hash of nothing would be a false anchor.
       const identity = graphPresent ? computeGraphIdentityHash(graph as GraphStateIngress) : null;
       // Why an item is not in the calculation (canvas-lm, DL 22 Oct): the mapper's own holds on a core scenario, from the same
-      // mapping every write and Run uses (`livingViewOf`). Null for an absent or legacy graph, or a living model that does not parse.
-      const living = graphPresent ? livingViewOf(graph) : undefined;
+      // mapping every write and Run uses (`livingViewOf`). Null for an absent or legacy graph, a program (the Living Model reader
+      // never runs on one), or a living model that does not parse.
+      const living = graphPresent && programRead.kind === 'none' ? livingViewOf(graph) : undefined;
       return reply.code(200).send({
         schema: SCENARIO_GRAPH_SCHEMA,
         ...(heldOffers !== undefined && heldOffers.length > 0 ? { held_proposal_offers: heldOffers } : {}),

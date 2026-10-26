@@ -80,6 +80,7 @@ import {
   buildCorsHeaders,
   isOriginAllowed,
   parseAllowedOrigins,
+  programOnLegacyRouteRefusal,
   resolveProxyAssistKey,
   resolveProxyInternalTarget,
   serialiseProxiedBodyWithoutClaimedIdentity,
@@ -179,6 +180,12 @@ export default async function proxyV5TurnStreamRoute(app: FastifyInstance): Prom
     // streamed and buffered rungs cannot diverge on who a caller is allowed
     // to claim to be.
     const payload = serialiseProxiedBodyWithoutClaimedIdentity(request.body ?? {});
+
+    const programRefusal = programOnLegacyRouteRefusal(resolveProxyInternalTarget(request.headers[AI_MODE_HEADER]), request, requestId);
+    if (programRefusal !== undefined) {
+      for (const [k, v] of Object.entries(cors)) reply.header(k, v);
+      return reply.code(409).send(programRefusal);
+    }
 
     await streamTurnAsStagedSse({
       app,
