@@ -58,6 +58,21 @@ const RAISE_WHY = 'in every simulated draw ‘Customers’ is 82 customers at 1 
 const FORECAST_OR_VERDICT = /\b(will|win|wins|winner|best|recommend|recommended|should)\b|comes out on top/i;
 
 describe('present: the canonical analysis view from a simulated model', () => {
+  it('multiline labels, premises and approximate quotes stay readable on one line without rewriting their source', () => {
+    const m = model([fixed('x', 2, 'tickets'), fixed('target', 1, 'tickets')], [goal('g', 'x', '>=', 'target')], [option('hold', 'Hold\n steady')]);
+    const labels = { x: { ...person('Weekly\n capacity'), approximate: { quote: 'about\r\n two tickets' } }, target: person('Target') };
+    const premise = { id: 'ready', text: 'Staff\n are trained.', author: 'person' as const, party: 'Our\n trainer', kind: 'condition' as const, confirmed: true };
+    const before = JSON.stringify({ m, labels, premise });
+    const v = present(m, labels, { goals: [{ goal_id: 'g', label: 'Capacity', status: 'calculable', reasons: [], asks: [], rests_on: [premise] }] });
+    expect(v.goal_chance.chance_words).toBe('chance of ‘Weekly capacity’ being at least 1 ticket at 1 month from the start of this model');
+    expect(cell(v, 'hold').face).toContain('Our trainer’s condition ‘Staff are trained’ is met');
+    expect(cell(v, 'hold').face).toContain('you said ‘about two tickets’');
+    expect(cell(v, 'hold').face).toContain('‘Hold steady’');
+    expect(cell(v, 'hold').face).not.toMatch(/[\r\n]/);
+    expect(v.goal_chance.chance_words).not.toMatch(/[\r\n]/);
+    expect(JSON.stringify({ m, labels, premise })).toBe(before);
+  });
+
   it('a later observation window counts from the model start for every state and flow reading, retaining each event and chance', () => {
     const horizons: { aggregation: Goal['aggregation']; state: string; flow: string; display: string }[] = [
       { aggregation: 'end', state: 'at 5 months', flow: 'in month 5', display: '0%' },
@@ -383,6 +398,36 @@ const timed = (delayOn: 'set' | 'risk') => ({ periods: 6, period_unit: 'month', 
   risks: delayOn === 'risk' ? [{ id: 'outage', occurrence: 'fires', severity: 'loss', effect_on: 'capacity', mode: 'add', from_period: 'delay' }] : [] }) as unknown as ExecutableModel;
 
 describe('present: what each computed chance rests on most (one figure at a time at its low end, middle and high end)', () => {
+  it('tests and reports only settings inside a declared domain, retaining the stated range in the model', () => {
+    const x: Quantity = { ...range('x', -0.2, 1.2, undefined, '1', 'olumi_estimate'),
+      dist: { kind: 'range', low: -0.2, high: 1.2, basis: 'olumi_estimate', range_kind: 'plausible', domain: { min: 0, max: 1 } } };
+    const m = model([x, fixed('target', 0.8, '1')], [goal('g', 'x', '>=', 'target')], [option('hold', 'Hold')]);
+    const v = present(m, { x: { label: 'Sell-through', author: 'olumi', shown_in: { unit: '%', factor: 0.01 } }, target: person('Target') });
+    const d = driver(v, 'hold');
+    // The permissible settings are 0%, 50%, 100%. Only 100% meets the 80% target, exactly, with no other uncertainty.
+    expect(d.kind).toBe('available');
+    expect(d.driver.low).toEqual({ value: 0, display: '0%' });
+    expect(d.driver.middle).toEqual({ value: 0.5, display: '0%' });
+    expect(d.driver.high).toEqual({ value: 1, display: '100%' });
+    expect(d.detail).toContain('at the low end (0%) 0%, at the middle (50%) 0%, at the high end (100%) 100%');
+    expect(x.dist).toMatchObject({ low: -0.2, high: 1.2, domain: { min: 0, max: 1 } });
+  });
+
+  it('uses the risk occurrence domain even when no explicit domain is recorded on its range', () => {
+    const m = model([range('chance', -0.2, 1.2, undefined, '1', 'olumi_estimate'), fixed('base', 100, 'tickets'), fixed('zero', 0, 'tickets'),
+      def('capacity', 'sum', ['base', 'zero'], 'tickets'), fixed('loss', -100, 'tickets'), fixed('target', 50, 'tickets')],
+    [goal('g', 'capacity', '>=', 'target')], [option('hold', 'Hold')]);
+    m.risks.push({ id: 'outage', occurrence: 'chance', severity: 'loss', effect_on: 'capacity', mode: 'add', from_period: 0 });
+    const d = driver(present(m, { ...confirmedFigures(m), chance: { label: 'Outage chance', author: 'olumi' } }), 'hold');
+    expect(d.kind).toBe('available');
+    expect(d.driver.low.value).toBe(0);
+    expect(d.driver.middle.value).toBe(0.5);
+    expect(d.driver.high.value).toBe(1);
+    // A risk still uses sampling precision, even when its tested chance is 0 or 1; never call it an exact whole Run.
+    expect(d.driver.low.display).toBe('more than 99%');
+    expect(d.driver.high.display).toBe('less than 1%');
+  });
+
   it('a hand-calculated model: the driver and its three settings are known, and an option nothing moves licenses none', () => {
     // Add: at c = 10, capacity is 90 + d, below 95 in every draw (d moves it by about 0.06): 0 of 200, "less than 1%"; at c = 20,
     // 100 + d, and at c = 30, 110 + d, met in every draw: "more than 99%". None is exact (d is still drawn). Swing 100 points;
