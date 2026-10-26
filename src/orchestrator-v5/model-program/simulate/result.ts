@@ -1,5 +1,6 @@
 // model-program/simulate/result.ts (S2 owns it)
 import type { Withheld } from '../executable.js';
+import type { PairedDifference } from './paired.js';
 
 export type Chance = { chance: number; precision_95: [number, number] };                         // Wilson interval = SIMULATION precision, never the chance's meaning band
 // ── Changed from the interface block (DL ruling 3, 23 Oct): a nonfinite draw (NaN or ±Infinity) in what a condition reads is
@@ -37,6 +38,8 @@ export type SimResult = {
   recorded?: RecordedDraw[];
   // ── Additive (SC0): only when `perDraw` asks. Every draw's own results, in memory only (typed arrays; never stored).
   per_draw?: PerDraw;
+  /** SC2: every pair of options compared on the same draws, a − b, in model order (paired.ts). */
+  paired: { a: string; b: string; joint_within_limits: PairedDifference }[];
 };
 /**
  * SC0: every draw's own results on the Run's shared draws, for the methods that read them (a paired comparison, value of
