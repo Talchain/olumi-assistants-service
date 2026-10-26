@@ -2961,9 +2961,10 @@ describe('the model-program turn on the real core route', () => {
       quote: 'I don\'t know what a Tech lead would cost yet.', basis: 'A recruiter\'s quote for a Tech lead would size it.', question: null });
     expect(((unknown.runs.at(-1)!.result as Json).compile.blockers as Json[]).filter((b) => b.id === 'tech_lead_hiring_cost' && b.code === 'asked')).toEqual([]);
     expect(dunno.data.changes[0].after).toContain('in your words "I don\'t know what a Tech lead would cost yet."');
-    // Their "I don't know" is theirs only in THIS turn's words (buddy 24 Oct): quoting their brief instead is refused, by id.
+    // Strip (Paul 26 Oct; A2/A2b/A5 removed): an answer quoting their brief instead of this turn's words is no longer refused by
+    // the host; it passes to the card as the AI declared it, and only the person's press applies it.
     expect(await ask('No idea yet.', [answer({ id: 'tech_lead_hiring_cost', status: 'unknown', quote: saved.brief.slice(0, 40), basis: 'A recruiter\'s quote would size it.' })]))
-      .toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['tech_lead_hiring_cost'] } });
+      .toMatchObject({ status: 'ok' });
     // A range's reading is theirs to give (buddy 24 Oct): one their words declare is kept exactly; one they do not stays null,
     // honestly unresolved, and the Run asks how to read it.
     const firm = await ask('Firmly between £40,000 and £50,000.', [answer({ id: 'developer_hiring_cost', status: 'known', low: 40000, high: 50000, range_kind: 'bounds', quote: 'Firmly between £40,000 and £50,000.' })]);
@@ -2972,12 +2973,11 @@ describe('the model-program turn on the real core route', () => {
     expect(open.status, JSON.stringify(open)).toBe('ok');
     expect(heldOf(open).canonical.quantities.find((x) => x.id === 'developer_hiring_cost')).toMatchObject({ low: 40000, high: 50000, range_kind: null });
     expect(((heldOf(open).runs.at(-1)!.result as Json).compile.blockers as Json[]).filter((b) => b.id === 'developer_hiring_cost').map((b) => b.code)).toEqual(['range_kind']);
-    // Codex r1 #3727: THIS turn's words only. An earlier message of theirs (verified, but not this turn's) is refused, and so is
-    // an answer that changes only its basis while quoting their brief.
+    // Strip (Paul 26 Oct): an answer quoting an earlier message of theirs is no longer refused by the host; it reaches the card.
     const earlier = 'About £45,000 per developer, all in.';
     expect(await proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [earlier, 'Yes, go ahead.'],
       user_turn_text: 'Yes, go ahead.' }, ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request: '', remove: [],
-      answers: [answer({ id: 'developer_hiring_cost', status: 'known', value: 45000, quote: earlier })] }))).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['developer_hiring_cost'] } });
+      answers: [answer({ id: 'developer_hiring_cost', status: 'known', value: 45000, quote: earlier })] }))).toMatchObject({ status: 'ok' });
     // Basis-only: their "I don't know" saved first, so the next answer changes nothing but its basis (and quotes their brief).
     expect(await applyProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, dunno.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'tech_lead_hiring_cost')).toMatchObject({ status: 'unknown', value: null, low: null, high: null });
