@@ -56,6 +56,7 @@ import {
 import { withTodayPartsAtGoalLevel } from "../orchestrator-v5/agent-lane/goal-definition-sum.js";
 import type { PendingAction } from "../orchestrator-v5/session/pending-action.js";
 import { isProgramGraph } from "../orchestrator-v5/model-program-turn/program-store.js";
+import { heldCardForReview, heldProgramCardMoved, isHeldCardBeingApplied } from "../orchestrator-v5/agent-lane/proposal-object/still-applies.js";
 
 /** Create-only construction may retain a count range the brief itself states. Proposed ranges still need approval. */
 function onlyBriefStatedCountRanges(graph: GraphStateIngress, brief: string | undefined): boolean {
@@ -392,6 +393,8 @@ async function threadLiveHoldsThroughRegistration(input: {
   readonly requestId: string;
   readonly graphForStore: unknown;
   readonly graphHashForStore: string | null;
+  /** A model program's save (inventory F4): its cards are judged by their own revision, and no legacy rule runs. */
+  readonly programSave?: boolean;
 }): Promise<readonly PendingAction[] | undefined> {
   let prior: readonly PendingAction[];
   try {
@@ -407,6 +410,12 @@ async function threadLiveHoldsThroughRegistration(input: {
       "Graph registration — prior pending read failed; refusing to erase live holds or scope issues",
     );
     throw err; // Never erase an unresolved issue because its authoritative read failed.
+  }
+  // ⭐ A MODEL PROGRAM'S SAVE (inventory F4): every prior pending is carried as it stands, but a program card whose revision this
+  // save moved is kept for review, never approvable. The card this write applies is carried as it stands, so a retry after an
+  // interrupted press still binds and is answered "already saved". No batch, scope or hash rule of the legacy model runs.
+  if (input.programSave === true) {
+    return prior.map((pa) => (heldProgramCardMoved(pa, input.graphForStore) && !isHeldCardBeingApplied(pa) ? heldCardForReview(pa, input.graphHashForStore) : pa));
   }
   // Even with no earlier issue, an approved scope may now contradict a canvas value.
   const result = threadHoldsThroughMutatingCommit({
@@ -680,6 +689,9 @@ export default async function route(app: FastifyInstance) {
       // readback hash), never the legacy edit rules (`CheckedGraphAppendParams.programSave`) nor the legacy kind repair and
       // event_risk contract: it is checked where it is made.
       const programSave = corePostimage && isProgramGraph(submitted);
+      // A model program is stored as it was built (inventory F4): the persistence projection's legacy passes (kind repair,
+      // intervention contract, risk marks, capacity ratios) are not program rules, and leave a program's graph unchanged.
+      const persistable = <T,>(graph: T): T => (programSave ? graph : project(graph, { scenarioId, turnClass: "direct_answer", source: "graph_registration" }));
 
       // Caps BEFORE normalisation, so a hostile 10k-node array is rejected in
       // O(1) rather than walked. A model program's save is held to its own cap (`graphCaps.ts`: it never reaches PLoT).
@@ -847,11 +859,7 @@ export default async function route(app: FastifyInstance) {
         try {
           const committed = await store.readCommittedTurn(scenarioId, registrationTurnId(scenarioId, operationId));
           if (committed === null) return false;
-          const bytes = withEntityRefs(project(graphToRegister, {
-            scenarioId,
-            turnClass: "direct_answer",
-            source: "graph_registration",
-          }));
+          const bytes = withEntityRefs(persistable(graphToRegister));
           return committed.request_hash === registrationRequestHash(bytes, brief.value);
         } catch {
           return false;
@@ -1112,29 +1120,27 @@ export default async function route(app: FastifyInstance) {
       // `commit.ts` was restructured to close.
       try {
         // Same deterministic check as the proposal writer and final append floor.
-        if (!programSave) assertNoScopedIdentityConflict(graphToRegister);
-        const pending = await loadMostRecentPendingActionsIntegrityStrict(scenarioId, requestId); // a failed read refuses every write
-        if (!programSave) assertNoPendingScopeAmendment(graphToRegister, baseGraphForInvariants, pending);
+        // A model program has no goal scope: neither check, nor the pending read that feeds the second, runs on its save.
+        if (!programSave) {
+          assertNoScopedIdentityConflict(graphToRegister);
+          const pending = await loadMostRecentPendingActionsIntegrityStrict(scenarioId, requestId); // a failed read refuses every write
+          assertNoPendingScopeAmendment(graphToRegister, baseGraphForInvariants, pending);
+        }
       } catch (err) {
         if (err instanceof GoalScopeIdentityConflict) return reply.code(422).send(buildErrorV1('BAD_INPUT', err.message, { code: err.code }, requestId));
         log.warn({ event: 'v5.scenario_graph_register.pending_wipe_risk', request_id: requestId, scenario_id: scenarioId }, 'Graph registration refused because the authoritative reconciliation read failed');
         return unavailable();
       }
-      const projected = project(graphToRegister, {
-        scenarioId,
-        turnClass: "direct_answer",
-        source: "graph_registration",
-      });
+      const projected = persistable(graphToRegister);
       if (!programSave && hasNewInterventionRanges(baseGraphForInvariants, projected)
         && !(callerExpectsNoGraph && (onlyBriefStatedCountRanges(projected, brief.value) || onlyRecordedSettingRanges(projected, brief.value)))) {
         return reply.code(409).send(buildErrorV1('BAD_INPUT',
           'A new or changed likely range needs approval on its stored change card. Nothing was written.',
           { code: 'INTERVENTION_RANGE_APPROVAL_REQUIRED' }, requestId));
       }
-      const graphForStore = withEntityRefs(project(
-        programSave ? projected : clearInheritedInterventionSourceQuotes(baseGraphForInvariants, projected), {
-          scenarioId, turnClass: "direct_answer", source: "graph_registration",
-        }));
+      const graphForStore = withEntityRefs(programSave ? projected : project(clearInheritedInterventionSourceQuotes(baseGraphForInvariants, projected), {
+        scenarioId, turnClass: "direct_answer", source: "graph_registration",
+      }));
 
       if (!programSave) prepareHorizonBasisForWrite(graphForStore, baseGraphForInvariants, scenarioId);
       const turnId = registrationTurnId(scenarioId, operationId);
@@ -1252,6 +1258,7 @@ export default async function route(app: FastifyInstance) {
             requestId,
             graphForStore,
             graphHashForStore: computeExpectedGraphCasHashes(graphForStore).expectedGraphAnalysisHash,
+            programSave,
           });
           return appendCheckedGraphWrite({
           store,
