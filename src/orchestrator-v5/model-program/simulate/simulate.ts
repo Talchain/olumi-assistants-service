@@ -423,6 +423,27 @@ function evaluate(node: Exclude<Node, StockNode>, vals: Float64Array, row: numbe
   }
 }
 
+/**
+ * The exact period-0 levels of a compiled model, before any option. Reuse the run's evaluator and dependency order,
+ * without drawing inputs or running time forward. A range or risk contributes no exact value; NaN carries that absence
+ * through its dependants, including a zero times an uncertain input. A stock starts at its start, not its first update.
+ */
+export function exactInitialValues(model: ExecutableModel): ReadonlyMap<string, number> {
+  const baseline = { ...model, options: [], risks: [] };
+  const c = compile(baseline);
+  const p = planOption(c, { id: '', label: '', sets: [] }, baseline);
+  const risky = new Set(model.risks.map((r) => r.effect_on));
+  const vals = new Float64Array(c.nodes.length).fill(NaN);
+  const inputs: Inputs = { drawn: [], riskU: [] };
+  for (const q of p.order) {
+    const node = c.nodes[q]!;
+    if (node.kind === 'drawn' || risky.has(c.ids[q]!)) continue;
+    const value = node.kind === 'stock' ? vals[node.start]! : evaluate(node, vals, 0, inputs, 0);
+    if (Number.isFinite(value)) vals[q] = value;
+  }
+  return new Map(c.ids.flatMap((id, q) => Number.isFinite(vals[q]) ? [[id, vals[q]!] as const] : []));
+}
+
 const below = (cmp: Cmp): boolean => cmp === '<=' || cmp === '<';
 const holds = (x: number, cmp: Cmp, y: number): boolean => (cmp === '>=' ? x >= y : cmp === '<=' ? x <= y : cmp === '>' ? x > y : x < y);
 

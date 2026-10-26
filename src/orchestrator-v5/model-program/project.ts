@@ -24,8 +24,9 @@ import { resolveGoalThresholdCapWithProvenance } from '../../utils/goal-threshol
 import type { CanonicalModelT, CanonicalQuantityT, QualitativeFamilyT } from './canonical.js';
 import { QUALITATIVE_FAMILIES } from './canonical.js';
 import { compile, isApproximate, normalise, rangeDistOf, readRange, type CompileResult, type LawReading } from './compile.js';
-import { parseUnit } from './units.js';
+import { parseUnit, sameDims } from './units.js';
 import { directionUsed, rateOf as rateOfLink } from './links.js';
+import { exactInitialValues } from './simulate/simulate.js';
 
 type Rec = Record<string, unknown>;
 /** structure: an exact constant the model's form needs; never drawn as anyone's estimate. */
@@ -68,6 +69,7 @@ const OLUMIS_FIGURE = { source: 'cee_inference', extractionType: 'inferred' } as
 export function project(input: CanonicalModelT, compiled: CompileResult = compile(input), opts: { readonly brief?: string } = {}): Projection {
   const model = normalise(input); // an option's inline value is a named quantity, drawn on its option card
   const x = compiled.executable;
+  const initial = x === null ? new Map<string, number>() : exactInitialValues(x);
   const xq = new Set(x?.quantities.map((q) => q.id) ?? []);
   const xg = new Set(x?.goals.map((g) => g.id) ?? []);
   const xl = new Set(x?.limits.map((l) => l.id) ?? []);
@@ -216,6 +218,27 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const basisOf = (q: CanonicalQuantityT): Rec => (q.status === 'derived' ? { value_basis: { kind: 'worked_out', from: partsOf.get(q.id) ?? [], words: workedOutWords(q.id) } }
     : q.status === 'asked' ? { value_basis: { kind: 'waiting_for_answer', words: WAITING_WORDS, ...(has(q.question) ? { question: q.question } : {}) } }
       : q.author === 'structure' ? { value_basis: { kind: 'structure', words: STRUCTURE_WORDS } } : {});
+  /** The engine's exact initial figure, converted back to the card's unit. No source stamp: it was worked out. */
+  const derivedObservation = (q: CanonicalQuantityT, unit = q.unit): Rec => {
+    const value = initial.get(q.id), own = parseUnit(q.unit), shown = parseUnit(unit);
+    if (value === undefined || !own.ok || !shown.ok || !sameDims(own.unit, shown.unit)) return {};
+    const raw = value / shown.unit.scale;
+    return Number.isFinite(raw) ? { observed_state: { value: raw, raw_value: raw, unit } } : {};
+  };
+  /** The existing horizon reader says “within N months”: only a fixed window from now can mean that. */
+  const horizonOf = (g: CanonicalModelT['goals'][number]): Rec => {
+    const w = g.measure?.window;
+    if (!w || w.origin_event !== null || w.origin_offset !== null || w.start !== 0) return {};
+    const q = Q.get(w.periods);
+    if (!q || q.status !== 'known' || (has(q.low) && has(q.high) && q.low !== q.high)) return {};
+    const value = q.value ?? q.low, u = parseUnit(q.unit);
+    if (!has(value) || !Number.isInteger(value) || value <= 0 || !u.ok || u.unit.scale !== 1) return {};
+    const dims = Object.entries(u.unit.dims);
+    if (dims.length !== 1 || dims[0]![1] !== 1) return {};
+    // Years and months have an exact conversion. Weeks do not have an exact number of months.
+    const months = dims[0]![0] === 'month' ? value : dims[0]![0] === 'year' ? value * 12 : null;
+    return months === null || !Number.isInteger(months) ? {} : { goal_horizon: { months }, goal_horizon_months: months };
+  };
   /**
    * An option's setting in the canvas's intervention vocabulary: the figure's own author, or, for a structural switch (0 or
    * 1, none or one), the option's, since setting it IS what the option says ("set by ‘Add one specialist’, from your brief").
@@ -237,13 +260,19 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const who = whoOf(g, g.id);
     const target = g.measure ? Q.get(g.measure.target) : undefined;
     const point = target && has(target.value) && !has(target.low) ? target.value : null;
-    const metricUnit = g.measure ? Q.get(g.measure.quantity)?.unit : undefined;
+    const metric = g.measure ? Q.get(g.measure.quantity) : undefined;
+    const metricUnit = metric?.unit;
+    const goalUnit = g.measure?.frame === 'change_rel' ? metricUnit : target?.unit;
     nodes.push({
       id: g.id, kind: 'goal', label: g.label, ...provenanceOf(who), ...quoteOf(g, g.id), ...participation(inCalc || (has(g.measure) && kept(per))),
       ...(g.measure ? { goal_direction: g.measure.cmp, goal_threshold_frame: g.measure.frame, ...(g.measure.frame === 'level' ? {} : { quantity_frame: 'level' }),
         ...(target ? { goal_threshold_unit: g.measure.frame === 'change_rel' ? (metricUnit ?? '1') : target.unit, display_value: `${g.measure.cmp} ${display(target)}` } : {}),
         ...(point !== null && target ? goalTarget(point, target, g.measure.frame) : {}) } : {}),
       ...(has(g.question) ? { user_questions: [g.question] } : {}),
+      ...horizonOf(g),
+      // A total over a window or a per-quantity ratio is not the measured quantity's level today.
+      ...(metric?.status === 'derived' && g.measure?.per === null && g.measure.aggregation !== 'sum' && goalUnit
+        ? { ...derivedObservation(metric, goalUnit), ...basisOf(metric) } : {}),
     });
     items.push({ record_id: g.id, family: 'goal', shown_as: { node: g.id }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: g.approval });
     if (g.measure && Q.has(g.measure.quantity)) {
@@ -272,12 +301,12 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   /**
    * A figure on the field the card's value line and editor read, with whose it is: a point as given; a range at its centre
    * (the figure given, else the centre Olumi reads it around) with both ends as `range`. An asked or unknown quantity has
-   * no figure, so only its unit is drawn; a derived one has neither.
+   * no figure, so only its unit is drawn; a derived one carries only an exact initial figure the engine can support.
    */
   const observedOf = (q: CanonicalQuantityT): Rec => {
     // Every card's figure is in its quantity's own unit (DL 23 Oct: the in-card editor reads it here, never the 0–1 model
-    // scale), a question's or an unknown's too; a worked-out figure has no editor, so none is drawn.
-    if (q.status !== 'known' && q.status !== 'estimated') return q.status === 'derived' ? {} : { observed_state: { unit: q.unit } };
+    // scale), a question's or an unknown's too. A derived figure keeps its worked-out basis, never anyone's source stamp.
+    if (q.status !== 'known' && q.status !== 'estimated') return q.status === 'derived' ? derivedObservation(q) : { observed_state: { unit: q.unit } };
     const ranged = has(q.low) && has(q.high) && q.low !== q.high;
     const r = ranged ? lawFor(q) : undefined;
     const centre = has(q.value) ? q.value : r?.kind === 'normal' ? r.mean : ranged ? (q.low! + q.high!) / 2 : null;
