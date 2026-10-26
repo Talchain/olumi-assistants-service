@@ -172,7 +172,9 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   const drafted = request.trim() !== '' || args.remove.length > 0 ? await proposePostimage(set.model, words, request, args.remove, ledgeredResponsesCall(), program.drafted_on) : set;
   // Why an update took more than one drafting call: each attempt's time and the compiler's error codes (never the person's words).
   if ('attempts' in drafted) log.info({ event: 'model_program.update_draft', scenario_id: ctx.scenario_id, attempts: drafted.attempts.map((a) => ({ ms: a.ms,
-    codes: a.errors?.map((e) => e.code) ?? null, ...(a.failed !== undefined ? { failed: a.failed } : {}) })) }, 'model-program: update drafted');
+    codes: a.errors?.map((e) => e.code) ?? null, ...(a.failed !== undefined ? { failed: a.failed } : {}),
+    // A call that threw: its typed fields only (status, type, code, request id), never its message (W9: the cause was lost).
+    ...(a.provider_error !== undefined ? { provider_error: a.provider_error } : {}) })) }, 'model-program: update drafted');
   if (drafted.model === null) return refused('no_model_back', 'Olumi could not write the updated model just now; nothing changed.');
   // Their answers win on the drafter's model too, set again exactly (buddy 24 Oct); one it removed is refused by name, never dropped.
   // An answer in words on a figure stays theirs there (Codex r1 #3767): their status, party and words, the drafter's reading of

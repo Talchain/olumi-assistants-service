@@ -40,6 +40,7 @@ import type { CardId, OpenAiPausedRun } from '../../session/store.js';
 import type { DraftVerification } from '../../path-b/tools/outcome.js';
 import { agentRequestIdentity } from '../runtime/prompt-identity.js';
 import type { AgentToolContext, ToolResult } from '../runtime/agent-tools.js';
+import { providerServerFault } from '../runtime/transport-retry.js';
 import { WITHHELD_ON_CHIP_TURN, type AgentTurnResult } from '../runtime/agent-loop.js';
 import type { CallBudget } from '../model-budgets.js';
 import { BRIEF_LABEL, runFactsContext, turnContextItems, turnContextText } from '../turn-context.js';
@@ -527,22 +528,52 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
        * not choose provider transport. A stage emitter is optional; the reply, outcomes and saved state remain final JSON.
        */
       const showProgress = currentStageEmitter() !== undefined;
-      const go = async (from: string | AgentInputItem[] | RunState<unknown, Agent>) => {
+      /** The run state of the last run that failed: its tool outputs, so a call after them can be sent again without them re-running. */
+      let failedRun: RunState<unknown, Agent> | undefined;
+      const goOnce = async (from: string | AgentInputItem[] | RunState<unknown, Agent>) => {
+        failedRun = undefined;
         const live = await run(agent, from, { ...options, stream: true });
         let writing = false;
-        for await (const event of live) {
-          accepted = true;
-          // The provider created the response from this request's input: the turn's items are now in the Conversation.
-          if (carrying && event.type === 'raw_model_stream_event' && event.data.type === 'response_started') { delivered = true; carrying = false; }
-          if (!writing && event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta') {
-            writing = true;
-            if (showProgress) emitAgentPhase('writing');
+        try {
+          for await (const event of live) {
+            accepted = true;
+            // The provider created the response from this request's input: the turn's items are now in the Conversation.
+            if (carrying && event.type === 'raw_model_stream_event' && event.data.type === 'response_started') { delivered = true; carrying = false; }
+            if (!writing && event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta') {
+              writing = true;
+              if (showProgress) emitAgentPhase('writing');
+            }
           }
-        }
-        await live.completed;
+          await live.completed;
+        } catch (err) { failedRun = live.state; throw err; }
         await Promise.allSettled(pendingRows);
         if (deliveryUnknown !== undefined) throw new CoreDeliveryUnknownError(deliveryUnknown.cause);
         return live;
+      };
+      /**
+       * ⭐ THE REPLY AFTER A SAVED CHANGE IS ASKED FOR ONCE MORE (W9; served 26 Oct 13:33Z: the approval saved, then OpenAI sent
+       * "overloaded" mid-stream on the reply call, and the person got a 502 for a change that was kept). Only when this turn has
+       * already saved a write and the call failed on the provider's own server fault (`providerServerFault`: busy, a server
+       * error, a 5xx) or its stream ended with no terminal event; never a refusal, a rate or quota answer, a call with no answer
+       * at all, or a cancelled turn. ONE retry per turn, from the failed run's own state: the tool outputs are in it, so the
+       * request carries them again and no tool runs twice. A retry that fails too is the turn's failure, as before.
+       */
+      let replyRetried = false;
+      const go = async (from: string | AgentInputItem[] | RunState<unknown, Agent>) => {
+        try { return await goOnce(from); } catch (err) {
+          const state = failedRun;
+          await Promise.allSettled(pendingRows);
+          const fault = providerServerFault(err)
+            ?? (deliveryUnknown !== undefined && !(err instanceof APIConnectionError) ? 'no_terminal_event' as const : undefined);
+          if (replyRetried || state === undefined || fault === undefined || input.signal?.aborted === true
+            || !toolResults.some((r) => r.mutated === true)) throw err;
+          replyRetried = true;
+          log.warn({ event: 'agent_core.reply_retried', scenario_id: input.ctx.scenario_id, request_id: input.ctx.request_id, fault },
+            'agent-core: the reply after a saved change failed on the provider; asking for it once more');
+          const lost = deliveryUnknown;
+          deliveryUnknown = undefined;
+          try { return await goOnce(state); } catch (again) { deliveryUnknown ??= lost; throw again; }
+        }
       };
       // At most two interrupted calls are answered, each once, and only when the turn's FIRST request was refused with a 400
       // before anything was accepted (no model event, no tool run): only then is a resend sure to repeat nothing (Codex r1

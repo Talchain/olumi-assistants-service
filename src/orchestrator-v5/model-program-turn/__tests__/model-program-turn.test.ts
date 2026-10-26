@@ -439,6 +439,120 @@ describe('the model-program turn on the real core route', () => {
     }, 30_000);
   });
 
+  /**
+   * ⭐ W9: THE ALPHA'S TURNS SURVIVE AN OPENAI OVERLOAD (served staging 26 Oct). 13:33Z, capacity: the approval SAVED, then the
+   * reply call was accepted and ended on OpenAI's own error event ("Our servers are currently overloaded"); the person got a
+   * 502 UPSTREAM_ERROR for a change that was kept. 13:44Z, european: the drafter's repair
+   * call ended the same way, the loop stopped on it, and the change was refused as does_not_compile, with no card. Each row
+   * drives the real core route or the real tool, with the provider's failure injected at fetch (synthetic bakery words).
+   */
+  describe('W9: an OpenAI overload (served 26 Oct 13:33Z and 13:44Z)', () => {
+    // The provider's error as its stream carries it (the captured shape of 19 Oct's streamed refusal, `{ error: {...} }`), after
+    // the response was created. Its typed fields are this fixture's: the served turn's log kept only the message (UNVERIFIED).
+    const OVERLOADED = { message: 'Our servers are currently overloaded. Please try again later.', type: 'service_unavailable_error', param: null, code: 'server_is_overloaded' };
+    const overloaded = (): Response => new Response(
+      `event: response.created\ndata: ${JSON.stringify({ type: 'response.created', sequence_number: 0, response: { id: `resp_overloaded_${sent.length}`, object: 'response', status: 'in_progress', model: 'gpt-6.1-sol', output: [] } })}\n\n`
+      + `event: error\ndata: ${JSON.stringify({ error: OVERLOADED })}\n\n`, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    const SAVED_KEPT = 'The saved change is kept, but the reply didn’t arrive. Send a new message to continue.';
+    /** The first draft, then its card's press, its first call answered with the approval (the reply calls are each row's). */
+    const press = async () => {
+      replies = [JSON.stringify(bakery())];
+      const draft = await turn({ message: BRIEF });
+      expect(draft.statusCode, draft.body).toBe(200);
+      conversationIds.set(SCENARIO, `conv_${SCENARIO}`);
+      const card = draft.json().cards[0];
+      const apply = () => sse('', [{ type: 'function_call', id: 'fc_approve', call_id: 'call_approve', status: 'completed', name: 'apply_change',
+        arguments: JSON.stringify({ proposal_id: card.proposal_id }) }]);
+      return { apply, payload: { turn_id: randomUUID(), message: card.approve_action.message, chip: card.approve_action } };
+    };
+    const outputsSent = (body: Json): string[] => (body.input as Json[]).filter((i) => i.type === 'function_call_output').map((i) => String(i.call_id));
+
+    it('change 2: an overload on the reply after the approval saved is asked for ONCE more, carrying the saved tool result; the reply arrives and the change is written once', async () => {
+      const { apply, payload } = await press();
+      replies = [apply, overloaded, 'Saved: the change is in your model.'];
+      const r = await turn(payload);
+      expect(r.statusCode, r.body).toBe(200);
+      const j = r.json();
+      expect([j.assistant_text, j.error, j.durability]).toEqual(['Saved: the change is in your model.', null, 'recorded']);
+      // ONE write (the draft, then the approval once), ONE apply_change, and its receipt the person's.
+      expect(registered).toHaveLength(2);
+      expect((j._agent.tool_calls as Json[]).filter((c) => c.name === 'apply_change').map((c) => c.outcome)).toEqual(['ok']);
+      expect((j.receipts as Json[]).map((x) => x.authorised_by)).toEqual(['person']);
+      // The draft, the apply call, the overloaded reply, and the reply asked for again: the same input, the tool's result in it.
+      expect(sent).toHaveLength(4);
+      expect([outputsSent(sent[2]!), outputsSent(sent[3]!)]).toEqual([['call_approve'], ['call_approve']]);
+      expect(stableStringify(sent[3]!.input)).toBe(stableStringify(sent[2]!.input));
+      expect(turnRows.get(payload.turn_id)?.assistant_message).toBe('Saved: the change is in your model.');
+    });
+
+    it('change 2: an overload twice is asked for once more, never twice: the change is kept and the provider is reported busy', async () => {
+      const { apply, payload } = await press();
+      replies = [apply, overloaded, overloaded, 'never sent'];
+      const r = await turn(payload);
+      expect(r.statusCode, r.body).toBe(502);
+      expect(r.json().error, 'the provider is busy; the change is kept').toEqual({ code: 'PROVIDER_CAPACITY', message: SAVED_KEPT, retry_safe: false, nothing_saved: false });
+      expect(registered, 'the approval stays saved, written once').toHaveLength(2);
+      expect([sent.length, replies.length], 'the reply was asked for once more, never twice').toEqual([4, 1]);
+    });
+
+    it('change 2 (CONTRAST): a provider error that is not a server fault on the same reply is not asked for again, and stays an upstream error', async () => {
+      const { apply, payload } = await press();
+      const refusal = () => new Response(`event: error\ndata: ${JSON.stringify({ error: { message: 'Invalid request.', type: 'invalid_request_error', param: null, code: null } })}\n\n`,
+        { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      replies = [apply, refusal, 'never sent'];
+      const r = await turn(payload);
+      expect(r.statusCode, r.body).toBe(502);
+      expect(r.json().error).toMatchObject({ code: 'UPSTREAM_ERROR', nothing_saved: false });
+      expect([sent.length, registered.length, replies.length]).toEqual([3, 2, 1]);
+    });
+
+    it('change 2 (CONTRAST): an overload before anything is saved is not asked for again here: nothing saved, the provider busy, and the same turn may be sent again', async () => {
+      replies = [JSON.stringify(bakery())];
+      expect((await turn({ message: BRIEF })).statusCode).toBe(200);
+      conversationIds.set(SCENARIO, `conv_${SCENARIO}`);
+      const payload = { turn_id: randomUUID(), message: 'What does the model hold now?' };
+      replies = [overloaded, 'never sent'];
+      const r = await turn(payload);
+      expect(r.statusCode, r.body).toBe(502);
+      expect(r.json().error).toMatchObject({ code: 'PROVIDER_CAPACITY', retry_safe: true, nothing_saved: true });
+      expect([sent.length, registered.length, replies.length]).toEqual([2, 1, 1]);
+      expect([turnRows.has(`${payload.turn_id}:claim`), turnRows.has(payload.turn_id)], 'the claim is released, so a resend runs the turn').toEqual([false, false]);
+    });
+
+    it('change 3: a drafter repair call that ends on the overload is sent again, the same body, once; its update calculates, so the card is prepared', async () => {
+      replies = [JSON.stringify(bakery())];
+      expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+      const read = programReadOf(persisted!);
+      const saved = (read.kind === 'program' ? read.program.canonical : null)!;
+      const none = { version: saved.version, question: null, period: null, quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [], claims: [],
+        evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: [] };
+      const broken = { ...none, claims: [{ id: 'nowhere', text: 'Bread sells.', concerns: ['no_such_record'], author: 'olumi', quote: null, party: null, approval: 'proposed', author_id: null }] };
+      const landlord = { id: 'landlord_agrees', text: 'Only once the landlord agrees.', kind: 'prerequisite', concerns: ['second_oven'], author: 'person', party: null,
+        quote: 'the landlord must agree first', approval: 'proposed', author_id: null };
+      const words = 'The oven would cost £2,500, and the landlord must agree first.';
+      replies = [JSON.stringify(broken), overloaded, JSON.stringify({ ...none, conditions: [landlord] })];
+      sent.length = 0;
+      const info = vi.spyOn(staticLog, 'info'); // the instance the statically imported tools hold
+      const out = await proposeProgramChange({ dispatch, proposals: new ProposalStore() }, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(),
+        verified_user_messages: [words], user_turn_text: words }, ProgramChangeParams.parse({ public_label: 'The landlord must agree', basis: 'their words',
+        request: 'The landlord must agree first.', remove: [] })) as Json;
+      const drafted = info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'model_program.update_draft' ? [o as Json] : []));
+      info.mockRestore();
+      expect(out.status, JSON.stringify(out)).toBe('ok');
+      expect(out.data.changes.map((c: Json) => [c.id, c.action])).toEqual([['landlord_agrees', 'add']]);
+      // The update, its repair (overloaded), and that repair's body sent again, byte for byte: three calls, MAX_REPAIRS' budget.
+      expect(sent).toHaveLength(3);
+      expect(stableStringify(sent[2])).toBe(stableStringify(sent[1]));
+      // The failed attempt is logged with the provider's typed fields, never its words.
+      expect(drafted.map((d) => d.attempts.map((a: Json) => [a.codes, a.failed ?? null, a.provider_error ?? null]))).toEqual([[
+        [['undefined_ref'], null, null],
+        [null, 'call failed: Error', { status: null, type: 'service_unavailable_error', code: 'server_is_overloaded', request_id: null }],
+        [[], null, null]]]);
+      expect(JSON.stringify(drafted)).not.toContain('overloaded. Please');
+      expect(registered, 'proposing saves nothing').toHaveLength(1);
+    });
+  });
+
   it('step 1, drafter: the first turn sends ONE strict canonical-schema call at gpt-6.1-sol, effort medium, with the fixed prompt', async () => {
     replies = [JSON.stringify(bakery())];
     const r = await turn({ message: BRIEF });
@@ -520,7 +634,9 @@ describe('the model-program turn on the real core route', () => {
         call: async () => { throw thrown; } });
       expect(out.assistantText).toBe(`I couldn't build a model that calculates from this yet (call failed: ${name}). Nothing was saved.`);
       expect(out.toolCalls).toEqual([{ name: 'draft_canonical_model', ok: false, outcome: 'refused', refusal: 'no_draft' }]);
-      expect((out.payload.model_program['draft'] as Json).attempts).toEqual([{ attempt: 0, errors: null, failed: `call failed: ${name}`, provider_error: none, status: null, usage: null, ms: expect.any(Number) }]);
+      // W9: a failure with no typed reason is sent again once, the same body; a second failure in a row ends the loop.
+      const failedAt = (attempt: number) => ({ attempt, errors: null, failed: `call failed: ${name}`, provider_error: none, status: null, usage: null, ms: expect.any(Number) });
+      expect((out.payload.model_program['draft'] as Json).attempts).toEqual([failedAt(0), failedAt(1)]);
       expect(out.toolResults[0]!.provider_error).toEqual(none);
       expect(JSON.stringify(out.payload)).not.toContain('socket hang up');
     }

@@ -192,6 +192,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   let outputs: Json[][] = [];
   /** The canonical drafter's answer for a first turn (a scenario with no saved model). */
   let canonicalDraft: string | undefined;
+  /** The drafter's answers in order, each once, before `canonicalDraft` answers the rest (a refused update, then its correction). */
+  let canonicalDrafts: string[] = [];
   let runWithStageStream: typeof import('../../cee/unified-pipeline/stage-stream-context.js').runWithStageStream;
   let currentTurnFence: typeof import('../../orchestrator-v5/session/turn-fence.js').currentTurnFence;
   beforeAll(async () => {
@@ -199,7 +201,11 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       if (String(url).endsWith('/v1/conversations')) return json({ id: `conv_${randomUUID()}`, object: 'conversation' });
       const body = JSON.parse(String(init?.body ?? '{}')) as Json;
       // The canonical drafter's strict call answers with the row's canned canonical model (none: no draft).
-      if (body.text?.format?.name === 'canonical_model') { calls.push(body); return json(responsesBody(canonicalDraft === undefined ? [] : [{ type: 'message', text: canonicalDraft }])); }
+      if (body.text?.format?.name === 'canonical_model') {
+        calls.push(body);
+        const draft = canonicalDrafts.shift() ?? canonicalDraft;
+        return json(responsesBody(draft === undefined ? [] : [{ type: 'message', text: draft }]));
+      }
       // A structured side call (the model critic) answers nothing, and never takes the conversation's scripted outputs.
       if (body.text?.format?.type === 'json_schema') return json(responsesBody([]));
       calls.push(body);
@@ -281,7 +287,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
-    SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); canonicalDraft = undefined; registered.length = 0; fenceRows.clear(); canvasForwards.length = 0; turnRows.clear(); conversationIds.clear();
+    SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); canonicalDraft = undefined; canonicalDrafts = []; registered.length = 0; fenceRows.clear(); canvasForwards.length = 0; turnRows.clear(); conversationIds.clear();
     readiness = { status: 'blocked', may_run: false, options: [], blockers: [] }; runState = undefined; carriedResult = undefined; otherRun = undefined; runs = 0; timingRun = false; runTimings.length = 0;
     pausedRun = null; calls = []; outputs = []; preparedId = ''; holdProvider = undefined; holdWhen = undefined; registerRefusal = null;
   });
@@ -1380,8 +1386,12 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(String(sentTools.propose_change)).toContain('An answer to a listed question (a blocker, or an asked item\'s question) goes in answers, on that existing item\'s id from read_canonical_context, saying whose it is: author person, ');
       expect(String(sentTools.propose_change)).toContain('Anything else (a new item or link, a rename, a removal) goes in request, in plain words with their exact words for every figure of theirs, '
         + 'with remove the ids of anything they asked to remove ([] for none); Olumi’s drafter writes it. ');
+      // 26 Oct (W9, european 13:44Z): a second proposal is refused only once a card is prepared, and after any refusal, while no
+      // card is prepared, a corrected proposal may follow (program-tools.ts releases the turn's claim on every outcome that is not
+      // ok). Before it 2bb9c6c0… (ONE correction, after does_not_compile only); the text before W9, "a second proposal in the same
+      // turn is refused", hashed to b5d5bc0e….
       // 26 Oct (W6 chat): RUN_WORDS_RULE gained one sentence, the leader's words as given (run.leader.words); before it 806a9ded….
-      expect(sentSha('propose_change')).toBe('b5d5bc0e7e8764b4e4dc2449450d622019e46ff3c06d38608c6722d56ba9f688');
+      expect(sentSha('propose_change')).toBe('6c4611c78b9c45bab08ef8a19a1f861dcdf6646141a25f9e79440f976f73efd1');
       const sentParams = (calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.parameters as Json;
       expect(Object.keys(sentParams.properties)).toEqual(['public_label', 'basis', 'request', 'remove', 'answers']);
       expect(sentParams.required).toContain('answers');
@@ -1504,6 +1514,42 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(JSON.stringify(tools.find((c) => c.outcome === 'refused'))).toContain('one_card_per_turn');
       expect(changeCards(j)).toHaveLength(1);
       expect(registered.length, 'proposing saves nothing').toBe(1);
+    });
+
+    it('W9 (european, served 26 Oct 13:44Z): propose_change, as SENT, says what the code does: a second proposal is refused only once a card is prepared, and after a refusal (here does_not_compile) a corrected proposal makes the card in the same turn', async () => {
+      await savedProgram();
+      // The first update does not calculate (a claim about no record: undefined_ref), on its call and both repairs; the
+      // corrected proposal's update does. Synthetic bakery words.
+      const broken = bakery();
+      broken.claims.push({ id: 'nowhere', text: 'Bread sells.', concerns: ['no_such_record'], author: 'olumi', quote: null, party: null, approval: 'proposed', author_id: null } as never);
+      const updated = bakery();
+      updated.quantities = updated.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known' as const, value: 2500, question: null, quote: 'The oven would cost £2,500' } : x));
+      const bad = JSON.stringify(updateOf(bakery(), broken));
+      canonicalDrafts = [bad, bad, bad, JSON.stringify(updateOf(bakery(), updated))];
+      const set = (request: string) => ({ public_label: 'Oven price £2,500', basis: 'their answer', request, remove: [] });
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'p1', args: set('The oven price is £2,500, and a note that bread sells.') }],
+        [{ type: 'function_call', name: 'propose_change', call_id: 'p2', args: set('The oven price is £2,500.') }],
+        [{ type: 'message', text: 'I prepared the oven price; approve its card.' }]];
+      const r = await typed('The oven would cost £2,500.');
+      expect(r.statusCode, r.body).toBe(200);
+      const j = r.json() as Json;
+      expect((j._agent.tool_calls as Json[]).filter((c) => c.name === 'propose_change').map((c) => [c.outcome, c.refusal ?? null]))
+        .toEqual([['refused', 'does_not_compile'], ['ok', null]]);
+      expect(changeCards(j)).toHaveLength(1);
+      expect(calls.map((c) => (c.text?.format?.name === 'canonical_model' ? 'drafter' : 'agent'))).toEqual(['agent', 'drafter', 'drafter', 'drafter', 'agent', 'drafter', 'agent']);
+      // The refusal's own reasons went back to the agent as the tool's output, so the correction can use them.
+      const back = JSON.stringify((calls[4]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'p1')!.output);
+      expect(back).toContain('does_not_compile');
+      expect(back).toContain('no_such_record');
+      expect(registered.length, 'proposing saves nothing').toBe(1);
+      // The words the agent was given, as the provider received them.
+      const sent = String((calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.description);
+      expect(sent).toContain('Put the whole change in ONE propose_change: once a card has been prepared, a second proposal in the same turn is refused. ');
+      expect(sent).toContain('say it plainly and ask for what is needed. After any refusal, while this turn has prepared no card, you may make a corrected propose_change, using the refusal\'s reasons.');
+      // The false sentences are gone: every second proposal refused, and ONE correction only after does_not_compile (the code
+      // releases the claim after every refusal). A prepared card still refuses one (the S3 row above).
+      expect(sent).not.toContain('ONE propose_change: a second proposal in the same turn is refused');
+      expect(sent).not.toContain('After a does_not_compile refusal you may make ONE');
     });
 
     it('S3 (batch 4 marketing r3–r5): a propose_change whose arguments fail its schema goes back to the model as a tool error; its retry gives ONE card, never a 502', async () => {
