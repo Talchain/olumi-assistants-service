@@ -390,7 +390,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             : ev.kind === 'goal_target_edit' && typeof ev.goal_node_id === 'string' && num(ev.raw_value) !== undefined
               ? { target: { goal_id: ev.goal_node_id }, value: num(ev.raw_value)! } : undefined;
           const edited = claim.held === 'same' ? { status: 'saved' as const }
-            : figure !== undefined ? await applyCanvasFigure({ dispatch }, scenarioId, { ...figure, operation_key: turnId })
+            : figure !== undefined ? await applyCanvasFigure({ dispatch }, scenarioId, { ...figure, operation_key: turnId, approver: userId })
             : { status: 'refused' as const, reason: ev.kind === 'edge_strength_edit'
               ? 'A link\'s size on this model is a figure in its own units; change it in the chat for now.'
               : 'Only a figure on a card or a goal\'s target can be edited here on this model; ask Olumi in the chat for other changes.' };
