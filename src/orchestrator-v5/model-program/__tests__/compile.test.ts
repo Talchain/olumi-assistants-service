@@ -764,6 +764,9 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 29 }, { value: 29 }))).toEqual([]);
     expect(recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 29 }, { unit: '1', value: 0.29 }))).toEqual([]);
     expect(recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 29 }, { value: 29.5 }))).toEqual(['boost_share']);
+    // Codex r3: a large exact bound is kept exactly: a same-unit setting one above it is outside, at it is within.
+    expect(recounts(shareModel({ unit: '%', value: 20, ceiling: 9999999999999 }, { value: 10000000000000 }))).toEqual(['boost_share']);
+    expect(recounts(shareModel({ unit: '%', value: 20, ceiling: 9999999999999 }, { value: 9999999999999 }))).toEqual([]);
     // One figure setting two quantities, capped at 100 and at 1,000 a month: 200 is outside the first, in either order.
     const shared = (reversed: boolean) => {
       const g = gymFilled();

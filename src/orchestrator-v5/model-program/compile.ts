@@ -682,9 +682,12 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
    *  once (the highest floor, the lowest ceiling), whatever the options' order (Codex r1 #3771). */
   const boundsOf = (q: CanonicalQuantityT): Pick<CanonicalQuantityT, 'floor' | 'ceiling'> => {
     if (has(q.floor) || has(q.ceiling)) return { floor: q.floor ?? null, ceiling: q.ceiling ?? null };
-    // By the ratio of scales (exactly 1 in the same unit), with float noise rounded away so a bound at a figure's own
-    // value never reads as outside it (Codex r2 #3771: 29 % became 28.999…%).
-    const into = (v: number, from: string) => Number((v * ((U.get(from)?.scale ?? 1) / (U.get(q.id)?.scale ?? 1))).toPrecision(12));
+    // A unit's scale is a power of ten, so the conversion is ONE correctly rounded operation: a same-unit bound is itself
+    // and 29 % is exactly 0.29, never 28.999…% (Codex r2 #3771) and never rounded away from a large exact figure (r3).
+    const into = (v: number, from: string) => {
+      const ratio = (U.get(from)?.scale ?? 1) / (U.get(q.id)?.scale ?? 1), k = Math.round(Math.log10(ratio));
+      return Math.abs(ratio - 10 ** k) <= Number.EPSILON * 10 ** k ? (k >= 0 ? v * 10 ** k : v / 10 ** -k) : v * ratio;
+    };
     const targets = (setsOf.get(q.id) ?? []).flatMap((id) => (Q.has(id) ? [Q.get(id)!] : []));
     const floors = targets.flatMap((t) => (has(t.floor) ? [into(t.floor, t.id)] : [])), ceilings = targets.flatMap((t) => (has(t.ceiling) ? [into(t.ceiling, t.id)] : []));
     return { floor: floors.length ? Math.max(...floors) : null, ceiling: ceilings.length ? Math.min(...ceilings) : null };
