@@ -121,6 +121,9 @@ export interface PresentInput {
   readonly left_out?: readonly { readonly text: string; readonly concerns: readonly string[] }[];
   /** R8, by goal and limit id: its own record (and its window's figures) confirmed, and accepted. Absent: neither (default deny). */
   readonly aims?: Readonly<Record<string, { readonly confirmed: boolean; readonly accepted: boolean }>>;
+  /** R8 (Codex on #3769): the premises each limit's check, and each option's own settings, rest on (compile's `rests_on`). */
+  readonly limit_premises?: Readonly<Record<string, readonly PresentPremise[]>>;
+  readonly option_premises?: Readonly<Record<string, readonly PresentPremise[]>>;
   /** The Run's own record. Absent: `run` is null. */
   readonly run?: { readonly run_id: string; readonly graph_hash_at_run: string; readonly computed_at: string };
   /** The caller's currentness check of this Run (graph hash equality). Absent: unknown. */
@@ -357,10 +360,13 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const shared = upstream(r, null), conditional = conditions(shared, premises).length > 0;
     const lead = basisWords(shared, premises, aimIds, new Set([...shared, ...model.options.flatMap((o) => [...upstream(r, o.id)])]));
     const own = model.options.flatMap((o) => {
-      const extra = assumptions(new Set([...upstream(r, o.id)].filter((id) => !shared.has(id))));
+      const extra = [...(input.option_premises?.[o.id] ?? []).filter((p) => !premises.some((x) => x.id === p.id)).map(premiseWords),
+        ...assumptions(new Set([...upstream(r, o.id)].filter((id) => !shared.has(id))))];
       return extra.length === 0 ? [] : [`with ${q(optionLabel.get(o.id) ?? o.id)}, ${conditional ? 'also ' : ''}if ${listWords(extra)}`];
     });
-    return [lead, ...own].join('; ');
+    // Codex on #3769: a bare "on your figures" beside an option's own conditions would read as covering every option; the
+    // options named say what is conditional, and the rest rest on the person's figures alone.
+    return (lead === 'on your figures' && own.length > 0 ? own : [lead, ...own]).join('; ');
   };
 
   // ── The question each chance answers ────────────────────────────────────────────────────────────────────────────────────
@@ -393,6 +399,9 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   /** The premises these goals' chance rests on, each once, in the goals' order. */
   const premisesOf = (goalIds: readonly string[]): PresentPremise[] =>
     [...new Map(goalIds.flatMap((id) => allGoals.find((g) => g.goal_id === id)?.rests_on ?? []).map((p) => [p.id, p] as const)).values()];
+  /** An option's whole chance (every goal, within every limit): its goals', its limits' and its own premises, each once. */
+  const optionPremises = (optionId: string): PresentPremise[] => [...new Map([...premisesOf(model.goals.map((g) => g.id)),
+    ...model.limits.flatMap((l) => input.limit_premises?.[l.id] ?? []), ...(input.option_premises?.[optionId] ?? [])].map((p) => [p.id, p] as const)).values()];
   const waiting = allGoals.filter((g) => g.status !== 'calculable');
   /** Options and risks the compiler left out: said in the words of every chance, with their reasons in the notes. */
   const notInRun = (model.withheld ?? []).filter((w) => w.kind === 'option' || w.kind === 'risk');
@@ -543,7 +552,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const s = shown(headline, result.draws)!;
     const why = headline.precision_95[0] === headline.precision_95[1] ? fixedWhy(o, headline.chance === 1) : undefined;
     const cell: PresentCell = { kind: 'figure', display: s.display,
-      face: `${q(name)}: ${s.display} chance of ${jointWords}, in this model, ${basisWords(upstream(roots, o.option_id), premisesOf(model.goals.map((g) => g.id)), [...model.goals, ...model.limits].map((c) => c.id))}${why !== undefined ? `: ${why}` : ''}.`
+      face: `${q(name)}: ${s.display} chance of ${jointWords}, in this model, ${basisWords(upstream(roots, o.option_id), optionPremises(o.option_id), [...model.goals, ...model.limits].map((c) => c.id))}${why !== undefined ? `: ${why}` : ''}.`
         + (model.limits.length > 0 ? ` Each limit on its own: ${limitLines(o).join('; ')}.` : '')
         + (uncheckedLine !== undefined ? ` ${stop(uncheckedLine)}` : ''),
       detail: { precision_95: headline.precision_95, draws: result.draws, precision_words: s.precision_words } };

@@ -118,10 +118,11 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   // R8: the compiler's premises for each goal (`rests_on`), in their own words, whose they are and whether confirmed.
   const premiseOf = new Map<string, PresentPremise>([...read.assumptions.map((a) => [a.id, { id: a.id, text: a.text, author: a.author, kind: 'assumption' as const, confirmed: confirmed.has(a.id) }] as const),
     ...read.conditions.map((c) => [c.id, { id: c.id, text: c.text, author: c.author, kind: 'condition' as const, confirmed: confirmed.has(c.id) }] as const)]);
+  const premisesFor = (ids: readonly string[]) => ids.flatMap((id) => (premiseOf.has(id) ? [premiseOf.get(id)!] : []));
   // Aims with no measure yet are left out of the chance (said in `leaves_out`), never a goal that waits.
   const goals: PresentGoal[] = compiled.perGoal.filter((p) => !p.needs_measure)
     .map((p) => ({ goal_id: p.goal_id, label: labelOf.get(p.goal_id) ?? p.goal_id, status: p.status, reasons: p.reasons, asks: p.asks,
-      rests_on: p.rests_on.flatMap((id) => (premiseOf.has(id) ? [premiseOf.get(id)!] : [])) }));
+      rests_on: premisesFor(p.rests_on) }));
   const blockers = blockersOf(model, compiled.blockers);
   const asks: PresentAsk[] = normalise(model).quantities.filter((q) => blockers.some((b) => b.answer?.quantity_id === q.id))
     .map((q) => ({ quantity_id: q.id, label: q.label, unit: q.unit }));
@@ -141,6 +142,8 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
     return [a.id, { confirmed: behind.every((id) => records.confirmed.has(id)), accepted: behind.every((id) => records.accepted.has(id)) }] as const;
   }));
   const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x, records), goals, asks, blockers, leaves_out, aims,
+    limit_premises: Object.fromEntries(compiled.perLimit.map((l) => [l.limit_id, premisesFor(l.rests_on)])),
+    option_premises: Object.fromEntries(compiled.perOption.map((o) => [o.option_id, premisesFor(o.rests_on)])),
     left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })), sweep: admitted.operations + driverSweepOperations(x, draws) <= MAX_OPERATIONS });
   return { compiled, sim, projection, view };
 }

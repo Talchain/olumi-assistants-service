@@ -99,7 +99,8 @@ describe('present: the canonical analysis view from a simulated model', () => {
       MRR_LABELS);
     expect(cell(own, 'hold').face.endsWith(`, in this model, on your figures: ${HOLD_WHY}.`)).toBe(true);
     expect(cell(own, 'raise').face.endsWith(`, in this model, if ‘New price’ is £59, Olumi’s figure: ${RAISE_WHY}.`)).toBe(true);
-    expect(own.goal_chance.targets.per_target[0].words).toBe(`${MRR_WORDS}, in this model, on your figures; with ‘Raise to £59’, if ‘New price’ is £59, Olumi’s figure`);
+    // Codex #3769: no bare "on your figures" beside an option's own condition; the option named says what is conditional.
+    expect(own.goal_chance.targets.per_target[0].words).toBe(`${MRR_WORDS}, in this model, with ‘Raise to £59’, if ‘New price’ is £59, Olumi’s figure`);
     for (const v of [olumi, theirs, own]) expect(JSON.stringify(v)).not.toMatch(FORECAST_OR_VERDICT);
   });
 

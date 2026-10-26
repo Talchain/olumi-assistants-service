@@ -70,8 +70,12 @@ export type GoalOutcome = {
   /** Left-out parts of the aim this measure does not cover: said with its chance ("productivity only"). */
   excludes: string[];
 };
-export type LimitOutcome = { limit_id: string; status: Outcome; reasons: string[]; asks: string[]; cancelled: string[]; needs_measure: boolean };
-export type OptionOutcome = { option_id: string; status: Outcome | 'not_compared'; reasons: string[]; asks: string[] };
+export type LimitOutcome = { limit_id: string; status: Outcome; reasons: string[]; asks: string[]; cancelled: string[]; needs_measure: boolean;
+  /** R8 (Codex on #3769): the premises a limit's check rests on, as a goal's `rests_on`. */
+  rests_on: string[] };
+export type OptionOutcome = { option_id: string; status: Outcome | 'not_compared'; reasons: string[]; asks: string[];
+  /** R8 (Codex on #3769): the premises this option's own settings rest on, or that name it. */
+  rests_on: string[] };
 /**
  * ONE THING THE RESULT WAITS ON (simplify v1 A4): typed, in the model's order, never ranked and never worded by the code.
  * `id` is the record (a quantity, goal or limit; '(model)' when there is no goal); `scope` the goals, limits and live options
@@ -744,16 +748,18 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   });
   const limitClosure = new Map<string, Set<string>>();
   const perLimit: LimitOutcome[] = model.limits.map((l) => {
-    if (!has(l.measure)) return { limit_id: l.id, status: 'asks', reasons: [`"${l.label}" has no measure yet, so the result does not cover it.`], asks: [], cancelled: [], needs_measure: true };
+    if (!has(l.measure)) return { limit_id: l.id, status: 'asks', reasons: [`"${l.label}" has no measure yet, so the result does not cover it.`], asks: [], cancelled: [], needs_measure: true, rests_on: restsOn(new Set([l.id])) };
     const closure = upstream(limitRoots(l));
     const w = limitWin.get(l.id);
     limitClosure.set(l.id, new Set([...closure, ...(w?.blockers ?? []), ...unknownWindowRefs(l.measure.window)]));
-    return { limit_id: l.id, ...outcomeOf(closure, w), cancelled: [], needs_measure: false };
+    const touched = touchedBy(closure, l.id);
+    for (const x of [l.measure.window?.periods, l.measure.window?.origin_offset]) if (has(x)) touched.add(x);
+    return { limit_id: l.id, ...outcomeOf(closure, w), cancelled: [], needs_measure: false, rests_on: restsOn(touched) };
   });
   const optionClosure = new Map(model.options.map((o) => [o.id, upstream([...o.sets.map((s) => s.to).filter(has), ...o.sets.map((s) => s.starts_after_periods).filter((t): t is string => typeof t === 'string')])] as const));
   const perOption: OptionOutcome[] = model.options.map((o) => {
-    if (o.status !== 'live') return { option_id: o.id, status: 'not_compared', reasons: [o.status === 'ruled_out' ? `"${o.label}" is ruled out, kept in view.` : `"${o.label}" is removed from the comparison.`], asks: [] };
-    return { option_id: o.id, ...outcomeOf(optionClosure.get(o.id)!) };
+    if (o.status !== 'live') return { option_id: o.id, status: 'not_compared', reasons: [o.status === 'ruled_out' ? `"${o.label}" is ruled out, kept in view.` : `"${o.label}" is removed from the comparison.`], asks: [], rests_on: [] };
+    return { option_id: o.id, ...outcomeOf(optionClosure.get(o.id)!), rests_on: restsOn(touchedBy(optionClosure.get(o.id)!, o.id)) };
   });
 
   const result: CompileResult = {

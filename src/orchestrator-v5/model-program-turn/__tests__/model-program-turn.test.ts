@@ -1583,6 +1583,41 @@ describe('the model-program turn on the real core route', () => {
         `‘members’ being at least 320 member at 3 months from now, in this model, if ${FEES}`]);
     });
 
+    const HALL_WORDS = `${OWN} The council must let us use the hall. And keep at least 320 members.`;
+    /** Two goals, so the view has a line per target. */
+    const viewOf = (m: CanonicalModelT) => {
+      m.quantities.push(q('floor', 'member', { value: 320, quote: 'at least 320 members', approval: 'approved' }));
+      m.goals.push({ ...m.goals[0]!, id: 'keep_320', label: 'Keep at least 320 members', measure: { ...m.goals[0]!.measure!, target: 'floor' }, quote: 'keep at least 320 members' });
+      return evaluateCanonical(m, { sourceText: HALL_WORDS, seed: 7 }).view as Json;
+    };
+    const optionFace = (v: Json, id: string) => (v.options as Json[]).find((o) => o.option_id === id)!.cell.face as string;
+    const HALL_MET = 'if your condition ‘The council must let us use the hall’ is met';
+    const REACH = '‘members’ being at least 340 member at 3 months from now, in this model,';
+
+    it('Codex #3769: a prerequisite on a limit is named in every option\'s chance (each is within the limit), never in the goal\'s own line', () => {
+      const m = approved(allTheirs());
+      m.conditions.push({ ...hall, concerns: ['within_budget'] });
+      const v = viewOf(m);
+      for (const id of ['promotion', 'carry_on']) {
+        expect(optionFace(v, id)).toContain(`, in this model, ${HALL_MET}`);
+        expect(optionFace(v, id)).not.toContain('on your figures');
+      }
+      expect((v.goal_chance.targets.per_target as Json[])[0]!.words).toBe(`${REACH} on your figures`);
+    });
+
+    it('Codex #3769: a prerequisite on one option, or on a figure only its settings use, is named for that option only; the target line names the option, with no bare "on your figures"', () => {
+      for (const concerns of [['promotion'], ['promo_cost']]) {
+        const m = approved(allTheirs());
+        m.conditions.push({ ...hall, concerns });
+        const v = viewOf(m);
+        expect(optionFace(v, 'promotion')).toContain(`, in this model, ${HALL_MET}`);
+        expect(optionFace(v, 'promotion')).not.toContain('on your figures');
+        expect(optionFace(v, 'carry_on')).toContain(', in this model, on your figures');
+        expect(optionFace(v, 'carry_on')).not.toContain('council');
+        expect((v.goal_chance.targets.per_target as Json[])[0]!.words).toBe(`${REACH} with ‘Run a promotion’, ${HALL_MET}`);
+      }
+    });
+
     it('several goals: each goal\'s own basis names only its own premises; the joint names every one', () => {
       const m = approved(allTheirs());
       m.quantities.push(q('floor', 'member', { value: 320, quote: 'at least 320 members', approval: 'approved' }));
