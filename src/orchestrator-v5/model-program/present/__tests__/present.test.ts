@@ -609,8 +609,8 @@ describe('present: which option is most likely to achieve the goal, in this mode
     expect(hold.detail.precision_95[0]).toBeLessThanOrEqual(nudge.detail.precision_95[1]);
     expect(v.leader_licence).toBe('withheld');
     expect(v.leader).toEqual({ licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: ['hold', 'nudge'],
-      words: `In this model, ‘Hold’ (${hold.display}) and ‘Nudge’ (${nudge.display}) are too close to call: the simulation cannot tell apart their chances of `
-        + '‘Total’ being at least 5 tickets at 1 month from the start of this model, if ‘Tickets’ follows Olumi’s provisional conversion of your range, 0 tickets to 10 tickets, into a bell-shaped spread.' });
+      words: `In this model, ‘Hold’ (${hold.display}) and ‘Nudge’ (${nudge.display}) are too close to call: for their chances of `
+        + '‘Total’ being at least 5 tickets at 1 month from the start of this model, their precision ranges overlap, if ‘Tickets’ follows Olumi’s provisional conversion of your range, 0 tickets to 10 tickets, into a bell-shaped spread.' });
   });
 
   // ── W6 review B1: the estate's three science conditions (goal-chance-licence.ts:891), all on the DISPLAYED chances ──────
@@ -686,6 +686,20 @@ describe('present: which option is most likely to achieve the goal, in this mode
     expect(cell(waiting, 'add').kind).toBe('withheld');
     expect(Object.hasOwn(waiting, 'leader')).toBe(false);
     expect(waiting.leader_licence).toBe('withheld');
+  });
+
+  it('the negative (science session, 26 Oct): no leader words say the simulation "cannot tell" the options apart; they say only what was tested', () => {
+    // Overlapping 95% intervals are each option's own precision; they never show that a paired test on the same draws cannot
+    // tell the chances apart (34.9% against 33.4% overlapped, yet the paired gap was 1.47 ± 0.63 points). Every leader form:
+    // overlapping ranges (200 draws), a gap under 10 points, under 1%, a limit not yet checked, and a named leader.
+    const overlap = present(NUDGE(0.2), NUDGE_LABELS);
+    const views = [overlap, present(NUDGE(0.5), NUDGE_LABELS, {}, 10_000), present(HIRE(115), SPEC_LABELS, {}, 10_000), present(HIRE(95), SPEC_LABELS, {}, 2000),
+      present(HIRE(95), SPEC_LABELS, { limits: [{ limit_id: 'cost', label: 'Within budget', status: 'asks', reasons: ['It needs the cost.'], asks: ['price'] }],
+        asks: [{ quantity_id: 'price', label: 'Specialist cost', unit: '£' }] }, 2000)];
+    // Positive control: the overlapping case is the form the old words were said in, and it says what was tested instead.
+    expect(overlap.leader.words).toContain(', their precision ranges overlap, ');
+    expect(views.filter((v) => typeof v.leader?.words === 'string')).toHaveLength(views.length);
+    for (const v of views) expect(v.leader.words).not.toMatch(/cannot tell/i);
   });
 
   it('the negative: no words anywhere choose for the person, use a superlative or call a share a chance', () => {

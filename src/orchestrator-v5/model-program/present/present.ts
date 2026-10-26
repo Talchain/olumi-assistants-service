@@ -691,10 +691,12 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const close = rest.filter((x) => near(x) || !distinct(top.c, x.c));
     if (close.length > 0) {
       const tied = said.filter((x) => x.id === top.id || close.includes(x));
-      // Each reason said only where it is true of every option named (every chance is on the same draws).
-      const why = close.every((x) => !distinct(top.c, x.c)) ? `the simulation cannot tell apart their chances of ${jointWords}`
+      // Each reason says only what was tested, and only where it is true of every option named (science session, 26 Oct: the
+      // intervals are each option's own, so overlapping ones never show the simulation cannot tell the chances apart; a paired
+      // test on the same draws can, e.g. 34.9% against 33.4%, a gap of 1.47 ± 0.63 points).
+      const why = close.every((x) => !distinct(top.c, x.c)) ? `for their chances of ${jointWords}, their precision ranges overlap`
         : close.every(near) ? `their chances of ${jointWords} are less than ${SUPERLATIVE_GAP_POINTS} points apart`
-          : `their chances of ${jointWords} are less than ${SUPERLATIVE_GAP_POINTS} points apart or the simulation cannot tell them apart`;
+          : `their chances of ${jointWords} are less than ${SUPERLATIVE_GAP_POINTS} points apart, or their precision ranges overlap`;
       return withheld(tied.map((x) => x.id), `In this model, ${listWords(tied.map((x) => `${name(x.id)} (${x.display})`))} are too close to call: ${why}, ${basis}.`);
     }
     const next = rest[0]!, d = top.driver;
