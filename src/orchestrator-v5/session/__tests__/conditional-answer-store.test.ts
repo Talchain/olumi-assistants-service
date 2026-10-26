@@ -3,6 +3,8 @@ import { SupabaseSessionStore } from '../supabase-store.js';
 import { SessionLRUCache } from '../cache.js';
 import { StateCommitFailedError, type SessionTurnWrite } from '../store.js';
 import { log } from '../../../utils/telemetry.js';
+import { isFailedTurnRecord } from '../pending-action.js';
+import { RECORDED_OUTCOMES, withRecordedOutcome } from '../../core-route/turn-request.js';
 
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const RPC = 'append_agent_answer_if_latest';
@@ -108,7 +110,8 @@ describe('S-D.1b conditional Agent answer store', () => {
     expect(await s.fresh().readMostRecentPendingActions(SCENARIO, { validation: 'strict', onLatestRowId })).toEqual([]);
     expect(onLatestRowId).toHaveBeenCalledExactlyOnceWith('floor-row');
     expect(s.filters).toEqual([
-      ['select', 'id, pending_actions'], ['eq', 'scenario_id', SCENARIO], ['not', 'turn_id', 'like', '%:claim'],
+      // W9 B1: the read also takes request_hash, to recognise a failed turn's record (rows below).
+      ['select', 'id, pending_actions, request_hash'], ['eq', 'scenario_id', SCENARIO], ['not', 'turn_id', 'like', '%:claim'],
       ['order', 'created_at', { ascending: false }], ['limit', 1],
     ]);
     expect(s.from).toHaveBeenCalledExactlyOnceWith('v5_conversation_turns');
@@ -119,5 +122,59 @@ describe('S-D.1b conditional Agent answer store', () => {
     const s = setup(), onLatestRowId = vi.fn();
     expect(await s.fresh().readMostRecentPendingActions(SCENARIO, { onLatestRowId })).toEqual([]);
     expect(onLatestRowId).toHaveBeenCalledExactlyOnceWith(null);
+  });
+});
+
+/**
+ * W9 B1 (Codex on #3800): a failed turn's record (`core-turn.ts`, its typed `reply_lost…` outcome) is the latest row, but it
+ * holds no cards: the latest pending read names ITS id (what the conditional append compares) and returns the cards of the
+ * newest row that is not one, read after that id.
+ */
+describe('W9 B1: the latest pending read passes over a failed turn\'s record', () => {
+  const card = { id: 'q', scenario_id: SCENARIO, chip_id: 'hold-q', action: { kind: 'run_analysis' }, preconditions: {},
+    expires_at_turn_count: 12, emitted_at_iso: '2026-10-26T00:00:00Z', expires_at_iso: '2026-10-27T00:00:00Z' };
+  const failed = { id: 'failed-row', pending_actions: [], request_hash: withRecordedOutcome('agent_turn:digest', 'reply_lost_saved') };
+  /** Each read answers with the next of `answers`; every query's filters are kept apart. */
+  function reads(...answers: unknown[][]) {
+    const queries: unknown[][][] = [];
+    const from = vi.fn(() => {
+      const filters: unknown[][] = [];
+      queries.push(filters);
+      const answer = answers[queries.length - 1] ?? [];
+      const chain = Object.fromEntries(['select', 'eq', 'not', 'order', 'limit', 'abortSignal'].map(name =>
+        [name, vi.fn((...args: unknown[]) => { filters.push([name, ...args]); return chain; })])) as Record<string, ReturnType<typeof vi.fn>> & PromiseLike<unknown>;
+      chain.then = ((done: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
+        Promise.resolve({ data: answer, error: null }).then(done, reject)) as never;
+      return chain;
+    });
+    const store = new SupabaseSessionStore({ from, rpc: vi.fn() } as never, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 20 }), { defaultReadLimit: 20 });
+    return { store, queries };
+  }
+
+  it('the failed record\'s id is the latest; the cards are the newest other row\'s, read with the record passed over', async () => {
+    const r = reads([failed], [{ id: 'card-row', pending_actions: [card], request_hash: 'agent_turn:other' }]), onLatestRowId = vi.fn();
+    expect(await r.store.readMostRecentPendingActions(SCENARIO, { validation: 'strict', onLatestRowId })).toEqual([card]);
+    expect(onLatestRowId).toHaveBeenCalledExactlyOnceWith('failed-row');
+    expect(r.queries[1]).toEqual([
+      ['select', 'id, pending_actions, request_hash'], ['eq', 'scenario_id', SCENARIO], ['not', 'turn_id', 'like', '%:claim'],
+      ['not', 'request_hash', 'like', '%#outcome:reply_lost%'], ['order', 'created_at', { ascending: false }], ['limit', 1],
+    ]);
+  });
+
+  it('CONTRAST: a final answer with a recorded outcome (reply_empty) is read as before, one query, its own cards', async () => {
+    const r = reads([{ id: 'answer-row', pending_actions: [card], request_hash: withRecordedOutcome('agent_turn:digest', 'reply_empty') }]);
+    expect(await r.store.readMostRecentPendingActions(SCENARIO, { validation: 'strict' })).toEqual([card]);
+    expect(r.queries).toHaveLength(1);
+  });
+
+  it('a pass-over the database did not apply is an unknown, never the record\'s empty cards', async () => {
+    const r = reads([failed], [failed]);
+    await expect(r.store.readMostRecentPendingActions(SCENARIO)).rejects.toThrow('a failed turn\'s record was not passed over');
+  });
+
+  it('the rule is the route\'s own typed outcomes: every reply_lost outcome, never reply_empty or a plain answer', () => {
+    expect(RECORDED_OUTCOMES.map((o) => [o, isFailedTurnRecord({ request_hash: withRecordedOutcome('agent_turn:digest', o) })]))
+      .toEqual([['reply_lost_saved', true], ['reply_lost_may_finish', true], ['reply_lost', true], ['reply_empty', false]]);
+    expect(isFailedTurnRecord({ request_hash: 'agent_turn:digest' })).toBe(false);
   });
 });

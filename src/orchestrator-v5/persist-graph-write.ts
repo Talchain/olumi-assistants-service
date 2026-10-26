@@ -8,7 +8,7 @@
  * graph bytes, and restore is never split into multiple writes.
  */
 import { assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, refreshScopePending } from './agent-lane/goal-scope.js';
-import { PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from './session/pending-action.js';
+import { isFailedTurnRecord, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from './session/pending-action.js';
 import { assertDoorProvenance } from './goal-target/horizon-basis-provenance.js';
 import { log } from '../utils/telemetry.js';
 import { assertUntouchedLevelQuantities } from './untouched-level-invariant.js';
@@ -413,11 +413,11 @@ export async function appendCheckedGraphWrite(
         },
     );
     // ⭐ W9 (served 26 Oct 13:33Z): the conditional append takes ONLY a final answer (the store's guard and its RPC refuse any
-    // other, by contract). A turn's record that is not one (a failed turn's typed outcome, `response_emitted: false`) is
-    // appended plainly, after the same reconciliation, so it is saved and a resend replays it (it was refused every time).
-    if (expectedLatestRowId === undefined || attempt >= 3 || typeof store.appendIfLatest !== 'function' || storedWrite.response_emitted !== true) {
-      return await store.append(storedWrite);
-    }
+    // other, by contract). A failed turn's record (`isFailedTurnRecord`, `response_emitted: false`) is appended plainly, so it is
+    // saved and a resend replays it (it was refused every time). It holds no cards, and the latest pending read passes over it,
+    // so it can never replace or blank them (Codex on #3800: a card saved after this read dropped out). Every other write is as before.
+    if (storedWrite.response_emitted !== true && isFailedTurnRecord(storedWrite)) return await store.append({ ...storedWrite, pending_actions: [] });
+    if (expectedLatestRowId === undefined || attempt >= 3 || typeof store.appendIfLatest !== 'function') return await store.append(storedWrite);
     const outcome = await store.appendIfLatest(storedWrite, { expectedLatestRowId });
     if (!('status' in outcome)) return outcome;
     if (attempt === 2) {

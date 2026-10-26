@@ -110,7 +110,7 @@ import type {
   IdentifiedHandlerFact,
 } from '../types/handler-fact.js';
 import { readCommittedMutationTurnRef } from '../types/recent-mutation-transition.js';
-import { parsePendingAction, type PendingAction } from './pending-action.js';
+import { FAILED_TURN_RECORD_LIKE, isFailedTurnRecord, parsePendingAction, type PendingAction } from './pending-action.js';
 import {
   parseConversationContent,
   type SessionTurnWithContent,
@@ -3235,21 +3235,32 @@ export class SupabaseSessionStore implements SessionStore {
     // Narrow read: only the most recent prior turn. Older orphan pending
     // actions are ignored by design — "yes" resolves against the last
     // assistant turn's explicit offer only. See store.ts JSDoc.
-    const { data, error } = await abortableAnalysisRead(this.client
-      .from('v5_conversation_turns')
-      .select('id, pending_actions')
-      .eq('scenario_id', scenarioId)
-      .not('turn_id', 'like', NOT_A_CLAIM_PATTERN)
-      .order('created_at', { ascending: false })
-      .limit(1));
-    if (error) {
-      throw new SessionReadError(
-        `readMostRecentPendingActions(${scenarioId}) failed: ${errMsg(error)}`,
-        { cause: error, code: errCode(error) },
-      );
+    const newest = async (passOverFailedTurnRecords: boolean) => {
+      const turns = this.client
+        .from('v5_conversation_turns')
+        .select('id, pending_actions, request_hash')
+        .eq('scenario_id', scenarioId)
+        .not('turn_id', 'like', NOT_A_CLAIM_PATTERN);
+      const { data, error } = await abortableAnalysisRead((passOverFailedTurnRecords ? turns.not('request_hash', 'like', FAILED_TURN_RECORD_LIKE) : turns)
+        .order('created_at', { ascending: false })
+        .limit(1));
+      if (error) {
+        throw new SessionReadError(
+          `readMostRecentPendingActions(${scenarioId}) failed: ${errMsg(error)}`,
+          { cause: error, code: errCode(error) },
+        );
+      }
+      return (data ?? []) as Array<{ id: string; pending_actions: unknown; request_hash?: string | null }>;
+    };
+    const latest = await newest(false);
+    // The latest row's id, as the conditional append compares it (its RPC counts every non-claim row).
+    options.onLatestRowId?.(latest[0]?.id ?? null);
+    // W9 B1: a failed turn's record holds no cards (`isFailedTurnRecord`), so they are the newest other row's. Read after the
+    // id: a row saved between the two reads moves the latest, and a conditional append on that id retries.
+    const rows = latest[0] !== undefined && isFailedTurnRecord(latest[0]) ? await newest(true) : latest;
+    if (rows[0] !== undefined && isFailedTurnRecord(rows[0])) {
+      throw new SessionReadError(`readMostRecentPendingActions(${scenarioId}): a failed turn's record was not passed over`, { code: 'pending_actions_corrupt' });
     }
-    const rows = (data ?? []) as Array<{ id: string; pending_actions: unknown }>;
-    options.onLatestRowId?.(rows[0]?.id ?? null);
     if (rows.length === 0) return [];
     const raw = rows[0]!.pending_actions;
     if (!Array.isArray(raw)) {

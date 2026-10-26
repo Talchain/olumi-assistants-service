@@ -1366,10 +1366,11 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(String(sentTools.propose_change)).toContain('An answer to a listed question (a blocker, or an asked item\'s question) goes in answers, on that existing item\'s id from read_canonical_context, saying whose it is: author person, ');
       expect(String(sentTools.propose_change)).toContain('Anything else (a new item or link, a rename, a removal) goes in request, in plain words with their exact words for every figure of theirs, '
         + 'with remove the ids of anything they asked to remove ([] for none); Olumi’s drafter writes it. ');
-      // 26 Oct (W9, european 13:44Z): a second proposal is refused only once a card is prepared, and ONE corrected proposal may
-      // follow a does_not_compile refusal (the old text, "a second proposal in the same turn is refused", hashed to b5d5bc0e…).
+      // 26 Oct (W9, european 13:44Z): a second proposal is refused only once a card is prepared, and until then a refused one may
+      // be corrected and sent again (the old text, "a second proposal in the same turn is refused", hashed to b5d5bc0e…; its
+      // "ONE corrected propose_change" after does_not_compile, untrue to the code (B2, Codex on #3800), to 2bb9c6c0…).
       // 26 Oct (W6 chat): RUN_WORDS_RULE gained one sentence, the leader's words as given (run.leader.words); before it 806a9ded….
-      expect(sentSha('propose_change')).toBe('2bb9c6c02c389735df405fe46877dce6cd562eb45b5b2fe6342a798b2f2e6f25');
+      expect(sentSha('propose_change')).toBe('5aff54e568725043ba187a93a1236c1a7eae18c25c71d9c3b13cf94d7709512d');
       const sentParams = (calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.parameters as Json;
       expect(Object.keys(sentParams.properties)).toEqual(['public_label', 'basis', 'request', 'remove', 'answers']);
       expect(sentParams.required).toContain('answers');
@@ -1494,7 +1495,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(registered.length, 'proposing saves nothing').toBe(1);
     });
 
-    it('W9 (european, served 26 Oct 13:44Z): propose_change, as SENT, says what the code does: a second proposal is refused only once a card is prepared, and after does_not_compile ONE corrected proposal makes the card in the same turn', async () => {
+    it('W9 (european, served 26 Oct 13:44Z; B2 Codex on #3800): propose_change, as SENT, says what the code does: a second proposal is refused only once a card is prepared, and until then a refused one may be corrected and sent again: refused, refused, then the card, in one turn', async () => {
       await savedProgram();
       // The first update does not calculate (a claim about no record: undefined_ref), on its call and both repairs; the
       // corrected proposal's update does. Synthetic bakery words.
@@ -1505,25 +1506,33 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const bad = JSON.stringify(updateOf(bakery(), broken));
       canonicalDrafts = [bad, bad, bad, JSON.stringify(updateOf(bakery(), updated))];
       const set = (request: string) => ({ public_label: 'Oven price £2,500', basis: 'their answer', request, remove: [] });
-      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'p1', args: set('The oven price is £2,500, and a note that bread sells.') }],
+      // p0: an answer whose quote is not in their words this turn (refused before any drafting, unverified_person_words);
+      // p1: the update that does not calculate (does_not_compile); p2: corrected, it makes the card.
+      const misquoted = { ...set('The oven price is £2,500.'), answers: [{ id: 'oven_price', value: 2500, low: null, high: null, range_kind: null, party: null,
+        quote: 'The oven is two and a half grand', basis: null, status: 'known', author: 'person' }] };
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'p0', args: misquoted }],
+        [{ type: 'function_call', name: 'propose_change', call_id: 'p1', args: set('The oven price is £2,500, and a note that bread sells.') }],
         [{ type: 'function_call', name: 'propose_change', call_id: 'p2', args: set('The oven price is £2,500.') }],
         [{ type: 'message', text: 'I prepared the oven price; approve its card.' }]];
       const r = await typed('The oven would cost £2,500.');
       expect(r.statusCode, r.body).toBe(200);
       const j = r.json() as Json;
       expect((j._agent.tool_calls as Json[]).filter((c) => c.name === 'propose_change').map((c) => [c.outcome, c.refusal ?? null]))
-        .toEqual([['refused', 'does_not_compile'], ['ok', null]]);
+        .toEqual([['refused', 'unverified_person_words'], ['refused', 'does_not_compile'], ['ok', null]]);
       expect(changeCards(j)).toHaveLength(1);
-      expect(calls.map((c) => (c.text?.format?.name === 'canonical_model' ? 'drafter' : 'agent'))).toEqual(['agent', 'drafter', 'drafter', 'drafter', 'agent', 'drafter', 'agent']);
+      expect(calls.map((c) => (c.text?.format?.name === 'canonical_model' ? 'drafter' : 'agent'))).toEqual(['agent', 'agent', 'drafter', 'drafter', 'drafter', 'agent', 'drafter', 'agent']);
       // The refusal's own reasons went back to the agent as the tool's output, so the correction can use them.
-      const back = JSON.stringify((calls[4]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'p1')!.output);
+      const back = JSON.stringify((calls[5]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'p1')!.output);
       expect(back).toContain('does_not_compile');
       expect(back).toContain('no_such_record');
       expect(registered.length, 'proposing saves nothing').toBe(1);
       // The words the agent was given, as the provider received them.
       const sent = String((calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.description);
       expect(sent).toContain('Put the whole change in ONE propose_change: once a card has been prepared, a second proposal in the same turn is refused. ');
-      expect(sent).toContain('say it plainly and ask for what is needed. After a does_not_compile refusal you may make ONE corrected propose_change in the same turn, using the refusal\'s reasons.');
+      expect(sent).toContain('say it plainly and ask for what is needed. Until a card is prepared, a refused propose_change may be corrected and sent again in the same turn, using the refusal\'s reasons.');
+      // B2 (Codex on #3800): the claim that only ONE corrected proposal may follow, and only a does_not_compile, is gone: the
+      // code releases the turn's claim after every refusal, as this turn's two refusals and its card show.
+      expect(sent).not.toContain('ONE corrected');
       // The false sentence is gone (it said every second proposal is refused); a prepared card still refuses one (the S3 row above).
       expect(sent).not.toContain('ONE propose_change: a second proposal in the same turn is refused');
     });

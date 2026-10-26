@@ -1171,6 +1171,19 @@ export function recordedAskWindowMustClamp(
 export const PENDING_ACTIONS_PER_TURN_CAP = 3;
 
 /**
+ * ⛔ A FAILED TURN'S RECORD NEVER HOLDS THE PENDING CARDS (W9 B1, Codex on #3800). `core-turn.ts` records a turn that failed
+ * after a write (the person's words and a typed `reply_lost…` outcome on its request hash) so a resend replays it. Only a
+ * final answer may take the conditional latest-row append, so this record is appended plainly, with no cards, and the latest
+ * pending read passes over it: a card another request saved meanwhile stays the latest state.
+ */
+export const FAILED_TURN_RECORD_MARK = '#outcome:reply_lost';
+/** The same rule as a SQL LIKE pattern. Its `_` matches any one character, a wider match only for hashes no writer makes. */
+export const FAILED_TURN_RECORD_LIKE = `%${FAILED_TURN_RECORD_MARK}%`;
+export function isFailedTurnRecord(row: { readonly request_hash?: string | null }): boolean {
+  return typeof row.request_hash === 'string' && row.request_hash.includes(FAILED_TURN_RECORD_MARK);
+}
+
+/**
  * The kinds whose live presence means "the next user turn is expected to
  * confirm or dismiss a pending change" — the semantic the ContextPack's
  * `conversation.pending_confirmation` boolean carries (see the assembler's
