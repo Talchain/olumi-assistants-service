@@ -34,7 +34,7 @@ import { providerFailureOf } from '../orchestrator-v5/agent-lane/runtime/transpo
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { FRESH_READ, turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
 import { agentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
-import { DURABLE_SEED_ROWS_READ, HistoryStore, historyFromDurableTurns } from '../orchestrator-v5/agent-lane/history-store.js';
+import { PROGRAM_HISTORY_ROWS_READ, programHistoryOf } from '../orchestrator-v5/model-program-turn/program-history.js';
 import { agentProposals as proposals } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import { approvalChipsFor, typedApprovalOf, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
 import { proposalPendingAction, rehydrateProposals, withApprovalOfferedOnRow } from '../orchestrator-v5/agent-lane/durable-proposal.js';
@@ -404,7 +404,9 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         turnId, durability: 'replayed', assistantText: outcome === undefined || outcome === 'reply_empty' ? prior.assistant_message ?? '' : '',
         revision: now.revision, scenarioRevision: now.identity, graph: appliedGraphWire(now.graph),
         cards: await heldCardsOf(store, scenarioId, pending, now),
-        run: now.run, analysisState: now.analysisState, ...(runPress ? { analysisResult: now.analysisResult } : {}),
+        // In the live reply's program shape (F7): today's stored Run and the program's own view, as the UI adopts them.
+        run: programRunOf(now.graph, null), analysisState: now.analysisState, ...(runPress ? { analysisResult: now.analysisResult } : {}),
+        ...(isProgramGraph(now.graph) ? { modelProgram: { canonical_analysis_view: reopenProgram(now.graph)?.view ?? null, model_program: { turn: 'replay' } } } : {}),
         paused: paused != null ? { proposal_id: paused.proposal_id } : null, error: outcome === undefined ? null : RECORDED[outcome].error,
         agent: { replayed: true }, providerCalls: recordedProviderCalls(),
       }));
@@ -562,31 +564,23 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
 
       // ── THE TURN'S CONTEXT: the person's own words, the selection, the Challenge. ───────────────────────────────────────
       const typedNow = requestWasTyped(body) ? message : null;
-      const history = new HistoryStore();
-      const sessionKey = `core_${scenarioId}`;
-      let earlierTurns: { role: 'user' | 'assistant'; text: string }[] = [];
+      // The program's own reader of the conversation (F7): its proven typed words and the turns before this one.
+      let earlier: ReturnType<typeof programHistoryOf> = { verified: [], earlierTurns: [] };
       try {
-        const rows = await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ);
-        const items = historyFromDurableTurns(rows);
-        history.seed(sessionKey, items, [], rows, typedRowProof(scenarioId, userId));
-        earlierTurns = items.flatMap((it) => { const r = it as { role?: unknown; content?: unknown };
-          const text = typeof r.content === 'string' ? r.content : Array.isArray(r.content) ? r.content.map((p) => String((p as { text?: unknown }).text ?? '')).join('') : '';
-          return (r.role === 'user' || r.role === 'assistant') && text !== '' ? [{ role: r.role, text }] : []; });
+        earlier = programHistoryOf(await store.readRecent(scenarioId, PROGRAM_HISTORY_ROWS_READ), typedRowProof(scenarioId, userId));
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'core-turn: durable conversation unreadable; earlier words stay unknown');
       }
-      const words = history.authorshipWords(sessionKey);
-      const verified = [...words.verified, ...(typedNow === null ? [] : [typedNow])];
-      const toolCtx: AgentToolContext = { scenario_id: scenarioId, authenticated_user_id: userId, request_id: String(req.id), turn_id: turnId,
-        user_turn_text: typedNow ?? '', user_text: verified.join('\n'), verified_user_messages: verified,
-        unverified_user_text: words.unknown.join('\n'), user_text_complete: false };
+      const earlierTurns = [...earlier.earlierTurns];
+      const verified = [...earlier.verified, ...(typedNow === null ? [] : [typedNow])];
+      // What a program's tools read of the person's words: this turn's typed message and every proven typed one.
+      const coreCtx: AgentToolContext = { scenario_id: scenarioId, authenticated_user_id: userId, request_id: String(req.id), turn_id: turnId,
+        user_turn_text: typedNow ?? '', verified_user_messages: verified };
       const nodes = Array.isArray(saved.graph?.nodes) ? (saved.graph.nodes as unknown[]).filter(isRec) : [];
       const edges = Array.isArray(saved.graph?.edges) ? (saved.graph.edges as unknown[]).filter(isRec) : [];
       const selectionContext = agentSelectionContext(selected, saved.graph === null ? undefined : { ok: true,
         entities: nodes.map((n) => ({ id: n.id, kind: n.kind, label: n.label })), links: edges.map((e) => ({ id: e.id, from: e.from, to: e.to })) });
       const challenge = challengeTargetOf(body, selectionContext, saved.graph);
-      const coreCtx = { ...toolCtx, ...(selectionContext != null ? { grounded_selection: selectionContext.grounded,
-        ...(selectionContext.links !== undefined ? { grounded_links: selectionContext.links } : {}) } : {}) };
 
       const program = programRead.kind === 'program';
       // A Run press on a program is the host's own (the stored Run, or a new one): no model call.

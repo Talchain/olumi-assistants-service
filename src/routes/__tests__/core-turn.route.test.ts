@@ -135,9 +135,9 @@ vi.mock('../../orchestrator/user-identity.js', async (original) => ({
   ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
 }));
 /** Spies that call the real legacy functions, so a row can say a program turn never reaches them (spec §3, DL 26 Oct). */
-const legacy = vi.hoisted(() => ({ livingView: vi.fn(), capabilities: vi.fn(), rank: vi.fn(), restoreRun: vi.fn(), heldWriter: vi.fn() }));
+const legacy = vi.hoisted(() => ({ livingView: vi.fn(), capabilities: vi.fn(), rank: vi.fn(), restoreRun: vi.fn(), heldWriter: vi.fn(), history: vi.fn() }));
 /** The program's own reader, spied the same way: the contrast that the probe sees a call the route does make. */
-const program = vi.hoisted(() => ({ read: vi.fn() }));
+const program = vi.hoisted(() => ({ read: vi.fn(), history: vi.fn() }));
 vi.mock('../../orchestrator-v5/path-b/living-model/view.js', async (load) => {
   const actual = await load<typeof import('../../orchestrator-v5/path-b/living-model/view.js')>();
   legacy.livingView.mockImplementation(actual.livingViewOf);
@@ -162,6 +162,16 @@ vi.mock('../../orchestrator-v5/agent-lane/actions/rank.js', async (load) => {
   const actual = await load<typeof import('../../orchestrator-v5/agent-lane/actions/rank.js')>();
   legacy.rank.mockImplementation(actual.actionBarOf);
   return { ...actual, actionBarOf: legacy.rank };
+});
+vi.mock('../../orchestrator-v5/agent-lane/history-store.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/agent-lane/history-store.js')>();
+  legacy.history.mockImplementation(actual.historyFromDurableTurns);
+  return { ...actual, historyFromDurableTurns: legacy.history };
+});
+vi.mock('../../orchestrator-v5/model-program-turn/program-history.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/model-program-turn/program-history.js')>();
+  program.history.mockImplementation(actual.programHistoryOf);
+  return { ...actual, programHistoryOf: program.history };
 });
 vi.mock('../../orchestrator-v5/agent-lane/run-operation.js', async (load) => {
   const actual = await load<typeof import('../../orchestrator-v5/agent-lane/run-operation.js')>();
@@ -643,6 +653,13 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(again.durability).toBe('replayed');
     expect(storedRuns()).toBe(stored);
     expect(calls).toHaveLength(0);
+    // F7: the replay is in the live reply's program shape: the program's own view, and today's stored Run named as a program
+    // names it (the Run the view shows, its state from the program's own currency), never the legacy read's run.
+    const live = first.json() as Json;
+    const shown = (live.canonical_analysis_view as Json | null)?.run as Json | undefined;
+    expect(shown?.run_id, 'the live view shows a stored Run').toEqual(expect.any(String));
+    expect(again.canonical_analysis_view).toEqual(live.canonical_analysis_view);
+    expect(again.run).toMatchObject({ run_id: shown!.run_id, run_key: shown!.run_id, state: { kind: 'complete_current' } });
   });
 
   it('two turns at once: the second waits on the scenario’s slot and starts from what the first saved', async () => {
@@ -1371,18 +1388,19 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       return String(calls[0]!.instructions);
     };
 
-    it('SPEC §3 + F1b (DL 26 Oct): a program\'s draft, typed turn, card (proposed, pressed, saved, read back), canvas edit and Run press never enter the Living Model reader, the legacy capabilities, the held-approval writer, the Run restore or the action ranker; the program\'s own reader does run', async () => {
+    it('SPEC §3 + F1b + F7 (DL 26 Oct): a program\'s draft, typed turn, card (proposed, pressed, saved, read back), canvas edit and Run press never enter the Living Model reader, the legacy capabilities, the held-approval writer, the Run restore, the action ranker or the history window; the program\'s own readers do run', async () => {
       const counts = () => Object.values(legacy).map((spy) => spy.mock.calls.length);
       const none = Object.values(legacy).map(() => 0);
-      for (const spy of [...Object.values(legacy), program.read]) spy.mockClear();
+      for (const spy of [...Object.values(legacy), ...Object.values(program)]) spy.mockClear();
       await savedProgram();
       expect(counts(), 'the draft').toEqual(none);
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
       const typedTurn = (await typed('What does the model hold now?')).json() as Json;
       expect([typedTurn.error, typedTurn.action_bar]).toEqual([null, null]);
       expect(counts(), 'the typed turn').toEqual(none);
-      // CONTRAST: the probe sees the program's own reader, which every agent turn on a program calls.
+      // CONTRAST: the probe sees the program's own readers, of its state and of its conversation (F7), which every agent turn on a program calls.
       expect(program.read).toHaveBeenCalled();
+      expect(program.history).toHaveBeenCalled();
       const press = await propose();
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved.' }]];
       const saved = (await post(press)).json() as Json;
@@ -1399,6 +1417,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(counts(), 'the refused Living Model turn').toEqual(none);
       (await import('../../orchestrator-v5/path-b/living-model/view.js')).livingViewOf(persisted);
       expect(legacy.livingView).toHaveBeenCalledTimes(1);
+      (await import('../../orchestrator-v5/agent-lane/history-store.js')).historyFromDurableTurns([]);
+      expect(legacy.history).toHaveBeenCalledTimes(1);
     });
 
     it('(7) Codex r1 BLOCK 1 on #3707: a loose figure goes in exactly as said, with no bounds Olumi adds; Olumi asks for their range', async () => {
