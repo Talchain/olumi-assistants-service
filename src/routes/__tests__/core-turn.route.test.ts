@@ -685,15 +685,24 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(calls).toHaveLength(1);
   });
 
-  it('a program Run press needs no model call; resent, it replays and stores no second Run', async () => {
+  /** The tools a call may use: those its `allowed_tools` restriction names (all of them when it names none). */
+  const allowedOf = (c: Json): string[] => (c.tool_choice?.type === 'allowed_tools' ? (c.tool_choice.tools as Json[]).map((t) => String(t.name))
+    : ((c.tools ?? []) as Json[]).map((t) => String(t.name)));
+
+  it('T1 (Paul 26 Oct): a program Run press makes no model call for its Run; the AI writes the reply, with no tool that drafts, proposes, applies or runs; resent, it replays with no second Run and no second call', async () => {
     const press = { turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } };
+    outputs = [[{ type: 'message', text: 'Each option, by the Run.' }]];
     const first = await post(press);
     expect(first.statusCode, first.body).toBe(200);
     const stored = storedRuns();
     const again = (await post(press)).json() as Json;
     expect(again.durability).toBe('replayed');
     expect(storedRuns()).toBe(stored);
-    expect(calls).toHaveLength(0);
+    // ONE call: the reply. The Run is the host's own; the replay makes none.
+    expect(calls).toHaveLength(1);
+    expect((first.json() as Json).assistant_text).toBe('Each option, by the Run.');
+    for (const writer of ['build_model_from_brief', 'propose_change', 'apply_change', 'run_analysis']) expect(allowedOf(calls[0]!), writer).not.toContain(writer);
+    expect(allowedOf(calls[0]!), 'CONTRAST: the reply may still read the model').toContain('read_canonical_context');
     // F7: the replay is in the live reply's program shape: the program's own view, and today's stored Run named as a program
     // names it (the Run the view shows, its state from the program's own currency), never the legacy read's run.
     const live = first.json() as Json;
@@ -703,22 +712,27 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(again.run).toMatchObject({ run_id: shown!.run_id, run_key: shown!.run_id, state: { kind: 'complete_current' } });
   });
 
-  it('C12 (assessor 26 Oct): a program Run press, answered by the host with no model call, joins the scenario\'s Conversation once it has one, so the next typed turn can refer to it', async () => {
+  it('T1 + C12: a Run press\'s reply is the AI\'s own, in the scenario\'s Conversation, so the next typed turn continues it; only when that reply cannot be written are the host\'s words added to the Conversation', async () => {
     const press = () => post({ turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } });
-    // Contrast: before the scenario has a Conversation, nothing is added (the turns that open it carry the reply).
-    expect((await press()).statusCode).toBe(200);
-    expect(conversationItems).toEqual([]);
     outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
     expect((await typed('What does the model hold now?')).statusCode).toBe(200);
     const conversation = String(calls.at(-1)!.conversation);
     expect(conversation).toMatch(/^conv_/);
     calls = [];
+    outputs = [[{ type: 'message', text: 'The Run, in my words.' }]];
     const ran = await press();
     expect(ran.statusCode, ran.body).toBe(200);
-    expect(calls, 'the Run press makes no model call').toHaveLength(0);
-    const said = String((ran.json() as Json).assistant_text);
+    // The AI's reply, in that Conversation: nothing added beside it.
+    expect([calls.length, calls[0]!.conversation, (ran.json() as Json).assistant_text]).toEqual([1, conversation, 'The Run, in my words.']);
+    expect(conversationItems).toEqual([]);
+    // CONTRAST: the reply call refused, the host's words stand and are added, as the person saw them.
+    calls = [];
+    outputs = [[{ type: 'refuse' }]];
+    const fallback = await press();
+    expect(fallback.statusCode, fallback.body).toBe(200);
+    const said = String((fallback.json() as Json).assistant_text);
     expect(said.trim()).not.toBe('');
-    // The press and the reply, as the person saw them, in the scenario's own Conversation.
+    expect(said).not.toBe('The Run, in my words.');
     expect(conversationItems).toEqual([{ conversation, items: [
       { type: 'message', role: 'user', content: 'Run the analysis' },
       { type: 'message', role: 'assistant', content: said },
@@ -800,7 +814,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(r.statusCode, r.body).toBe(200);
     const j = r.json() as Json;
     expect(registered).toHaveLength(1);
-    expect(calls.map((c) => c.text?.format?.name ?? null), 'one canonical drafting call, and no agent call').toEqual(['canonical_model']);
+    expect(calls.map((c) => c.text?.format?.name ?? null), 'one canonical drafting call, then the AI\'s reply (T1)').toEqual(['canonical_model', null]);
     const ready = frames.filter((f) => f.kind === 'GRAPH_READY');
     expect(ready, JSON.stringify(frames.map((f) => f.kind))).toHaveLength(1);
     expect(ids(ready[0]!.graph)).toEqual(ids(j.model.graph));
@@ -951,6 +965,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       return (j.cards as Json[]).filter((c) => c.reading !== true);
     };
     /** Drafts and saves a program; returns the reply exactly as it was sent to the person. */
+    /** The calls the last `savedProgram` made: the drafter's, then the AI's reply (T1). */
+    let draftCalls: Json[] = [];
     const savedProgram = async (): Promise<string> => {
       SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(bakery()); calls.length = 0;
       const drafted = await typed(BAKERY_BRIEF);
@@ -958,6 +974,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(calls[0]!.text?.format?.name).toBe('canonical_model');
       const london = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
       expect(calls[0]!.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is ${london} (Europe/London). A date they state counts in whole periods from today, which is period 0.`);
+      draftCalls = [...calls];
       calls.length = 0;
       return String((drafted.json() as Json).assistant_text);
     };
@@ -1027,6 +1044,12 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       skipped.length = 0;
       expect(found(draftCall)).toEqual([]);
       expect(skipped, 'only the person\'s brief is skipped').toEqual([BAKERY_BRIEF]);
+      // T1: the draft's reply is the AI's own call, which opens the Conversation with the brief: scanned the same way.
+      const replyCall = calls.find((c) => c.text?.format?.name !== 'canonical_model')!;
+      expect(hostText(replyCall).join(' '), 'the draft reply call carries the host\'s state block').toContain('OLUMI STATE BLOCK');
+      skipped.length = 0;
+      expect(found(replyCall)).toEqual([]);
+      expect(skipped, 'only the person\'s brief is skipped').toEqual([BAKERY_BRIEF]);
       calls.length = 0;
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
       expect((await typed('What does the model hold now?')).statusCode).toBe(200);
@@ -1038,7 +1061,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(agentText, 'the host\'s program guidance in the input is scanned').toContain('This scenario\'s model is a model program: read_canonical_context');
       skipped.length = 0;
       expect(found(calls[0]!)).toEqual([]);
-      expect(skipped, 'only the person\'s two typed messages are skipped').toEqual(TYPED);
+      // The brief opened the Conversation on the draft turn (T1), so this call carries only the new message.
+      expect(skipped, 'only the person\'s typed message is skipped').toEqual(['What does the model hold now?']);
     });
 
     it('Challenge on a PROGRAM board (served 502 on board 5715db98, 24 Oct): no first tool is forced, as its tools have no note_on_item; the note rides the turn and a reply comes back', async () => {
@@ -1187,24 +1211,24 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       for (const s of spies) s.mockRestore();
     });
 
-    it('a program\'s first agent turn holds the host-written draft reply (prompt audit 24 Oct: "which question did your \'I don\'t know\' answer?"): its Conversation opens with the brief, then that reply with its numbered questions, then the message', async () => {
+    it('T1 (Paul 26 Oct): the draft\'s reply is the AI\'s own, and its call opens the Conversation with the brief; the first typed turn continues that Conversation with only its message, never a seed', async () => {
+      outputs = [[{ type: 'message', text: 'Here is your model: one question first.' }]];
       const sent = await savedProgram();
+      expect(sent).toBe('Here is your model: one question first.');
+      // The reply call: the brief as the person's message, the draft and its Run in the state block, and no writing tool.
+      const reply = draftCalls.find((c) => c.text?.format?.name !== 'canonical_model')!;
+      const replyInput = (reply.input ?? []) as Json[];
+      expect(replyInput.filter((i) => i.role === 'user').map((i) => String(i.content))).toEqual([BAKERY_BRIEF]);
+      expect(replyInput.some((i) => i.role === 'system' && String(i.content).startsWith(STATE_BLOCK_PREFIX))).toBe(true);
+      expect(replyInput.some((i) => i.role === 'system' && String(i.content).includes('Olumi has just drafted this model'))).toBe(true);
+      for (const writer of ['build_model_from_brief', 'propose_change', 'apply_change', 'run_analysis']) expect(allowedOf(reply), writer).not.toContain(writer);
       outputs = [[{ type: 'message', text: 'Thanks; I will put that on the oven price.' }]];
       expect((await typed('About £2,500 for the oven.')).statusCode).toBe(200);
       const input = (calls[0]!.input ?? []) as Json[];
-      const said = input.filter((i) => i.role === 'assistant').map((i) => (i.content as Json[]).map((c) => String(c.text)).join(''));
-      // Exactly the bytes they were sent (Codex r2 #3727), no more and no less; the reply itself has its numbered questions.
-      expect(said, 'the draft reply, as the person saw it').toEqual([sent]);
-      expect(sent).toMatch(/^I've drafted a first model of: /);
-      expect(sent).toMatch(/\n1\. \S/);
-      const users = input.filter((i) => i.role === 'user').map((i) => String(i.content));
-      expect(users[0]).toContain(BAKERY_BRIEF);
-      expect(users.at(-1)).toBe('About £2,500 for the oven.');
-      // Contrast: the turn after it carries no seed again (the Conversation holds it now).
-      calls.length = 0;
-      outputs = [[{ type: 'message', text: 'Noted.' }]];
-      expect((await typed('And it takes a week to install.')).statusCode).toBe(200);
-      expect(((calls[0]!.input ?? []) as Json[]).filter((i) => i.role === 'assistant')).toEqual([]);
+      expect(calls[0]!.conversation, 'the same Conversation the draft opened').toBe(reply.conversation);
+      // No seed: the Conversation already holds the brief and the AI's reply.
+      expect(input.filter((i) => i.role === 'assistant')).toEqual([]);
+      expect(input.filter((i) => i.role === 'user').map((i) => String(i.content))).toEqual(['About £2,500 for the oven.']);
     });
 
     it('S3 (DL 23 Oct): on a program turn the provider receives the PROGRAM tool descriptions, read included, and the read it gets back carries the Run\'s goal_chance block unchanged', async () => {
@@ -1247,7 +1271,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // turn is refused", hashed to b5d5bc0e….
       // 26 Oct (W6 chat): RUN_WORDS_RULE gained one sentence, the leader's words as given (run.leader.words); before it 806a9ded….
       // Strip (Paul 26 Oct, B5): a worded answer goes in request; before it 6c4611c7….
-      expect(sentSha('propose_change')).toBe('9532ffa4afd08d6973490ba3c57e975ac6985c0bd14d48a348b69509e8643373');
+      // 26 Oct (T1, Paul): RUN_WORDS_RULE reports from the Run's own facts (chance, precision_95, driver, leader.option_id), each figure once; before it 9532ffa4….
+      expect(sentSha('propose_change')).toBe('7996a9ef03dfefe5e32fa0a69d860f36ea6f553bde0a100e5a3d8c415486fbe8');
       const sentParams = (calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.parameters as Json;
       expect(Object.keys(sentParams.properties)).toEqual(['public_label', 'basis', 'request', 'remove', 'answers']);
       expect(sentParams.required).toContain('answers');
@@ -1267,7 +1292,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(stableStringify(run.goal_chance)).toBe(stableStringify(stored));
       // W6 chat (26 Oct): and which option is most likely to achieve the goal, or why none is named: the stored view's own words.
       const leader = (persisted!.living_model.runs.at(-1).result.canonical_analysis_view as Json).leader as Json;
-      expect(run.leader).toEqual({ licence: leader.licence, words: leader.words });
+      // T1: the leader's option id rides with its words, so the AI names that option without quoting the sentence.
+      expect(run.leader).toEqual({ licence: leader.licence, option_id: leader.goal_chance_leader ?? null, words: leader.words });
       expect(Object.keys(run).sort()).toEqual(['current', 'engine_current', 'goal_chance', 'leader', 'options', 'run_id']);
     });
 
@@ -1326,7 +1352,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(sent).not.toContain('prepare a new change');
       // 25 Oct (measure RL mrr-r4/r5): the superseded sentence; before it 09fd261b… said "read it again and prepare a new change".
       // 26 Oct (W6 chat): RUN_WORDS_RULE gained one sentence, the leader's words as given (run.leader.words); before it 4ebb0110….
-      expect(createHash('sha256').update(sent, 'utf8').digest('hex')).toBe('8ac4ec6531078147a7541f27d41db10921d93a02c9395839ab10b0b0cb475b77');
+      // 26 Oct (T1, Paul): RUN_WORDS_RULE reports from the Run's own facts, each figure once; before it 8ac4ec65….
+      expect(createHash('sha256').update(sent, 'utf8').digest('hex')).toBe('6a9fa6d052afe945021241a3c035e10abc292df870ef9eea766e07dd467bea58');
     });
 
     it('DL 23 Oct (served capacity: a new Run unseen until reload): a program reply names the Run its turn stored in `run`, and only that Run', async () => {

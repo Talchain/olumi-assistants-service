@@ -334,7 +334,11 @@ describe('the model-program turn on the real core route', () => {
       replies = [JSON.stringify(bakery())];
       const draft = await turn({ message: BRIEF });
       expect(draft.statusCode, draft.body).toBe(200);
-      expect([creates.length, conversationIds.has(SCENARIO)]).toEqual([0, false]);
+      // T1 (Paul 26 Oct): the draft's reply is the AI's, so the draft turn tries to open the Conversation; this harness
+      // refuses that create, so no Conversation is saved, the host's reply stands, and the approval below is the first
+      // conversation turn. Its creates are counted from here.
+      expect([creates.length, conversationIds.has(SCENARIO), String(draft.json().assistant_text).trim() !== '']).toEqual([1, false, true]);
+      creates.length = 0;
       if (saved) conversationIds.set(SCENARIO, `conv_${SCENARIO}`);
       const card = draft.json().cards[0];
       const held = agentProposalOf([...turnRows.values()].find((r) => r.pending_actions?.length)?.pending_actions[0])!;
@@ -362,8 +366,9 @@ describe('the model-program turn on the real core route', () => {
       expect({ status: x.counts.status, creates: x.counts.creates, responses: x.counts.responses, writes: x.counts.writes, left: createAnswers.length,
         graph_unchanged: JSON.stringify(persisted) === x.before.graph, saved_id: conversationIds.get(SCENARIO) ?? null })
         .toEqual({ status: 502, creates: 1, responses: 0, writes: 0, left: 1, graph_unchanged: true, saved_id: null });
-      // ONE line at this non-model boundary, with no attempt count and no retry flag: no body, no key, no provider prose.
-      const logged = lines();
+      // ONE line at this non-model boundary, with no attempt count and no retry flag: no body, no key, no provider prose. (The
+      // first line is the draft's own create, refused by this harness: T1.)
+      const logged = lines().slice(1);
       expect(logged).toHaveLength(1);
       expect(Object.keys(logged[0]!)).not.toContain('retry');
       expect(Object.keys(logged[0]!)).not.toContain('attempt');
@@ -375,7 +380,7 @@ describe('the model-program turn on the real core route', () => {
       const x = await draftThenApprove([201]);
       expect([x.counts.status, x.counts.creates, x.counts.writes, x.counts.tools.filter((t: Json) => t.name === 'apply_change').length], x.r.body).toEqual([200, 1, 1, 1]);
       expect(stableStringify(persisted!.living_model)).toBe(stableStringify(x.held.living_model));
-      expect(lines()).toEqual([{ event: 'core_turn.conversation_create', scenario_id: SCENARIO, path: '/v1/conversations', status: 201, duration_ms: expect.any(Number) }]);
+      expect(lines().slice(1)).toEqual([{ event: 'core_turn.conversation_create', scenario_id: SCENARIO, path: '/v1/conversations', status: 201, duration_ms: expect.any(Number) }]); // after the draft's refused create (T1)
     }, 30_000);
 
     it('the turn\'s signal aborted during the create: the turn stops at once, after ONE create attempt and no Responses call', async () => {
@@ -802,15 +807,15 @@ describe('the model-program turn on the real core route', () => {
     expect([diverged.staleness.stale, diverged.face_when_stale, Object.hasOwn(diverged, 'leader'), diverged.leader_licence]).toEqual([true, RUN_AGAIN_FOR_CHANCE, false, 'withheld']);
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null };
     const fresh = await readProgramContext({ dispatch, proposals: new ProposalStore() }, ctx) as Json;
-    expect([fresh.data.run.current, fresh.data.run.leader]).toEqual([true, { licence: 'permitted', words: stored.leader.words }]);
+    expect([fresh.data.run.current, fresh.data.run.leader]).toEqual([true, { licence: 'permitted', option_id: stored.leader.goal_chance_leader, words: stored.leader.words }]);
     persisted = moved;
     const old = await readProgramContext({ dispatch, proposals: new ProposalStore() }, ctx) as Json;
     expect([old.data.run.current, Object.hasOwn(old.data.run, 'leader')]).toEqual([false, false]);
   });
 
   it('W6 chat: the agent can say on a later turn which option is most likely, from the Run\'s own words; its tool descriptions say how, with no choosing word', () => {
-    const rule = 'When the person asks which option is most likely to achieve the goal, say run.leader.words as given: they name that option as a finding in this model, '
-      + 'or say why none is named; with no run.leader, say this Run names none; never pick, rank or advise on an option yourself.';
+    const rule = 'Which option is most likely to achieve the goal is run.leader: name run.leader.option_id\u2019s option as the one most likely to achieve the goal in this model, a finding, never advice; '
+      + 'with no option_id, say why none is named, from run.leader.words; with no run.leader, say this Run names none; never pick, rank or advise on an option yourself.';
     for (const [name, text] of Object.entries(PROGRAM_TOOL_DESCRIPTIONS)) {
       expect(text.split(rule), name).toHaveLength(2);
       for (const banned of ['recommend', 'best', 'winner', 'you should']) expect(text.toLowerCase(), `${name}: ${banned}`).not.toContain(banned);

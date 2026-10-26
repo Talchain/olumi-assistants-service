@@ -137,13 +137,15 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     const { PROGRAM_TOOL_DESCRIPTIONS: d } = coreInstructions;
     expect(Object.keys(d)).toEqual(['read_canonical_context', 'propose_change', 'apply_change', 'run_analysis']);
     // Spelled out, not imported: the PL's per-goal + joint permission at the emitted paths, and never a figure of the agent's own.
-    const words = 'Report results only in the Run\u2019s recorded words: each option\u2019s words (run.options[].words; where shown is false, they say why no chance is shown); '
+    // T1 (Paul 26 Oct): the AI writes results from the Run's own facts, each figure exactly as given and said once.
+    const words = 'Report results only from the Run\u2019s own facts: each option\u2019s chance as run.options[].chance gives it (with run.options[].precision_95, in %, only if asked how exact it is); '
+      + 'what that chance rests on, in a few plain words, or, where shown is false, why none is shown: both are in run.options[].words; the input it is most sensitive to with the chance at that input\u2019s low, middle and high values (run.options[].driver); '
       + 'each goal\u2019s own words with each option\u2019s display for it (run.goal_chance.targets.per_target[].words and its options[].display); '
       + 'for meeting every goal together, run.goal_chance.targets.joint.words, or its line saying why that waits (run.goal_chance.targets.joint.line); '
       + 'and run.goal_chance.notes, limits[].words with each option\u2019s display, and unchecked_limits[].words. '
-      + 'Quote them; never a figure, chance, rounding, combination or ranking of your own.';
+      + 'Use those figures exactly as given; never a figure, chance, rounding, combination or ranking of your own.';
     // The run block as S3 emits it: { run_id, options[{ option_id, shown, words }], goal_chance: the Run's own block }.
-    const PATHS = ['run.options[].words', 'run.goal_chance.targets.per_target[].words', 'run.goal_chance.targets.joint.words',
+    const PATHS = ['run.options[].words', 'run.options[].chance', 'run.options[].precision_95', 'run.options[].driver', 'run.goal_chance.targets.per_target[].words', 'run.goal_chance.targets.joint.words',
       'run.goal_chance.targets.joint.line', 'run.goal_chance.notes, limits[].words with', 'and unchecked_limits[].words'];
     for (const [name, text] of Object.entries(d)) {
       expect(text.split(words), name).toHaveLength(2);
