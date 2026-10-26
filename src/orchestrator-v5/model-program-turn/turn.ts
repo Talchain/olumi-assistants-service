@@ -8,7 +8,7 @@
  */
 import { CONFIRM_READING } from '../agent-lane/approval-chips.js';
 import type { ProposalStore } from '../agent-lane/proposal.js';
-import type { InternalDispatch } from '../agent-lane/runtime/agent-capabilities.js';
+import type { InternalDispatch } from '../core-route/internal-dispatch.js';
 import type { ToolResult } from '../agent-lane/runtime/agent-tools.js';
 import type { CanonicalModelT } from '../model-program/canonical.js';
 import { compile, normalise, type Blocker } from '../model-program/compile.js';

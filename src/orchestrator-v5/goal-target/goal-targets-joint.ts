@@ -611,7 +611,4 @@ function isGoalTargetsBlock(v: unknown, optionIds: readonly string[]): v is Goal
   return true;
 }
 
-/** "about 37%", "less than 1%", "more than 99%" — the screen's one edge-word rule for a displayed whole percentage. */
-export function sayDisplayedPct(pct: number): string {
-  return pct === 0 ? 'less than 1%' : pct === 100 ? 'more than 99%' : `about ${pct}%`;
-}
+export { sayDisplayedPct } from '../model-program/present/display-words.js';
