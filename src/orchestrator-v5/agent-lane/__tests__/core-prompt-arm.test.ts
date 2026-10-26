@@ -80,7 +80,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // 24 Oct (DL, marketing "no path"; AIE policy): a goal or limit an update adds comes with the options' relations to it, only
     // where an option plausibly affects it, never added merely to connect.
     // 26 Oct: alpha G2, floor and ceiling are Olumi's reading of what a quantity can physically be (0 for a count or level; null for a change).
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('67e5fae5a050b3293dacd9fa3975e1c21b04048317191929ce3df67c02414b28'); // 25 Oct: alpha G21, the reach rule is the compiler's (at least one goal or limit, only when every goal has a measure)
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('d0e05a8e6f4faac9226364b33422da008a9d0f5b7ea3aa9fb7bcf07336f62cc0'); // 26 Oct: independent candidate B; hash computed by executing prompt.ts.
     // 24 Oct (DL, DoD-G classes 12 and 4): an update returns only the records it changes or adds; the host merges them by id.
     expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('b54257c11969f65208dfead1d0006e17a88c65d20f0e0880588c650b58d8e4c8');
     expect(createHash('sha256').update(UPDATE_REPAIR_PREFIX, 'utf8').digest('hex')).toBe('1b52b62678cfab1b06670bc026504a9e63e186e458fec752c4b56ba9df918daf');
@@ -179,7 +179,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(b).not.toContain(words);
   });
 
-  it('the model-program drafter (DL 24 Oct): only their facts wait, link sizes stay Olumi\u2019s estimates, quotes are copied exactly, and an update keeps every option reaching every goal', () => {
+  it('the model-program drafter (DL 24 Oct): only their facts wait, link sizes stay Olumi\u2019s estimates, quotes are copied exactly, and updates preserve plausible causal relations', () => {
     for (const rule of [
       'its quote is their words copied exactly, one unbroken stretch, never reworded or joined.',
       'what they know or decide: current levels, prices, costs, budgets and how they split them, headcount, dates, durations, targets.',
@@ -187,14 +187,14 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       // DL 24 Oct (blind score of 1510a008, mrr structure): an identity is a definition; a missing figure is asked on its item.
       'Mechanism: when the model has a goal and every goal has a measure, each option reaches, through relations from what it sets, at least one goal or limit it plausibly affects, never a link added only to connect it; a quantity that is by definition a product or sum of others is a definition, never an effect; each other link is sized by their coefficient or Olumi\'s estimate.',
       // AIE 6386018855 §5 (DL 24 Oct): the capture-only clauses replaced, each permission once, attributed and grounded.
-      'Olumi\'s own additions (a suggested measure, options, drivers, risks) are made when the model is first drafted; a repair or an update changes only what it asks, and a goal or limit an update adds comes with the relations from the options to it, only where an option plausibly affects it; never added merely to connect.',
+      'First drafts include useful Olumi proposals; repairs and updates change only what is requested, preserving all other meaning and ids.',
       'Model the main reason each option could succeed and the main reason it could fail.',
       'Every driver, constraint and current state they mention feeds the calculation or the record that fits it.',
       'Where the brief leaves out a driver, countereffect or risk that is plausible and could change the result, add it as Olumi\'s hypothesis (author olumi, with a basis and its direction); plausibility alone never justifies a figure, so size it like any other link.',
-      'An aim they state without a measure stays theirs: where a measure can responsibly track it, suggest one (measure_by "olumi":',
-      'its target asked unless they gave one and its exclusions naming what it misses; a suggested measure is never their definition of success.',
+      'Suggest a measure only if it responsibly tracks the aim (measure_by olumi),',
+      'name what it misses in exclusions, and ask its target unless given.',
       'An aim no measure can responsibly track, and a guardrail without one, keep measure null and a question.',
-      'Where they named none, or the question is how to divide something (money, staff, hours), propose a small set of feasible, distinct options of Olumi\'s (author olumi, short plain names; a proposed division is a design, not a fact about today) within their stated budgets, exclusions and scope,',
+      'Where useful, propose 1–2 feasible, nonredundant alternatives as author olumi, quote null, approval proposed, even when options already exist.',
       'left_out holds only what matters to the result but cannot be calculated, with the reason;',
       // AMEND (DL 24 Oct, blind score of #3735): a lever only the options set, and a whole, are structure; a stated limit stays a limit.
       'So are the starting level of a setting only the options change, when they gave none (0, an Olumi division\'s share included), and a whole such as 100 %: never asked.',
@@ -267,8 +267,8 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // r5 (buddy, accepted): never numerical bounds demanded where only a direction is defensible (r4's "order of magnitude").
     // AIE §5: the schema says the same as the prompt: a suggested measure where one can track the aim; Olumi's options where structure is missing.
     for (const rule of ['Where one can, Olumi suggests it instead (measure_by olumi).', 'the measure is a suggestion, never their definition of success;',
-      'each with its own measure (theirs, Olumi\'s suggestion, or null with a question), target and window. Never an aim they did not state.',
-      'and, where they named none or the question is how to divide something, a small set of Olumi\'s own (author olumi) within their stated budgets and scope.'])
+      'If none was stated, one provisional Olumi working aim for confirmation or correction.',
+      'When useful, add 1–2 feasible, distinct Olumi alternatives within their budgets, exclusions and scope (author olumi, quote null, proposed), even if options already exist.'])
       expect(count(sentSchema, rule), rule).toBe(1);
     for (const old of ['Never invent a measure', 'An aim with no measure is valid; never invent one']) expect(sentSchema, old).not.toContain(old);
     for (const old of ['nobody can give or responsibly estimate it yet', 'is never unknown', 'basis says why. ', 'whenever one is supportable', 'order of magnitude']) expect(sentSchema, old).not.toContain(old);

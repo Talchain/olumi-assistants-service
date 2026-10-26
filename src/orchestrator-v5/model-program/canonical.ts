@@ -206,7 +206,7 @@ const per = id.nullable().describe('For a rate over the window ("no-shows per bo
 
 export const CanonicalGoal = z.object({
   id,
-  label: z.string().describe("The aim in the person's own words (\"keep weekly profit over £900\"). Never empty."),
+  label: z.string().describe("The stated aim in their own words, or one provisional Olumi working aim when none was stated (author olumi, quote null, proposed). Never invent their target. Never empty."),
   measure: z.object({
     quantity: id.describe('The quantity the aim is about. Never an asked quantity: that would ask for the result itself.'),
     per,
@@ -294,7 +294,7 @@ export type CanonicalOptionSetT = z.infer<typeof CanonicalOptionSet>;
 
 export const CanonicalOption = z.object({
   id,
-  label: z.string().describe('The option\'s exact name as the person wrote it; for Olumi\'s own option, a short plain name.'),
+  label: z.string().describe('A short neutral name preserving the option\'s actual intent. Keep the person\'s original words exactly in quote; an Olumi alternative stays author olumi, quote null, proposed.'),
   sets: z.array(CanonicalOptionSet).describe('What the option changes. [] for "carry on as now".'),
   status: z.enum(OPTION_STATUSES).describe('live: compared. ruled_out: the person rules it out but keeps it in view. removed: taken out of the comparison.'),
   developed_from: id.nullable().describe('The id of the option this is a variant of. A record, not a cause. Null otherwise.'),
@@ -378,10 +378,10 @@ export const CanonicalModel = z.object({
   period: z.enum(PERIOD_UNITS).describe('The model\'s time step, which windows and stocks count in. Period 0 is now.'),
   quantities: z.array(CanonicalQuantity),
   relations: z.array(CanonicalRelation),
-  goals: z.array(CanonicalGoal).describe('Every aim the person stated, each with its own measure (theirs, Olumi\'s suggestion, or null with a question), target and window. Never an aim they did not state.'),
+  goals: z.array(CanonicalGoal).describe('Every stated aim remains theirs. If none was stated, one provisional Olumi working aim for confirmation or correction. A responsible measure may be suggested (measure_by olumi), with exclusions and an asked target unless given; otherwise measure null with a question. Never invent a personal target or force a metric.'),
   limits: z.array(CanonicalLimit).describe('Every condition the plan must not break. A budget or a time cap is a limit, not a goal.'),
   preferences: z.array(CanonicalPreference).describe('Every wish without a threshold ("we\'d like fewer late deliveries").'),
-  options: z.array(CanonicalOption).describe('Every option the person named, by its exact name, and, where they named none or the question is how to divide something, a small set of Olumi\'s own (author olumi) within their stated budgets and scope.'),
+  options: z.array(CanonicalOption).describe('Every named option, neutrally labelled with the original words retained in quote. When useful, add 1–2 feasible, distinct Olumi alternatives within their budgets, exclusions and scope (author olumi, quote null, proposed), even if options already exist. No redundant alternatives or quota.'),
   risks: z.array(CanonicalRisk),
   claims: z.array(CanonicalClaim),
   evidence: z.array(CanonicalEvidence),
