@@ -355,15 +355,19 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     ]);
   });
 
-  it('row 7: an Olumi figure without a range is an error; an exact constant is STRUCTURE, never an Olumi estimate', () => {
+  it('S1 strip (B8, B10 off): an Olumi figure without a range is no error: it calculates as Olumi\'s exact figure, as written', () => {
     const m = bakery();
     m.quantities = m.quantities.map((q) => (q.id === 'extra_per_oven' ? { ...q, low: null, high: null, range_kind: null } : q));
     const r = compile(m);
-    expect(r.executable).toBeNull();
-    expect(r.errors.map((e) => [e.code, e.items])).toEqual([['olumi_no_range', ['extra_per_oven']]]);
+    expect(r.errors).toEqual([]);
+    expect(xq(r).get('extra_per_oven')!.dist).toEqual({ kind: 'fixed', value: 120, author: 'olumi' });
     const known = bakery();
     known.quantities.push(qty('weeks_per_year', 'week/year', { value: 52, author: 'olumi', status: 'known', basis: 'A year has 52 weeks.' }));
-    expect(codes(compile(known))).toEqual(['olumi_no_range']); // phase 0b: no more zero-width Olumi "estimates"
+    expect(codes(compile(known))).toEqual([]);
+    // Contrast (MATHS, kept): an estimate with no figure at all would be read as 0, so it is still an error.
+    const empty = bakery();
+    empty.quantities = empty.quantities.map((q) => (q.id === 'extra_per_oven' ? { ...q, value: null, low: null, high: null, range_kind: null } : q));
+    expect(compile(empty).errors.map((e) => [e.code, e.items])).toEqual([['figure_status', ['extra_per_oven']]]);
     const ok = bakery();
     ok.quantities.push(structure('weeks_per_year', 'week/year', 52, 'A year has 52 weeks.'));
     expect(compile(ok).errors).toEqual([]);
@@ -381,10 +385,13 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(r.executable!.limits.map((l) => l.id)).toEqual(['spend_cap']);
   });
 
-  it('a condition that is both a goal and a limit is an error; a different limit on the same quantity is not', () => {
+  it('S1 strip (B14 off): a condition stated as both a goal and a limit is no error: both calculate; a different limit on the same quantity too', () => {
     const m = bakery();
     m.limits.push(limit('profit_limit', 'Profit over £900', 'profit', '>', 'profit_target', 'every', 'quarter', 'over £900'));
-    expect(compile(m).errors.map((e) => [e.code, e.items])).toEqual([['goal_and_limit', ['weekly_profit', 'profit_limit']]]);
+    const both = compile(m);
+    expect(both.errors).toEqual([]);
+    expect(both.executable!.goals.map((g) => g.id)).toContain('weekly_profit');
+    expect(both.executable!.limits.map((l) => l.id)).toEqual(['profit_limit']);
     const ok = bakery();
     ok.quantities.push(person('zero_profit', 'GBP/week', 0, 'never make a loss'));
     ok.limits.push(limit('no_loss', 'Never make a loss', 'profit', '>=', 'zero_profit', 'every', 'quarter', 'never make a loss'));
@@ -393,19 +400,18 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(r.executable!.limits).toEqual([{ id: 'no_loss', label: 'Never make a loss', quantity: 'profit', cmp: '>=', bound: 'zero_profit', aggregation: 'every', window: { start_period: 0, periods: 13 } }]);
   });
 
-  it('a quote not in the person\'s words is UNVERIFIED (a typed outcome, not an error) and never drawn as theirs', () => {
+  it('S1 strip (A25a, X4 off): authorship is the AI\'s alone: a quote not in the person\'s words, or none, is drawn as the AI wrote it', () => {
     const m = bakery();
     const brief = 'We sell 400 loaves a week at £3 and costs £600 a week. A second oven? Buy it or keep one oven. Weekly profit over £900 within 3 months, and at least £10,000 in the bank. We have £2,000 in the bank.';
-    m.quantities = m.quantities.map((q) => (q.id === 'costs' ? { ...q, quote: 'costs are £650 a week' } : q));
+    m.quantities = m.quantities.map((q) => (q.id === 'costs' ? { ...q, quote: 'costs are £650 a week' } : q.id === 'price' ? { ...q, quote: null } : q));
     const r = compile(m, { sourceText: brief });
     expect(r.errors).toEqual([]);
-    expect(r.unverified).toContainEqual({ id: 'costs', quote: 'costs are £650 a week' });
-    expect(r.unverified.map((u) => u.id)).not.toContain('price');
-    expect(r.perGoal[0].unverified_inputs).toContain('costs');
+    expect(r.unverified).toEqual([]);
+    expect(r.perGoal[0].unverified_inputs).toEqual([]);
     const p = project(m, r);
-    const costs = p.graph.nodes.find((n) => n.id === 'costs')!;
-    expect(costs.provenance).toBe('unverified_brief');
-    expect(costs).not.toHaveProperty('source_quote');
+    expect(p.graph.nodes.find((n) => n.id === 'costs')).toMatchObject({ provenance: 'from_brief', source_quote: 'costs are £650 a week' });
+    expect(p.graph.nodes.find((n) => n.id === 'price')).toMatchObject({ provenance: 'from_brief' });
+    expect(p.graph.nodes.find((n) => n.id === 'price')).not.toHaveProperty('source_quote');
     expect(p.graph.nodes.find((n) => n.id === 'base_sales')).toMatchObject({ provenance: 'from_brief', source_quote: 'We sell 400 loaves a week' });
   });
 
@@ -434,13 +440,15 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const q = xq(r);
     expect(q.get('net__plus')!.equation).toEqual({ form: 'definition', op: 'sum', parts: ['takings', 'tips'] });
     expect(q.get('net')!.equation).toEqual({ form: 'definition', op: 'difference', parts: ['net__plus', 'costs', 'rent'] });
-    // An exact identity is a definition, never an effect: a person's exact figure as a link size is refused.
+    // S1 strip (B12 off): a person's exact figure as a link size is no error; the link runs with that exact size.
     const bad = bakery();
     bad.quantities = bad.quantities.map((q2) => (q2.id === 'extra_per_oven' ? person('extra_per_oven', 'loaf/week/oven', 150, 'each oven adds exactly 150') : q2));
-    expect(codes(compile(bad))).toEqual(['coefficient_kind']);
+    const rb = compile(bad);
+    expect(codes(rb)).toEqual([]);
+    expect(xq(rb).get('extra_per_oven')!.dist).toEqual({ kind: 'fixed', value: 150, author: 'person' });
   });
 
-  it('phase 0b fix 3: a structural constant is exact, authored structure, never drawn as Olumi\'s; a non-structural figure cannot hide there', () => {
+  it('phase 0b fix 3: a structural constant is exact, authored structure, never drawn as Olumi\'s; S1 strip (B2 off): any figure the AI labels structure is read as written', () => {
     const m = bakery();
     m.quantities = m.quantities.map((q) => (q.id === 'ovens_added' ? structure('ovens_added', 'oven', 0, 'No extra oven: as now.') : q));
     const r = compile(m);
@@ -451,12 +459,12 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(String(node.display_value)).not.toContain('Olumi');
     const hiding = bakery();
     hiding.quantities = hiding.quantities.map((q) => (q.id === 'costs' ? structure('costs', 'GBP/week', 612.5, 'Costs.') : q));
-    // Codex r4/r5 #3709: it cannot hide there — it is the person's to give (never Olumi's fixed figure), and what rests on it
-    // waits for them. S1 A4: an asked figure, with no question of the code's ("What is …?" is gone).
+    // The structure rewrite (B2) is off the path: the AI's label passes through unchanged and the figure calculates as structure.
     const hid = compile(hiding);
     expect(hid.errors).toEqual([]);
-    expect(normalise(hiding).quantities.find((q) => q.id === 'costs')).toMatchObject({ author: 'person', status: 'asked', value: null, question: null, basis: null });
-    expect(hid.blockers).toEqual([{ id: 'costs', code: 'asked', scope: ['weekly_profit', 'cash_buffer'] }]);
+    expect(normalise(hiding).quantities.find((q) => q.id === 'costs')).toMatchObject({ author: 'structure', status: 'known', value: 612.5, basis: 'Costs.' });
+    expect(hid.blockers).toEqual([]);
+    expect(xq(hid).get('costs')!.dist).toEqual({ kind: 'fixed', value: 612.5, author: 'structure' });
   });
 
   it('finite numerical agreement cannot suppress an asked fact or invent its value', () => {
@@ -524,13 +532,14 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const r = compile(m);
     expect(r.errors).toEqual([]);
     expect(xq(r).get('extra_per_oven')!.equation).toEqual({ form: 'definition', op: 'product', parts: ['capacity_per_oven', 'sell_through'] });
-    // A derived quantity marked fact, and kind derived on a figure, are both refused: schema and compiler say the same.
+    // S1 strip (X2 off): kind is the AI's word; a derived quantity marked fact, and kind derived on a figure, both compile as written.
     const asFact = bakery();
     asFact.quantities = asFact.quantities.map((q) => (q.id === 'profit' ? { ...q, kind: 'fact' as const } : q));
-    expect(compile(asFact).errors.map((e) => [e.code, e.items])).toEqual([['figure_status', ['profit']]]);
+    expect(compile(asFact).errors).toEqual([]);
     const figure = bakery();
     figure.quantities = figure.quantities.map((q) => (q.id === 'costs' ? { ...q, kind: 'derived' as const } : q));
-    expect(compile(figure).errors.map((e) => [e.code, e.items])).toEqual([['figure_status', ['costs']]]);
+    expect(compile(figure).errors).toEqual([]);
+    expect(xq(compile(figure)).get('costs')!.dist).toEqual({ kind: 'fixed', value: 600, author: 'person' });
     const schemaText = JSON.stringify(z.toJSONSchema(CanonicalModel));
     expect(schemaText).not.toContain('A derived or structural quantity is a fact');
     expect(schemaText).toContain('a link\'s size stays a coefficient even when it is worked out by a relation'); // contrast: the new rule is said
@@ -549,14 +558,16 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(project(m, r).items.find((i) => i.record_id === 'spend_less')).toMatchObject({ family: 'preference', shown_as: {}, in_calculation: false, concerns: ['costs'] });
   });
 
-  it('asking for the result itself (an asked goal quantity) is an error; asking for a target is not', () => {
+  it('S1 strip (B15 off): a goal measuring an asked quantity is no error: it waits on that answer; asking for a target is not either', () => {
     const m = bakery();
     m.quantities = m.quantities.map((q) => (q.id === 'profit_target' ? asked('profit_target', 'GBP/week', 'What weekly profit would count as success?') : q));
     expect(compile(m).errors).toEqual([]);
     const bad = bakery();
     bad.quantities.push(asked('launch_success', '1', 'Was the launch a success?'), person('one', '1', 1, 'a success'));
     bad.goals.push(goal('success', 'launch_success', '>=', 'one', 'end', 'quarter', 'a successful launch'));
-    expect(codes(compile(bad))).toEqual(['asks_for_result']);
+    const rb = compile(bad);
+    expect(codes(rb)).toEqual([]);
+    expect(rb.perGoal.find((p) => p.goal_id === 'success')).toMatchObject({ status: 'asks', asks: ['launch_success'] });
   });
 
   it('gold gaps 3-6: a guardrail with no measure is a typed withheld entry; max and a rate over the window compile; timing may name a quantity', () => {
@@ -615,9 +626,33 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(compile(filled).executable!.options.map((o) => o.id)).toEqual(['buy_oven', 'keep_one', 'raise_price']);
     const fact = bakery();
     fact.quantities = fact.quantities.map((q) => (q.id === 'costs' ? olumi('costs', 'GBP/week', 500, 700) : q));
+    // S1 strip (B9 off): Olumi's estimate of a fact is no error; it calculates as Olumi's range, labelled as the AI wrote it.
     const rf = compile({ ...fact, quantities: fact.quantities.map((q) => (q.id === 'costs' ? { ...q, kind: 'fact' as const } : q)) });
-    expect(rf.errors.map((e) => [e.code, e.items])).toEqual([['fact_estimated', ['costs']]]);
+    expect(rf.errors).toEqual([]);
+    expect(xq(rf).get('costs')!.dist).toMatchObject({ kind: 'range', low: 500, high: 700, basis: 'olumi_estimate' });
     expect(compile(fact).errors).toEqual([]);
+  });
+
+  it('S1 strip (M3, M11): a setting on a worked-out figure overrides it unless it is a stock (the engine cannot set a stock); an inline setting\'s status and kind never vary by author', () => {
+    // M3: setting `sales` (an effect) compiles, and the option's set reaches the Run; setting `cash` (a stock) is still an error.
+    const over = bakery();
+    over.quantities.push(person('sales_cap', 'loaf/week', 350, 'cap sales at 350'));
+    over.options.push(option('cap_sales', 'Cap sales', [set('sales', 'sales_cap', 'cap sales at 350')], 'cap sales'));
+    const ro = compile(over);
+    expect(codes(ro)).toEqual([]);
+    expect(ro.executable!.options.find((o) => o.id === 'cap_sales')!.sets).toEqual([{ quantity: 'sales', to: 'sales_cap', from_period: 0 }]);
+    const onStock = bakery();
+    onStock.quantities.push(person('cash_reset', 'GBP', 0, 'start from nothing'));
+    onStock.options.push(option('reset_cash', 'Reset cash', [set('cash', 'cash_reset', 'start from nothing')], 'reset cash'));
+    expect(compile(onStock).errors.map((e) => [e.code, e.items])).toEqual([['set_derived', ['reset_cash', 'cash']]]);
+    // M11: an option set carries no status or kind of its own (canonical.ts CanonicalOptionSet), so the host's default is one
+    // for every author: a figure in hand is known, a fact; whose it is stays the AI's.
+    const inline = (author: 'person' | 'olumi') => {
+      const m = bakery();
+      m.options.push(option('raise_price', 'Raise the price', [set('price', null, 'put the price up to £3.50', { value: 3.5, author, ...(author === 'olumi' ? { quote: null } : {}) })], 'put the price up'));
+      return normalise(m).quantities.find((q) => q.id === 'raise_price__price')!;
+    };
+    for (const author of ['person', 'olumi'] as const) expect(inline(author), author).toMatchObject({ status: 'known', kind: 'fact', author, value: 3.5 });
   });
 
   it('DL defect (b): a goal window may be null: a static level reads once at period 0; a level that moves over time asks for a deadline', () => {
@@ -637,7 +672,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(rm.executable!.goals.map((g) => g.id)).toEqual(['weekly_profit']);
   });
 
-  it('DL defect (a): an option that reaches only a limit reaches; one that reaches neither is an error', () => {
+  it('DL defect (a), S1 strip (B16 off): an option that reaches only a limit reaches; one that reaches neither is no error and compares as carrying on', () => {
     const m = bakery();
     m.quantities.push(person('hours', 'hour/week', 50, '50 hours a week'), person('fewer_hours', 'hour/week', 40, 'cut to 40 hours'), person('hours_cap', 'hour/week', 45, 'no more than 45 hours'));
     m.limits.push(limit('my_hours', 'No more than 45 hours a week', 'hours', '<=', 'hours_cap', 'every', 'quarter', 'no more than 45 hours'));
@@ -646,7 +681,9 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const none = bakery();
     none.quantities.push(person('hours', 'hour/week', 50, '50 hours a week'), person('fewer_hours', 'hour/week', 40, 'cut to 40 hours'));
     none.options.push(option('cut_hours', 'Cut my hours', [set('hours', 'fewer_hours', 'cut to 40 hours')], 'Cut my hours'));
-    expect(codes(compile(none))).toEqual(['set_reaches_nothing', 'option_reaches_no_goal']);
+    const rn = compile(none);
+    expect(codes(rn)).toEqual([]);
+    expect(rn.executable!.options.find((o) => o.id === 'cut_hours')!.sets).toEqual([]);
   });
 
   it('alpha G7: an id lowering generates is no record\'s own: an authored record with it is refused, never silently replaced or reused', () => {
@@ -794,24 +831,18 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(domain(setting(null), 'promo__members_now')).toBeNull();
   });
 
-  it('alpha G2: a figure given wholly outside its declared bounds is asked again (theirs) or held (Olumi\'s), naming Olumi\'s reading; a fixed one too', () => {
+  it('S1 strip (A20b off): a figure given wholly outside its declared bounds is never asked again nor held by the compiler; it runs with its domain, which the engine reads', () => {
     const withMembers = (f: Partial<CanonicalQuantityT>) => { const g = gymFilled(); g.quantities = g.quantities.map((q) => (q.id === 'members_now' ? { ...q, floor: 0, ...f } : q)); return compile(g); };
-    const why = (r: ReturnType<typeof compile>) => r.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ');
-    const fixed = withMembers({ value: -5, low: null, high: null });
-    expect(fixed.blockers).toContainEqual({ id: 'members_now', code: 'recount', scope: ['reach_400'], reason: '"members now" is given as -5 member, but Olumi reads it as never below 0 member' });
-    expect(why(fixed)).toContain('needs "members now" again: "members now" is given as -5 member, but Olumi reads it as never below 0 member.');
-    // A ceiling, from above.
-    expect(why(withMembers({ value: 900, low: null, high: null, ceiling: 500 }))).toContain('is given as 900 member, but Olumi reads it as never above 500 member');
-    // Olumi's own fixed figure outside: held as unsupported, never asked of them.
-    const olumis = withMembers({ value: -5, low: null, high: null, author: 'olumi', status: 'estimated', quote: null, basis: 'a guess' });
-    expect(olumis.perGoal.find((p) => p.goal_id === 'reach_400')).toMatchObject({ status: 'withheld' });
-    expect(why(olumis)).toContain('but Olumi reads it as never below 0 member; Olumi\'s figure is unsupported');
-    // Contrast: inside its bounds, or undeclared, a figure below 0 is no contradiction.
-    expect(withMembers({ value: 5, low: null, high: null }).blockers.some((b) => b.code === 'recount')).toBe(false);
-    expect(withMembers({ value: -5, low: null, high: null, floor: null }).blockers.some((b) => b.code === 'recount')).toBe(false);
+    for (const [what, r] of [['person below', withMembers({ value: -5, low: null, high: null })], ['person above', withMembers({ value: 900, low: null, high: null, ceiling: 500 })],
+      ['olumi below', withMembers({ value: -5, low: null, high: null, author: 'olumi', status: 'estimated', quote: null, basis: 'a guess' })]] as const) {
+      expect(r.blockers.filter((b) => b.code === 'recount'), what).toEqual([]);
+      expect(r.perGoal.find((p) => p.goal_id === 'reach_400'), what).toMatchObject({ status: 'calculable' });
+      // MATHS kept (A20a): the declared bounds ride into the Run as its domain, never clamped.
+      expect(xq(r).get('members_now')!.domain, what).toMatchObject({ min: 0 });
+    }
   });
 
-  it('numbers#1 (alpha G2): a person\'s firm range that only touches Olumi\'s floor or ceiling is asked again in their unit, never held in engine fractions', () => {
+  it('S1 strip (A20b off): a person\'s firm range that only touches Olumi\'s floor or ceiling is never asked again; the law holds it (no room), and a range with room calculates', () => {
     // A hall's occupancy in %, which Olumi reads as 0 to 100 %, on the real compile → present path (evaluateCanonical).
     const words = 'The hall has 200 seats. We want at least 150 guests this month. Carry on as now. Between 100% and 120% full.';
     const hall = (occupancy: Partial<CanonicalQuantityT>) => evaluateCanonical(model({
@@ -822,21 +853,13 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       goals: [goal('enough_guests', 'guests', '>=', 'want', 'end', 'one', 'at least 150 guests')],
       options: [option('carry_on', 'Carry on as now', [], 'Carry on as now')],
     }), { sourceText: words, seed: 7, draws: 2000 });
-    type View = { goal_chance: { notes: string[] }; options: { option_id: string; cell: { face: string; why: string; reasons: { code: string; message: string | null }[] } }[] };
-    // From above: 100–120 % against a ceiling of 100 % leaves one figure, no spread. Asked again, in %, naming Olumi's reading.
-    const above = hall({ low: 100, high: 120, range_kind: 'bounds' });
-    expect(above.compiled.errors).toEqual([]);
-    expect(above.compiled.blockers).toEqual([{ id: 'occupancy', code: 'recount', scope: ['enough_guests'], reason: '"occupancy" is given as 100–120 %, but Olumi reads it as never above 100 %' }]);
-    expect(above.compiled.perGoal.find((p) => p.goal_id === 'enough_guests')).toMatchObject({ status: 'asks', asks: ['occupancy'] });
-    const seen = above.view as unknown as View;
-    expect(seen.goal_chance.notes).toEqual(['‘enough guests’ waits on ‘occupancy’ again.']);
-    expect(seen.options.map((o) => [o.option_id, o.cell.face, o.cell.why])).toEqual([['carry_on', 'Not shown yet: needs your answer', 'The chance waits on ‘occupancy’ again.']]);
-    expect(seen.options[0]!.cell.reasons).toEqual([{ code: 'goal_asks', message: 'needs "occupancy" again: "occupancy" is given as 100–120 %, but Olumi reads it as never above 100 %.' }]);
-    expect(JSON.stringify(above.view)).not.toContain('no room');
-    // From below: −10–0 % against a floor of 0 %.
-    const below = hall({ low: -10, high: 0, range_kind: 'bounds' });
-    expect(below.compiled.blockers).toEqual([{ id: 'occupancy', code: 'recount', scope: ['enough_guests'], reason: '"occupancy" is given as -10–0 %, but Olumi reads it as never below 0 %' }]);
-    expect((below.view as unknown as View).options[0]!.cell.reasons[0]!.message).toBe('needs "occupancy" again: "occupancy" is given as -10–0 %, but Olumi reads it as never below 0 %.');
+    for (const [what, f] of [['above', { low: 100, high: 120, range_kind: 'bounds' as const }], ['below', { low: -10, high: 0, range_kind: 'bounds' as const }]] as const) {
+      const r = hall(f);
+      expect(r.compiled.errors, what).toEqual([]);
+      expect(r.compiled.blockers.filter((b) => b.code === 'recount'), what).toEqual([]);
+      expect(r.compiled.perGoal.find((p) => p.goal_id === 'enough_guests'), what).toMatchObject({ status: 'withheld', asks: [] });
+      expect(r.compiled.perGoal.find((p) => p.goal_id === 'enough_guests')!.reasons.join(' '), what).toContain('has no room inside what it can be');
+    }
     // Contrast: a firm range INSIDE that ends at the ceiling has room (80–100 %), and a rough estimate touching it is the
     // ruled reading within what it can be (conditioned and disclosed): both calculate, nothing is asked again.
     for (const [what, f] of [['firm 80–100 %', { low: 80, high: 100, range_kind: 'bounds' as const }], ['rough 100–120 %', { low: 100, high: 120, range_kind: 'plausible' as const }]] as const) {
@@ -885,33 +908,24 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       goals: [goal('enough', 'joined', '>=', 'want', 'end', 'one', '300 to join')],
       options: [option('boost', 'Boost sign-ups', [set('share', 'boost_share', 'half would join')], 'boost sign-ups'), option('carry_on', 'Carry on as now', [], 'carry on as now')],
     }));
+    // S1 strip (A20b off): a setting outside what it inherits is never asked again; the inherited bounds (A20a, kept) are its
+    // domain in the engine's scale, which the Run reads, in either unit and whatever the options' order.
     const recounts = (r: ReturnType<typeof compile>) => r.blockers.filter((b) => b.code === 'recount').map((b) => b.id);
-    expect(recounts(shareModel({ floor: 0, ceiling: 1 }, {}))).toEqual([]);                     // 50 % within 0 to 1
+    const dom = (r: ReturnType<typeof compile>, id = 'boost_share') => r.domains[id];
+    expect(dom(shareModel({ floor: 0, ceiling: 1 }, {}))).toEqual({ min: 0, max: 1 });                 // 50 % within 0 to 1
     const over = shareModel({ floor: 0, ceiling: 1 }, { value: 150 });
-    expect(recounts(over)).toEqual(['boost_share']);
-    expect(over.perOption.find((o) => o.option_id === 'boost')!.reasons.join(' ')).toContain('"boost share" is given as 150 %, but Olumi reads it as never above 100 %');
-    // The other way: a target capped at 100 % set by a figure in "1": 2 is 200 %, outside.
-    const back = (v: number) => recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 100 }, { unit: '1', value: v }));
-    expect(back(2)).toEqual(['boost_share']);
-    expect(back(0.5)).toEqual([]);
-    // Codex r2: a setting AT its inherited bound, in the same unit, is within it (29 % with a 29 % ceiling); and across
-    // units (0.29 with a 29 % ceiling).
-    expect(recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 29 }, { value: 29 }))).toEqual([]);
-    expect(recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 29 }, { unit: '1', value: 0.29 }))).toEqual([]);
-    expect(recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 29 }, { value: 29.5 }))).toEqual(['boost_share']);
-    // Codex r3: a large exact bound is kept exactly: a same-unit setting one above it is outside, at it is within.
-    expect(recounts(shareModel({ unit: '%', value: 20, ceiling: 9999999999999 }, { value: 10000000000000 }))).toEqual(['boost_share']);
-    expect(recounts(shareModel({ unit: '%', value: 20, ceiling: 9999999999999 }, { value: 9999999999999 }))).toEqual([]);
-    // numbers#6: a setting that declares one side of its own keeps the other from what it sets, so a floor-only 150 % is
-    // still above the share's ceiling and a ceiling-only -10 % still below its floor. One that declares both overrides (ruled).
-    const floorOnly = shareModel({ unit: '%', value: 20, floor: 0, ceiling: 100 }, { value: 150, floor: 0 });
-    expect(floorOnly.blockers.filter((b) => b.code === 'recount')).toEqual([{ id: 'boost_share', code: 'recount', scope: ['boost'], reason: '"boost share" is given as 150 %, but Olumi reads it as never above 100 %' }]);
-    expect(floorOnly.perOption.find((o) => o.option_id === 'boost')).toMatchObject({ status: 'asks', asks: ['boost_share'] });
-    const ceilingOnly = shareModel({ unit: '%', value: 20, floor: 0, ceiling: 100 }, { value: -10, ceiling: 100 });
-    expect(ceilingOnly.blockers.filter((b) => b.code === 'recount')).toEqual([{ id: 'boost_share', code: 'recount', scope: ['boost'], reason: '"boost share" is given as -10 %, but Olumi reads it as never below 0 %' }]);
-    expect(recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 100 }, { value: 150, floor: 0, ceiling: 200 }))).toEqual([]);
-    expect(recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 100 }, { value: 50, floor: 0 }))).toEqual([]);
-    // One figure setting two quantities, capped at 100 and at 1,000 a month: 200 is outside the first, in either order.
+    expect(recounts(over)).toEqual([]);
+    expect(dom(over)).toEqual({ min: 0, max: 1 });
+    // The other way: a target capped at 100 % set by a figure in "1".
+    expect(dom(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 100 }, { unit: '1', value: 2 }))).toEqual({ min: 0, max: 1 });
+    // Codex r2/r3: one correctly rounded conversion, so a large exact bound is kept exactly.
+    expect(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 29 }, { unit: '1', value: 0.29 }).domains.boost_share).toEqual({ min: 0, max: 0.29 });
+    expect(dom(shareModel({ unit: '%', value: 20, ceiling: 9999999999999 }, { value: 10000000000000 }))).toEqual({ max: 9999999999999 * 0.01 });
+    // numbers#6: a setting that declares one side of its own keeps the other from what it sets; one that declares both overrides.
+    expect(dom(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 100 }, { value: 150, floor: 0 }))).toEqual({ min: 0, max: 1 });
+    expect(dom(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 100 }, { value: -10, ceiling: 100 }))).toEqual({ min: 0, max: 1 });
+    expect(dom(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 100 }, { value: 150, floor: 0, ceiling: 200 }))).toEqual({ min: 0, max: 2 });
+    // One figure setting two quantities, capped at 100 and at 1,000 a month: the lowest ceiling, in either order.
     const shared = (reversed: boolean) => {
       const g = gymFilled();
       g.quantities = g.quantities.map((q) => (q.id === 'joins' ? { ...q, ceiling: 100 } : q.id === 'promo_joins' ? { ...q, value: 200 } : q));
@@ -921,7 +935,10 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       g.options = reversed ? [second, ...g.options] : [...g.options, second];
       return compile(g);
     };
-    for (const reversed of [false, true]) expect(recounts(shared(reversed)), `reversed ${reversed}`).toEqual(['promo_joins']);
+    for (const reversed of [false, true]) {
+      expect(recounts(shared(reversed)), `reversed ${reversed}`).toEqual([]);
+      expect(dom(shared(reversed), 'promo_joins'), `reversed ${reversed}`).toEqual({ max: 100 });
+    }
   });
 
   it('numbers#4: a card reads its range within the same domain whether or not it is in a Run yet: the waiting first draft says the floor, and a chance in % stays in %', () => {
@@ -1043,22 +1060,14 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       .toMatchObject({ lower: 0.1, upper: 0.3 }); // contrast: their bounds alone
   });
 
-  it('numbers#2 (c), spec §3.7: a timing given below the floor Olumi declares on it is asked again, with the reason in their unit, and never used; at or above it, it is', () => {
+  it('numbers#2 (c), S1 strip (A20b off): a fixed timing given below the floor Olumi declares on it is never asked again; it is read as written, as at or above it', () => {
     const starting = (floor: number | null) => {
       const g = gymFilled();
       g.quantities.push(qty('promo_start', 'month', { value: 1, quote: 'the promotion starts in a month', floor }));
       g.options = g.options.map((o) => (o.id === 'promo' ? { ...o, sets: o.sets.map((s) => ({ ...s, starts_after_periods: 'promo_start' })) } : o));
       return compile(g);
     };
-    const early = starting(2);
-    expect(early.errors).toEqual([]);
-    expect(early.blockers).toEqual([{ id: 'promo_start', code: 'recount', scope: ['promo'], reason: '"promo start" is given as 1 month, but Olumi reads it as never below 2 month' }]);
-    expect(early.perOption.find((o) => o.option_id === 'promo')).toMatchObject({ status: 'asks', asks: ['promo_start'] });
-    expect(early.perOption.find((o) => o.option_id === 'promo')!.reasons).toEqual(['needs "promo start" again: "promo start" is given as 1 month, but Olumi reads it as never below 2 month.']);
-    // Never used: the promotion is not in the Run, so no setting starts at month 1 against the reading.
-    expect(early.executable!.options.map((o) => o.id)).toEqual(['carry_on']);
-    // Contrast: at its floor, or with none, the timing is read and the promotion starts at month 1.
-    for (const floor of [1, null]) {
+    for (const floor of [2, 1, null]) {
       const r = starting(floor);
       expect(r.blockers, `floor ${floor}`).toEqual([]);
       expect(r.executable!.options.find((o) => o.id === 'promo')!.sets.map((s) => s.from_period), `floor ${floor}`).toEqual([1]);
@@ -1270,7 +1279,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(exactInitialValues(zeroed.executable!).get('share')).toBe(0);
   });
 
-  it('Codex r2 numbers#2 (4), spec §3.7: a window length given outside Olumi\'s reading of it is asked again before any Run on that window; reversed bounds on it withhold; never run for the given length', () => {
+  it('Codex r2 numbers#2 (4), S1 strip (A20b off): a window length given outside Olumi\'s reading of it is read as written; reversed bounds on it (A20d, kept) withhold', () => {
     const windowed = (f: Partial<CanonicalQuantityT>) => {
       const g = gymFilled();
       g.quantities = g.quantities.map((q) => (q.id === 'half_year' ? { ...q, value: 12, quote: 'within a year', ...f } : q));
@@ -1278,10 +1287,8 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     };
     const capped = windowed({ ceiling: 6 });
     expect(capped.errors).toEqual([]);
-    const why = '"half year" is given as 12 month, but Olumi reads it as never above 6 month';
-    expect(capped.blockers).toEqual([{ id: 'half_year', code: 'recount', scope: ['reach_400', 'class_income'], reason: why }]);
-    for (const p of capped.perGoal) expect(p, p.goal_id).toMatchObject({ status: 'asks', asks: ['half_year'], reasons: [`needs "half year" again: ${why}.`] });
-    expect(capped.executable).toBeNull();
+    expect(capped.blockers).toEqual([]);
+    expect(capped.executable!.goals.map((x) => x.window)).toEqual([{ start_period: 0, periods: 12 }, { start_period: 0, periods: 12 }]);
     const reversed = windowed({ floor: 10, ceiling: 5 });
     for (const p of reversed.perGoal) {
       expect(p, p.goal_id).toMatchObject({ status: 'withheld', asks: [], reasons: ['rests on "half year": Olumi reads "half year" as never below 10 month and never above 5 month, which leaves nothing it can be.'] });
@@ -1300,22 +1307,18 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(wide.perGoal.map((p) => p.status)).toEqual(['calculable', 'calculable']);
     // W10: 0 to 1,200 around its middle, 600: σ = 600/1.2815516 = 468.18249 each side, the Normal on 600.
     expect(wide.conversions.find((c) => c.quantity === 'costs')).toMatchObject({ reading: unbounded(600, 468.18249, 468.18249, 600, 468.18249) });
-    // A count whose WHOLE range is below 0 contradicts what it can be (the PL's ruling, 23 Oct): never pinned near 0, never
-    // read as a spread. The person's is ASKED again with its words kept; Olumi's is HELD as unsupported.
-    const g = gymFilled();
-    g.quantities = g.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const, floor: 0 } : q));
-    const theirs = compile(g);
-    expect(theirs.perGoal.find((p) => p.goal_id === 'reach_400')).toMatchObject({ status: 'asks', asks: ['members_now'] });
-    expect(theirs.blockers).toContainEqual({ id: 'members_now', code: 'recount', scope: ['reach_400'], reason: '"members now" is given as -1010–-990 member, but Olumi reads it as never below 0 member' });
-    expect(theirs.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ')).toContain('is given as -1010–-990 member, but Olumi reads it as never below 0 member.');
-    expect(theirs.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ')).not.toContain('What is it?');
-    expect(theirs.conversions.some((c) => c.quantity === 'members_now')).toBe(false);
-    expect(theirs.perGoal.find((p) => p.goal_id === 'class_income')).toMatchObject({ status: 'calculable' }); // contrast
-    const olumis = gymFilled();
-    olumis.quantities = olumis.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const, author: 'olumi' as const, status: 'estimated' as const, quote: null, basis: 'a guess', floor: 0 } : q));
-    const heldR = compile(olumis);
-    expect(heldR.perGoal.find((p) => p.goal_id === 'reach_400')).toMatchObject({ status: 'withheld' });
-    expect(heldR.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ')).toContain('but Olumi reads it as never below 0 member; Olumi\'s range is unsupported');
+    // A count whose WHOLE range is below 0 has no room inside what it can be: never pinned near 0, never read as a spread.
+    // S1 strip (A20b off): it is never asked again; the law refuses it and it is HELD with the law's reason, whoever's it is.
+    for (const author of ['person', 'olumi'] as const) {
+      const g = gymFilled();
+      g.quantities = g.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const, floor: 0, author, ...(author === 'olumi' ? { status: 'estimated' as const, quote: null, basis: 'a guess' } : {}) } : q));
+      const r = compile(g);
+      expect(r.perGoal.find((p) => p.goal_id === 'reach_400'), author).toMatchObject({ status: 'withheld', asks: [] });
+      expect(r.blockers.filter((b) => b.code === 'recount'), author).toEqual([]);
+      expect(r.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' '), author).toContain('the range -1010 to -990 has no room inside what it can be');
+      expect(r.conversions.some((c) => c.quantity === 'members_now'), author).toBe(false);
+      expect(r.perGoal.find((p) => p.goal_id === 'class_income'), author).toMatchObject({ status: 'calculable' }); // contrast
+    }
     // Only a count's domain: a money range wholly below 0 (a loss) stays an ordinary spread.
     const loss = withCosts({ low: -700, high: -500, range_kind: 'plausible' });
     expect(loss.conversions.find((c) => c.quantity === 'costs')).toMatchObject({ kind: 'range_law', domain: null });
@@ -1364,9 +1367,10 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const counts = (floor: number | null) => compile(model({ ...gymFilled(), quantities: gymFilled().quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: 280, high: 320, range_kind: 'bounds' as const, floor } : q)) }));
     expect(xq(counts(0)).get('members_now')!.dist).toMatchObject({ range_kind: 'bounds', domain: { min: 0 } });
     expect(xq(counts(null)).get('members_now')!.dist).not.toHaveProperty('domain');
-    // Olumi's own range always states its kind.
+    // S1 strip (B13 off): Olumi's range with no kind is no error; it is read as plausible (compile.ts rangeDistOf).
     const noKind = bakery(); noKind.quantities = noKind.quantities.map((q) => (q.id === 'extra_per_oven' ? { ...q, range_kind: null } : q));
-    expect(compile(noKind).errors.map((e) => [e.code, e.items])).toEqual([['range_kind', ['extra_per_oven']]]);
+    expect(compile(noKind).errors).toEqual([]);
+    expect(xq(compile(noKind)).get('extra_per_oven')!.dist).toMatchObject({ kind: 'range', range_kind: 'plausible', basis: 'olumi_estimate' });
   });
 
   it('PL BLOCK 1: window identity: "members after six months" is {0, 6} on a state; "class revenue in months 6 to 8" is {6, 3}; no extra period', () => {
@@ -1461,10 +1465,10 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
         [{ id: 'cash_buffer', code: 'deadline', scope: ['cash_buffer'] }]],
       ['range kind', edit(bakery(), (m) => { m.quantities = m.quantities.map((q) => (q.id === 'costs' ? { ...q, value: null, low: 500, high: 700 } : q)); }),
         [{ id: 'costs', code: 'range_kind', scope: ['weekly_profit', 'cash_buffer'] }]],
-      ['recount', edit(gymFilled(), (m) => { m.quantities = m.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const, floor: 0 } : q)); }),
-        [{ id: 'members_now', code: 'recount', scope: ['reach_400'], reason: '"members now" is given as -1010–-990 member, but Olumi reads it as never below 0 member' }]],
-      ['structure', edit(bakery(), (m) => { m.quantities = m.quantities.map((q) => (q.id === 'costs' ? structure('costs', 'GBP/week', 612.5, 'Costs.') : q)); }),
-        [{ id: 'costs', code: 'asked', scope: ['weekly_profit', 'cash_buffer'] }]],
+      ['S1 strip (A20b off): a range with no room is held, never a recount', edit(gymFilled(), (m) => { m.quantities = m.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const, floor: 0 } : q)); }),
+        []],
+      ['S1 strip (B2 off): structure as written, no ask', edit(bakery(), (m) => { m.quantities = m.quantities.map((q) => (q.id === 'costs' ? structure('costs', 'GBP/week', 612.5, 'Costs.') : q)); }),
+        []],
       ['an asked figure with no question of the AI\'s: valid, typed', edit(bakery(), (m) => { m.quantities.push(qty('flour_cost', 'GBP/week', { status: 'asked' })); }),
         [{ id: 'flour_cost', code: 'asked', scope: [] }]],
       ['a guardrail that changes over time with no deadline', edit(bakery(), (m) => { m.limits.push(limit('cash_floor', 'Keep cash above today', 'cash', '>=', 'cash_now', 'end', 'quarter', 'at least £10,000 in the bank'));
@@ -1477,8 +1481,8 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       // No sentence of the compiler's is a question, whatever it waits on (labels carry none here).
       expect(JSON.stringify(r), name).not.toContain('?');
     }
-    // The structure figure is asked with NO question of the code's ("What is …?" is gone), and no mark the drafter could forge.
-    expect(normalise(cases[7]![1]).quantities.find((q) => q.id === 'costs')).toMatchObject({ status: 'asked', question: null, basis: null });
+    // The structure figure passes through as the AI wrote it (B2 off): no ask, no question of the code's.
+    expect(normalise(cases[7]![1]).quantities.find((q) => q.id === 'costs')).toMatchObject({ author: 'structure', status: 'known', value: 612.5, question: null });
     // Contrast: the probe sees a question where there is one: the AI's own, on the record, in the model it was given.
     expect(JSON.stringify(gym())).toContain('How many members leave in a typical month?');
     expect(JSON.stringify(cases[2]![1])).toContain('How would you tell the regulars are happy?');
@@ -1532,19 +1536,18 @@ describe('issue 39: an unsized link is drawn with its stated direction, never a 
       .toEqual({ direction: 'negative', strength: false });
   });
 
-  it('an unknown size with no stated direction is not drawn: no link carries a sign no one can give, and its record stays accounted for', () => {
+  it('S1 strip (show, never hide): an unknown size with no stated direction is drawn with no sign and no strength; its record is on it', () => {
     const items = (m: CanonicalModelT) => new Map(project(m).items.map((i) => [i.record_id, i] as const));
     const linked = (m: CanonicalModelT) => (project(m).graph.edges as Record<string, unknown>[]).map((e) => `${String(e.from)}>${String(e.to)}`);
     const none = priced({ ...UNKNOWN, direction: null });
     const lowers = priced({ ...UNKNOWN, direction: 'lowers' });
-    expect(linked(none)).not.toContain('price_rise>sales');
-    expect(linked(lowers), 'contrast: the same link with a direction is drawn').toContain('price_rise>sales');
+    expect(linked(none)).toContain('price_rise>sales');
+    expect(linkOf(none)).toEqual({ direction: undefined, strength: false });
+    expect(linkOf(lowers), 'contrast: the same link with a direction has its sign').toEqual({ direction: 'negative', strength: false });
     expect(linked(none), 'the base level is still drawn').toContain('base_sales>sales');
-    // The size and its link stay in the model, said as before, shown nowhere on the canvas.
-    expect(none.quantities.map((x) => x.id)).toContain('price_effect');
-    expect(items(none).get('price_effect')).toMatchObject({ shown_as: {}, in_calculation: false, why_out: items(lowers).get('price_effect')!.why_out });
+    expect(items(none).get('price_effect')).toMatchObject({ shown_as: { on_edge: 'price_rise__sales' }, in_calculation: false, why_out: items(lowers).get('price_effect')!.why_out });
     expect(items(none).get('price_effect')!.why_out).toContain('unknown: Last year\'s sales after a price change would size it.');
-    expect(items(none).get('sales_rel:price_rise')).toMatchObject({ shown_as: {} });
+    expect(items(none).get('sales_rel:price_rise')).toMatchObject({ shown_as: { edge: 'price_rise__sales' } });
     expect(items(lowers).get('sales_rel:price_rise')).toMatchObject({ shown_as: { edge: 'price_rise__sales' } });
   });
 
@@ -1567,19 +1570,18 @@ describe('issue 39: an unsized link is drawn with its stated direction, never a 
     expect(read.data!.quantities.map((x) => [x.id, x.direction])).toEqual(old.quantities.map((x) => [x.id, null]));
   });
 
-  it('issue 40: a direction the projection would not use is cleared when the draft is read, so the card never states it, and nothing drawn moves; one it uses is kept', () => {
+  it('S1 strip (B3 off): the AI\'s direction is kept as written; the projection still draws a sign from a given size, never from a direction beside it', () => {
     const dirOf = (m: CanonicalModelT, id = 'price_effect') => normalise(m).quantities.find((x) => x.id === id)!.direction;
     const without = (m: CanonicalModelT, id = 'price_effect'): CanonicalModelT => ({ ...m, quantities: m.quantities.map((x) => (x.id === id ? { ...x, direction: null } : x)) });
     const ONE_SIDE = { status: 'estimated' as const, low: -60, high: -10, range_kind: 'plausible' as const, basis: 'Fewer loaves sell at a higher price.' };
     const stray = priced({ ...UNKNOWN, direction: null });
     stray.quantities.push(qty('stray_effect', 'loaf/week/GBP', { kind: 'coefficient', author: 'olumi', ...UNKNOWN, direction: 'lowers' }));
-    // Cleared: a figure is given; a range on one side of zero; a size no link has. The projection is the same with or without.
-    for (const [m, id] of [[priced({ ...ONE_SIDE, value: -30, direction: 'raises' }), 'price_effect'], [priced({ ...ONE_SIDE, direction: 'raises' }), 'price_effect'], [stray, 'stray_effect']] as const) {
-      expect(m.quantities.find((x) => x.id === id)!.direction).not.toBeNull();
-      expect(dirOf(m, id)).toBeNull();
+    // Kept as written: a figure is given; a range on one side of zero; a size no link has. What is drawn is the same with or without.
+    for (const [m, id, said] of [[priced({ ...ONE_SIDE, value: -30, direction: 'raises' }), 'price_effect', 'raises'], [priced({ ...ONE_SIDE, direction: 'raises' }), 'price_effect', 'raises'], [stray, 'stray_effect', 'lowers']] as const) {
+      expect(dirOf(m, id)).toBe(said);
       expect(project(m).graph).toEqual(project(without(m, id)).graph);
     }
-    // Kept: an unknown size, and a range across zero, take their stated direction (issue 39), and it moves what is drawn.
+    // An unknown size, and a range across zero, take their stated direction (issue 39), and it moves what is drawn.
     expect(dirOf(priced({ ...UNKNOWN, direction: 'lowers' }))).toBe('lowers');
     expect(dirOf(priced({ ...STRADDLES, direction: 'raises' }))).toBe('raises');
     expect(project(priced({ ...STRADDLES, direction: 'raises' })).graph).not.toEqual(project(priced({ ...STRADDLES, direction: null })).graph);
@@ -1588,19 +1590,18 @@ describe('issue 39: an unsized link is drawn with its stated direction, never a 
 
 describe('AIE §5 AMEND (DL 24 Oct): a first draft never waits on an ask no one can see', () => {
   const withQ = (m: CanonicalModelT, id: string, f: Partial<CanonicalQuantityT>): CanonicalModelT => ({ ...m, quantities: m.quantities.map((q) => (q.id === id ? { ...q, ...f } : q)) });
-  it('an asked figure with no question is refused on a first draft; with its question, or on a saved model or an update, it compiles as before', () => {
+  it('S1 strip (B7, B2 off): an asked figure with no question is no error on a first draft either: it is the typed blocker only', () => {
     const noQ = withQ(gym(), 'leavers', { question: null });
-    expect(compile(noQ, { asksNeedQuestions: true }).errors.map((e) => [e.code, e.items])).toEqual([['asked_no_question', ['leavers']]]);
-    expect(codes(compile(withQ(gym(), 'leavers', { question: '  ' }), { asksNeedQuestions: true }))).toEqual(['asked_no_question']); // blank is none
-    // Contrast: with its question a first draft compiles; a saved model or an update (no flag) keeps A4, the typed blocker only.
-    expect(codes(compile(gym(), { asksNeedQuestions: true }))).toEqual([]);
-    const saved = compile(noQ);
-    expect(codes(saved)).toEqual([]);
-    expect(saved.blockers.map((b) => [b.id, b.code])).toContainEqual(['leavers', 'asked']);
-    // A figure labelled structure that is no structural constant is the person's ask (normalise): on a first draft it needs its question too.
+    for (const opts of [{ asksNeedQuestions: true }, {}]) {
+      const r = compile(noQ, opts);
+      expect(codes(r)).toEqual([]);
+      expect(r.blockers.map((b) => [b.id, b.code])).toContainEqual(['leavers', 'asked']);
+    }
+    expect(codes(compile(withQ(gym(), 'leavers', { question: '  ' }), { asksNeedQuestions: true }))).toEqual([]);
+    // A figure the AI labels structure is read as written (B2 off): no ask, no error, first draft or not.
     const mislabelled = withQ(gym(), 'joins', { author: 'structure', quote: null, basis: 'Today.' });
-    expect(compile(mislabelled, { asksNeedQuestions: true }).errors.map((e) => [e.code, e.items])).toEqual([['asked_no_question', ['joins']]]);
-    expect(codes(compile(mislabelled))).toEqual([]);
+    expect(codes(compile(mislabelled, { asksNeedQuestions: true }))).toEqual([]);
+    expect(compile(mislabelled).blockers.map((b) => b.id)).not.toContain('joins');
   });
 
   it('the starting level of a setting only the options change, and a whole, are structure: Olumi\'s proposed divisions compile with no ask', () => {
@@ -1624,8 +1625,9 @@ describe('AIE §5 AMEND (DL 24 Oct): a first draft never waits on an ask no one 
     expect(codes(r)).toEqual([]);
     expect(r.blockers.filter((b) => b.code === 'asked')).toEqual([]);
     expect(r.executable).not.toBeNull();
-    // Contrast (the AMEND's draft 1): the same lever asked with no question is refused on a first draft.
-    expect(compile(withQ(division, 'share', { author: 'person', status: 'asked', value: null, basis: null }), { asksNeedQuestions: true }).errors.map((e) => [e.code, e.items]))
-      .toEqual([['asked_no_question', ['share']]]);
+    // S1 strip (B7 off): the same lever asked with no question is no error on a first draft; it waits as a typed ask.
+    const askedShare = compile(withQ(division, 'share', { author: 'person', status: 'asked', value: null, basis: null }), { asksNeedQuestions: true });
+    expect(codes(askedShare)).toEqual([]);
+    expect(askedShare.blockers.map((b) => [b.id, b.code])).toContainEqual(['share', 'asked']);
   });
 });

@@ -1,7 +1,7 @@
 /**
  * A LINK'S SIZE, WHAT IT MOVES AND WHEN ITS STATED DIRECTION IS USED: one derivation (issue 40), read by the projection
- * that draws the link (`project.ts`), the reading of a draft (`compile.ts` normalise) and the card that names what it moves
- * (`postimage.ts`).
+ * that draws the link (`project.ts`) and the card that names what it moves (`postimage.ts`). The host never clears a
+ * direction (B3 off the path, S1 strip, Paul 26 Oct): the saved model keeps the AI's.
  */
 import type { CanonicalModelT, CanonicalQuantityT, CanonicalRelationT } from './canonical.js';
 
@@ -28,13 +28,3 @@ export function linkTargets(model: Pick<CanonicalModelT, 'quantities' | 'relatio
 /** A link's stated direction is used only where its size has no figure: no value, and no range or one across zero (issue 39). */
 export const directionUsed = (q: Pick<CanonicalQuantityT, 'value' | 'low' | 'high'>): boolean =>
   none(q.value) && (none(q.low) || none(q.high) || (q.low! < 0 && q.high! > 0));
-
-/**
- * The host's reading of a model's directions: one the model does not use (its link is sized, or no link has it as its
- * size) is cleared, so the card never states a sign the model does not use. Never anyone's change: the same model when
- * nothing is cleared.
- */
-export function withUsedDirections<M extends Pick<CanonicalModelT, 'quantities' | 'relations'>>(model: M): M {
-  const quantities = model.quantities.map((q) => (q.direction !== null && (!directionUsed(q) || linkTargets(model, q.id).length === 0) ? { ...q, direction: null } : q));
-  return quantities.some((q, i) => q !== model.quantities[i]) ? { ...model, quantities } : model;
-}

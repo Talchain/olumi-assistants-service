@@ -6,10 +6,8 @@
  *  · schema: it is a canonical model;
  *  · preservation by (family, id): every saved record is present in its own family; a removal is only one listed
  *    explicitly; an id is never moved to another family, never duplicated, and a removed id is never used again;
- *  · authorship: every added or changed item the person authors quotes their words (the same words in the same order;
- *    white space ignored), and a figure of theirs that
- *    changes quotes the words of THIS change. That is provenance (their words are there), never proof that the words
- *    entail the figure, unit or sign: the card is where the reading is reviewed;
+ *  · authorship and provenance are the AI's alone (S1 strip, Paul 26 Oct): no quote check (A2, A2b), so an item is shown as
+ *    its author says; the card shows whose it is and in whose words, and only the person's press accepts it;
  *  · the card shows every change: the field-level diff is derived ONCE, to the leaves (each changed path, saved →
  *    proposed; a list of another length compared entry by entry, an added or removed entry or item field by field) and
  *    drives the card: every changed path is said in plain words on its change's before and after, or, when it has no
@@ -20,10 +18,9 @@
  */
 import { ProposalChangeSchema, type ProposalChange } from '../agent-lane/proposal.js';
 import { readingGroups } from './reading-groups.js';
-import { CanonicalModel, HOST_OWNED_FIELDS, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
+import { CanonicalModel, HOST_OWNED_FIELDS, type CanonicalModelT } from '../model-program/canonical.js';
 import { norm } from '../model-program/compile.js';
-import { linkTargets, withUsedDirections } from '../model-program/links.js';
-import { isExactCalendarReexpression, parseUnit, sameDims } from '../model-program/units.js';
+import { linkTargets } from '../model-program/links.js';
 
 type Rec = Record<string, unknown>;
 type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'period' | 'history'>;
@@ -84,32 +81,6 @@ export const verbatimIn = (quote: unknown, words: readonly string[]): boolean =>
   typeof quote === 'string' && norm(quote) !== '' && words.some((w) => norm(w).includes(norm(quote)));
 
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
-/**
- * The same amount, in its units (issue 37): value, low and high each the saved one, in the same unit (however spelled) or an
- * EXACT calendar re-expression of it (1 year = 12 month, 1 week = 7 day). An average conversion (weeks in a month, days in a
- * year) or any other unit is a change.
- */
-const sameAmount = (a: Rec, b: Rec): boolean => {
-  const ks = ['value', 'low', 'high'] as const;
-  if (a['unit'] === b['unit']) return ks.every((k) => a[k] === b[k]);
-  const [ua, ub] = [parseUnit(String(a['unit'])), parseUnit(String(b['unit']))];
-  if (!ua.ok || !ub.ok) return false;
-  const same = sameDims(ua.unit, ub.unit) && ua.unit.scale === ub.unit.scale;
-  return ks.every((k) => {
-    const [x, y] = [a[k], b[k]];
-    if (typeof x !== 'number' || typeof y !== 'number') return x === y;
-    return same ? x === y : isExactCalendarReexpression(x, ua.unit, y, ub.unit);
-  });
-};
-/**
- * Every attribution in a record (itself, an option's settings, a relation's terms) that names the person as its author and
- * states something: a figure of theirs that is only ASKED (no figure, no words yet) states nothing.
- */
-const noFigure = (v: Rec): boolean => v['value'] === null && v['low'] === null && v['high'] === null;
-/** A slot of theirs that is not known yet and holds nothing (no figure): it states nothing, like an asked one (DL 24 Oct). */
-const emptyUnknown = (v: Rec): boolean => v['status'] === 'unknown' && noFigure(v);
-const personAttributions = (v: unknown): Rec[] => (Array.isArray(v) ? v.flatMap(personAttributions)
-  : isRec(v) ? [...(v['author'] === 'person' && 'quote' in v && !(v['quote'] === null && (v['status'] === 'asked' || emptyUnknown(v))) ? [v] : []), ...Object.values(v).flatMap(personAttributions)] : []);
 export const withoutHost = (v: unknown): unknown => (Array.isArray(v) ? v.map(withoutHost)
   : isRec(v) ? Object.fromEntries(Object.entries(v).filter(([k]) => !HOST_FIELDS.has(k)).map(([k, x]) => [k, withoutHost(x)])) : v);
 /** The host's own fields, set all the way down a record: its approval, and who approved it. Who authored it is unchanged. */
@@ -161,10 +132,9 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
   opts: { readonly removals: readonly string[]; readonly words: readonly string[]; readonly fresh: readonly string[]; readonly approver?: string | null }): PostimageResult {
   const parsed = CanonicalModel.safeParse(raw);
   if (!parsed.success) return { ok: false, code: 'schema', reason: 'The proposed model is not in the model format.', ids: [] };
-  // The host's reading of directions (`links.ts`) on BOTH sides first, so only the change's own fields are compared: a
-  // direction the model does not use, cleared by the host, never shows as a change nor refuses one (issue 40).
-  const base = withUsedDirections(saved);
-  const post = withUsedDirections(parsed.data);
+  // Both sides as written: the host clears no direction (B3 off the path, S1 strip), so a direction change is a change, shown.
+  const base = saved;
+  const post = parsed.data;
   const refuse = (code: Exclude<PostimageResult, { ok: true }>['code'], ids: readonly string[], reason: string, check?: 'their_words' | 'this_turn'): PostimageResult =>
     ({ ok: false, code, reason, ids, ...(check ? { check } : {}) });
   // Preservation by (family, id), before anything is compared.
@@ -190,8 +160,6 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
   const was = wordsIn(base);
   const now = wordsIn(post);
   const history = [...base.history];
-  const unverified: string[] = [];
-  const unturned: string[] = [];
   const unshown: string[] = [];
   const families = Object.fromEntries(FAMILIES.map(([family, kind]) => {
     const before = new Map((base[family] as readonly Rec[]).map((r) => [String(r['id']), r] as const));
@@ -218,13 +186,10 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
       // unseen beside another change: a link moved to a twin while a link is added, or a figure given where there was none
       // beside a timing the words say. A field that appears with its container is set back to empty, where empty is a state
       // the item can be in (a window's start appears with the window and has no empty); one that leaves with its container
-      // (a deadline or a setting taken away) has nowhere to go back to. Either way the container's words say it. A direction
-      // set back where no drawn link uses it is not a state either: the host's reading clears it, so it is no one's change.
+      // (a deadline or a setting taken away) has nowhere to go back to. Either way the container's words say it.
       if (r !== undefined) for (const x of out) if (x.old !== x.now) for (const d of diff.filter((y) => x.paths.includes(y.path))) {
         const back = withPath(r, d.path, d.old ?? null);
         if (d.now === undefined || (d.old === undefined && (d.now === null || !CanonicalModel.shape[family].element.safeParse(back).success))) continue;
-        if (family === 'quantities' && d.path === 'direction' && d.old != null
-          && withUsedDirections({ ...post, quantities: post.quantities.map((x) => (x.id === id ? back as CanonicalQuantityT : x)) }).quantities.find((x) => x.id === id)!.direction === null) continue;
         if (now.phrase(family, x.group, back, x.at) === x.now) hidden.push(d.path);
       }
       if (hidden.length > 0) unshown.push(`${id} (${hidden.join(', ')})`);
@@ -257,14 +222,6 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
       const fields = said(String(r['id']), old, r);
       // Unchanged but for what the host owns: the saved record, exactly.
       if (old !== undefined && fields.length === 0 && !unshown.some((u) => u.startsWith(`${String(r['id'])} (`))) return old;
-      // A figure of theirs changed, or what it is (an "I don't know" turning asked into unknown): their words THIS turn (buddy 24 Oct).
-      // Changed is its amount, in its units (issue 37): their 1 year said exactly as 12 month is the same figure.
-      // A figure that was never theirs (Olumi's or the structure's) withdrawn into an empty question of theirs states nothing of
-      // theirs, so it needs none of their words (European fix request, 25 Oct); their own figure, changed or withdrawn, does.
-      const emptied = old !== undefined && old['author'] !== 'person' && r['quote'] === null && (r['status'] === 'asked' || r['status'] === 'unknown') && noFigure(r);
-      const refigured = family === 'quantities' && old !== undefined && r['author'] === 'person' && (old['status'] !== r['status'] || !sameAmount(old, r)) && !emptied;
-      if (personAttributions(r).some((a) => !verbatimIn(a['quote'], opts.words))) unverified.push(String(r['id']));
-      else if (refigured && !verbatimIn(r['quote'], opts.fresh)) unturned.push(String(r['id']));
       const record = accepted(r, opts.approver ?? null) as Rec;
       changes.push(entry(String(r['id']), old === undefined ? 'add' : 'change', fields, now.title(family, record), authorOf(record), r));
       if (old !== undefined) history.push({ id: String(r['id']), change: 'superseded', old: JSON.stringify(old), quote: typeof r['quote'] === 'string' ? r['quote'] : null, author_id: opts.approver ?? null });
@@ -277,9 +234,6 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
     return [family, records];
   })) as Pick<CanonicalModelT, Family>;
   if (unshown.length > 0) return refuse('unshown_change', unshown, `The card cannot show every change to ${unshown.join('; ')}; nothing is proposed.`);
-  for (const [ids, check] of [[unverified, 'their_words'], [unturned, 'this_turn']] as const) {
-    if (ids.length > 0) return refuse('unverified_person_words', ids, `${ids.join(', ')}: the person's items must quote their words exactly.`, check);
-  }
   for (const [key, label] of [['question', 'The question'], ['period', 'The time step']] as const) {
     if (base[key] !== post[key]) changes.push({ id: key, kind: 'record', action: 'change', label, before: base[key], after: post[key], author: 'olumi' });
   }
@@ -351,9 +305,9 @@ function wordsIn(m: CanonicalModelT) {
   const figure = (r: Rec) => {
     const u = unitOf(r['unit']), at = (k: string) => (typeof r[k] === 'number' ? `${n(r[k] as number)}${u}` : null);
     const bare = (k: string) => n(r[k] as number);
-    // What it moves is said by name; a direction on a size no link has is never said (the host clears it, on both sides).
+    // What it moves is said by name; a direction on a size no link has is said alone, so its change shows (B3 off the path).
     const moves = typeof r['direction'] === 'string' && typeof r['id'] === 'string' ? linkTargets(m, r['id']) : [];
-    const sign = (said: string) => [said, ...(moves.length > 0 ? [`${of(DIRECTION_WORDS, r['direction'])} ${and(moves.map(label))}`] : [])].filter((x) => x !== '').join(', ');
+    const sign = (said: string) => [said, ...(typeof r['direction'] === 'string' ? [`${of(DIRECTION_WORDS, r['direction'])}${moves.length > 0 ? ` ${and(moves.map(label))}` : ''}`] : [])].filter((x) => x !== '').join(', ');
     // alpha G2: what it can be is Olumi's reading, said as such, so a change to it shows.
     const can = [...(at('floor') !== null ? [`never below ${bare('floor')}`] : []), ...(at('ceiling') !== null ? [`never above ${bare('ceiling')}`] : [])];
     const reading = (typeof r['range_kind'] === 'string' ? ` (${of(RANGE_WORDS, r['range_kind'])})` : '') + (can.length > 0 ? ` (${can.join(', ')}: Olumi’s reading)` : '');

@@ -2,7 +2,7 @@
  * CANONICAL MODEL → compile → simulate (seed fixed per scenario) → present → the display graph. PURE: the same
  * model, person's words and seed give the same result byte for byte, which is what a cold reopen relies on.
  *
- *  · compile (S1 `compile.ts`) against the person's own words, so a quote not in them stays UNVERIFIED;
+ *  · compile (S1 `compile.ts`); authorship is the AI's own, drawn as written (A25 off the path, S1 strip, Paul 26 Oct);
  *  · simulate (S2) the executable subset, on the scenario's seed;
  *  · present (S2 `present.ts`) to the `canonical_analysis_view.v1` fields. No tipping threshold is searched (alpha G10): a grid
  *    of sampled points cannot show the goal flips once, so "at least X" would be unsupported. Re-enable only as a sampled
@@ -63,22 +63,20 @@ export type WaitingView = {
   readonly goal_chance: { readonly notes: readonly string[]; readonly waits_on?: readonly PresentBlocker[] };
 };
 
-/** R8, ONE rule (default deny): the records (quantity, relation, link, goal, limit, premise) accepted and in their words;
- * `confirmed`: the person's. A goal whose measure is Olumi's suggestion (`measure_by`) is Olumi's. */
+/** R8, ONE rule (default deny): the records (quantity, relation, link, goal, limit, premise) the person accepted;
+ * `confirmed`: the person's, by the AI's own author (A25's quote guard and measure_by re-stamp are off the path, S1 strip). */
 type Records = { readonly accepted: ReadonlySet<string>; readonly confirmed: ReadonlySet<string> };
-function recordsOf(m: CanonicalModelT, compiled: CompileResult): Records {
-  const unverified = new Set(compiled.unverified.map((u) => u.id)), links = m.relations.flatMap((r) => (r.form === 'effect' ? r.terms.map((t) => ({ ...t, id: `${r.id}:${t.driver}` })) : []));
-  const goals = m.goals.map((g) => (g.measure?.measure_by === 'olumi' ? { ...g, author: 'olumi' as const } : g));
-  const all = [...m.quantities, ...m.relations, ...links, ...goals, ...m.limits, ...m.assumptions, ...m.conditions], ok = all.filter((r) => r.approval === 'approved' && !unverified.has(r.id));
+function recordsOf(m: CanonicalModelT): Records {
+  const links = m.relations.flatMap((r) => (r.form === 'effect' ? r.terms.map((t) => ({ ...t, id: `${r.id}:${t.driver}` })) : []));
+  const all = [...m.quantities, ...m.relations, ...links, ...m.goals, ...m.limits, ...m.assumptions, ...m.conditions], ok = all.filter((r) => r.approval === 'approved');
   return { accepted: new Set(ok.map((r) => r.id)), confirmed: new Set(ok.filter((r) => r.author === 'person').map((r) => r.id)) };
 }
 
 /** Labels and authors for every quantity the executable model reads, including the ids the compiler adds. */
 function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: ExecutableModel, records: Records): Record<string, PresentQuantity> {
   const m = normalise(model);
-  const unverified = new Set(compiled.unverified.map((u) => u.id));
-  // A quote not found in the person's words is never shown as theirs: S2 says "whose source is not confirmed" for it.
-  const who = (author: 'person' | 'olumi' | 'structure', id: string): PresentQuantity['author'] => (author === 'person' && unverified.has(id) ? 'unverified' : author);
+  // Whose it is: the AI's own author, as written (A25 off the path, S1 strip, Paul 26 Oct).
+  const who = (author: 'person' | 'olumi' | 'structure', _id: string): PresentQuantity['author'] => author;
   const rel = new Map(m.relations.map((r) => [r.defines, r] as const));
   const own = new Map(m.quantities.map((q) => {
     const r = rel.get(q.id);
@@ -110,11 +108,11 @@ function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: Execut
 
 /** `brief`: the person's first words, so the display tells their brief's figures from the ones they gave later. */
 export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourceText: string; readonly seed: number; readonly draws?: number; readonly brief?: string }): Evaluation {
-  const compiled = compile(model, { sourceText: opts.sourceText });
+  const compiled = compile(model);
   const projection = project(model, compiled, opts.brief !== undefined ? { brief: opts.brief } : {});
   const read = normalise(model);
   const labelOf = new Map(read.goals.map((g) => [g.id, g.label] as const));
-  const records = recordsOf(read, compiled), confirmed = records.confirmed;
+  const records = recordsOf(read), confirmed = records.confirmed;
   // R8: the compiler's premises for each goal (`rests_on`), in their own words, whose they are and whether confirmed.
   const premiseOf = new Map<string, PresentPremise>([...read.assumptions.map((a) => [a.id, { id: a.id, text: a.text, author: a.author, party: a.party, kind: 'assumption' as const, confirmed: confirmed.has(a.id) }] as const),
     ...read.conditions.map((c) => [c.id, { id: c.id, text: c.text, author: c.author, party: c.party, kind: 'condition' as const, confirmed: confirmed.has(c.id) }] as const)]);

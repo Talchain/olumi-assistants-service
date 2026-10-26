@@ -5,10 +5,10 @@
  *                                     blockers, unverified, preferences, conversions, implicit_as_stated }
  *
  * Four kinds of outcome, never confused:
- *  · ERRORS are the draft's own mistakes (an undefined id, a unit that does not combine, a cycle not through a stock, an
- *    Olumi figure without a range, a person's item without their words, a condition that is both a goal and a limit, an ask
- *    for the result itself). Each is one plain sentence naming the items, so the AI can repair it in the same turn. Any error
- *    → `executable: null`. Having no goal, or an aim with no measure, is NEVER an error (phase 0b: forced goals were the only
+ *  · ERRORS are only what the engine cannot calculate as written (an undefined id, a unit that does not combine, a cycle
+ *    not through a stock, a range out of order, a timing that is no whole period): the maths, never the draft's meaning or
+ *    whose it is (S1 strip, Paul 26 Oct). Each is one plain sentence naming the items, so the AI can repair it in the same
+ *    turn. Any error → `executable: null`. Having no goal, or an aim with no measure, is NEVER an error (phase 0b: forced goals were the only
  *    unfaithful drafts).
  *  · ASKS are legitimate, successful outcomes: a figure only the person can give. Each ask fills EXACTLY ONE quantity
  *    (an update's postimage sets it) and lists what it feeds; each goal lists its own asks, so "answer these and the chance
@@ -18,8 +18,8 @@
  *    PROVEN from the canonical forms with its domain conditions, and only after a PL review: not built.
  *  · WITHHELD goals rest on a quantity that is `unknown` or `unsupported`, a range the ruled law holds, or a window or timing
  *    that is a range; the reason says which. Withheld items are echoed in `executable.withheld` and `coverage`.
- *  · UNVERIFIED items are the person's by their author, but their quote is not in the person's words (`sourceText`). They
- *    still calculate, and are never shown as the person's (`project.ts`).
+ *  · Authorship and provenance are the AI's alone (S1 strip, Paul 26 Oct): an item is drawn as its author says, quoted or
+ *    not; `unverified` stays [] for stored Runs' shape.
  *
  * The joint and the limits are never computed over a partial subset (PL correction 2): `joint` and `within_limits` say
  * whether the simulator's joint figures stand for ALL measured goals and ALL measured limits; `coverage` says what the run
@@ -34,9 +34,8 @@ import {
   type CanonicalGoalT, type CanonicalLimitT,
 } from './canonical.js';
 import type { ExecutableModel, Quantity as XQuantity, Goal as XGoal, Limit as XLimit, Option as XOption, Risk as XRisk, Dist, Domain, Withheld, FixedAuthor } from './executable.js';
-import { parseUnit, multiply, divide, sameDims, isDimensionless, showUnit, perPeriod, isCalendarConversion, TIME_DIMS, DIMENSIONLESS_UNIT, type Unit } from './units.js';
+import { parseUnit, multiply, divide, sameDims, isDimensionless, showUnit, perPeriod, TIME_DIMS, type Unit } from './units.js';
 import { rangeLaw, type RangeReading, type RangeDist } from './simulate/range-law.js';
-import { withUsedDirections } from './links.js';
 
 /** The law's reading of an uncertain range, or HELD when the law has no room for it (its domain leaves no probability). */
 export type LawReading = Extract<RangeReading, { kind: 'normal' }> | { kind: 'held'; reason: string };
@@ -148,8 +147,6 @@ const ID_RE = /^[a-z][a-z0-9_]*$/;
 const has = <T>(x: T | null | undefined): x is T => x !== null && x !== undefined;
 /** The one form a quote is compared in: case, curly quotes, dashes and white space folded (compile and the card alike). */
 export const norm = (s: string) => s.toLowerCase().replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/\s+/g, ' ').trim();
-const direction = (cmp: string) => (cmp.startsWith('>') ? 'up' : 'down');
-const isPowerOfTen = (v: number) => v > 0 && Math.abs(Math.log10(v) - Math.round(Math.log10(v))) < 1e-12;
 
 /** Schema-check unknown JSON (the AI's raw output), then compile. A schema failure is an error the AI can act on. */
 export function compileJson(input: unknown, opts: CompileOptions = {}): CompileResult {
@@ -176,9 +173,9 @@ export const inlineQuantityId = (optionId: string, quantity: string) => `${optio
 
 /**
  * An option's inline value ("raise the price to 3.50") becomes a named quantity of its own, with the set's author and words,
- * so every number the simulator reads is a named, authored quantity. A person's figure is known, a structural switch is
- * known (author structure), Olumi's setting on its OWN option is its proposal (known), Olumi's figure on a person's option
- * is an estimate (ranged), and no figure is an ask.
+ * so every number the simulator reads is a named, authored quantity. A setting carries no status or kind of its own
+ * (canonical.ts CanonicalOptionSet), so the engine's default is the same for every author (M11, S1 strip): a figure in hand
+ * is known, a fact; none is asked.
  */
 export function normalise(model: CanonicalModelT): CanonicalModelT {
   const Q = new Map(model.quantities.map((q) => [q.id, q] as const));
@@ -191,75 +188,32 @@ export function normalise(model: CanonicalModelT): CanonicalModelT {
       const target = Q.get(s.quantity);
       const fig = has(s.value) || has(s.low) || has(s.high);
       const proposal = s.author === 'olumi' && o.author === 'olumi';
-      const status = !fig ? 'asked' : s.author === 'olumi' && !proposal ? 'estimated' : 'known';
       extra.push({
         id, label: `${o.label}: ${target?.label ?? s.quantity}`, unit: target?.unit ?? '1',
-        kind: status === 'estimated' ? 'coefficient' : 'fact',
-        value: s.value, low: s.low, high: s.high, range_kind: s.range_kind, status, question: s.question,
-        basis: status === 'estimated' ? `Olumi's estimate of what "${o.label}" sets this to.` : proposal ? `Olumi's proposed setting for its option "${o.label}".` : s.author === 'structure' ? `"${o.label}" switched on.` : null,
+        kind: 'fact',
+        value: s.value, low: s.low, high: s.high, range_kind: s.range_kind, status: fig ? 'known' : 'asked', question: s.question,
+        basis: s.author === 'olumi' ? (proposal ? `Olumi's proposed setting for its option "${o.label}".` : `Olumi's estimate of what "${o.label}" sets this to.`) : s.author === 'structure' ? `"${o.label}" switched on.` : null,
         direction: null, floor: null, ceiling: null, author: s.author, party: null, quote: s.quote, approval: o.approval, author_id: o.author_id,
       });
       return { ...s, to: id, value: null, low: null, high: null, range_kind: null, question: null };
     }),
   }));
-  const named = extra.length ? { ...model, quantities: [...model.quantities, ...extra], options } : model;
-  // A figure labelled structure that is no structural constant ("current output = 12", stated by no one) is the person's
-  // to give: always asked of them, never Olumi's fixed figure nor read as theirs (Codex r4–r7 #3709).
-  const asked = named.quantities.map((q) => (q.author === 'structure' && q.kind === 'fact' && q.status === 'known' && has(q.value) && !has(q.low) && !has(q.high)
-    && !isStructuralConstant(named, q) ? structureAsked(q) : q));
-  // A direction the model does not use is not kept, so the card never states a sign the model does not use (issue 40).
-  return withUsedDirections(asked.some((q, i) => q !== named.quantities[i]) ? { ...named, quantities: asked } : named);
+  // B2 (the structure rewrite) and B3 (direction clearing) are off the path (S1 strip, Paul 26 Oct): the drafter's
+  // structure figures and directions are read as written.
+  return extra.length ? { ...model, quantities: [...model.quantities, ...extra], options } : model;
 }
-
-/**
- * THE STRUCTURAL ADMISSION, shared by the first draft (`normalise`, saved as read: `draft.ts`) and mechanism completion
- * (`answer.ts`): a figure is a structural constant only by its declared meaning, never because it looks like one:
- *  · an exact calendar conversion (12 month/year, 52 week/year);
- *  · a power of ten that IS its unit's scale (100 %, 1000 g/kg: the constant times its unit's scale is exactly 1), never 1;
- *  · 0 or 1 on a quantity an option switches (what it sets, or its switched-on figure);
- *  · 0 as an additive identity: an effect's base, a part of a sum, a stock's start ("nothing extra yet");
- *  · 1 in unit "1" only, by exact unit algebra: a part of a product, or the base of an effect or a part of a sum whose every
- *    other term is dimensionless ("current productivity, indexed" = 1, the 1 of "1 + growth"); 1 with any unit ("one
- *    customer", "current customers = 1") never is one.
- * Any other figure labelled structure ("current output = 12", "budget for the year" = 1 year) is the person's to give.
- */
-export function isStructuralConstant(model: CanonicalModelT, q: CanonicalQuantityT): boolean {
-  const u = parseUnit(q.unit);
-  if (!has(q.value) || !u.ok) return false;
-  const v = q.value;
-  if (isCalendarConversion(v, u.unit)) return true;
-  if (v !== 1 && isPowerOfTen(v) && Math.abs(v * u.unit.scale - 1) < 1e-9) return true;
-  if ((v === 0 || v === 1) && model.options.some((o) => o.sets.some((s) => s.quantity === q.id || s.to === q.id))) return true;
-  const used = (as: (r: CanonicalModelT['relations'][number]) => boolean) => model.relations.some(as);
-  const base = (r: CanonicalModelT['relations'][number]) => r.form === 'effect' && r.base === q.id;
-  const sumPart = (r: CanonicalModelT['relations'][number]) => r.form === 'definition' && r.op === 'sum' && r.parts.some((p) => p.id === q.id);
-  if (v === 0) return used((r) => base(r) || sumPart(r) || (r.form === 'stock' && r.start === q.id));
-  if (v !== 1 || !(isDimensionless(u.unit) && u.unit.scale === 1)) return false;
-  // 1 in unit "1", by exact unit algebra: a product's part, or the base of an effect or a part of a sum whose every other
-  // term is dimensionless too (an index or multiplier built from today's 1). Any unit on it is a count or level.
-  const unitOf = (id: string): Unit | undefined => { const x = model.quantities.find((y) => y.id === id); const p = x === undefined ? undefined : parseUnit(x.unit); return p?.ok === true ? p.unit : undefined; };
-  const free = (...ids: string[]) => { const us = ids.map(unitOf); return us.every((x) => x !== undefined) && isDimensionless(us.reduce((a, b) => multiply(a!, b!), DIMENSIONLESS_UNIT)!); };
-  return used((r) => (r.form === 'definition' && r.op === 'product' && r.parts.some((p) => p.id === q.id))
-    || (r.form === 'definition' && r.op === 'sum' && r.parts.some((p) => p.id === q.id) && r.parts.every((p) => p.id === q.id || free(p.id)))
-    || (r.form === 'effect' && r.base === q.id && r.terms.every((t) => free(t.driver, t.coefficient))));
-}
-/** A figure only the person can give: asked, with no question of the code's (the AI asks in its own words). */
-export const structureAsked = (q: CanonicalQuantityT): CanonicalQuantityT => ({ ...q, kind: 'fact', status: 'asked', author: 'person', value: null, low: null, high: null,
-  range_kind: null, basis: null, quote: null, question: null });
 
 /** A figure the person gave as approximate (the host's mark, `APPROXIMATE_FIGURE`): theirs, a point, a range asked for. */
 export const isApproximate = (q: CanonicalQuantityT): boolean => q.author === 'person' && q.basis === APPROXIMATE_FIGURE && q.status === 'known' && q.value !== null && q.low === null;
 
-/** `asksNeedQuestions` (a FIRST draft only, `draft.ts`): every figure that waits on the person carries the question that asks for
- *  it, so no goal waits on an ask no one can see. A saved model and an update are compiled as before (A4: the AI asks in its own words). */
+/** `sourceText` and `asksNeedQuestions` are accepted from existing callers and no longer read (S1 strip, Paul 26 Oct): the quote
+ *  check (X4, A25a) and the asked-needs-a-question repair (B7) are off the path. */
 export type CompileOptions = { readonly sourceText?: string; readonly asksNeedQuestions?: boolean };
 
-export function compile(input: CanonicalModelT, opts: CompileOptions = {}): CompileResult {
+export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): CompileResult {
   const model = normalise(input);
   const errors: CompileError[] = [];
   const err = (code: CompileErrorCode, message: string, items: string[]) => errors.push({ code, message, items });
-  if (opts.asksNeedQuestions === true) for (const q of model.quantities) if (q.status === 'asked' && (q.question ?? '').trim() === '')
-    err('asked_no_question', `"${q.label}" (${q.id}) waits on the person but has no question. If it is theirs to give, ask the one plain question that would give it. If it is not (the starting level of a setting only the options change, or a whole such as 100 %), it is a structural constant: author structure, known, one exact figure.`, [q.id]);
 
   // ── ids and labels ─────────────────────────────────────────────────────────────────────────────────────────────────
   const allIds = new Map<string, string>();
@@ -298,14 +252,8 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   const period: Unit = { dims: { [model.period]: 1 }, scale: 1 };
   const unitsOk = (...refs: string[]) => refs.every((r) => U.has(r));
 
-  // ── quotes: absent on a person's item = an error; not in their words = UNVERIFIED (a typed outcome) ────────────────
-  const source = has(opts.sourceText) ? norm(opts.sourceText) : null;
+  // ── quotes: the AI's own (S1 strip, Paul 26 Oct): no missing-quote error (X4), no unverified re-stamp (A25a) ────────
   const unverified: { id: string; quote: string }[] = [];
-  const needQuote = (rec: { author: string; quote: string | null }, what: string, item: string) => {
-    if (rec.author !== 'person') return;
-    if (!has(rec.quote) || rec.quote.trim() === '') err('missing_quote', `${what} is the person's but has no quote: copy their exact words, or make it Olumi's (author olumi).`, [item]);
-    else if (source !== null && !source.includes(norm(rec.quote))) unverified.push({ id: item, quote: rec.quote });
-  };
 
   // ── which quantities hold windows and timings ──────────────────────────────────────────────────────────────────────
   const windowed = [
@@ -317,9 +265,6 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   const windowQs = new Set(windowed.flatMap(({ w }) => [w.periods, ...(has(w.origin_offset) ? [w.origin_offset] : [])]));
   /** Set and risk timings that name a quantity: a fixed one resolves to a whole period; an uncertain one goes into the run. */
   const timingQs = new Set(timings);
-  /** Settings of Olumi's own options: its proposal, exact by definition. */
-  const proposals = new Set(model.options.filter((o) => o.author === 'olumi').flatMap((o) => o.sets.map((s) => s.to)).filter(has));
-  for (const o of model.options) if (o.author !== 'olumi') for (const s of o.sets) if (has(s.to)) proposals.delete(s.to);
 
   // ── relations ──────────────────────────────────────────────────────────────────────────────────────────────────────
   const R = new Map<string, CanonicalRelationT>();
@@ -339,43 +284,16 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
     else if (has(q.value) && has(q.low) && has(q.high) && q.low < q.high && (q.value === q.low || q.value === q.high)) {
       err('range_order', `${n} has its most likely figure ${q.value} at an end of its range ${q.low}–${q.high}; give a most likely figure strictly inside the range, or none (null).`, [q.id]);
     }
-    const ranged = has(q.low) && has(q.high) && q.low < q.high;
-    if (ranged && q.author === 'olumi' && !has(q.range_kind)) err('range_kind', `${n} is Olumi's range without its kind; say plausible (a rough span) or bounds (hard ends).`, [q.id]);
-    if (!ranged && has(q.range_kind)) err('range_kind', `${n} has a range kind but no range; set range_kind null.`, [q.id]);
-    // Kind and status agree: derived status ⇔ kind derived, except a link's size, which stays a coefficient when derived.
-    if (q.status === 'derived' && q.kind === 'fact') err('figure_status', `${n} is worked out by its relation, so its kind is derived (or coefficient, when it is the size of a link), not fact.`, [q.id]);
-    if (q.kind === 'derived' && q.status !== 'derived') err('figure_status', `${n} has kind derived but status ${q.status}; a derived quantity is worked out by exactly one relation (status derived), otherwise it is a fact or a coefficient.`, [q.id]);
+    // B13 (range kind), X2 (kind and status agree), B11 (structure's shape), B8, B9, B10, B10b and X3 (status, author and
+    // basis) are off the path (S1 strip, Paul 26 Oct): only what the engine cannot read is an error.
     if (q.status === 'derived') {
       if (!R.has(q.id)) err('no_relation', `${n} is marked derived but no relation works it out; add its definition, effect or stock, or give its figure.`, [q.id]);
       if (fig) err('figure_status', `${n} is derived, so its figures must be null (its relation works them out).`, [q.id]);
       continue;
     }
     if (R.has(q.id)) { err('relation_on_figure', `${n} has a relation ("${R.get(q.id)!.id}") but is marked ${q.status}; mark it derived with null figures, or remove the relation.`, [q.id, R.get(q.id)!.id]); continue; }
-    if (q.author === 'structure') {
-      // Its meaning is checked in `normalise` (`isStructuralConstant`): one that is no structural constant is already asked.
-      if (q.status !== 'known' || !has(q.value) || has(q.low)) err('structure_value', `${n} is a structural constant, so it is known with one exact figure and no range.`, [q.id]);
-      if (q.kind !== 'fact') err('structure_value', `${n} is a structural constant, so its kind is fact (a coefficient is a mechanism's size, never structural: the person's figure or Olumi's ranged estimate).`, [q.id]);
-      continue;
-    }
-    if (q.status === 'known') {
-      if (!fig) err('figure_status', `${n} is marked known but has no figure; give the person's figure, or mark it asked with a question.`, [q.id]);
-      else if (q.author === 'olumi') {
-        const point = has(q.value) && !has(q.low);
-        const dateReading = point && (windowQs.has(q.id) || timingQs.has(q.id)) && Number.isInteger(q.value) && has(q.basis);
-        const proposal = point && proposals.has(q.id);
-        if (!dateReading && !proposal) err('olumi_no_range', `${n} is Olumi's figure marked known; Olumi's figures are estimates: mark it estimated with low and high, or, for an exact constant such as 12 month/year, an option switch or the starting level of a setting only the options change, make its author structure.`, [q.id]);
-      }
-      needQuote(q, n, q.id);
-    } else if (q.status === 'estimated') {
-      if (q.kind === 'fact') err('fact_estimated', `${n} is a fact about the person's own situation, so only they can give it: mark it asked with one question. Olumi estimates only coefficients (the size of a mechanism).`, [q.id]);
-      if (q.author !== 'olumi') err('figure_status', `${n} is the person's figure marked estimated; mark it known with their quote (their own range in low and high).`, [q.id]);
-      else if (!has(q.low) || !has(q.high)) err('olumi_no_range', `${n} is Olumi's estimate without both low and high; give a range as wide as what is genuinely unknown.`, [q.id]);
-      if (!has(q.basis)) err('figure_status', `${n} is Olumi's estimate with no basis; say in one sentence what it rests on.`, [q.id]);
-    } else {
-      if (fig) err('figure_status', `${n} is marked ${q.status} but has a figure; a figure in hand is known (the person's) or estimated (Olumi's).`, [q.id]);
-      // An asked figure needs no question of the AI's: what waits on it is typed, and the AI asks in its own words (A4).
-      if (q.status !== 'asked' && !has(q.basis)) err('figure_status', `${n} is ${q.status} with no basis; say why in one sentence.`, [q.id]);
-    }
+    // A figure read as given must have one: with none, the engine would read 0 (`distOf`), whoever's it is (MATHS).
+    if (FIGURE_STATUSES.has(q.status) && !fig) err('figure_status', `${n} is marked ${q.status} but has no figure; give its figure, or mark it asked with a question.`, [q.id]);
   }
 
   // ── relations: references, forms, units, quotes ────────────────────────────────────────────────────────────────────
@@ -383,7 +301,6 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   const lagged = new Map<string, string[]>();    // stock flows: through the stock, so never a cycle
   for (const r of R.values()) {
     const at = `The relation "${r.id}" for ${name(r.defines)}`;
-    needQuote(r, at, r.id);
     const d = U.get(r.defines);
     if (r.form === 'definition') {
       const parts = r.parts.map((p) => p.id);
@@ -405,11 +322,6 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
       const refs = [r.base, ...r.terms.flatMap((t) => [t.coefficient, t.driver])];
       if (!refs.every((x) => isQ(x, at, r.id))) continue;
       instant.set(r.defines, refs);
-      for (const t of r.terms) needQuote(t, `The link from ${name(t.driver)} in "${r.id}"`, `${r.id}:${t.driver}`);
-      for (const t of r.terms) {
-        const c = Q.get(t.coefficient)!;
-        if (c.kind !== 'coefficient' || c.author === 'structure') err('coefficient_kind', `${name(t.coefficient)} is the size of the link from ${name(t.driver)} in "${r.id}", so it is a coefficient of uncertain size (kind coefficient, never structure). If the relation is exact, write it as a definition (a signed sum or a product), not an effect.`, [t.coefficient, r.id]);
-      }
       if (!d || !unitsOk(...refs)) continue;
       if (!sameDims(U.get(r.base)!, d)) err('unit_mismatch', `${at}: its base ${name(r.base)} is ${showUnit(U.get(r.base)!)} but ${name(r.defines)} is ${showUnit(d)}.`, [r.id, r.base, r.defines]);
       for (const t of r.terms) {
@@ -492,15 +404,6 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   };
 
   // ── goals and limits: what the person is trying to achieve vs a condition the plan must not break ──────────────────
-  const GOAL_VS_LIMIT = 'A goal is what the person is trying to achieve; a limit is a condition the plan must not break (a budget, a time cap); a preference has no threshold.';
-  const figureOf = (id: string) => { const q = Q.get(id); return q && has(q.value) && !has(q.low) ? q.value : null; };
-  for (const g of model.goals) for (const l of model.limits) {
-    const m = g.measure;
-    const lm = l.measure;
-    if (!m || !lm || m.quantity !== lm.quantity || direction(m.cmp) !== direction(lm.cmp)) continue;
-    const sameBound = m.target === lm.bound || (figureOf(m.target) !== null && figureOf(m.target) === figureOf(lm.bound));
-    if (sameBound) err('goal_and_limit', `${name(m.quantity)} ${m.cmp} its figure appears as both a goal ("${g.label}") and a limit ("${l.label}"). ${GOAL_VS_LIMIT} Keep it as the one the person describes and remove the other.`, [g.id, l.id]);
-  }
   /** `at` names a goal or limit for the drafter's repairs (its id too); `said` is what the person reads of it (its label only). */
   const resolveWindow = (w: CanonicalWindowT, at: string, said: string, item: string): WinState => {
     const st: WinState = { win: null, blockers: [], withheld: [] };
@@ -512,7 +415,7 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
       if (U.has(ref) && !sameDims(U.get(ref)!, period)) { err('window', `${at}'s ${what} ${name(ref)} is ${showUnit(U.get(ref)!)}; it counts ${model.period}s.`, [item, ref]); return null; }
       if (q.status === 'derived') { err('window', `${at}'s ${what} ${name(ref)} is derived; a window needs a figure.`, [item, ref]); return null; }
       if (q.status === 'asked') { st.blockers.push(ref); return null; }
-      if (!FIGURE_STATUSES.has(q.status)) { st.withheld.push(`${said}'s ${what} "${q.label}" is ${q.status.replace('_', ' ')}: ${q.basis}`); return null; }
+      if (!FIGURE_STATUSES.has(q.status)) { st.withheld.push(`${said}'s ${what} "${q.label}" is ${q.status.replace('_', ' ')}${has(q.basis) ? `: ${q.basis}` : '.'}`); return null; }
       if (has(q.low) && has(q.high) && q.low !== q.high) { st.withheld.push(`${said}'s ${what} "${q.label}" is a range (${q.low}–${q.high} ${q.unit}); the calculation needs one whole number of ${model.period}s.`); return null; }
       const v = q.value ?? q.low!;
       if (!Number.isInteger(v) || v < min) { err('window', `${at}'s ${what} ${name(ref)} is ${v}; it must be a whole number of ${model.period}s, at least ${min} (a finer period, such as week, can hold a part ${model.period}).`, [item, ref]); return null; }
@@ -532,7 +435,6 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   /** Shared checks for a goal's or a limit's measure; returns its window state. */
   const measureChecks = (m: Measure, against: string, at: string, said: string, item: string, roots: readonly string[], frameWithheld: string[], relative = false): WinState | null => {
     if (!roots.every((x) => isQ(x, at, item))) return null;
-    if (Q.get(m.quantity)!.status === 'asked') err('asks_for_result', `${at} measures ${name(m.quantity)}, which is asked: that asks the person for the result itself. Model what drives it (its definition, effect or stock), or leave the aim with measure null and a question.`, [item, m.quantity]);
     if (has(m.per) && m.aggregation === 'every') err('goal_shape', `${at} is a rate over the window (per ${name(m.per)}), which needs end, sum, mean, max or min, not every.`, [item]);
     if (unitsOk(m.quantity, against) && (!has(m.per) || U.has(m.per)) && !relative && !targetUnitOk(m, against)) {
       err('unit_mismatch', `${at} compares ${name(m.quantity)}${has(m.per) ? ` per ${name(m.per)}` : ''} (${showUnit(has(m.per) && U.has(m.per) ? divide(U.get(m.quantity)!, U.get(m.per)!) : U.get(m.quantity)!)}) with ${name(against)} (${showUnit(U.get(against)!)}); for "${m.aggregation}" the figure is in ${m.aggregation === 'sum' && !has(m.per) ? `the quantity's unit × ${model.period}` : "the quantity's unit"}.`, [item, m.quantity, against]);
@@ -548,7 +450,6 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   for (const g of model.goals) {
     const at = `The goal "${g.label}" (${g.id})`;
     const said = `The goal "${g.label}"`;
-    needQuote(g, at, g.id);
     if (!has(g.measure)) continue; // an aim with no measure yet is VALID: coached, left out of the chance, never forced
     const m = g.measure;
     const frameWithheld: string[] = [];
@@ -556,7 +457,6 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
       if (U.has(m.target) && !isDimensionless(U.get(m.target)!)) err('unit_mismatch', `${at} is a relative change, so its target ${name(m.target)} is a fraction ("1") or a percentage ("%"), not ${showUnit(U.get(m.target)!)}.`, [g.id, m.target]);
     }
     const ref = m.reference;
-    if (m.frame === 'level' && has(ref)) err('goal_shape', `${at} is a level but names a reference; make it a change (change_abs or change_rel), or set its reference to null.`, [g.id]);
     if (m.frame !== 'level' && !has(ref)) err('goal_shape', `${at} is a change but names no reference; say what it is a change from (now, an option such as carrying on as now, or a stated value).`, [g.id]);
     if (m.frame !== 'level' && has(m.per)) frameWithheld.push(`${said} is a change in a rate over the window, which is not supported yet.`);
     if (m.frame !== 'level' && has(ref)) {
@@ -581,7 +481,6 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   for (const l of model.limits) {
     const at = `The limit "${l.label}" (${l.id})`;
     const said = `The limit "${l.label}"`;
-    needQuote(l, at, l.id);
     if (!has(l.measure)) continue; // a guardrail with no measure yet is VALID: reported as not covered, never given a scale
     const st = measureChecks({ ...l.measure, target: l.measure.bound }, l.measure.bound, at, said, l.id, limitRoots(l), []);
     if (st) limitWin.set(l.id, st);
@@ -592,50 +491,33 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   // ── options ────────────────────────────────────────────────────────────────────────────────────────────────────────
   const measured = model.goals.filter((g) => has(g.measure) && goalRoots(g).every((x) => Q.has(x)));
   const measuredLimits = model.limits.filter((l) => has(l.measure) && limitRoots(l).every((x) => Q.has(x)));
-  const goalReach = upstream(measured.flatMap(goalRoots));
-  const limitReach = upstream(measuredLimits.flatMap(limitRoots));
-  // Never pressure invention: with no goal, or an aim with no measure yet (an option may act on it), no reach errors fire.
-  const reachable = model.goals.length > 0 && model.goals.every((g) => has(g.measure)) && measured.length + measuredLimits.length > 0;
   const optionIds = new Set(model.options.map((o) => o.id));
-  const labels = new Map<string, string>();
   const setTiming = new Map<string, (number | string | null)[]>();
   for (const o of model.options) {
     const at = `The option "${o.label}" (${o.id})`;
-    needQuote(o, at, o.id);
     if (o.label.trim() === '') err('option_shape', `The option ${o.id} has no name; use the person's exact name for it.`, [o.id]);
-    const key = norm(o.label);
-    if (labels.has(key)) err('option_shape', `${at} has the same name as "${labels.get(key)}"; each option needs its own name.`, [o.id, labels.get(key)!]);
-    labels.set(key, o.id);
     if (has(o.developed_from) && !optionIds.has(o.developed_from)) err('undefined_ref', `${at} is developed from "${o.developed_from}", which is not an option.`, [o.id]);
-    let reaches = false;
     const times: (number | string | null)[] = [];
     o.sets.forEach((s, i) => {
       const from = timingOf(s.starts_after_periods, `${at}'s setting of ${name(s.quantity)}`, o.id, o.status === 'live');
       times.push(from);
       const to = s.to ?? '';
       if (!isQ(s.quantity, at, o.id) || !isQ(to, at, o.id)) return;
-      if (Q.get(s.quantity)!.status === 'derived') err('set_derived', `${at} sets ${name(s.quantity)}, which is worked out by its relation; set one of its inputs instead.`, [o.id, s.quantity]);
+      // A setting on a stock has no meaning to the engine (simulate.ts throws); one on any other worked-out figure overrides it.
+      if (R.get(s.quantity)?.form === 'stock') err('set_derived', `${at} sets ${name(s.quantity)}, a running total; set its start or its flows instead.`, [o.id, s.quantity]);
       if (unitsOk(s.quantity, to) && !sameDims(U.get(s.quantity)!, U.get(to)!)) err('unit_mismatch', `${at} sets ${name(s.quantity)} (${showUnit(U.get(s.quantity)!)}) to ${name(to)} (${showUnit(U.get(to)!)}); they need one unit.`, [o.id, s.quantity, to]);
       if (o.sets.slice(0, i).some((x) => x.quantity === s.quantity && x.starts_after_periods === s.starts_after_periods)) err('option_shape', `${at} sets ${name(s.quantity)} twice from the same period; keep one.`, [o.id, s.quantity]);
-      if (horizon > 0 && typeof from === 'number' && from >= horizon) err('after_horizon', `${at} sets ${name(s.quantity)} after ${from} ${model.period}s, beyond the model's ${horizon}.`, [o.id]);
-      if (goalReach.has(s.quantity) || limitReach.has(s.quantity)) reaches = true;
-      else if (reachable) err('set_reaches_nothing', `${at} sets ${name(s.quantity)}, which reaches no goal or limit; link it to what it changes, or drop the setting.`, [o.id, s.quantity]);
     });
     setTiming.set(o.id, times);
-    if (reachable && o.sets.length && !reaches && o.status === 'live') {
-      err('option_reaches_no_goal', `${at} changes nothing a goal or limit depends on; link what it changes to a goal's or a limit's quantity.`, [o.id]);
-    }
   }
 
   // ── risks ──────────────────────────────────────────────────────────────────────────────────────────────────────────
   const riskTiming = new Map<string, number | string | null>();
   for (const k of model.risks) {
     const at = `The risk "${k.label}" (${k.id})`;
-    needQuote(k, at, k.id);
     const from = timingOf(k.starts_after_periods, at, k.id);
     riskTiming.set(k.id, from);
     if (!isQ(k.occurrence, at, k.id) || !isQ(k.severity, at, k.id) || !isQ(k.effect_on, at, k.id)) continue;
-    if (horizon > 0 && typeof from === 'number' && from >= horizon) err('after_horizon', `${at} takes effect after ${from} ${model.period}s, beyond the model's ${horizon}.`, [k.id]);
     const ou = U.get(k.occurrence);
     if (ou && !isDimensionless(ou)) err('risk_shape', `${at}: its chance ${name(k.occurrence)} is ${showUnit(ou)}; a chance is a pure number ("1", or "%").`, [k.id, k.occurrence]);
     const occ = Q.get(k.occurrence)!;
@@ -650,9 +532,8 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   }
 
   // ── preferences, qualitative records: references and authorship ───────────────────────────────────────────────────
-  for (const p of model.preferences) { needQuote(p, `The preference "${p.id}"`, p.id); isQ(p.quantity, `The preference "${p.id}"`, p.id); }
+  for (const p of model.preferences) isQ(p.quantity, `The preference "${p.id}"`, p.id);
   for (const f of QUALITATIVE_FAMILIES) for (const rec of model[f]) {
-    needQuote(rec, `The ${f.replace('_', ' ')} record "${rec.id}"`, rec.id);
     for (const c of rec.concerns) if (!allIds.has(c)) err('undefined_ref', `The ${f.replace('_', ' ')} record "${rec.id}" concerns "${c}", which is not in the model.`, [rec.id, c]);
   }
 
@@ -727,30 +608,12 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
     return ceiling !== null && ceiling < 0 ? `${read} above ${at(ceiling)}, but ${role} is never below ${at(0)}`
       : `${read} below ${at(floor!)}, but a chance is never above ${at(1 / (U.get(q.id)?.scale ?? 1))}`;
   };
-  /**
-   * A figure given WHOLLY outside what it can be (its fixed value, or its whole range) contradicts Olumi's reading of it
-   * (the PL's ruling, 23 Oct): never pinned to the bound, never moved inside. Its words and figure stay as given; the
-   * person's is asked again, naming the reading so they can correct either; Olumi's is held as unsupported.
-   * A person's FIRM range (range_kind 'bounds') is drawn only where their ends and Olumi's reading overlap (range-law.ts), so
-   * one that only touches the floor or ceiling (100–120 % against "never above 100 %") shares one figure with it and leaves
-   * no spread: it contradicts the reading as fully, and is asked again in their unit, never held with the law's refusal in
-   * engine fractions ("the range 1 to 1.2 has no room", numbers#1). Compared as the law compares, in the engine's scale, so no
-   * such range is left for the law to refuse. A rough estimate touching it keeps the ruled reading within what it can be.
-   */
-  const outside = (q: CanonicalQuantityT): string | undefined => {
-    const { floor, ceiling } = boundsOf(q), lo = has(q.low) ? q.low : q.value, hi = has(q.high) ? q.high : q.value;
-    if (!has(lo) || !has(hi)) return undefined;
-    const given = lo === hi ? `${lo} ${q.unit}` : `${lo}–${hi} ${q.unit}`;
-    const firm = q.author === 'person' && q.range_kind === 'bounds' && lo < hi, s = U.get(q.id)?.scale ?? 1;
-    if (floor !== null && (firm ? hi * s <= floor * s : hi < floor)) return `"${q.label}" is given as ${given}, but Olumi reads it as never below ${floor} ${q.unit}`;
-    if (ceiling !== null && (firm ? lo * s >= ceiling * s : lo > ceiling)) return `"${q.label}" is given as ${given}, but Olumi reads it as never above ${ceiling} ${q.unit}`;
-    return undefined;
-  };
   const nothing = new Map(model.quantities.flatMap((q) => { const why = roomless(q); return why === undefined ? [] : [[q.id, why] as const]; }));
   // A chance and a timing are read against what they declare as any figure is (spec §3.7): the timing reader never uses one
   // outside it, as an option or risk resting on it is asked or held.
-  const contradictory = new Map(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && !nothing.has(q.id) && outside(q) !== undefined)
-    .map((q) => [q.id, outside(q)!] as const));
+  // A20b, the re-route of a figure outside a floor or ceiling, is off the path (S1 strip, Paul 26 Oct): such a figure goes to
+  // the law and the domain as written, which hold or withhold it (A20d above, and simulate.ts invalid_domain), never re-asked.
+  const contradictory = new Map<string, string>();
   /** A person's range whose words do not say whether its ends are hard: an UNRESOLVED reading, a blocker (PL ruling B). */
   const unresolved = new Set(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && q.author === 'person' && has(q.low) && has(q.high) && q.low < q.high && !has(q.range_kind) && !windowQs.has(q.id)
     && !contradictory.has(q.id) && !nothing.has(q.id)).map((q) => q.id));
@@ -772,7 +635,7 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   const blockersOf = (closure: Iterable<string>) => [...closure].map((x) => Q.get(x)).filter((q): q is CanonicalQuantityT => !!q && (isAsk(q) || withholds(q)));
   const describe = (q: CanonicalQuantityT) => (q.status === 'asked' ? `needs "${q.label}".` : held.has(q.id) ? `rests on "${q.label}": ${held.get(q.id)}${nothing.has(q.id) ? '.' : '; give a most likely figure, or ask'}`
     : unresolved.has(q.id) ? `needs how to read "${q.label}" (firm ends, or a rough estimate).` : recheck.has(q.id) ? `needs "${q.label}" again: ${recheck.get(q.id)}.`
-      : `rests on "${q.label}", which is ${q.status.replace('_', ' ')}: ${q.basis}`);
+      : `rests on "${q.label}", which is ${q.status.replace('_', ' ')}${has(q.basis) ? `: ${q.basis}` : '.'}`);
   const outcomeOf = (closure: Set<string>, win?: WinState): { status: Outcome; reasons: string[]; asks: string[] } => {
     const blockers = blockersOf([...closure, ...(win?.blockers ?? [])]);
     const withheld = [...(win?.withheld ?? []), ...blockers.filter(withholds).map(describe)];

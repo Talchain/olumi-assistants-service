@@ -12,8 +12,8 @@
  *    canvas draws them by id from the living model (`living_model.canonical`), so their items have no `shown_as` place.
  *    Their `concerns` stay in the manifest, never as links: a GraphV3 link is a causal claim, and a note is not one.
  *
- * Authorship is shown as stated: the person's (with their words), Olumi's (provisional), or UNVERIFIED (said to be the
- * person's but their words were not found), which is never shown as theirs. Each figure carries it in the canvas's own
+ * Authorship is shown as stated: the person's (with their words) or Olumi's (provisional), as the AI wrote it (the A25
+ * 'unverified' label is off the path, S1 strip, Paul 26 Oct). Each figure carries it in the canvas's own
  * fields: a value's `observed_state.source` (the brief's, the person's later figure, or Olumi's estimate), a goal's
  * `threshold_source`. Every figure an editor can change is on the field that editor reads, under its quantity's id
  * (a coefficient's id rides its link as `coefficient_id`), so an edit maps back to that ONE quantity.
@@ -34,7 +34,7 @@ import { exactInitialValues } from './simulate/simulate.js';
 
 type Rec = Record<string, unknown>;
 /** structure: an exact constant the model's form needs; never drawn as anyone's estimate. */
-export type DisplayAuthor = 'person' | 'olumi' | 'unverified' | 'structure';
+export type DisplayAuthor = 'person' | 'olumi' | 'structure';
 export type ItemFamily = 'quantity' | 'relation' | 'term' | 'goal' | 'limit' | 'preference' | 'option' | 'risk' | QualitativeFamilyT;
 export type ProjectedItem = {
   record_id: string;
@@ -76,11 +76,10 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const xl = new Set(x?.limits.map((l) => l.id) ?? []);
   const xo = new Set(x?.options.map((o) => o.id) ?? []);
   const xr = new Set(x?.risks.map((r) => r.id) ?? []);
-  const unverified = new Set(compiled.unverified.map((u) => u.id));
   const notCompiling = compiled.errors.length > 0;
-  const whoOf = (rec: { author: string }, id: string): DisplayAuthor => (rec.author === 'olumi' ? 'olumi' : rec.author === 'structure' ? 'structure' : unverified.has(id) ? 'unverified' : 'person');
+  const whoOf = (rec: { author: string }, _id: string): DisplayAuthor => (rec.author === 'olumi' ? 'olumi' : rec.author === 'structure' ? 'structure' : 'person');
   /** The canvas's origin vocabulary; a structural constant has none (it is nobody's figure, never "AI inferred"). */
-  const provenanceOf = (who: DisplayAuthor) => (who === 'structure' ? {} : { provenance: who === 'person' ? 'from_brief' : who === 'unverified' ? 'unverified_brief' : 'ai_inferred' });
+  const provenanceOf = (who: DisplayAuthor) => (who === 'structure' ? {} : { provenance: who === 'person' ? 'from_brief' : 'ai_inferred' });
   const quoteOf = (rec: { author: string; quote: string | null }, id: string) => (whoOf(rec, id) === 'person' && has(rec.quote) ? { source_quote: rec.quote } : {});
   /** In the analysis (`included`): what the calculation uses now, or will once its questions are answered; only what is
    *  genuinely left out (a note, a preference, an aim with no measure, a figure that is unknown or unsupported, a model that
@@ -93,7 +92,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const why = (inCalc: boolean, reason: string) => (inCalc ? null : notCompiling ? 'The model does not compile yet.' : reason);
   const plain = (t: string) => t.toLowerCase().replace(/\s+/g, ' ').trim();
   const fromBrief = (quote: string | null) => opts.brief === undefined || (has(quote) && plain(opts.brief).includes(plain(quote)));
-  /** Whose figure it is, in the canvas's value vocabulary: none claimed for a structural constant or unverified words. */
+  /** Whose figure it is, in the canvas's value vocabulary: none claimed for a structural constant. */
   const figureSource = (q: CanonicalQuantityT): Rec => {
     const who = whoOf(q, q.id);
     if (who === 'olumi') return OLUMIS_FIGURE;
@@ -110,10 +109,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   };
   /** Each relation's links, in drawing order, with their ids: computed once, so a coefficient's host is its own link. */
   const relationEdgeIds = new Map<string, string[]>();
-  /** Links whose size no one has given (not worked out by a relation) and whose direction is not stated: no one can give their
-   *  sign, so they are not drawn (issue 39). */
-  const undrawn = new Set<string>();
-  const unsigned = (id: string) => { const c = Q.get(id); return c !== undefined && c.status !== 'derived' && !has(c.value) && !(has(c.low) && has(c.high)) && c.direction === null; };
+  // Every link is drawn (Paul: show, never hide; S1 strip): one whose size no one has given and whose direction is not stated
+  // has no sign and no strength band (`rateLink`).
 
   const nodes: Rec[] = [];
   const edges: Rec[] = [];
@@ -134,8 +131,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const ids = froms.map((f) => edgeId(f, r.defines));
     relationEdgeIds.set(r.id, ids);
     froms.forEach((f) => use(f, 'node'));
-    if (r.form === 'effect') r.terms.forEach((t, i) => { use(t.coefficient, 'coefficient'); hostOf.set(t.coefficient, { edge: ids[i + 1]! }); if (unsigned(t.coefficient)) undrawn.add(ids[i + 1]!); });
-    if (rate) { use(rate.coefficient, 'coefficient'); hostOf.set(rate.coefficient, { edge: ids[0]! }); if (unsigned(rate.coefficient)) undrawn.add(ids[0]!); }
+    if (r.form === 'effect') r.terms.forEach((t, i) => { use(t.coefficient, 'coefficient'); hostOf.set(t.coefficient, { edge: ids[i + 1]! }); });
+    if (rate) { use(rate.coefficient, 'coefficient'); hostOf.set(rate.coefficient, { edge: ids[0]! }); }
     use(r.defines, 'node');
   }
   for (const g of model.goals) if (g.measure) {
@@ -362,7 +359,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       ? 'Nothing that can be worked out yet uses it.' : `${q.status.replace('_', ' ')}: ${q.basis}`;
     if (folded(q.id)) {
       const host = hostOf.get(q.id)!;
-      items.push({ record_id: q.id, family: 'quantity', shown_as: host.edge ? (undrawn.has(host.edge) ? {} : { on_edge: host.edge }) : { on_node: host.node }, in_calculation: inCalc, why_out: why(inCalc, reason), author: who, approval: q.approval, ...lawOf(q) });
+      items.push({ record_id: q.id, family: 'quantity', shown_as: host.edge ? { on_edge: host.edge } : { on_node: host.node }, in_calculation: inCalc, why_out: why(inCalc, reason), author: who, approval: q.approval, ...lawOf(q) });
       continue;
     }
     nodes.push({
@@ -384,9 +381,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const mid = c ? (c.value ?? (has(c.low) && has(c.high) ? (c.low + c.high) / 2 : null)) : null;
     const straddles = c && has(c.low) && has(c.high) && c.low < 0 && c.high > 0;
     // A size with no figure (no value; no range, or one across zero) has no sign of its own: the link takes its stated
-    // direction (issue 39). A given value always keeps its own sign (Codex r1 #3734).
+    // direction (issue 39), and with none it has no sign (drawn unsigned, never hidden). A given value keeps its own sign.
     const stated = c && directionUsed(c) ? c.direction : null;
-    const sign = stated === 'lowers' ? -1 : stated === 'raises' ? 1 : mid !== null && mid < 0 ? -1 : 1;
+    const sign = stated === 'lowers' ? -1 : stated === 'raises' ? 1 : mid === null ? null : mid < 0 ? -1 : 1;
     const driverUnit = Q.get(driver)?.unit ?? '';
     const definedUnit = Q.get(defines)?.unit ?? '';
     // The link's figure is what the compiler uses, per ONE of the driver's unit, in the defined quantity's unit: the
@@ -409,7 +406,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const reason = 'What it works out is not used by anything that can be worked out yet.';
     const drawn: string[] = [];
     const ids = [...relationEdgeIds.get(r.id)!];
-    const push = (e: Rec) => { const id = ids.shift()!; if (undrawn.has(id)) return id; edges.push({ ...e, id }); drawn.push(id); return id; };
+    const push = (e: Rec) => { const id = ids.shift()!; edges.push({ ...e, id }); drawn.push(id); return id; };
     const rate = rateOf(r);
     if (rate) {
       push({ ...rateLink(rate.driver, rate.coefficient, r.defines, who, inCalc), coefficient_id: rate.coefficient });
@@ -428,7 +425,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       for (const t of r.terms) {
         const termWho = whoOf(t, `${r.id}:${t.driver}`);
         const id = push({ ...rateLink(t.driver, t.coefficient, r.defines, termWho, inCalc), coefficient_id: t.coefficient });
-        items.push({ record_id: `${r.id}:${t.driver}`, family: 'term', shown_as: undrawn.has(id) ? {} : { edge: id }, in_calculation: inCalc, why_out: why(inCalc, reason), author: termWho, approval: t.approval });
+        items.push({ record_id: `${r.id}:${t.driver}`, family: 'term', shown_as: { edge: id }, in_calculation: inCalc, why_out: why(inCalc, reason), author: termWho, approval: t.approval });
       }
     }
     items.push({ record_id: r.id, family: 'relation', shown_as: { edge: drawn.join(' ') }, in_calculation: inCalc, why_out: why(inCalc, reason), author: who, approval: r.approval });
@@ -467,7 +464,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
    * A risk's chance on the field the risk card reads (W3b, 26 Oct: the card said "Likelihood and impact not set yet" over a
    * chance the model holds): the canvas's event_risk.v1, its range (or point) as a fraction, whose it is, over the model's
    * own horizon, which is the window the model reads the chance over. Only where that horizon is a whole number of months
-   * (a weekly model's is not) and the figure is someone's: never converted, never an unverified figure called theirs.
+   * (a weekly model's is not) and the figure is someone's: never converted.
    */
   const eventRiskOf = (occ: CanonicalQuantityT | undefined): Rec => {
     if (!occ || x === null || (occ.status !== 'known' && occ.status !== 'estimated')) return {};
@@ -521,12 +518,12 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
 /** A link: no strength (the model holds no β), its sign only where the model gives one (null: no direction is drawn). */
 function link(from: string, to: string, sign: 1 | -1 | null, who: DisplayAuthor, inCalc: boolean, extra: Rec): Rec {
   const { reasoning, magnitude, definitional, ...rest } = extra;
-  const provenance = who === 'unverified' ? undefined : {
+  const provenance = {
     source: who === 'person' ? 'brief_extraction' : 'cee_hypothesis',
     ...(has(reasoning) ? { reasoning } : {}), ...(has(magnitude) ? { magnitude } : {}), ...(definitional === true ? { definitional: true } : {}), ...rest,
   };
   return {
     from, to, exists_probability: 1, ...(sign === null ? {} : { effect_direction: sign > 0 ? 'positive' : 'negative' }),
-    ...(provenance ? { provenance } : {}), origin: inCalc ? 'model_program:calculation' : who === 'unverified' ? 'model_program:unverified' : 'model_program:display',
+    provenance, origin: inCalc ? 'model_program:calculation' : 'model_program:display',
   };
 }

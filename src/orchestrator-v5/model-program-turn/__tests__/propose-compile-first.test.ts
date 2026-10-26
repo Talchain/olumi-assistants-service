@@ -28,7 +28,8 @@ const propose = (low: number | null) => proposeProgramChange({ dispatch, proposa
 describe('propose_change reads the compiler’s errors before anything is projected', () => {
   it('a known figure with one end of its range (the qual-r5 shape) is the compiler’s typed refusal, never a throw', async () => {
     await expect(propose(null)).resolves.toEqual({ status: 'refused', reason: 'does_not_compile',
-      detail: '"oven price" (oven_price) has only one end of its range; give both low and high, or neither. "oven price" (oven_price) has a range kind but no range; set range_kind null.' });
+      // S1 strip (B13 off): only the MATHS sentence; a range kind with no range is no longer an error.
+      detail: '"oven price" (oven_price) has only one end of its range; give both low and high, or neither.' });
   });
 
   it('contrast: the same answer with both ends (0 to £3,000) is held on a card as before', async () => {

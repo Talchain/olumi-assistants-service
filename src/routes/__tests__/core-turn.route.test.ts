@@ -883,8 +883,6 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect((j.cards as Json[]).filter((c) => c.reading === true), 'the first draft\'s reading card is carried').toHaveLength(1);
       return (j.cards as Json[]).filter((c) => c.reading !== true);
     };
-    /** An id as the turn log holds it: never its text, whatever its characters (Codex BLOCK ×2 on #3739). */
-    const hashed = (id: string) => `#${createHash('sha256').update(id, 'utf8').digest('hex').slice(0, 8)}`;
     /** Drafts and saves a program; returns the reply exactly as it was sent to the person. */
     const savedProgram = async (): Promise<string> => {
       SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(bakery()); calls.length = 0;
@@ -1077,7 +1075,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       info.mockRestore();
     });
 
-    it('issue 37: a redraft that moves a figure of theirs without their words this turn is refused; the agent receives the check and the id, and the turn log names them, never their words', async () => {
+    it('issue 37, S1 strip (A2b off): a redraft that moves a figure of theirs without their words this turn is proposed for their press, never refused; proposing saves nothing, and the turn log never carries their words', async () => {
       await savedProgram();
       const saved = JSON.stringify((persisted as Json).living_model);
       const updated = bakery();
@@ -1089,16 +1087,16 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
         [{ type: 'message', text: 'I need the figure in your words.' }]];
       expect((await typed(said)).statusCode).toBe(200);
       const output = (calls.at(-1)!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'more')!.output;
-      expect(JSON.parse(typeof output === 'string' ? output : JSON.stringify(output))).toMatchObject({ status: 'refused', reason: 'unverified_person_words',
-        data: { ids: ['base_sales'], check: 'this_turn' } });
+      expect(JSON.parse(typeof output === 'string' ? output : JSON.stringify(output))).toMatchObject({ status: 'ok',
+        data: { changes: [{ id: 'base_sales', action: 'change', before: '300 loaf/week', after: '301 loaf/week', author: 'person' }] } });
       expect(JSON.stringify((persisted as Json).living_model)).toBe(saved);
       const line = info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : [])).at(-1)!;
-      expect(line.tool_calls).toEqual([{ name: 'propose_change', outcome: 'refused', refusal: 'unverified_person_words', words: { check: 'this_turn', ids: [hashed('base_sales')] } }]);
-      for (const text of [said, 'We bake 300 loaves a week', 'base_sales']) expect(JSON.stringify(line)).not.toContain(text);
+      expect(line.tool_calls).toEqual([expect.objectContaining({ name: 'propose_change', outcome: 'ok' })]);
+      for (const text of [said, 'We bake 300 loaves a week']) expect(JSON.stringify(line)).not.toContain(text);
       info.mockRestore();
     });
 
-    it('issue 37 (Codex BLOCK ×2 on #3739): no id reaches a log line as text, whatever its characters (one holding their words, a plain-looking "Stop."): the turn log names each by a stable stand-in; the agent still receives the ids it wrote, to correct them', async () => {
+    it('issue 37 (Codex BLOCK ×2 on #3739), S1 strip (A2 off): ids holding their words, or a plain-looking "Stop.", reach the compiler (bad_id, kept), which names them to the agent; no id or words reach a log line as text', async () => {
       await savedProgram();
       const said = 'Our rival bakery shuts in March.';
       const id = said.slice(0, -1);
@@ -1111,12 +1109,13 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
         [{ type: 'message', text: 'I could not use that as your words.' }]];
       expect((await typed(said)).statusCode).toBe(200);
       const output = (calls.at(-1)!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'rival')!.output;
-      // Contrast control: what the agent receives names the id it wrote, so it can correct its draft (this is no log).
-      expect(JSON.parse(typeof output === 'string' ? output : JSON.stringify(output))).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: [id, 'Stop.'], check: 'their_words' } });
+      // Contrast control: what the agent receives names the ids it wrote, so it can correct its draft (this is no log).
+      const told = JSON.parse(typeof output === 'string' ? output : JSON.stringify(output)) as Json;
+      expect(told).toMatchObject({ status: 'refused', reason: 'does_not_compile' });
+      for (const x of [id, 'Stop.']) expect(String(told.detail)).toContain(`"${x}"`);
       const logged = spies.flatMap((s) => s.mock.calls);
       const line = logged.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : [])).at(-1)!;
-      expect(line.tool_calls).toEqual([{ name: 'propose_change', outcome: 'refused', refusal: 'unverified_person_words', words: { check: 'their_words', ids: [hashed(id), hashed('Stop.')] } }]);
-      expect(JSON.stringify(logged)).toContain(hashed('Stop.'));
+      expect(line.tool_calls).toEqual([expect.objectContaining({ name: 'propose_change', outcome: 'refused', refusal: 'does_not_compile' })]);
       for (const text of [id, 'rival bakery', 'Stop.']) expect(JSON.stringify(logged)).not.toContain(text);
       for (const s of spies) s.mockRestore();
     });

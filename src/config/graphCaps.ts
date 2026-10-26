@@ -56,6 +56,7 @@ export const GRAPH_MAX_EDGES = resolveCap(
   DEFAULT_MAX_EDGES
 );
 
-// A MODEL PROGRAM's stored graph: CEE's own compiler and simulator analyse it, never PLoT, so PLoT's 50/100 above does not bind it (W11).
-export const PROGRAM_GRAPH_MAX_NODES = 150;
-export const PROGRAM_GRAPH_MAX_EDGES = 300;
+// A MODEL PROGRAM's stored graph: CEE's own compiler and simulator analyse it, never PLoT, so PLoT's 50/100 above does not bind it.
+// Uncapped (W11 off the path, S1 strip, Paul 26 Oct): a Run's size is bounded by its admission limit instead (evaluate.ts A23).
+export const PROGRAM_GRAPH_MAX_NODES = Number.POSITIVE_INFINITY;
+export const PROGRAM_GRAPH_MAX_EDGES = Number.POSITIVE_INFINITY;
