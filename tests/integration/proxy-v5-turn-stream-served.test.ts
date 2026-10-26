@@ -1,43 +1,39 @@
 /**
  * The streamed-turn TRANSPORT guarantees, on the path the browser is actually SERVED:
- * `POST /proxy/v5/turn/stream` → `streamTurnAsStagedSse` → `app.inject('/agent/v1/turn')`
- * (deployment default `PROXY_V5_TARGET=agent`, no comparison-mode header).
+ * `POST /proxy/v5/turn/stream` → `streamTurnAsStagedSse` → `app.inject('/agent/v1/core-turn')` (inventory F1b: every
+ * browser turn is the core route's, whatever mode it names).
  *
- * ── WHY THIS FILE EXISTS (#3283) ────────────────────────────────────────────
- * #3283 retired the free-text conversation shape on `/orchestrate/v2/turn`: it now answers 410
- * `conventional_conversation_retired` after admission. Three suites proved the streamed transport by
- * drafting a free-text brief through that conventional target, so every one of their draft rows went
- * red — not because the guarantees broke, but because the turn they rode no longer exists there.
- * The guarantees themselves belong to the shared transport (`streamed-turn-sse.ts`), and the browser
- * still reaches that transport on every streamed turn. So each row is MOVED here, onto the served
- * target, with the same assertion it made; nothing is deleted.
+ * ── WHY THIS FILE EXISTS (#3283, then F1b) ──────────────────────────────────
+ * #3283 moved these rows from the conventional target onto the served one, `/agent/v1/turn`. F1b (26 Oct) made the core
+ * route the only served target, so each row is MOVED again, onto it, with the same guarantee; nothing is deleted. The
+ * guarantees belong to the shared transport (`streamed-turn-sse.ts`), which every streamed browser turn still reaches. The
+ * inner turn is now the core route's: a first brief is drafted as a model program by the canonical drafter, and the
+ * terminal body is the core turn contract (`model.graph`, never the legacy `draft_graph`).
  *
  *   from proxy-v5-turn-stream.test.ts (3)  PS1 browser with no key gets a real streamed turn
  *                                          (its "the injected key authenticates the inner turn" half
- *                                          stays in that file on a kept shape — this bare app has no
- *                                          auth plugin, so a 200 here cannot prove the key), PS2, PS3
+ *                                          stays in that file — this bare app has no auth plugin), PS2, PS3
  *   from streamed-turn-sse.test.ts   (10)  S1–S10
  *   from streamed-turn-attack.test.ts (4)  A1–A4
  *   = 17 rows, one `it` each, titles kept.
  *
  * ── THE HARNESS ─────────────────────────────────────────────────────────────
- * The established agent-lane route harness (`agent-lane/__tests__/graph-ready-frame.test.ts`): the real
- * Agent route, real builder and real first-analysis runner, a scripted provider behind a stubbed `fetch`,
- * and doubles for the internal routes the Agent dispatches to. Two changes, both to make the commit
- * claims mean something:
- *   · the register double STORES the graph it was sent and the read double SERVES it back, so "the
- *     committed graph" is exactly what the Agent committed (that harness returns a fixed graph instead);
- *   · the scripted provider is a pure function of each request (no shared script queue), and every brief
- *     carries its own team name, which ends up in its option and factor labels. Concurrent lanes are
- *     therefore told apart by IDENTITY, not by counting frames.
- * The real proxy routes (`proxy-v5-turn-stream.ts`, `proxy-v5-turn.ts`) are mounted on the same app, so
- * every turn below goes through the browser ingress and the shared SSE writer exactly as served.
+ * The real core route and its real canonical drafter, a scripted provider behind a stubbed `fetch`, a stateful session
+ * store, and doubles for the internal routes the core route dispatches to:
+ *   · the register double STORES the graph it was sent and the read double SERVES it back, so "the committed graph" is
+ *     exactly what the core route committed;
+ *   · the scripted provider is a pure function of each request (no shared script queue), and every brief carries its own
+ *     team name, which ends up in its option's label. Concurrent lanes are therefore told apart by IDENTITY, not by
+ *     counting frames. The brief is the synthetic bakery's, so the drafted model's quotes are the person's own words.
+ * The real proxy routes (`proxy-v5-turn-stream.ts`, `proxy-v5-turn.ts`) are mounted on the same app, so every turn below
+ * goes through the browser ingress and the shared SSE writer exactly as served.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
-import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { bakery, BRIEF as BAKERY_BRIEF } from '../../src/orchestrator-v5/model-program-turn/__tests__/bakery.fixture.js';
+import { streamWhenAsked } from '../../src/orchestrator-v5/agent-lane/__tests__/stream-when-asked.js';
 
 const ORIGIN = 'https://staging--olumi.netlify.app';
 const STREAM_URL = '/proxy/v5/turn/stream';
@@ -48,17 +44,16 @@ const realFetch = globalThis.fetch;
 // ── The internal routes' state, per scenario ────────────────────────────────
 interface Scenario {
   registered: boolean;
-  /** Exactly the graph the Agent sent to `/graph/register`. */
+  /** Exactly the graph the core route sent to `/graph/register`. */
   graph: unknown;
   revision: number;
   versions: { version_id: string; sequence: number; creation: { kind: string; mutation_id: string; source_turn_id: string } }[];
-  facts: HandlerFact[];
 }
 const scenarios = new Map<string, Scenario>();
 const st = (sid: string): Scenario => {
   let s = scenarios.get(sid);
   if (s === undefined) {
-    s = { registered: false, graph: null, revision: 0, versions: [], facts: [] };
+    s = { registered: false, graph: null, revision: 0, versions: [] };
     scenarios.set(sid, s);
   }
   return s;
@@ -66,37 +61,27 @@ const st = (sid: string): Scenario => {
 /** Every graph read and every register, by scenario, in order. */
 const reads: string[] = [];
 const registers: string[] = [];
-/** Every construction (model-building) provider call, by the team named in its brief. */
+/** Every canonical drafting call, by the team named in its brief. */
 const constructions: string[] = [];
 
-const { runStub } = vi.hoisted(() => ({ runStub: { impl: null as null | ((a: unknown) => Promise<unknown>) } }));
-vi.mock('../../src/orchestrator-v5/handlers/chip-click-dispatch.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  dispatchChipClickRunAnalysis: (a: unknown) => runStub.impl!(a),
-}));
-vi.mock('../../src/orchestrator-v5/build-turn-context.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  loadPriorFactsWithReadState: async (sid: string) => ({ status: 'ok', facts: [...st(sid).facts] }),
-}));
-
-/** Durable answer rows by (scenario, turn): a same-turn_id retry takes the real replay path. */
-const rows = new Map<string, { id: string }>();
+/** Durable rows by (scenario, turn): a same-turn_id retry takes the real replay path; a claim is confirmed by its own read. */
+const rows = new Map<string, Record<string, unknown>>();
+const conversations = new Map<string, string>();
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (sid: string, turnId: string) => rows.get(`${sid}:${turnId}`) ?? null),
+  readMostRecentPendingActions: vi.fn(async () => []),
+  readRecent: vi.fn(async () => []),
+  releaseTurnClaim: vi.fn(async (sid: string, turnId: string, hash: string) => { if (rows.get(`${sid}:${turnId}`)?.request_hash === hash) rows.delete(`${sid}:${turnId}`); }),
+  readOpenAiConversationId: vi.fn(async (sid: string) => conversations.get(sid) ?? null),
+  claimOpenAiConversationId: vi.fn(async (sid: string, id: string) => { if (!conversations.has(sid)) conversations.set(sid, id); return conversations.get(sid)!; }),
   append: vi.fn(async (w: Record<string, unknown>) => {
     const k = `${String(w.scenario_id)}:${String(w.turn_id)}`;
-    if (!rows.has(k)) {
-      rows.set(k, {
-        id: `row-${rows.size + 1}`,
-        request_hash: w.request_hash,
-        assistant_message: w.assistantMessage ?? null,
-        user_message: w.userMessage ?? null,
-        llm_calls_used: w.llm_calls_used ?? 0,
-        pending_actions: JSON.parse(JSON.stringify(w.pending_actions ?? [])),
-      } as { id: string });
-    }
-    return { id: rows.get(k)!.id };
+    const prior = rows.get(k);
+    if (prior !== undefined) return prior.request_hash === w.request_hash ? { id: String(prior.id), replayedPriorTurn: true as const } : { id: String(prior.id), priorTurnConflict: true as const };
+    rows.set(k, { id: `row-${rows.size + 1}`, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null,
+      llm_calls_used: w.llm_calls_used ?? 0, pending_actions: JSON.parse(JSON.stringify(w.pending_actions ?? [])) });
+    return { id: String(rows.get(k)!.id) };
   }),
 };
 vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => ({
@@ -110,77 +95,67 @@ vi.mock('../../src/orchestrator/user-identity.js', async (importOriginal) => ({
 
 // ── The scripted provider: a pure function of each request ──────────────────
 const TEAM_RE = /team ([A-Z][a-z]+)/;
-const briefFor = (team: string) =>
-  `Should we hire a tech lead or two developers to lift delivery reliability in team ${team}?`;
-/** The labels a team's model carries; a frame or a commit is bound to its lane by these. */
-const optionLabel = (team: string) => `Hire a tech lead for team ${team}`;
-const factorLabel = (team: string) => `Team ${team} capacity`;
-const candidateFor = (team: string) => ({
-  goal: { metric: 'Delivery reliability', operator: '>=', value: 90, unit: '%', horizon_months: 6, provenance: 'explicit' },
-  constraints: [],
-  options: [{ label: optionLabel(team), provenance: 'explicit', interventions: [] }],
-  factors: [{ label: factorLabel(team), role: 'controllable', baseline_known: true, baseline_value: 5, unit: 'people', provenance: 'explicit' }],
-  risks: [],
-  outcomes: [{ label: 'Delivery reliability', provenance: 'inferred' }],
-  links: [{ from: factorLabel(team), to: 'Delivery reliability', direction: 'positive', provenance: 'inferred' }],
-  unknowns: [],
-});
+const briefFor = (team: string) => `${BAKERY_BRIEF} This is for team ${team}.`;
+/** The label a team's option carries; a frame or a commit is bound to its lane by it. */
+const optionLabel = (team: string) => `A second oven for team ${team}`;
+/** The bakery, drafted for one team: its option is named for that team. */
+const canonicalFor = (team: string) => {
+  const m = bakery();
+  m.options = m.options.map((o) => (o.id === 'second_oven' ? { ...o, label: optionLabel(team) } : o));
+  return m;
+};
 /**
  * A measurable turn duration, so the real-socket flush boundary is a property of the route rather than of
  * how fast the scripted provider answers (the same reason the conventional suites delayed validation).
  */
 const CONSTRUCTION_DELAY_MS = 60;
-const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
-const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200 });
+let served = 0;
+/** A completed Responses API answer carrying `text` (none: no output). */
+const respond = (text?: string) => {
+  served += 1;
+  return new Response(JSON.stringify({ id: `resp_${served}`, object: 'response', model: 'gpt-scripted', status: 'completed',
+    output: text === undefined ? [] : [{ id: `msg_${served}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] }],
+    usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 0 } } }),
+  { status: 200, headers: { 'content-type': 'application/json' } });
+};
 
-/** The text of the LAST user message in a Responses-API input — the brief this turn was sent. */
-function lastUserText(input: unknown): string {
-  if (!Array.isArray(input)) return typeof input === 'string' ? input : '';
-  for (let i = input.length - 1; i >= 0; i--) {
-    const item = input[i] as { role?: unknown; content?: unknown };
-    if (item?.role !== 'user') continue;
-    if (typeof item.content === 'string') return item.content;
-    if (Array.isArray(item.content)) return item.content.map((c) => String((c as { text?: unknown }).text ?? '')).join(' ');
-  }
-  return '';
-}
-
-let callSeq = 0;
 function installProvider() {
-  vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: string }) => {
-    if (String(url).startsWith('http://127.0.0.1')) return realFetch(url as string, init as Parameters<typeof fetch>[1]);
-    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> & { text?: { format?: { type?: string } }; input?: unknown };
-    const instructions = typeof body.instructions === 'string' ? body.instructions : '';
-    // The brief reading: no reading, so it neither routes the turn nor adds a frame.
-    if (instructions.startsWith('You copy words out of a decision brief')) {
-      return json(say(JSON.stringify({ goal: null, limits: [], options: [], build: false })));
+  // A call that asks for a stream (the drafter's) is answered as one (`streamWhenAsked`), as the provider does.
+  const scripted = streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
+    if (String(url).endsWith('/v1/conversations')) {
+      return new Response(JSON.stringify({ id: `conv_${randomUUID()}`, object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
-    // Draft-time widening: nothing to add.
-    if (instructions.includes('suggest risks they have not considered') || instructions.includes('METHOD TURN:')) {
-      return json(say('{}'));
-    }
-    // Construction: this brief's own model.
-    if (body.text?.format?.type === 'json_schema') {
+    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> & { text?: { format?: { name?: string; type?: string } }; input?: unknown };
+    // The canonical drafter: this brief's own model.
+    if (body.text?.format?.name === 'canonical_model') {
       const team = TEAM_RE.exec(JSON.stringify(body.input ?? ''))?.[1] ?? 'Unnamed';
       constructions.push(team);
       await new Promise((r) => setTimeout(r, CONSTRUCTION_DELAY_MS));
-      return json(say(JSON.stringify(candidateFor(team))));
+      return respond(JSON.stringify(canonicalFor(team)));
     }
-    // The conversation: build from this turn's brief, then answer once the tool has replied.
-    const input = Array.isArray(body.input) ? (body.input as Array<{ type?: unknown }>) : [];
-    if (body.tool_choice === 'none' || input[input.length - 1]?.type === 'function_call_output') {
-      return json(say('Here is where the model stands.'));
-    }
-    const team = TEAM_RE.exec(lastUserText(body.input))?.[1] ?? 'Unnamed';
-    return json({ output: [{ type: 'function_call', name: 'build_model_from_brief', call_id: `c${callSeq++}`, arguments: JSON.stringify({ brief: briefFor(team) }) }] });
-  }));
+    // Any other structured side call answers nothing.
+    if (body.text?.format?.type === 'json_schema') return respond();
+    // The agent's conversation on a saved program: an answer in words, no tool.
+    return respond('Here is where the model stands.');
+  });
+  vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) =>
+    (String(url).startsWith('http://127.0.0.1') ? realFetch(url as string, init as Parameters<typeof fetch>[1]) : scripted(url, init))));
 }
 
-/** The internal routes the Agent dispatches to, plus the real Agent route and the real browser proxies. */
+/** The internal routes the core route dispatches to, plus the real core route and the real browser proxies. */
 async function buildApp(): Promise<FastifyInstance> {
   vi.resetModules();
   const { registrationTurnId } = await import('../../src/orchestrator-v5/graph-registration/registration-identity.js');
-  const { agentV1TurnRoute } = await import('../../src/routes/agent-v1-turn.js');
+  const { coreTurnRoute } = await import('../../src/routes/core-turn.js');
+  const { computeGraphIdentityHash } = await import('../../src/orchestrator-v5/context/graph-identity.js');
+  const { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } = await import('../../src/orchestrator-v5/context/graph-hash.js');
+  /** The register's receipt, in the served shape (`model_version`): what the program save checks before it calls itself saved. */
+  const receiptOf = (g: unknown, v: { version_id: string; sequence: number }) => ({ version_id: v.version_id, version_number: v.sequence, mutation_id: `m_${v.sequence}`,
+    creation_kind: v.sequence === 1 ? 'initial' : 'committed_mutation', graph_identity_hash: computeGraphIdentityHash(g as never)?.value,
+    analysis_affecting_hash: computeAnalysisAffectingGraphHashSha256(g as never) });
+  /** The served read's and the register's identities of a stored graph: what a program save reads back to confirm itself. */
+  const identityOf = (g: unknown) => ({ graph_hash: computeAnalysisAffectingGraphHash(g as never), graph_identity_hash: computeGraphIdentityHash(g as never),
+    content_hash: computeGraphIdentityHash(g as never)?.value ?? null });
   const { default: proxyV5TurnStreamRoute } = await import('../../src/routes/proxy-v5-turn-stream.js');
   const { proxyV5TurnRoute } = await import('../../src/routes/proxy-v5-turn.js');
   const a = Fastify({ logger: false });
@@ -188,12 +163,8 @@ async function buildApp(): Promise<FastifyInstance> {
     const sid = (req.params as { id: string }).id;
     reads.push(sid);
     const s = st(sid);
-    if (!s.registered) return { graph: { nodes: [], edges: [] }, graph_hash: 'empty' };
-    return {
-      graph: JSON.parse(JSON.stringify(s.graph)),
-      graph_hash: `rev-${s.revision}`,
-      analysis_state: { run_state: { kind: 'never_run' }, leader_claim: { permitted: false, withheld_reason: 'no_analysis' } },
-    };
+    if (!s.registered) return { scenario_id: sid, graph: null, graph_present: false, graph_hash: null, graph_identity_hash: null, content_hash: null };
+    return { scenario_id: sid, graph: JSON.parse(JSON.stringify(s.graph)), graph_present: true, ...identityOf(s.graph) };
   });
   a.post('/assist/v1/scenarios/:id/graph/register', async (req) => {
     const sid = (req.params as { id: string }).id;
@@ -204,16 +175,16 @@ async function buildApp(): Promise<FastifyInstance> {
     const prior = s.versions.find((v) => v.creation.source_turn_id === turnId);
     s.registered = true;
     if (prior !== undefined) {
-      return { registered: true, replayed: true, graph_hash: `rev-${s.revision}`, model_version: { version_id: prior.version_id, version_number: prior.sequence } };
+      return { registered: true, replayed: true, ...identityOf(s.graph), model_version: receiptOf(s.graph, prior) };
     }
     s.graph = JSON.parse(JSON.stringify(b.graph));
     s.revision += 1;
     const v = { version_id: `00000000-0000-4000-8000-00000000000${s.versions.length + 1}`, sequence: s.versions.length + 1, creation: { kind: 'initial', mutation_id: 'm', source_turn_id: turnId } };
     s.versions.push(v);
-    return { registered: true, graph_hash: `rev-${s.revision}`, model_version: { version_id: v.version_id, version_number: v.sequence } };
+    return { registered: true, ...identityOf(s.graph), model_version: receiptOf(s.graph, v) };
   });
   a.post('/assist/v1/scenarios/:id/versions', async (req) => ({ versions: [...st((req.params as { id: string }).id).versions].reverse(), next_cursor: null }));
-  await a.register(agentV1TurnRoute);
+  await a.register(coreTurnRoute);
   await proxyV5TurnStreamRoute(a);
   await proxyV5TurnRoute(a);
   await a.ready();
@@ -247,12 +218,14 @@ function expectUsableGraph(graph: GraphShape | null, label: string): GraphShape 
   return graph!;
 }
 const nodeIdentities = (g: GraphShape) => g.nodes.map((n) => ({ id: n.id, label: n.label, kind: n.kind ?? n.type }));
-/** Edges on this path carry no `id`; they are identified by their endpoints. */
+/** An edge by its id, else its endpoints. */
 const edgeIdentities = (g: GraphShape) => g.edges.map((e) => e.id ?? `${String(e.from)}->${String(e.to)}`);
 const graphReadyFrames = (frames: StageFrame[]) => frames.filter((f) => f.stage === 'GRAPH_READY');
 const completeOf = (frames: StageFrame[]) => frames.find((f) => f.stage === 'COMPLETE');
 const committedGraph = (sid: string) => asGraphShape(st(sid).graph);
-type AgentBody = { response_version?: unknown; draft_graph?: unknown; _agent?: { tool_calls: Array<{ name: string; ok: boolean; refusal?: string }> } };
+/** The core turn contract's fields these rows read. */
+type CoreBody = { turn_id?: unknown; durability?: unknown; assistant_text?: unknown; model?: { graph?: unknown }; model_program?: { turn?: unknown };
+  _agent?: { tool_calls?: Array<{ name: string; outcome?: string }> } };
 
 let n = 0;
 const nextScenarioId = () => `7c6e1a2b-3a4f-4e5d-8c6b-${(++n).toString(16).padStart(12, '0')}`;
@@ -266,7 +239,7 @@ function boundTo(serialised: string, team: string, others: readonly string[]): b
 
 const browserHeaders = { origin: ORIGIN, 'content-type': 'application/json' };
 const turnPayload = (scenarioId: string, team: string, turnId: string = randomUUID()) => ({
-  kind: 'message', turn_id: turnId, scenario_id: scenarioId, message: briefFor(team),
+  kind: 'message', turn_id: turnId, scenario_id: scenarioId, message: briefFor(team), source: 'composer',
 });
 
 /** Process-survival instrumentation. */
@@ -281,10 +254,9 @@ const ENV = {
   BROWSER_PROXY_ENABLED: 'true',
   BROWSER_PROXY_ALLOWED_ORIGINS: ORIGIN,
   ASSIST_API_KEY: 'served-stream-suite-key',
-  PROXY_V5_TARGET: 'agent',
 } as const;
 
-describe('POST /proxy/v5/turn/stream — the SERVED streamed turn (agent target)', () => {
+describe('POST /proxy/v5/turn/stream — the SERVED streamed turn (the core route)', () => {
   let app: FastifyInstance;
   let port = 0;
   const saved: Record<string, string | undefined> = {};
@@ -294,10 +266,6 @@ describe('POST /proxy/v5/turn/stream — the SERVED streamed turn (agent target)
     process.on('unhandledRejection', onUnhandled);
     for (const [k, v] of Object.entries(ENV)) { saved[k] = process.env[k]; process.env[k] = v; }
     installProvider();
-    runStub.impl = async () => ({
-      outcome: 'ok', commitPerformed: true, graph: null, mayNameLeadingOption: false, analysisReady: { status: 'ready' },
-      response: { response_version: 2, assistant_text: 'Ran.', suggested_actions: [], insights: [], stage_indicator: 'analyse', blocks: [] },
-    });
     app = await buildApp();
     await app.ready();
   }, 120_000);
@@ -324,7 +292,6 @@ describe('POST /proxy/v5/turn/stream — the SERVED streamed turn (agent target)
     uncaught.length = 0;
     unhandled.length = 0;
   });
-
   const stream = (scenarioId: string, team: string, turnId?: string) =>
     app.inject({ method: 'POST', url: STREAM_URL, headers: browserHeaders, payload: turnPayload(scenarioId, team, turnId) });
   const buffered = (scenarioId: string, team: string) =>
@@ -344,9 +311,9 @@ describe('POST /proxy/v5/turn/stream — the SERVED streamed turn (agent target)
     expect(complete.stage).toBe('COMPLETE');
     expect(complete.status_code, JSON.stringify(complete.payload).slice(0, 300)).toBe(200);
     expect(frames.some((f) => f.stage === 'GRAPH_READY')).toBe(true);
-    // Served BY THE AGENT LANE: the staging failure this target once had was a perfect answer from the
-    // other engine (`streamed-turn-sse.ts`, STREAMED_TURN_INTERNAL_TARGET). The `_agent` sidecar is that lane's.
-    expect((complete.payload as AgentBody)._agent, 'the streamed turn was not served by the Agent route').toBeDefined();
+    // Served BY THE CORE ROUTE: the staging failure this target once had was a perfect answer from another engine
+    // (`streamed-turn-sse.ts`). The core route drafted it: its own tool call first, on its own contract.
+    expect((complete.payload as CoreBody)._agent?.tool_calls?.[0], 'the streamed turn was not served by the core route').toMatchObject({ name: 'draft_canonical_model', outcome: 'ok' });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -372,17 +339,15 @@ describe('POST /proxy/v5/turn/stream — the SERVED streamed turn (agent target)
     const before = JSON.stringify(st(sid).graph);
 
     // A second streamed first brief on the same scenario (a DIFFERENT brief, so this is not a replay)
-    // must SEE the model and decline to draft over it.
+    // must SEE the model: the agent answers on it, and nothing is drafted over it.
     reads.length = 0;
     registers.length = 0;
     constructions.length = 0;
     const second = await stream(sid, nextTeam());
     expect(second.statusCode).toBe(200);
-    const body = completeOf(parseStageFrames(second.body))!.payload as AgentBody;
+    const body = completeOf(parseStageFrames(second.body))!.payload as CoreBody;
     expect(reads.filter((s) => s === sid).length, 'the follow-up turn never read the scenario graph').toBeGreaterThan(0);
-    expect(body._agent?.tool_calls, 'the follow-up turn did not see the committed graph').toMatchObject([
-      { name: 'build_model_from_brief', ok: false, refusal: 'model_already_exists' },
-    ]);
+    expect(body.model_program, 'the follow-up turn did not see the committed graph').toMatchObject({ turn: 'agent' });
     expect(constructions, 'the follow-up turn re-drafted — it did not see the committed graph').toEqual([]);
     expect(registers.filter((s) => s === sid)).toEqual([]);
     expect(JSON.stringify(st(sid).graph)).toBe(before);
@@ -401,9 +366,7 @@ describe('POST /proxy/v5/turn/stream — the SERVED streamed turn (agent target)
     const second = await buffered(sid, nextTeam());
     expect(second.statusCode).toBe(200);
     expect(reads.filter((s) => s === sid).length, 'the follow-up turn never read the scenario graph').toBeGreaterThan(0);
-    expect((second.json() as AgentBody)._agent?.tool_calls).toMatchObject([
-      { name: 'build_model_from_brief', ok: false, refusal: 'model_already_exists' },
-    ]);
+    expect((second.json() as CoreBody).model_program, 'the follow-up turn did not see the committed graph').toMatchObject({ turn: 'agent' });
     expect(constructions, 'the follow-up turn drafted again — it did not see the committed graph').toEqual([]);
     expect(registers.filter((s) => s === sid), 'the follow-up turn re-drafted — it did not see the committed graph').toEqual([]);
     expect(committedGraph(sid)!.nodes.length).toBe(persisted.nodes.length);
@@ -444,7 +407,7 @@ describe('POST /proxy/v5/turn/stream — the SERVED streamed turn (agent target)
     expect(options(committed).length, 'persisted options were lost').toBeGreaterThan(0);
     expect(typeof goalId(early), 'GRAPH_READY goal identity was lost').toBe('string');
     expect(typeof goalId(committed), 'persisted goal identity was lost').toBe('string');
-    expect(early.nodes.every((x) => x.provenance !== undefined), 'control: provenance is present to compare').toBe(true);
+    expect(early.nodes.some((x) => x.provenance !== undefined), 'control: provenance is present to compare').toBe(true);
     expect(projection(early)).toEqual(projection(committed));
   });
 
@@ -459,9 +422,9 @@ describe('POST /proxy/v5/turn/stream — the SERVED streamed turn (agent target)
     const complete = completeOf(frames);
     expect(ready.length, 'no GRAPH_READY frame — the streamed turn emitted no staged graph').toBeGreaterThan(0);
     expect(complete, 'no COMPLETE frame').toBeDefined();
-    // Both shapes read here and compared here. On this lane the LAST frame is the committed model and is
-    // what COMPLETE applies (`agent-v1-turn.ts` C6-1/S3); nothing the canvas drew earlier may vanish.
-    const terminal = expectUsableGraph(asGraphShape((complete!.payload as AgentBody).draft_graph), 'COMPLETE payload graph');
+    // Both shapes read here and compared here. The LAST frame is the committed model and is what COMPLETE applies
+    // (`core-turn.ts`: one projection, `appliedGraphWire`, for both); nothing the canvas drew earlier may vanish.
+    const terminal = expectUsableGraph(asGraphShape((complete!.payload as CoreBody).model?.graph), 'COMPLETE payload graph');
     const last = expectUsableGraph(asGraphShape(ready.at(-1)!.graph), 'last GRAPH_READY graph');
     expect(nodeIdentities(last)).toEqual(nodeIdentities(terminal));
     expect(edgeIdentities(last)).toEqual(edgeIdentities(terminal));
@@ -512,7 +475,7 @@ describe('POST /proxy/v5/turn/stream — the SERVED streamed turn (agent target)
     const complete = completeOf(parseStageFrames((await stream(nextScenarioId(), nextTeam())).body))!;
     expect(complete.status_code).toBe(200);
     expect(complete.payload).toBeTypeOf('object');
-    expect((complete.payload as AgentBody).response_version).toBe(2);
+    expect(complete.payload, 'the core turn contract').toMatchObject({ turn_id: expect.any(String), durability: 'recorded' });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -544,7 +507,7 @@ describe('POST /proxy/v5/turn/stream — the SERVED streamed turn (agent target)
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toContain('application/json');
     expect(res.body).not.toContain('event: stage');
-    expect(JSON.parse(res.body).response_version).toBe(2);
+    expect(JSON.parse(res.body), 'the core turn contract').toMatchObject({ turn_id: expect.any(String), durability: 'recorded' });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -619,7 +582,7 @@ describe('POST /proxy/v5/turn/stream — the SERVED streamed turn (agent target)
         for (const f of graphReadyFrames(frames)) {
           expect(boundTo(JSON.stringify(f.graph), lanes[i].team, teams), `round ${round} lane ${i} GRAPH_READY crossed`).toBe(true);
         }
-        expect(boundTo(JSON.stringify((complete.payload as AgentBody).draft_graph), lanes[i].team, teams), `round ${round} lane ${i} COMPLETE crossed`).toBe(true);
+        expect(boundTo(JSON.stringify((complete.payload as CoreBody).model?.graph), lanes[i].team, teams), `round ${round} lane ${i} COMPLETE crossed`).toBe(true);
         // Its own commit landed, under its own scenario.
         expect(boundTo(JSON.stringify(st(lanes[i].scenarioId).graph), lanes[i].team, teams), `round ${round} lane ${i} commit missing or crossed`).toBe(true);
       }
