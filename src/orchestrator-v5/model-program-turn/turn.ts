@@ -146,7 +146,7 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
   const reading = kind === 'draft' && write.status === 'saved' && write.after.identity !== null && input.proposals !== undefined ? (() => {
     const v = readingOf(next.program.canonical, { words: next.program.person_words, approver: input.userId ?? null });
     if (!v.ok) return { call: { name: CONFIRM_READING, ok: false, outcome: 'refused', refusal: v.code, mutated: false }, result: { ok: false, mutated: false, refusal: v.code, ids: v.ids } };
-    const p = holdProgramCard(input.proposals!, { scenarioId: input.scenarioId, userId: input.userId ?? null, graphHash: write.after.graphHash, identity: write.after.identity! },
+    const p = holdProgramCard(input.proposals!, { scenarioId: input.scenarioId, userId: input.userId ?? null, graphHash: write.after.graphHash, identity: write.after.identity!, base: savedProgramOf(write.after.graph) ?? next.program },
       { label: READING_LABEL, basis: 'Olumi’s reading of the brief, for the person to confirm or correct.', program: withNewRun({ ...next.program, canonical: v.model }).program, changes: v.changes, reading: true });
     return { call: { name: CONFIRM_READING, ok: true, outcome: 'ok', mutated: false, proposal_id: p.proposal_id }, result: { ok: true, mutated: false, proposal_id: p.proposal_id, public_label: p.public_label } };
   })() : undefined;
