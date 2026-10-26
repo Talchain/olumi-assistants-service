@@ -20,7 +20,7 @@ import type { ExecutableModel } from '../model-program/executable.js';
 import { costOf, simulate } from '../model-program/simulate/simulate.js';
 import type { SimResult } from '../model-program/simulate/result.js';
 import {
-  driverSweepOperations, needsAnswer, presentAnalysisView, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentQuantity,
+  driverSweepOperations, needsAnswer, presentAnalysisView, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentPremise, type PresentQuantity,
   type PresentedAnalysisView,
 } from '../model-program/present/present.js';
 
@@ -63,8 +63,18 @@ export type WaitingView = {
   readonly goal_chance: { readonly notes: readonly string[]; readonly waits_on?: readonly PresentBlocker[] };
 };
 
+/** R8, ONE rule (default deny): the records (quantity, relation, link, goal, limit, premise) accepted and in their words;
+ * `confirmed`: the person's. A goal whose measure is Olumi's suggestion (`measure_by`) is Olumi's. */
+type Records = { readonly accepted: ReadonlySet<string>; readonly confirmed: ReadonlySet<string> };
+function recordsOf(m: CanonicalModelT, compiled: CompileResult): Records {
+  const unverified = new Set(compiled.unverified.map((u) => u.id)), links = m.relations.flatMap((r) => (r.form === 'effect' ? r.terms.map((t) => ({ ...t, id: `${r.id}:${t.driver}` })) : []));
+  const goals = m.goals.map((g) => (g.measure?.measure_by === 'olumi' ? { ...g, author: 'olumi' as const } : g));
+  const all = [...m.quantities, ...m.relations, ...links, ...goals, ...m.limits, ...m.assumptions, ...m.conditions], ok = all.filter((r) => r.approval === 'approved' && !unverified.has(r.id));
+  return { accepted: new Set(ok.map((r) => r.id)), confirmed: new Set(ok.filter((r) => r.author === 'person').map((r) => r.id)) };
+}
+
 /** Labels and authors for every quantity the executable model reads, including the ids the compiler adds. */
-function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: ExecutableModel): Record<string, PresentQuantity> {
+function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: ExecutableModel, records: Records): Record<string, PresentQuantity> {
   const m = normalise(model);
   const unverified = new Set(compiled.unverified.map((u) => u.id));
   // A quote not found in the person's words is never shown as theirs: S2 says "whose source is not confirmed" for it.
@@ -72,7 +82,8 @@ function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: Execut
   const rel = new Map(m.relations.map((r) => [r.defines, r] as const));
   const own = new Map(m.quantities.map((q) => {
     const r = rel.get(q.id);
-    return [q.id, { label: q.label, author: who(q.author, q.id), ...(r !== undefined ? { relation_author: who(r.author, r.id) } : {}), ...(isApproximate(q) ? { approximate: { quote: q.quote ?? String(q.value) } } : {}) }] as const;
+    const behind = r === undefined ? [q.id] : [r.id, ...(r.form === 'effect' ? r.terms.map((t) => `${r.id}:${t.driver}`) : [])];
+    return [q.id, { label: q.label, author: who(q.author, q.id), confirmed: behind.every((id) => records.confirmed.has(id)), accepted: behind.every((id) => records.accepted.has(id)), ...(r !== undefined ? { relation_author: who(r.author, r.id) } : {}), ...(isApproximate(q) ? { approximate: { quote: q.quote ?? String(q.value) } } : {}) }] as const;
   }));
   const goals = new Map(m.goals.map((g) => [g.id, g] as const));
   const out: Record<string, PresentQuantity> = {};
@@ -85,7 +96,7 @@ function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: Execut
     const g = goals.get(root ?? '');
     if (g !== undefined && (suffix === 'change' || suffix === 'change_rel')) {
       const of = own.get(g.measure?.quantity ?? '')?.label ?? g.label;
-      out[q.id] = { label: suffix === 'change' ? `Change in ${of}` : `Relative change in ${of}`, author: who(g.author, g.id), relation_author: who(g.author, g.id) };
+      out[q.id] = { label: suffix === 'change' ? `Change in ${of}` : `Relative change in ${of}`, author: who(g.author, g.id), relation_author: who(g.author, g.id), confirmed: records.confirmed.has(g.id), accepted: records.accepted.has(g.id) };
       continue;
     }
     const base = own.get(root ?? '');
@@ -101,10 +112,16 @@ function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: Execut
 export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourceText: string; readonly seed: number; readonly draws?: number; readonly brief?: string }): Evaluation {
   const compiled = compile(model, { sourceText: opts.sourceText });
   const projection = project(model, compiled, opts.brief !== undefined ? { brief: opts.brief } : {});
-  const labelOf = new Map(normalise(model).goals.map((g) => [g.id, g.label] as const));
+  const read = normalise(model);
+  const labelOf = new Map(read.goals.map((g) => [g.id, g.label] as const));
+  const records = recordsOf(read, compiled), confirmed = records.confirmed;
+  // R8: the compiler's premises for each goal (`rests_on`), in their own words, whose they are and whether confirmed.
+  const premiseOf = new Map<string, PresentPremise>([...read.assumptions.map((a) => [a.id, { id: a.id, text: a.text, author: a.author, kind: 'assumption' as const, confirmed: confirmed.has(a.id) }] as const),
+    ...read.conditions.map((c) => [c.id, { id: c.id, text: c.text, author: c.author, kind: 'condition' as const, confirmed: confirmed.has(c.id) }] as const)]);
   // Aims with no measure yet are left out of the chance (said in `leaves_out`), never a goal that waits.
   const goals: PresentGoal[] = compiled.perGoal.filter((p) => !p.needs_measure)
-    .map((p) => ({ goal_id: p.goal_id, label: labelOf.get(p.goal_id) ?? p.goal_id, status: p.status, reasons: p.reasons, asks: p.asks }));
+    .map((p) => ({ goal_id: p.goal_id, label: labelOf.get(p.goal_id) ?? p.goal_id, status: p.status, reasons: p.reasons, asks: p.asks,
+      rests_on: p.rests_on.flatMap((id) => (premiseOf.has(id) ? [premiseOf.get(id)!] : [])) }));
   const blockers = blockersOf(model, compiled.blockers);
   const asks: PresentAsk[] = normalise(model).quantities.filter((q) => blockers.some((b) => b.answer?.quantity_id === q.id))
     .map((q) => ({ quantity_id: q.id, label: q.label, unit: q.unit }));
@@ -118,7 +135,12 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   if (!admitted.ok) return { compiled, sim: null, projection, view: waitingView(model, compiled, goals, blockers, tooLarge(x, admitted.over)) };
   const sim = simulate(x, { seed: opts.seed, draws });
   // A limit, option or risk left out of this run is said by S2's present itself (S1's `executable.withheld`, r3).
-  const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x), goals, asks, blockers, leaves_out,
+  // R8: each goal and limit is read with its own record and its window's figures (a structural one is nobody's).
+  const aims = Object.fromEntries([...read.goals, ...read.limits].map((a) => {
+    const behind = [a.id, ...[a.measure?.window?.periods, a.measure?.window?.origin_offset].filter((id): id is string => typeof id === 'string' && read.quantities.find((q) => q.id === id)?.author !== 'structure')];
+    return [a.id, { confirmed: behind.every((id) => records.confirmed.has(id)), accepted: behind.every((id) => records.accepted.has(id)) }] as const;
+  }));
+  const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x, records), goals, asks, blockers, leaves_out, aims,
     left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })), sweep: admitted.operations + driverSweepOperations(x, draws) <= MAX_OPERATIONS });
   return { compiled, sim, projection, view };
 }
