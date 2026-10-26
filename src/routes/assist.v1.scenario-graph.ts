@@ -20,6 +20,7 @@ import { computeAnalysisAffectingGraphHash } from "../orchestrator-v5/context/gr
 import { proposalRecord, proposalFieldsWire, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalIssuingRow } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { isProgramGraph, programReadOf, reopenProgram, unreadableWords } from "../orchestrator-v5/model-program-turn/program-store.js";
+import { programReadinessOf } from "../orchestrator-v5/model-program-turn/program-readiness.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
@@ -50,6 +51,23 @@ import { deriveDecisionContextGraphHash } from '../orchestrator-v5/build-turn-co
 
 /** Wire schema discriminator. Frozen — the UI lane builds against this. */
 export const SCENARIO_GRAPH_SCHEMA = "scenario_graph.v1" as const;
+
+type LegacyAnalysis = Awaited<ReturnType<typeof readScenarioAnalysis>>;
+type ProgramOrLegacyAnalysis = Omit<LegacyAnalysis, 'canonical_analysis_view'> & { readonly canonical_analysis_view?: LegacyAnalysis['canonical_analysis_view'] };
+
+/**
+ * A MODEL PROGRAM's analysis block on the read (inventory F3, PR-C): no state and no result from the legacy facts, an empty
+ * current read, and the program's own readiness. The same bytes the legacy reader's program answer gave, with none of it run.
+ */
+function programAnalysisRead(graph: unknown): ProgramOrLegacyAnalysis {
+  const ready = programReadinessOf(graph);
+  return {
+    analysis_state: null,
+    analysis_result: null,
+    current_read: { run_state: null, computed_against_hash: null, current_analysis_hash: null, result: null, figures: [],
+      ...(ready === undefined ? {} : { analysis_ready: ready }) },
+  };
+}
 
 /**
  * `scenarios.id` is a UUID column, so a non-UUID id cannot name an existing
@@ -436,7 +454,10 @@ export default async function route(app: FastifyInstance) {
       // It reads the SAME graph object this response returns, so the freshness
       // verdict cannot describe a different model than the one being delivered.
       // Never throws; on any failure both keys are `null` and the graph stands.
-      const analysis = await readScenarioAnalysis({
+      //
+      // A MODEL PROGRAM's analysis is its own (inventory F3, PR-C): its newest stored Run is served below from the program
+      // (`canonical_analysis_view`) and its readiness is `program-readiness.ts`'s, so the legacy analysis reader never runs on one.
+      const analysis: ProgramOrLegacyAnalysis = programGraph ? programAnalysisRead(graph) : await readScenarioAnalysis({
         scenarioId,
         graph: graphPresent ? graph : null,
         requestId,
@@ -454,7 +475,7 @@ export default async function route(app: FastifyInstance) {
       const program = programRead.kind === 'program' ? reopenProgram(graph) : undefined;
       // Compatibility projection reads the common canonical claim, never the
       // issue count. The pending actions remain explanatory data only.
-      const scopePermissions = claimPermissionsFrom(analysis.analysis_state, undefined);
+      const scopePermissions = programGraph ? undefined : claimPermissionsFrom(analysis.analysis_state, undefined);
 
       // ── 6. THE CONVERSATION, OPT-IN (DL lease #75 5907582591; Canvas 5907308286) ──
       //
@@ -546,7 +567,8 @@ export default async function route(app: FastifyInstance) {
        * Run and a reload keeps the marks. Recomputed from the durable receipts (`context/changed-since-run.ts`). Opt-in
        * with the conversation, so the Agent's own internal reads stay byte-identical; absent = could not answer.
        */
-      const changedSinceRun = conversationRequested && graphPresent ? await readChangedSinceRun(store, scenarioId,
+      // A program's Runs are its own and keep no item marks (a Run stores only its digest), so this never runs on one.
+      const changedSinceRun = conversationRequested && graphPresent && !programGraph ? await readChangedSinceRun(store, scenarioId,
         // The Run's own projection (CS-AN-2): the raw-bytes hash never equals `graph_hash_at_run` on a promoted graph.
         deriveDecisionContextGraphHash(graph)) : undefined;
 
@@ -647,7 +669,7 @@ export default async function route(app: FastifyInstance) {
         // questions).
         analysis_state: analysis.analysis_state,
         ...(scopeIssues.length > 0 ? { goal_scope_reconciliation: scopeIssues } : {}),
-        ...(scopePermissions.total_goal_claims_allowed === false ? {
+        ...(scopePermissions?.total_goal_claims_allowed === false ? {
           goal_scope_claim_permissions: { total_goal_claims_allowed: false, exploratory_work_allowed: true },
         } : {}),
         analysis_result: coreLane && analysis.analysis_result?.type === 'analysis_result'

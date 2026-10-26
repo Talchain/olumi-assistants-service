@@ -12,7 +12,7 @@ import { withScenarioRevision } from '../../../tests/utils/revision-store-double
 
 const SCENARIO = 'f1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c';
 
-const spies = vi.hoisted(() => ({ scope: vi.fn(), today: vi.fn(), admission: vi.fn(), egress: vi.fn(), offers: vi.fn() }));
+const spies = vi.hoisted(() => ({ scope: vi.fn(), today: vi.fn(), admission: vi.fn(), egress: vi.fn(), offers: vi.fn(), analysis: vi.fn(), claims: vi.fn(), changed: vi.fn() }));
 vi.mock('../../orchestrator-v5/compose/goal-scope-claim-input.js', async (load) => {
   const actual = await load<typeof import('../../orchestrator-v5/compose/goal-scope-claim-input.js')>();
   spies.scope.mockImplementation(actual.goalScopeClaimInput);
@@ -37,6 +37,22 @@ vi.mock('../../orchestrator-v5/agent-lane/answer-offers-reload.js', async (load)
   const actual = await load<typeof import('../../orchestrator-v5/agent-lane/answer-offers-reload.js')>();
   spies.offers.mockImplementation(actual.answerOffersForReload);
   return { ...actual, answerOffersForReload: spies.offers };
+});
+// PR-C: the legacy analysis reader, its claim permissions and the changed-since-Run marks.
+vi.mock('../scenario-graph-analysis-read.js', async (load) => {
+  const actual = await load<typeof import('../scenario-graph-analysis-read.js')>();
+  spies.analysis.mockImplementation(actual.readScenarioAnalysis);
+  return { ...actual, readScenarioAnalysis: spies.analysis };
+});
+vi.mock('../../orchestrator-v5/agent-lane/first-analysis.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/agent-lane/first-analysis.js')>();
+  spies.claims.mockImplementation(actual.claimPermissionsFrom);
+  return { ...actual, claimPermissionsFrom: spies.claims };
+});
+vi.mock('../../orchestrator-v5/context/changed-since-run.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/context/changed-since-run.js')>();
+  spies.changed.mockImplementation(actual.readChangedSinceRun);
+  return { ...actual, readChangedSinceRun: spies.changed };
 });
 vi.mock('../../config/index.js', async (load) => {
   const actual = await load<typeof import('../../config/index.js')>();
@@ -117,12 +133,18 @@ const internalRead = (graph: Rec) => read(graph, { fresh: true });
 /** The UI's reload: the conversation restored with the model. */
 const reload = (graph: Rec) => read(graph, { include_conversation_turns: true });
 
-describe('a program read runs none of the legacy read producers (inventory F3, PR-A)', () => {
+describe('a program read runs none of the legacy read producers (inventory F3, PR-A + PR-C)', () => {
   it('the internal read (every core turn, every save readback): no goal-scope reader, today-part notes or admission projection; the same readiness, admission and stored Run', async () => {
     const body = await internalRead(await storedProgram());
     expect(spies.scope).not.toHaveBeenCalled();
     expect(spies.today).not.toHaveBeenCalled();
     expect(spies.admission).not.toHaveBeenCalled();
+    // PR-C: nor the legacy analysis reader or its claim permissions; the program's readiness is served as its own.
+    expect(spies.analysis).not.toHaveBeenCalled();
+    expect(spies.claims).not.toHaveBeenCalled();
+    expect([body.analysis_state, body.analysis_result]).toEqual([null, null]);
+    expect(body.current_read).toEqual({ run_state: null, computed_against_hash: null, current_analysis_hash: null, figures: [],
+      analysis_ready: expect.objectContaining({ goal_node_id: 'more_loaves' }) });
     expect(body.analysis_admission).toBeNull();
     expect(body).not.toHaveProperty('goal_scope_reconciliation');
     expect(body).not.toHaveProperty('today_part_notes');
@@ -132,6 +154,8 @@ describe('a program read runs none of the legacy read producers (inventory F3, P
 
   it('CONTRAST: the SAME graph with no program still runs each of them on the internal read', async () => {
     await internalRead(withoutProgram(await storedProgram()));
+    expect(spies.analysis).toHaveBeenCalled();
+    expect(spies.claims).toHaveBeenCalled();
     expect(spies.scope).toHaveBeenCalled();
     expect(spies.today).toHaveBeenCalled();
     expect(spies.admission).toHaveBeenCalled();
@@ -141,6 +165,10 @@ describe('a program read runs none of the legacy read producers (inventory F3, P
     const body = await reload(await storedProgram());
     expect(spies.egress).not.toHaveBeenCalled();
     expect(spies.offers).not.toHaveBeenCalled();
+    // PR-C: no changed-since-Run marks (a program's Run keeps no item marks) and no legacy analysis reader.
+    expect(spies.changed).not.toHaveBeenCalled();
+    expect(spies.analysis).not.toHaveBeenCalled();
+    expect(body).not.toHaveProperty('changed_since_run');
     expect((body.conversation_turns as Rec[]).map((t) => t.assistant_message)).toEqual([SAID]);
   });
 
@@ -148,6 +176,8 @@ describe('a program read runs none of the legacy read producers (inventory F3, P
     const body = await reload(withoutProgram(await storedProgram()));
     expect(spies.egress).toHaveBeenCalled();
     expect(spies.offers).toHaveBeenCalledTimes(1);
+    expect(spies.changed).toHaveBeenCalledTimes(1);
+    expect(spies.analysis).toHaveBeenCalled();
     expect((body.conversation_turns as Rec[]).map((t) => t.assistant_message)).toEqual([SAID]);
   });
 });
