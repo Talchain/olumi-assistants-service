@@ -75,7 +75,9 @@ describe('present: the canonical analysis view from a simulated model', () => {
       m.periods = 5;
       const v = present(m, confirmedFigures(m));
       const horizon = `${row[reading]} from the start of this model${row.aggregation === 'sum' && reading === 'state' ? ', taking its level at the start of each month' : ''}`;
-      expect(v.goal_chance.targets.per_target[0].words).toBe(`‘x’ being at least £4 ${horizon}, in this model, on your figures`);
+      const words = `‘x’ being at least £4 ${horizon}`;
+      expect(v.goal_chance.chance_words).toBe(`chance of ${words}`);
+      expect(cell(v, 'hold').face).toContain(`${words}, in this model, on your figures`);
       expect(cell(v, 'hold').display).toBe(row.display);
       expect(JSON.stringify(v)).not.toContain('from now');
     }
