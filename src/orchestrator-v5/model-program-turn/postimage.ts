@@ -104,7 +104,7 @@ const noFigure = (v: Rec): boolean => v['value'] === null && v['low'] === null &
 const emptyUnknown = (v: Rec): boolean => v['status'] === 'unknown' && noFigure(v);
 const personAttributions = (v: unknown): Rec[] => (Array.isArray(v) ? v.flatMap(personAttributions)
   : isRec(v) ? [...(v['author'] === 'person' && 'quote' in v && !(v['quote'] === null && (v['status'] === 'asked' || emptyUnknown(v))) ? [v] : []), ...Object.values(v).flatMap(personAttributions)] : []);
-const withoutHost = (v: unknown): unknown => (Array.isArray(v) ? v.map(withoutHost)
+export const withoutHost = (v: unknown): unknown => (Array.isArray(v) ? v.map(withoutHost)
   : isRec(v) ? Object.fromEntries(Object.entries(v).filter(([k]) => !HOST_FIELDS.has(k)).map(([k, x]) => [k, withoutHost(x)])) : v);
 /** The host's own fields, set all the way down a record: its approval, and who approved it. Who authored it is unchanged. */
 const hostSet = (v: unknown, approval: 'proposed' | 'approved', by: string | null): unknown => (Array.isArray(v) ? v.map((x) => hostSet(x, approval, by))

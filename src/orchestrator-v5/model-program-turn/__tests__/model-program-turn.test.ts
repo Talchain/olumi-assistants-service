@@ -2402,6 +2402,12 @@ describe('the model-program turn on the real core route', () => {
     const until = 'We count until the oven is paid for.';
     replies = [savedWith(() => {})]; // their 8 weeks, not returned: never their new words on the old figure
     expect(await ask([answer({ id: 'weeks_counted', quote: until })], ctx(until))).toEqual(unread('weeks_counted'));
+    // #3790 review: the same once their record is approved. The drafter no longer writes approval, so a record it returns
+    // unchanged comes back 'proposed' from the host; it is still the saved record, never their new words on the old figure.
+    const canon = persisted!.living_model.canonical as CanonicalModelT;
+    canon.quantities = canon.quantities.map((x) => (x.id === 'weeks_counted' ? { ...x, approval: 'approved' as const, author_id: 'person-1' } : x));
+    replies = [savedWith(() => {})];
+    expect(await ask([answer({ id: 'weeks_counted', quote: until })], ctx(until))).toEqual(unread('weeks_counted'));
     replies = [savedWith((d) => setQ(d, 'sell_through', { low: 0.6, high: 0.8, basis: 'Read as about last year.' }))]; // Olumi's estimate, and it compiles
     expect(await ask([answer({ id: 'sell_through', quote: same })], ctx(same))).toEqual(unread('sell_through'));
     const vague = 'Sometime in the next month or so.';

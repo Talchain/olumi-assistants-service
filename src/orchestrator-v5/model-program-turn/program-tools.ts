@@ -26,7 +26,7 @@ import { ok, refused, unavailable, type ToolOutcome } from '../path-b/tools/outc
 import { CanonicalQuantity, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
 import { compile } from '../model-program/compile.js';
 import { ledgeredResponsesCall, proposePostimage } from './draft.js';
-import { validatePostimage, verbatimIn } from './postimage.js';
+import { validatePostimage, verbatimIn, withoutHost } from './postimage.js';
 import { isSaved, postimageOf, programOperationId, savePostimage, withNewRun } from './program-save.js';
 import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, sourceTextOf, unreadableWords, type SavedProgram } from './program-store.js';
 import { shownRun, type StoredRun } from './run-receipt.js';
@@ -171,7 +171,7 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   // Their answers win on the drafter's model too, set again exactly (buddy 24 Oct); one it removed is refused by name, never dropped.
   // An answer in words on a figure stays theirs there (Codex r1 #3767): their status, party and words, the drafter's reading of
   // them its figure; one it read no figure from is refused by name, never saved as Olumi's. Read means the drafter returned
-  // that record changed, as a known figure: one it left as saved (the merge keeps it) or read only as an estimate is not
+  // that record changed, as a known figure, apart from the host's own fields: one it left as saved (the merge keeps it) or read only as an estimate is not
   // their answer, so it is never restamped as theirs (integrated review 26 Oct: Olumi's estimate saved as "known, yours").
   const worded = answers.filter((a) => toDrafter(a) && quantities.some((x) => x.id === a.id));
   // One the change removed, a figure or in words, is refused by its label as removed (writes#6), never as read no figure.
@@ -180,7 +180,7 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   const unread = worded.filter((a) => {
     const x = drafted.model!.quantities.find((y) => y.id === a.id);
     return x === undefined || (x.value === null && x.low === null && x.high === null) || x.status !== 'known'
-      || stableStringify(x) === stableStringify(set.model.quantities.find((y) => y.id === a.id));
+      || stableStringify(withoutHost(x)) === stableStringify(withoutHost(set.model.quantities.find((y) => y.id === a.id)));
   }).map((a) => a.id);
   if (unread.length > 0) return refused('not_an_answer', `${unread.join(', ')}: the change read no figure from your answer, so nothing changed.`, { ids: unread });
   const postimage: CanonicalModelT = { ...drafted.model, quantities: drafted.model.quantities.map((x) => {
