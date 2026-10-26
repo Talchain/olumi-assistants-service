@@ -164,7 +164,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const u = parseUnit(q.unit), k = u.ok ? u.unit.scale : 1;
     if (c && c.kind === 'range_law') {
       const r = c.reading;
-      return k === 1 ? r : { ...r, centre: r.centre / k, sd: r.sd / k, lower: r.lower / k, upper: r.upper / k, mean: r.mean / k, sd_conditioned: r.sd_conditioned / k };
+      return k === 1 ? r : { ...r, centre: r.centre / k, sd_below: r.sd_below / k, sd_above: r.sd_above / k, sd: r.sd / k, lower: r.lower / k, upper: r.upper / k,
+        mean: r.mean / k, sd_conditioned: r.sd_conditioned / k };
     }
     const inside = !has(q.value) || (q.low! < q.value && q.value < q.high!);
     const d = compiled.domains[q.id];

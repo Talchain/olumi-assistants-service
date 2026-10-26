@@ -89,21 +89,26 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     expect(o.joint).toEqual({ chance: 0, precision_95: [0, 0] });
   });
 
-  it('row 2: a range is drawn with the reused conversion; P(X ≥ t) matches its closed form within the Wilson interval at 20k', () => {
-    // The conversion (mapper.ts rangeSpread, :104-110): Normal, centre = most likely value (else the middle), sd = (high − low)/√12.
-    // Range 10 to 30: sd = 20/√12 = 5.7735027.
-    //  (a) mode 20, P(X ≥ 25): z = 5/5.7735027 = √3/2 = 0.8660254. Table Φ(0.86) = 0.80511, Φ(0.87) = 0.80785, interpolated
-    //      Φ(0.8660254) = 0.80511 + 0.60254 × 0.00274 = 0.80676, so P = 0.19324.
-    //  (b) no mode: centre = (10 + 30)/2 = 20, the same law, P(X ≥ 25) = 0.19324.
-    //  (c) mode 15, P(X ≥ 20): z = 5/5.7735027 = √3/2 again, P = 0.19324.
-    //  (d) the capacity brief: 80 + 1 × X ≥ 100 with X mode 20 → P(X ≥ 20) = 0.5 (the served engine witness on #3688: 0.4971).
-    // Wilson 95% half-width at 20,000 draws: 1.96 × √(0.19324 × 0.80676 / 20000) = 0.00547; at 0.5: 1.96 × √(0.25/20000) = 0.00693.
-    const P = 0.19324;
-    const cases: [Quantity, number][] = [[range('x', 10, 30, 20), 25], [range('x', 10, 30), 25], [range('x', 10, 30, 15), 20]];
-    for (const [x, t] of cases) {
+  it('row 2: a plausible range is read as its 10th to 90th percentiles (W10); P(X ≥ t) matches its closed form within the Wilson interval at 20k', () => {
+    // W10 (interim, adopted behaviour; before it, the √12 Normal gave 0.19324 for (a), (b) and (c)): a plausible range is
+    // equal-mass halves around its median m (the most likely value, else the middle): with probability ½ m − |Z|·σL, else
+    // m + |Z|·σH, σL = (m − low)/Φ⁻¹(0.9), σH = (high − m)/Φ⁻¹(0.9), Φ⁻¹(0.9) = 1.2815516.
+    // Range 10 to 30 around 20 (or no mode: the middle, 20): σL = σH = 10/1.2815516 = 7.8030415, the Normal on 20.
+    //  (a) mode 20, P(X ≥ 25): z = 5/7.8030415 = 0.6407758. Table Φ(0.64) = 0.73891, Φ(0.65) = 0.74215, interpolated
+    //      Φ(0.6407758) = 0.73891 + 0.07758 × 0.00324 = 0.73916, so P = 0.26084.
+    //  (b) no mode: m = (10 + 30)/2 = 20, the same law, P(X ≥ 25) = 0.26084.
+    //  (c) mode 15, P(X ≥ 20): above the median, σH = 15/1.2815516 = 11.704562, so P = ½ × P(|Z| ≥ 5/11.704562 = 0.4271839)
+    //      = ½ × 2 × (1 − Φ(0.4271839)); table Φ(0.42) = 0.66276, Φ(0.43) = 0.66640, interpolated 0.66276 + 0.71839 ×
+    //      0.00364 = 0.66538, so P = 0.33462.
+    //  (d) the capacity brief: 80 + 1 × X ≥ 100 with X mode 20 → P(X ≥ 20) = 0.5, the median (the served engine witness on #3688: 0.4971).
+    // Wilson 95% half-width at 20,000 draws: 1.96 × √(0.26084 × 0.73916 / 20000) = 0.00609; at 0.33462: 1.96 ×
+    // √(0.33462 × 0.66538 / 20000) = 0.00654; at 0.5: 1.96 × √(0.25/20000) = 0.00693.
+    const cases: [Quantity, number, number, number][] = [[range('x', 10, 30, 20), 25, 0.26084, 0.00609], [range('x', 10, 30), 25, 0.26084, 0.00609],
+      [range('x', 10, 30, 15), 20, 0.33462, 0.00654]];
+    for (const [x, t, P, half] of cases) {
       const g = ch(simulate(model(1, [x, fixed('t', t)], [goal('g', 'x', '>=', 't')]), { seed: SEED, draws: N }).options[0]!.per_goal[0]!);
       expect(inside(P, g.precision_95)).toBe(true);
-      expect(Math.abs(g.chance - P)).toBeLessThanOrEqual(0.00547);
+      expect(Math.abs(g.chance - P)).toBeLessThanOrEqual(half);
     }
     const cap = simulate(model(1, [fixed('today', 80), range('each', 10, 30, 20), fixed('count', 0), fixed('one', 1),
       effect('capacity', 'today', [{ coefficient: 'each', driver: 'count' }]), fixed('t', 100)], [goal('g', 'capacity', '>=', 't')],
@@ -113,22 +118,24 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     expect(inside(0.5, opt(cap, 'add').per_goal[0].precision_95)).toBe(true);
     expect(Math.abs(opt(cap, 'add').per_goal[0].chance - 0.5)).toBeLessThanOrEqual(0.00693);
 
-    // The law is the producer's, by identity: the core mapper converts the same person's level range 10 to 30 around 20 into
-    // observed_state {raw_value 20, std × cap = 20/√12 = 5.773502691896258}; the simulator's draws of that range must have that
-    // centre and spread (sample mean within 4 × 5.7735/√20000 = 0.163 of 20; sample sd within 2% of 5.7735).
+    // A person's HARD bounds keep the producer's law, by identity (W10 rule 3): the core mapper converts the same person's
+    // level range 10 to 30 around 20 ("between 10 and 30") into observed_state {raw_value 20, std × cap = 20/√12 =
+    // 5.773502691896258}, and the law's 'bounds' reading has that centre and spread before it is held within them.
     const node = (mapLivingModel(capacityLivingModel()).graph.nodes as Rec[]).find((n) => n.id === 'each')!;
     expect(node.observed_state.raw_value).toBe(20);
     expect(node.observed_state.std * node.observed_state.cap).toBeCloseTo(5.773502691896258, 12);
-    const law = rangeLaw({ kind: 'range', low: 10, high: 30, mode: 20, basis: 'person_range', range_kind: 'plausible' });
+    const law = rangeLaw({ kind: 'range', low: 10, high: 30, mode: 20, basis: 'person_range', range_kind: 'bounds' });
     if (law.kind !== 'normal') throw new Error(`expected a spread, got ${law.kind}`);
     expect(law.centre).toBe(node.observed_state.raw_value);
     expect(law.sd).toBeCloseTo(node.observed_state.std * node.observed_state.cap, 12);
+    // The same range read as plausible (W10): the draws have centre 20 and sd 7.8030415 (sample mean within 4 × 7.8030/√20000
+    // = 0.221 of 20; sample sd within 2% of 7.8030415).
     const rec = simulate(model(1, [range('each', 10, 30, 20), fixed('t', 0)], [goal('g', 'each', '>=', 't')]),
       { seed: SEED, draws: N, record: Array.from({ length: N }, (_, i) => i) }).recorded!.map((d) => d.values.each![0]!);
     const mean = rec.reduce((s, v) => s + v, 0) / N;
     const sd = Math.sqrt(rec.reduce((s, v) => s + (v - mean) ** 2, 0) / (N - 1));
-    expect(Math.abs(mean - 20)).toBeLessThanOrEqual(0.163);
-    expect(Math.abs(sd / 5.773502691896258 - 1)).toBeLessThanOrEqual(0.02);
+    expect(Math.abs(mean - 20)).toBeLessThanOrEqual(0.221);
+    expect(Math.abs(sd / 7.8030415 - 1)).toBeLessThanOrEqual(0.02);
   });
 
   it('row 3: product identity MRR = price × customers keeps the interaction a linear model drops', () => {
@@ -172,19 +179,19 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
   });
 
   it('row 5: the joint AND is counted on the same draws, never a product of marginals', () => {
-    // A ~ range 10..30 mode 20, B ~ range 10..30 (independent streams). P(A ≥ 20) = 0.5; P(B ≥ 25) = 0.19324 (row 2).
-    // (a) P(A≥20 ∧ B≥25) ≤ min(0.5, 0.19324) in counts, exactly; and ≈ 0.5 × 0.19324 = 0.09662 for independent inputs
-    //     (Wilson half-width at 20k: 1.96 × √(0.09662 × 0.90338 / 20000) = 0.00409).
-    // (b) Same quantity: A ≥ 25 implies A ≥ 20, so P(A≥20 ∧ A≥25) = P(A≥25) = 0.19324, NOT 0.5 × 0.19324 = 0.09662.
+    // A ~ range 10..30 mode 20, B ~ range 10..30 (independent streams). P(A ≥ 20) = 0.5; P(B ≥ 25) = 0.26084 (row 2, W10).
+    // (a) P(A≥20 ∧ B≥25) ≤ min(0.5, 0.26084) in counts, exactly; and ≈ 0.5 × 0.26084 = 0.13042 for independent inputs
+    //     (Wilson half-width at 20k: 1.96 × √(0.13042 × 0.86958 / 20000) = 0.00467).
+    // (b) Same quantity: A ≥ 25 implies A ≥ 20, so P(A≥20 ∧ A≥25) = P(A≥25) = 0.26084, NOT 0.5 × 0.26084 = 0.13042.
     const qs = [range('a', 10, 30, 20), range('b', 10, 30), fixed('t20', 20), fixed('t25', 25)];
     const o = first(simulate(model(1, qs, [goal('ga', 'a', '>=', 't20'), goal('gb', 'b', '>=', 't25')]), { seed: SEED, draws: N }));
     expect(o.joint.chance).toBeLessThanOrEqual(Math.min(goalOf(o, 'ga').chance, goalOf(o, 'gb').chance));
-    expect(inside(0.09662, o.joint.precision_95)).toBe(true);
-    expect(Math.abs(o.joint.chance - 0.09662)).toBeLessThanOrEqual(0.00409);
+    expect(inside(0.13042, o.joint.precision_95)).toBe(true);
+    expect(Math.abs(o.joint.chance - 0.13042)).toBeLessThanOrEqual(0.00467);
     const same = first(simulate(model(1, qs, [goal('g20', 'a', '>=', 't20'), goal('g25', 'a', '>=', 't25')]), { seed: SEED, draws: N }));
     expect(same.joint.chance).toBe(goalOf(same, 'g25').chance);
-    expect(inside(0.19324, same.joint.precision_95)).toBe(true);
-    expect(Math.abs(same.joint.chance - 0.09662)).toBeGreaterThan(0.05);
+    expect(inside(0.26084, same.joint.precision_95)).toBe(true);
+    expect(Math.abs(same.joint.chance - 0.13042)).toBeGreaterThan(0.05);
   });
 
   it('row 6: the same model in £ and in £k gives identical chances for the same seed', () => {
@@ -274,8 +281,9 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
 
   it('row 8c: a goal\u2019s denominator (per) is part of what it rests on: uncertain only there, it is the driver, never exact', () => {
     // Revenue per customer = 1,000 \u00f7 customers \u2265 10 holds exactly when 0 < customers \u2264 100. Customers is a plausible range
-    // 80 to 120, most likely 100: an unbounded Normal centred on 100 (a plausible range is not a bound, row 2b), so the hand chance is
-    // P(0 < customers \u2264 100) = 1/2 less a term below 1e-17 (Wilson interval at 20k must hold 0.5). Revenue and the target are fixed:
+    // 80 to 120, most likely 100: an unbounded Normal centred on 100 (a plausible range is not a bound, row 2b; W10: sd
+    // 20/1.2815516 = 15.606), so the hand chance is P(0 < customers \u2264 100) = 1/2 less Φ(−6.41) < 1e-10 (Wilson interval
+    // at 20k must hold 0.5). Revenue and the target are fixed:
     // the denominator is the ONLY uncertainty, so it must be the one driver and the chance cannot be exact.
     const r = simulate(model(1, [fixed('revenue', 1000), range('customers', 80, 120, 100), fixed('t', 10)],
       [{ ...goal('per_customer', 'revenue', '>=', 't'), per: 'customers' }]), { seed: SEED, draws: N });
@@ -315,16 +323,19 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
   });
 
   it('row 2b: the PL\u2019s range law: a person\u2019s bounds condition the spread; other ranges only a domain; no point fallback', () => {
-    // The law is rangeSpread's Normal (centre = most likely value, else the middle; sd = (high − low)/√12), conditioned:
-    //  (a) Capacity 80 + 1 × X against a target of 110, X the person's range 10 to 30 around 20 (sd 5.7735).
+    // A person's bounds: rangeSpread's Normal (centre = most likely value, else the middle; sd = (high − low)/√12),
+    // conditioned on them. Every other range (W10, interim, adopted behaviour): 1 in 10 below its low end and 1 in 10 above
+    // its high end (row 2), an end on a hard edge being that edge, drawn within its domain:
+    //  (a) Capacity 80 + 1 × X against a target of 110, X the person's range 10 to 30 around 20.
     //      As 'bounds', X < 30 in every draw, so capacity < 110: the chance is exactly 0 (no draw meets it).
-    //      As 'plausible' (unbounded): P(X ≥ 30) = 1 − Φ(10/5.7735) = 1 − Φ(1.7321) = 1 − 0.95837 = 0.04163
-    //      (table Φ(1.73) = 0.95818, Φ(1.74) = 0.95907, interpolated); Wilson half-width at 20k: 0.00277.
+    //      As 'plausible' (unbounded): P(X ≥ 30) = ½ × P(|Z| ≥ 10/(10/1.2815516)) = ½ × 2 × (1 − Φ(1.2815516)) = 0.1 exactly
+    //      (before W10, the √12 Normal: 0.04163); Wilson half-width at 20k: 1.96 × √(0.1 × 0.9 / 20000) = 0.00416.
     //  (b) "Between 10 and 30" as 'bounds': 0 of 20,000 draws outside [10, 30], and none sits on an end (no clamping).
-    //  (c) Olumi's one-signed coefficient, −2.2 to −1.4 around −1.8 (sd 0.8/√12 = 0.23094), stays UNBOUNDED even if marked
-    //      'bounds' (only a person's bounds bound): P(outside) = 2 × (1 − Φ(0.4/0.23094)) = 2 × 0.04163 = 0.08326 (Wilson
-    //      half-width at 20k: 0.00383). With a stated sign restriction (≤ 0) it is conditioned on (−∞, 0]: no draw above 0,
-    //      and P(> 0) = 1 − Φ(7.79) ≈ 3e-15, so the share outside the range is the same 0.08326.
+    //  (c) Olumi's one-signed coefficient, −2.2 to −1.4 around −1.8, stays plausible (UNBOUNDED) even if marked 'bounds'
+    //      (only a person's bounds bound): P(outside) = 0.1 + 0.1 = 0.2 exactly (before W10: 0.08326); Wilson half-width
+    //      at 20k: 1.96 × √(0.2 × 0.8 / 20000) = 0.00554. With a stated sign restriction (≤ 0) the upper half is drawn within
+    //      (−∞, 0], keeping its ½: σH = 0.4/1.2815516 = 0.31212, 0 is 1.8/0.31212 = 5.767 σH above the median, so the share
+    //      above −1.4 is ½ × (Φ(5.767) − Φ(1.2816))/(Φ(5.767) − ½) = 0.1 − 3e-9: the share outside is the same 0.2.
     //  (d) Hard-bound control, the conditioned moments: [10, 30] around 20: α = −1.7321, β = 1.7321; φ(1.7321) =
     //      0.39894 × e^−1.5 = 0.089016; Z = 2 × 0.95837 − 1 = 0.91674; mean 20 (symmetric); variance factor
     //      1 − 2 × 1.7321 × 0.089016 / 0.91674 = 0.66363 → sd = 5.7735 × 0.81464 = 4.7033.
@@ -332,11 +343,17 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     //      Z = 0.63457; φ(α) = 0.39894 × e^−0.06 = 0.37571, φ(β) = 0.39894 × e^−4.86 = 0.003091;
     //      mean = 12 + 5.7735 × (0.37571 − 0.003091) / 0.63457 = 15.390;
     //      variance factor 1 + (−0.34641 × 0.37571 − 3.1177 × 0.003091) / 0.63457 − 0.58720² = 0.43491 → sd = 3.8075.
-    //  (e) Domain control: Olumi's 0 to 8 (no most likely value; centre 4, sd 2.3094) for a count (≥ 0): α = −1.7321,
-    //      Z = 0.95837, mean = 4 + 2.3094 × 0.089016 / 0.95837 = 4.2145, variance factor 1 − 1.7321 × 0.089016 / 0.95837
-    //      − (0.089016 / 0.95837)² = 0.83049 → sd = 2.1046; no draw below 0 (unbounded, about 4% are).
-    //      A risk's occurrence 0 to 0.2 is a chance, conditioned on [0, 1]: mean 0.1 + 0.057735 × 0.092883 = 0.10536,
-    //      sd 0.057735 × 0.91131 = 0.052615; P(≤ 0) = 0 exactly and P(≥ 0) = 1 exactly.
+    //  (e) Domain control (W10 rule 2; before W10, mean 4.2145, sd 2.1046): Olumi's 0 to 8 (no most likely value) for a
+    //      count (≥ 0): its low end sits on the floor, so it is that edge: m = the middle, 4, σ = 4/1.2815516 = 3.1212166
+    //      for both halves; the lower half is truncated at 0 (|Z| ≤ 1.2815516), keeping its ½. In standard units the lower
+    //      half has mass Φ(0) − Φ(−1.2816) = 0.4, φ(1.2816) = 0.39894 × e^−0.82119 = 0.17550, mean (0.17550 − 0.39894)/0.4
+    //      = −0.55861 and variance 1 − 1.2816 × 0.17550/0.4 − 0.55861² = 0.12568; the upper half-Normal has mean √(2/π) =
+    //      0.79788 and variance 1 − 2/π = 0.36338. Mixed ½ and ½: mean = 4 + 3.1212166 × ½ × (0.79788 − 0.55861) = 4.37341;
+    //      variance factor ½ × (0.12568 + 0.36338) + ¼ × (0.79788 + 0.55861)² = 0.24453 + 0.46002 = 0.70455 → sd = 3.1212166
+    //      × 0.83937 = 2.61987. No draw below 0 (without the floor, rule 1 puts 1 in 10 below 0).
+    //      A risk's occurrence 0 to 0.2 is a chance, within [0, 1]: its low end sits on 0, m = 0.1, σ = 0.1/1.2815516 =
+    //      0.078030, and 1 is 11.5 σ above it (nothing beyond): mean 0.1 + 0.078030 × 0.11964 = 0.10934, sd 0.078030 ×
+    //      0.83937 = 0.065497 (before W10, 0.10536 and 0.052615); P(≤ 0) = 0 exactly and P(≥ 0) = 1 exactly.
     //  (f) Degenerate control, low = high = 20: not uncertain, exactly 20: P(X ≥ 20) = 1 and P(X > 20) = 0, exact.
     const kinded = (q: Quantity, range_kind: RangeKind, domain?: Domain): Quantity => {
       const dist: RangeDist = { ...(q.dist as RangeDist), range_kind, ...(domain !== undefined ? { domain } : {}) };
@@ -346,8 +363,8 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
       effect('capacity', 'today', [{ coefficient: 'each', driver: 'count' }]), fixed('t110', 110)], [goal('g', 'capacity', '>=', 't110')]);
     expect(first(simulate(capacity(kinded(range('each', 10, 30, 20), 'bounds')), { seed: SEED, draws: N })).per_goal[0].chance).toBe(0);
     const plausible = ch(first(simulate(capacity(kinded(range('each', 10, 30, 20), 'plausible')), { seed: SEED, draws: N })).per_goal[0]);
-    expect(inside(0.04163, plausible.precision_95)).toBe(true);
-    expect(Math.abs(plausible.chance - 0.04163)).toBeLessThanOrEqual(0.00277);
+    expect(inside(0.1, plausible.precision_95)).toBe(true);
+    expect(Math.abs(plausible.chance - 0.1)).toBeLessThanOrEqual(0.00416);
 
     const all = Array.from({ length: N }, (_, i) => i);
     const drawsOf = (x: Quantity): number[] => simulate(model(1, [x, fixed('t', 0)], [goal('g', x.id, '>=', 't')]), { seed: SEED, draws: N, record: all })
@@ -359,7 +376,7 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     const olumi = (d?: Domain): Quantity => kinded({ id: 'k', label: 'k', unit: '', reading: 'state', dist: { kind: 'range', low: -2.2, high: -1.4, mode: -1.8, basis: 'olumi_estimate', range_kind: 'plausible' } }, 'bounds', d);
     for (const k of [drawsOf(olumi()), drawsOf(olumi({ max: 0 }))]) {
       const outside = k.filter((v) => v < -2.2 || v > -1.4).length / N;
-      expect(Math.abs(outside - 0.08326)).toBeLessThanOrEqual(0.00383);
+      expect(Math.abs(outside - 0.2)).toBeLessThanOrEqual(0.00554);
     }
     expect(Math.max(...drawsOf(olumi({ max: 0 })))).toBeLessThanOrEqual(0);
 
@@ -380,13 +397,13 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
 
     const count = (d?: Domain): Quantity => kinded({ id: 'n', label: 'n', unit: 'people', reading: 'state', dist: { kind: 'range', low: 0, high: 8, basis: 'olumi_estimate', range_kind: 'plausible' } }, 'plausible', d);
     const counted = law(count({ min: 0 }));
-    expect(Math.abs(counted.mean - 4.2145)).toBeLessThanOrEqual(0.001);
-    expect(Math.abs(counted.sd_conditioned - 2.1046)).toBeLessThanOrEqual(0.001);
+    expect(Math.abs(counted.mean - 4.37341)).toBeLessThanOrEqual(0.001);
+    expect(Math.abs(counted.sd_conditioned - 2.61987)).toBeLessThanOrEqual(0.001);
     expect(Math.min(...drawsOf(count({ min: 0 })))).toBeGreaterThanOrEqual(0);
     expect(drawsOf(count()).filter((v) => v < 0).length).toBeGreaterThan(0);
     const occ = law(range('occ', 0, 0.2), { domain: { min: 0, max: 1 } });
-    expect(Math.abs(occ.mean - 0.10536)).toBeLessThanOrEqual(0.0001);
-    expect(Math.abs(occ.sd_conditioned - 0.052615)).toBeLessThanOrEqual(0.0001);
+    expect(Math.abs(occ.mean - 0.10934)).toBeLessThanOrEqual(0.0001);
+    expect(Math.abs(occ.sd_conditioned - 0.065497)).toBeLessThanOrEqual(0.0001);
     const c = first(simulate(model(1, [fixed('level', 100), range('occ', 0, 0.2), fixed('sev', -30), fixed('zero', 0)],
       [goal('le0', 'occ', '<=', 'zero'), goal('ge0', 'occ', '>=', 'zero')], [HOLD],
       { risks: [{ id: 'loss', occurrence: 'occ', severity: 'sev', effect_on: 'level', mode: 'add', from_period: 0 }] }), { seed: SEED, draws: N }));
@@ -416,10 +433,12 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     // Sales (a flow) are 10 a month; the option lifts them to 20 from the launch period L. Over months 1–6 (intervals 0..5):
     // total = 10 L + 20 (6 − L) = 120 − 10 L. Goal: total ≥ 90 ⇔ L ≤ 3.
     //  (a) L a figure, 3: total 90, met in every draw → exactly 1, the same as from_period 3 written as a number.
-    //  (b) L a range 2 to 6 with no most likely value, conditioned to 0 or more as the compiler gives it (an elapsed time):
-    //      centre 4, sd 4/√12 = 1.1547; the period is ceil(L), so met ⇔ L ≤ 3:
-    //      P = (Φ(−0.866) − Φ(−3.4641)) / (1 − Φ(−3.4641)) = (0.193238 − 0.000266) / 0.999734 = 0.19302 (Wilson half-width
-    //      at 20k: 0.00547).
+    //  (b) L a range 2 to 6 with no most likely value, drawn within 0 or more as the compiler gives it (an elapsed time),
+    //      strictly inside it, so W10 rule 1 (before W10: 0.19302): median 4, σ = 2/1.2815516 = 1.5606083 each side, the
+    //      lower half within [0, 4], keeping its ½ (0 is −2.5631 σ). The period is ceil(L), so met ⇔ L ≤ 3:
+    //      P = ½ × (Φ(−1/1.5606083) − Φ(−2.5631)) / (½ − Φ(−2.5631)) = ½ × (0.26084 − 0.00519) / 0.49481 = 0.25833
+    //      (Φ(−0.6407758) = 0.26084 as in row 2; table Φ(2.56) = 0.99477, Φ(2.57) = 0.99492, so Φ(−2.5631) = 0.00519);
+    //      Wilson half-width at 20k: 1.96 × √(0.25833 × 0.74167 / 20000) = 0.00607.
     //  (c) Each option its own timing: 'early' at 2 → 100 ≥ 90 → 1; 'late' at 5 → 70 → 0.
     //  (d) A risk timed by a quantity of 3 (certain, −5 a month) is the risk timed by the number 3: 10 × 3 + 5 × 3 = 45.
     const sales = (timing: Quantity, options: Option[], risks: Risk[] = []) => model(6, [flow(fixed('sales', 10)), fixed('lifted', 20), timing,
@@ -432,8 +451,8 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     expect(outcomeOf(first(byFigure), 'g').p50).toBe(90);
     const elapsed = { ...range('launch', 2, 6), dist: { ...(range('launch', 2, 6).dist as RangeDist), domain: { min: 0 } } };
     const sampled = ch(first(simulate(sales(elapsed, [option('launch', [timed('sales', 'lifted', 'launch')])]), { seed: SEED, draws: N })).per_goal[0]);
-    expect(inside(0.19302, sampled.precision_95)).toBe(true);
-    expect(Math.abs(sampled.chance - 0.19302)).toBeLessThanOrEqual(0.00547);
+    expect(inside(0.25833, sampled.precision_95)).toBe(true);
+    expect(Math.abs(sampled.chance - 0.25833)).toBeLessThanOrEqual(0.00607);
     // Strict ceil (the PL's ruling): a fraction waits for the next period (2.5 → 3: total 90, met); beyond the horizon it
     // never takes effect (6.5: sales stay 10, total 60, missed); a timing below 0 is outside the domain, never clamped to 0.
     const at = (v: number) => first(simulate(sales(fixed('launch', v), [option('launch', [timed('sales', 'lifted', 'launch')])]), { seed: SEED, draws: 10 }));
@@ -452,9 +471,10 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
   it('row 13: each limit\u2019s own chance and its quantity\u2019s summary (the cost)', () => {
     // cost = specialists × salary. Fixed salary £40,000: limits cost ≤ £50,000 and cost ≤ £30,000.
     //   hold (0): 0 ≤ both → 1, 1; add (1): 40,000 ≤ 50,000 → 1, 40,000 > 30,000 → 0; within_limits add = 0. All exact.
-    // Uncertain salary, £30,000 to £50,000 around £40,000 (sd 20,000/√12 = 5,773.5): P(cost ≤ £45,000) for add =
-    //   Φ(5,000/5,773.5) = Φ(0.866) = 0.80676 (Wilson half-width at 20k: 0.00547); its median cost is £40,000 (the sample
-    //   median's standard error 1.2533 × 5,773.5/√20000 = 51, so within 4 × 51 = 204).
+    // Uncertain salary, a plausible £30,000 to £50,000 around £40,000 (W10: sd 10,000/1.2815516 = 7,803.0; before W10, the
+    //   √12 law gave 0.80676): P(cost ≤ £45,000) for add = Φ(5,000/7,803.0) = Φ(0.6407758) = 0.73916 (row 2; Wilson
+    //   half-width at 20k: 0.00609); its median cost is £40,000 (the sample median's standard error 1.2533 × 7,803.0/√20000
+    //   = 69.2, so within 4 × 69.2 = 277).
     const build = (salary: Quantity, limits: [string, string][]) => model(1, [fixed('count', 0), fixed('one', 1), salary,
       def('cost', 'product', ['count', 'salary']), fixed('b50', 50000), fixed('b45', 45000), fixed('b30', 30000), fixed('zero', 0)],
     [goal('g', 'count', '>=', 'zero')], [HOLD, option('add', [{ quantity: 'count', to: 'one', from_period: 0 }])],
@@ -465,9 +485,9 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     expect(opt(r, 'add').within_limits).toEqual({ chance: 0, precision_95: [0, 0] });
     expect(opt(r, 'add').limit_outcomes[0]).toEqual({ limit_id: 'l50', p10: 40000, p50: 40000, p90: 40000 });
     const u = opt(simulate(build(range('salary', 30000, 50000, 40000), [['l45', 'b45']]), { seed: SEED, draws: N }), 'add');
-    expect(inside(0.80676, u.per_limit[0].precision_95)).toBe(true);
-    expect(Math.abs(u.per_limit[0].chance - 0.80676)).toBeLessThanOrEqual(0.00547);
-    expect(Math.abs(u.limit_outcomes[0].p50 - 40000)).toBeLessThanOrEqual(204);
+    expect(inside(0.73916, u.per_limit[0].precision_95)).toBe(true);
+    expect(Math.abs(u.per_limit[0].chance - 0.73916)).toBeLessThanOrEqual(0.00609);
+    expect(Math.abs(u.limit_outcomes[0].p50 - 40000)).toBeLessThanOrEqual(277);
   });
 
   it('row 14: a fixed-only option is exact (no Monte Carlo interval); an uncertain one or one with a risk is not', () => {
@@ -574,5 +594,24 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
       [goal('ga', 'a', '>=', 'zero')], [HOLD], { risks: [{ id: 'r', occurrence: 'occ', severity: 'sev', effect_on: 'a', mode: 'add', from_period: 0 }] }),
     { seed: 1, draws: 50 }));
     expect(occ.per_goal[0]).toEqual({ goal_id: 'ga', withheld: { reason: 'invalid_domain', count: 50, quantities: ['a', 'occ'] } });
+  });
+
+  it('row 18 (W10): one goal chance on a simple model, recomputed by hand under the plausible reading', () => {
+    // members = 100 + X × promotions, X the person's plausible 3 to 9 around 4 (members per promotion); goal members ≥ 112.
+    // W10: equal-mass halves around 4, σH = (9 − 4)/1.2815516 = 3.901521 above it.
+    //  'Two' (2 promotions): 100 + 2X ≥ 112 ⇔ X ≥ 6, above the median: P = ½ × 2 × (1 − Φ(2/3.901521 = 0.512621)); table
+    //  Φ(0.51) = 0.69497, Φ(0.52) = 0.69847, interpolated 0.69497 + 0.2621 × 0.00350 = 0.69589, so P = 0.30411.
+    //  'Three': 100 + 3X ≥ 112 ⇔ X ≥ 4, the median: P = 0.5 exactly.
+    // (Before W10, the √12 Normal on 4, sd 6/√12 = 1.7321, gave 'Two' 1 − Φ(1.1547) = 0.12411.) Wilson half-widths at 20k:
+    // 1.96 × √(0.30411 × 0.69589 / 20000) = 0.00638; at 0.5, 0.00693.
+    const r = simulate(model(1, [fixed('start', 100), range('effect', 3, 9, 4), fixed('none', 0), fixed('n2', 2), fixed('n3', 3),
+      effect('members', 'start', [{ coefficient: 'effect', driver: 'none' }]), fixed('t', 112)], [goal('g', 'members', '>=', 't')],
+    [option('two', [{ quantity: 'none', to: 'n2', from_period: 0 }]), option('three', [{ quantity: 'none', to: 'n3', from_period: 0 }])]), { seed: SEED, draws: N });
+    const two = ch(opt(r, 'two').per_goal[0]), three = ch(opt(r, 'three').per_goal[0]);
+    expect(inside(0.30411, two.precision_95)).toBe(true);
+    expect(Math.abs(two.chance - 0.30411)).toBeLessThanOrEqual(0.00638);
+    expect(inside(0.5, three.precision_95)).toBe(true);
+    expect(Math.abs(three.chance - 0.5)).toBeLessThanOrEqual(0.00693);
+    expect(Math.abs(two.chance - 0.12411)).toBeGreaterThan(0.1); // not the √12 law's chance
   });
 });

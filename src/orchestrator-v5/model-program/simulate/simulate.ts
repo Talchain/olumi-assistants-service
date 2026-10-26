@@ -6,10 +6,11 @@
  *   - Common random numbers: every uncertain quantity is drawn ONCE per draw index, from its own stream keyed by (seed, id),
  *     and those draws are shared by ALL options. Option switches are never randomised.
  *   - Every goal, the joint and the limits read the SAME draws; the joint is counted draw by draw, never a product of marginals.
- *   - A `range` is read with CEE's existing range conversion, reused (`range-law.ts`, which cites mapper.ts), as the PL ruled
- *     (AMEND, 23 Oct): a person's 'bounds' conditioned on [low, high]; otherwise unbounded unless a domain applies, and a
- *     risk's occurrence is conditioned on [0, 1]; low = high is that figure. A chance worked out by an equation is never
- *     clipped: outside [0, 1] it is outside the domain (below).
+ *   - A `range` is read by the one law in `range-law.ts`: a person's 'bounds' with CEE's existing conversion (mapper.ts),
+ *     conditioned on [low, high], as the PL ruled (AMEND, 23 Oct); a plausible range (W10, interim) with exactly 1 draw in
+ *     10 below its low end and 1 in 10 above its high end, in equal-mass halves around its median, an end on a hard edge
+ *     being that edge, drawn within its domain; a risk's occurrence is conditioned on [0, 1]; low = high is that figure. A
+ *     chance worked out by an equation is never clipped: outside [0, 1] it is outside the domain (below).
  *   - Time (DL ruling 1, 23 Oct; a quantity's `reading` is 'state' or 'flow'): a model of N periods has boundaries 0..N and
  *     intervals 0..N−1. At each time k = 0..N, (1) the option's sets and the risk effects active at k apply, and (2) every
  *     quantity is evaluated, in dependency order, from the stocks' boundary levels S[k]; then (3) S[k+1] = S[k] + Σ inflows −
@@ -59,16 +60,11 @@
  */
 import type { Aggregation, Cmp, ExecutableModel, Goal, Limit, Option, OptionSet, Quantity, Reading, Risk, Window } from '../executable.js';
 import { standardNormals, uniforms } from './prng.js';
-import { rangeLaw, truncatedStandardNormal, type RangeDist } from './range-law.js';
+import { fromStandardNormal, fromUniform, rangeLaw, truncatedStandardNormal, type RangeDist, type SpreadReading } from './range-law.js';
 import type { Chance, ChanceOrWithheld, OptionResult, RecordedDraw, SimResult, WithheldChance, WithheldChanceEntry } from './result.js';
 
-interface NormalLaw {
-  readonly centre: number;
-  readonly sd: number;
-  /** Where the draws are conditioned (±Infinity when they are not). */
-  readonly lower: number;
-  readonly upper: number;
-}
+/** A range's law as range-law.ts reads it; `lower` and `upper` are where its draws are conditioned (±Infinity: not). */
+type NormalLaw = SpreadReading;
 /** A quantity's reading, as the compiler set it (executable.ts r2, S1). */
 export const readingOf = (q: Quantity): Reading => q.reading;
 /** Gold-model ruling 2, ahead of S1's executable.ts: a `from_period` that names a timing quantity. */
@@ -263,7 +259,7 @@ function compileNode(q: Quantity, i: number, ref: (id: string, where: string) =>
     // A risk's occurrence is a chance: its mathematical domain is [0, 1].
     const reading = rangeLaw(q.dist as RangeDist, chance ? { domain: { min: 0, max: 1 } } : {});
     if (reading.kind === 'point') return { kind: 'fixed', value: reading.value };
-    ranged.push({ q: i, law: { centre: reading.centre, sd: reading.sd, lower: reading.lower, upper: reading.upper } });
+    ranged.push({ q: i, law: reading });
     return { kind: 'drawn', slot: ranged.length - 1 };
   }
   if (q.equation !== undefined) {
@@ -374,15 +370,24 @@ function planOption(c: Compiled, option: Option, model: ExecutableModel): Plan {
 function drawInputs(c: Compiled, seed: number, draws: number): Inputs {
   return {
     drawn: c.ranged.map(({ q, law }) => {
+      // W10 changes the law, never a stream (range-law.ts, HOW A DRAW IS MADE): the same key, stream and one value per draw.
       const key = `q:${c.ids[q]}`;
       if (law.lower === -Infinity && law.upper === Infinity) {
+        // A plausible range with no edge (a person's bounds always have one): z's sign picks the half, |z| draws it.
         const z = standardNormals(seed, key, draws);
-        for (let i = 0; i < draws; i++) z[i] = law.centre + law.sd * z[i]!;
+        for (let i = 0; i < draws; i++) z[i] = fromStandardNormal(law, z[i]!);
         return z;
       }
       // Conditioned on [lower, upper] by inverse CDF, one uniform per draw: no draw outside, none piled on an end.
-      const u = uniforms(seed, key, draws), alpha = (law.lower - law.centre) / law.sd, beta = (law.upper - law.centre) / law.sd;
-      for (let i = 0; i < draws; i++) u[i] = law.centre + law.sd * truncatedStandardNormal(u[i]!, alpha, beta);
+      const u = uniforms(seed, key, draws);
+      if (law.ends === 'hard_bounds') {
+        // A person's bounds: rangeSpread's Normal conditioned on them, exactly as before W10.
+        const alpha = (law.lower - law.centre) / law.sd, beta = (law.upper - law.centre) / law.sd;
+        for (let i = 0; i < draws; i++) u[i] = law.centre + law.sd * truncatedStandardNormal(u[i]!, alpha, beta);
+        return u;
+      }
+      const draw = fromUniform(law);
+      for (let i = 0; i < draws; i++) u[i] = draw(u[i]!);
       return u;
     }),
     riskU: c.risks.map((r) => uniforms(seed, `r:${r.id}`, draws)),

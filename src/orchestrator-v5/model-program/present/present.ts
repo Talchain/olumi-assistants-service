@@ -18,8 +18,12 @@
  *   - main_driver (DL 24 Oct): for a computed chance, what it rests on most, by one figure at a time at its range's ends on
  *     the Run's own draws (`mainDriverOf`, DRIVER_MIN_SWING); a withheld chance says `{ kind: 'not_recorded' }`, the word
  *     DGAI's parser takes for "absent" (it refuses the WHOLE view when `main_driver` is missing).
- *   - Every range is named as Olumi's provisional conversion (`rangeSpread`, mapper.ts:104-110) of the person's range, or of
- *     Olumi's own: the person's bounds stay theirs and are never called their probability law (DL ruling 4).
+ *   - Every range is named as Olumi's provisional reading of the person's range, or of Olumi's own, said plainly and once
+ *     (W10, interim): a plausible range as the range it falls in 8 times out of 10, with its middle value, an end on a hard
+ *     edge as "never below" / "never above" it; a person's bounds as before, Olumi's provisional conversion (`rangeSpread`,
+ *     mapper.ts:104-110) held within them. The person's bounds stay theirs and are never called their probability law (DL
+ *     ruling 4). Once per result, where the chances shown rest on two or more uncertain inputs, the notes say what Olumi
+ *     assumes about how they move together (`INDEPENDENCE_WORDS`): each is drawn on its own stream (prng.ts).
  *   - A chance the simulator withheld for a nonfinite draw (`invalid_domain`, DL ruling 3) is a withheld cell with its count
  *     and quantities, never a figure and never a failure.
  *   - WHICH OPTION IS MOST LIKELY TO ACHIEVE THE GOAL (Paul 6 and 14 Oct; W6): with every option's chance worked out and at
@@ -237,6 +241,10 @@ export function driverSweepOperations(model: ExecutableModel, draws: number): nu
 export const NO_DRIVER_REASON = 'Tested one at a time at each figure’s low end, middle and high end, no figure moved this chance by more than 5 points.';
 export const NO_RANGE_REASON = 'No figure this chance rests on has a range to test.';
 export const NOT_SWEPT_REASON = 'This model is too large to test each figure one at a time in one run, so what the chance rests on most is not measured.';
+/** W10: how a plausible range with neither end on a hard edge is read (range-law.ts rule 1), said once where it is listed. */
+export const EIGHT_IN_TEN_WORDS = 'the range it falls in 8 times out of 10';
+/** W10: once per result, where the chances shown rest on two or more uncertain inputs (each drawn on its own stream, prng.ts). */
+export const INDEPENDENCE_WORDS = 'Olumi treats these figures as varying independently, except where the model links them.';
 const whoseRange = (author: 'person' | 'olumi' | 'unverified'): string => (author === 'unverified' ? NOT_IN_THEIR_WORDS : author === 'person' ? '(your range)' : '(Olumi’s estimate)');
 /**
  * WHEN AN OPTION IS NAMED AS MOST LIKELY TO ACHIEVE THE GOAL (W6 review B1): the estate's existing science conditions, the
@@ -342,9 +350,10 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const assumptions = (ids: ReadonlySet<string>): string[] => [...new Set(model.quantities.filter((x) => ids.has(x.id)).flatMap((x): string[] => {
     const name = q(label(x.id) ?? x.id), m = meta(x.id);
     if (x.dist?.kind === 'range') {
-      // DL ruling 4: every range's law is Olumi's provisional conversion (`rangeSpread`, mapper.ts:104-110), never the person's
-      // probability law; the person's bounds stay theirs and are named as such.
-      // The PL's range law (AMEND): conditioned on the person's bounds, or on a domain, as the simulator draws it.
+      // DL ruling 4: every range's law is Olumi's provisional reading, never the person's probability law; the person's
+      // bounds stay theirs and are named as such. Said as the simulator draws it (range-law.ts): a person's bounds with
+      // rangeSpread's conversion held within them; a plausible range (W10) as the range it falls in 8 times out of 10, an
+      // end on a hard edge as never below or above it, with its median as the middle value.
       const d: RangeDist = x.dist;
       const { domain, reading } = lawOf(x.id, d);
       const ends = `${sayOf(x.id, d.low, x.unit)} to ${sayOf(x.id, d.high, x.unit)}`;
@@ -355,9 +364,25 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       if (reading.kind === 'point') {
         return d.basis === 'person_range' && !unverified ? [] : [`${name} is ${sayOf(x.id, reading.value, x.unit)}${unverified ? ` ${NOT_IN_THEIR_WORDS}` : d.basis === 'olumi_estimate' ? ', Olumi’s estimate' : ` ${NOT_RECORDED}`}`];
       }
-      const held = reading.lower === d.low && reading.upper === d.high ? ', held within those bounds'
-        : Number.isFinite(reading.lower) || Number.isFinite(reading.upper) ? `, kept to Olumi’s reading of what it can be (${canBe(x.id, x.unit, domain)})` : '';
-      return [`${name} follows Olumi’s provisional conversion of ${whose}, ${ends}, into a bell-shaped spread${held}`];
+      const kept = `, kept to Olumi’s reading of what it can be (${canBe(x.id, x.unit, domain)})`;
+      if (reading.ends === 'hard_bounds') {
+        const held = reading.lower === d.low && reading.upper === d.high ? ', held within those bounds' : Number.isFinite(reading.lower) || Number.isFinite(reading.upper) ? kept : '';
+        return [`${name} follows Olumi’s provisional conversion of ${whose}, ${ends}, into a bell-shaped spread${held}`];
+      }
+      const at = (v: number): string => sayOf(x.id, v, x.unit);
+      const never = [...(reading.edge_below ? [`below ${at(reading.lower)}`] : []), ...(reading.edge_above ? [`above ${at(reading.upper)}`] : [])];
+      // Its centre is the middle value (the median), and its ends 1 in 10 each, only where no end lies past a hard edge
+      // (range-law.ts `share_below` ½); otherwise (a rough 100 to 120 % against a ceiling of 100 %) it is said only as what it
+      // never is.
+      const median = reading.share_below === 0.5;
+      const how = !median ? `never ${never.join(' or ')}`
+        : reading.edge_below && reading.edge_above ? `never ${never.join(' or ')}, with ${at(reading.centre)} as the middle value`
+          : reading.edge_below ? `never ${never[0]} and above ${at(d.high)} only 1 time in 10, with ${at(reading.centre)} as the middle value`
+            : reading.edge_above ? `never ${never[0]} and below ${at(d.low)} only 1 time in 10, with ${at(reading.centre)} as the middle value`
+              : `${EIGHT_IN_TEN_WORDS}, with ${at(reading.centre)} as the middle value`;
+      // What it can be, said only where it keeps the draws somewhere that is not already one of its ends.
+      const within = (Number.isFinite(reading.lower) && !reading.edge_below) || (Number.isFinite(reading.upper) && !reading.edge_above) ? kept : '';
+      return [`${name} follows Olumi’s provisional reading of ${whose}, ${ends}, as ${how}${within}`];
     }
     if (x.dist?.kind === 'fixed') {
       // executable.ts r3: the author of every fixed value. A structural constant (a conversion, a switch, a count) and a
@@ -623,6 +648,12 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   });
 
   // ── The detail said once beside the chances ───────────────────────────────────────────────────────────────────────────
+  /** The uncertain inputs the chances rest on, under any option: each range (low < high) and each risk on what they reach. */
+  const uncertainInputs = (): number => {
+    const rests = new Set([null, ...model.options.map((o) => o.id)].flatMap((id) => [...upstream(roots, id)]));
+    return model.quantities.filter((x) => rests.has(x.id) && x.dist?.kind === 'range' && x.dist.low < x.dist.high).length
+      + model.risks.filter((r) => rests.has(r.effect_on)).length;
+  };
   const notes: string[] = [
     ...result.options.flatMap((o) => o.per_goal.flatMap((g) => (isWithheld(g)
       ? [`${q(allGoals.find((x) => x.goal_id === g.goal_id)?.label ?? g.goal_id)} with ${q(optionLabel.get(o.option_id) ?? o.option_id)} is not shown: in ${g.withheld.count.toLocaleString('en-GB')} of ${result.draws.toLocaleString('en-GB')} simulated draws ${listWords(g.withheld.quantities.map((id) => q(label(id) ?? id)))} could not be worked out.`]
@@ -633,6 +664,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     ...(covered.length > 0 && notCovered.length > 0 ? [`Covers: ${listWords(covered)} · Leaves out: ${listWords(notCovered.map(q))}`] : []),
     ...notInRun.map((w) => `The ${w.kind} ${q(w.label)} is not in this run: ${inlineWords(w.reason)}`),
     ...(uncheckedLine !== undefined ? [stop(uncheckedLine)] : []),
+    // W10: said once per result, where a chance shown rests on two or more uncertain inputs (ranges, and risks that fire).
+    ...(options.some((o) => o.cell.kind === 'figure') && uncertainInputs() >= 2 ? [INDEPENDENCE_WORDS] : []),
   ];
   const several = allGoals.length >= 2;
   const perTarget = !several ? [] : model.goals.flatMap((g) => {

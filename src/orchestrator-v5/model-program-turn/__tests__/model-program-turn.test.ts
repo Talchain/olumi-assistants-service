@@ -638,8 +638,10 @@ describe('the model-program turn on the real core route', () => {
     expect(stored.chances).toEqual(JSON.parse(JSON.stringify(sim.options.map((o) => ({ option_id: o.option_id, per_goal: o.per_goal, joint: o.joint,
       within_limits: o.within_limits, joint_within_limits: o.joint_within_limits, outcomes: o.outcomes })))));
     const oven = sim.options.find((o) => o.option_id === 'second_oven')!.per_goal[0] as { chance: number };
-    expect(oven.chance).toBeGreaterThan(0.12); // 1 − Φ(0.1 / 0.1155) ≈ 0.19 on the ruled range law
-    expect(oven.chance).toBeLessThan(0.27);
+    // W10 (adopted; the √12 law gave 1 − Φ(0.1 / 0.1155) ≈ 0.19, within 0.12 to 0.27): sell through 0.5 to 0.9 read as the
+    // range it falls in 8 times out of 10, σ = 0.2/1.2815516 = 0.15606, so 1 − Φ(0.1 / 0.15606 = 0.6408) = 0.2608.
+    expect(oven.chance).toBeGreaterThan(0.19);
+    expect(oven.chance).toBeLessThan(0.34);
     expect((sim.options.find((o) => o.option_id === 'keep_one')!.per_goal[0] as { chance: number }).chance).toBe(0);
     const view = r.canonical_analysis_view;
     expect(view.schema).toBe('canonical_analysis_view.v1');
@@ -654,8 +656,8 @@ describe('the model-program turn on the real core route', () => {
 
   /** The bakery's chance words and basis as the view says them (step 3), written out by hand. */
   const BAKERY_SALES = '‘sales’ being at least 380 loaf / week with each option in effect';
-  const BAKERY_BASIS = 'on Olumi’s reading of your figures (not yet confirmed), if ‘sell through’ follows Olumi’s provisional conversion of Olumi’s own estimated range, '
-    + '0.5 to 0.9, into a bell-shaped spread and ‘sales’ follows Olumi’s assumed relationship';
+  const BAKERY_BASIS = 'on Olumi’s reading of your figures (not yet confirmed), if ‘sell through’ follows Olumi’s provisional reading of Olumi’s own estimated range, '
+    + '0.5 to 0.9, as the range it falls in 8 times out of 10, with 0.7 as the middle value and ‘sales’ follows Olumi’s assumed relationship';
   /** The bakery with the oven's price given: the £3,000 limit is then checked, and the second oven is within it in every draw. */
   const PRICED = `${BRIEF} The oven costs £2,500.`;
   const priced = (): CanonicalModelT => {
@@ -670,9 +672,10 @@ describe('the model-program turn on the real core route', () => {
     const r = (await turn({ message: BRIEF })).json();
     const view = r.canonical_analysis_view;
     const oven = view.options.find((o: Json) => o.option_id === 'second_oven').cell, keep = view.options.find((o: Json) => o.option_id === 'keep_one').cell;
-    // A second oven: about 19% (step 3), on the sales target alone; our one oven: 0% in every draw. Spend = price × ovens, so
-    // only the second oven can break the budget, and its price is not known: a target-only chance is not the whole goal.
-    expect(oven.display).toMatch(/^about (1[2-9]|2[0-6])%$/);
+    // A second oven: about 26% (step 3; W10, before it 19%), on the sales target alone; our one oven: 0% in every draw. Spend
+    // = price × ovens, so only the second oven can break the budget, and its price is not known: a target-only chance is not
+    // the whole goal.
+    expect(oven.display).toMatch(/^about (19|2[0-9]|3[0-3])%$/);
     expect(keep.display).toBe('0%');
     expect(view.goal_chance.unchecked_limits).toEqual([{ limit_id: 'within_budget', words: '‘Within the £3,000’ — needs "oven price".' }]);
     expect(view.leader_licence).toBe('withheld');
@@ -962,7 +965,8 @@ describe('the model-program turn on the real core route', () => {
     const m = club();
     m.quantities = m.quantities.map((x) => (x.id === 'promo_effect' ? { ...x, floor: 0 } : x));
     const face = ((evaluateCanonical(m, { sourceText: CLUB_BRIEF, seed: 7 }).view as Json).options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
-    expect(face).toContain('‘promo effect’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 3 member / month / promotion to 7 member / month / promotion, into a bell-shaped spread, kept to Olumi’s reading of what it can be (never below 0 member / month / promotion)');
+    expect(face).toContain('‘promo effect’ follows Olumi’s provisional reading of Olumi’s own estimated range, 3 member / month / promotion to 7 member / month / promotion, '
+      + 'as the range it falls in 8 times out of 10, with 5 member / month / promotion as the middle value, kept to Olumi’s reading of what it can be (never below 0 member / month / promotion)');
   });
 
   it('numbers#2 (spec §3.7): Olumi\'s floor on a worked-out stock is said, saved and applied; a path that keeps to it gives its chance', async () => {
@@ -1647,13 +1651,17 @@ describe('the model-program turn on the real core route', () => {
         .map((o) => ({ option_id: o.option_id, per_goal: o.per_goal, joint: o.joint, within_limits: o.within_limits, joint_within_limits: o.joint_within_limits, outcomes: o.outcomes })))) as Json[];
     };
     const atSeed1 = (option: string) => chancesOf(1).find((o) => o.option_id === option)!.per_goal[0];
-    // Carry on exactly 0 (330 < 340); the promotion Φ(1.4434) = 0.92554 (Wilson half-width 0.0051).
+    // Carry on exactly 0 (330 < 340); the promotion needs 330 + 3 × effect ≥ 340, an effect of 10/3, below its median 5. W10
+    // (adopted; the √12 law gave Φ(1.4434) = 0.92554): σL = 2/1.2815516 = 1.56061, so Φ((5 − 10/3)/1.56061 = 1.06796) =
+    // 0.85723 (table Φ(1.06) = 0.85543, Φ(1.07) = 0.85769, interpolated; Wilson half-width at 10,000 draws 0.0069).
     expect(run1.result.chances).toEqual(chancesOf(seedOf(SCENARIO)));
     expect([goalOf(run1, 'carry_on').chance, goalOf(run1, 'carry_on').precision_95]).toEqual([0, [0, 0]]);
-    expect(Math.abs(atSeed1('promotion').chance - 0.92554)).toBeLessThan(0.0075);
+    expect(Math.abs(atSeed1('promotion').chance - 0.85723)).toBeLessThan(0.0075);
     expect((run1.result.chances as Json[]).map((o) => [o.option_id, (o.within_limits as Json).chance])).toEqual([['promotion', 1], ['carry_on', 1]]);
 
-    // Change ONE input on its card: leavers 10 → 12. The promotion now needs an effect of 16/3: 1 − Φ(0.2887) = 0.38641.
+    // Change ONE input on its card: leavers 10 → 12. The promotion now needs an effect of 16/3, above its median: W10 (the √12
+    // law gave 1 − Φ(0.2887) = 0.38641): σH = 1.56061, 1 − Φ((16/3 − 5)/1.56061 = 0.21359) = 0.41543 (table Φ(0.21) = 0.58317,
+    // Φ(0.22) = 0.58706, interpolated; Wilson half-width 0.0097).
     const card = await turn({ kind: 'system_event', event: { kind: 'factor_value_edit', target_id: 'leavers', value: 12 } });
     expect(card.statusCode, card.body).toBe(200);
     const m2 = persisted!.living_model.canonical as CanonicalModelT;
@@ -1664,7 +1672,7 @@ describe('the model-program turn on the real core route', () => {
     expect(run2.receipt.revision_digest).toBe(revisionDigest(m2, persisted!.living_model.person_words));
     expect(goalOf(run2, 'carry_on').chance).toBe(0);
     expect(run2.result.chances).toEqual(chancesOf(seedOf(SCENARIO)));
-    expect(Math.abs(atSeed1('promotion').chance - 0.38641)).toBeLessThan(0.012);
+    expect(Math.abs(atSeed1('promotion').chance - 0.41543)).toBeLessThan(0.012);
     expect(card.json().canonical_analysis_view.run.run_id).toBe(run2.run_id);
 
     // Cold reopen: the SAME stored result, Run id and digest, from the stored JSON alone in a fresh module.
@@ -2392,7 +2400,9 @@ describe('the model-program turn on the real core route', () => {
       m.conditions.push(hall);
       const face = faceOf(m, HALL);
       // The club's members stock is Olumi's (accepted, but never theirs): Olumi's reading, named, with no "(not yet confirmed)".
-      expect(face).toContain(', in this model, on Olumi’s reading of ‘members’, if your condition ‘The council must let us use the hall’ is met, ‘promo effect’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 3 member / month / promotion to 7 member / month / promotion, into a bell-shaped spread and ‘joins’ follows Olumi’s assumed relationship.');
+      expect(face).toContain(', in this model, on Olumi’s reading of ‘members’, if your condition ‘The council must let us use the hall’ is met, ‘promo effect’ follows Olumi’s provisional reading of '
+        + 'Olumi’s own estimated range, 3 member / month / promotion to 7 member / month / promotion, as the range it falls in 8 times out of 10, with 5 member / month / promotion as the middle value '
+        + 'and ‘joins’ follows Olumi’s assumed relationship.');
       expect(face).not.toContain('on your figures');
       // The exact 0% names it too, before what fixes it.
       expect(faceOf(m, HALL, 'carry_on')).toContain(', in this model, on Olumi’s reading of ‘members’, if your condition ‘The council must let us use the hall’ is met, ‘promo effect’');
@@ -3414,7 +3424,8 @@ describe('the model-program turn on the real core route', () => {
     pct.quantities = pct.quantities.map((x) => (x.id === 'sell_through' ? { ...x, unit: '%', value: null, low: 50, high: 90 } : x));
     const pctNode = nodeOf(project(pct, compile(pct, { sourceText: BRIEF })).graph)('sell_through');
     expect(pctNode.observed_state).toMatchObject({ value: 70, raw_value: 70, unit: '%', range: { low: 50, high: 90 } });
-    expect(pctNode.display_value).toMatch(/^50–90 %, Olumi's estimate; Olumi reads it as a spread around 70 \(sd 11\.55\)/);
+    // W10: 50 to 90 % read as the range it falls in 8 times out of 10, σ = 20/1.2815516 = 15.606 % (the √12 law: 11.55).
+    expect(pctNode.display_value).toMatch(/^50–90 %, Olumi's estimate; Olumi reads it as a spread around 70 \(sd 15\.61\)/);
 
     // DL 24 Oct (board 3de98183): a bare range of theirs IS the level. The centre the card draws is Olumi's reading, labelled
     // Olumi's; the range and their words stay theirs. A figure they state keeps their source.
@@ -3697,7 +3708,8 @@ describe('the model-program turn on the real core route', () => {
     expect(today.e.compiled.executable!.quantities.find((x) => x.id === 'sales__today')!.label).toBe('sales relative to today');
     expect(today.face).toBe('‘A second oven’: more than 99% chance of ‘Relative change in sales relative to today’ being at least 10% with each option in effect, in this model, '
       // G9 (#3738): a first draft is Olumi's reading until the person confirms it, and its basis says so.
-      + 'on Olumi’s reading of your figures (not yet confirmed), if ‘sell through’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 0.5 to 0.9, into a bell-shaped spread and ‘sales relative to today’ follows Olumi’s assumed relationship. '
+      + 'on Olumi’s reading of your figures (not yet confirmed), if ‘sell through’ follows Olumi’s provisional reading of Olumi’s own estimated range, 0.5 to 0.9, as the range it falls in 8 times '
+      + 'out of 10, with 0.7 as the middle value and ‘sales relative to today’ follows Olumi’s assumed relationship. '
       + 'Not yet checked: ‘Within the £3,000’ — needs "oven price".');
     expect(JSON.stringify(today.e.view)).not.toContain('today today');
     // Contrast: a quantity not already said "today" keeps its shadow's "today", listed as before.
