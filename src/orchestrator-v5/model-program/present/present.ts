@@ -176,14 +176,14 @@ export interface PresentedAnalysisView {
  */
 export function waitsOnWords(blockers: readonly PresentBlocker[], ids: ReadonlySet<string>): string | undefined {
   const said = blockers.filter((b) => b.code === 'no_goal' || b.scope.some((s) => ids.has(s))).map((b) => {
-    const name = `‘${b.label.trim()}’`;
+    const name = q(b.label);
     switch (b.code) {
       case 'no_goal': return 'the result you want';
       case 'measure': return `a measure for ${name}`;
       case 'deadline': return `a deadline for ${name}`;
       case 'range_kind': return `how to read the range for ${name}`;
       case 'recount': return `${name} again`;
-      case 'unknown': return `${name}, which no one can size yet${b.basis?.trim() ? ` (${b.basis.trim().replace(/[.!]+$/, '')})` : ''}`;
+      case 'unknown': return `${name}, which no one can size yet${b.basis?.trim() ? ` (${inlineWords(b.basis).replace(/[.!]+$/, '')})` : ''}`;
       default: return name;
     }
   });
@@ -228,7 +228,7 @@ export function listWords(parts: readonly string[]): string {
   return parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
 /** Display words stay on one line; the authored model and its quoted source are never rewritten. */
-const inlineWords = (text: string): string => text.trim().replace(/\s+/g, ' ');
+export const inlineWords = (text: string): string => text.trim().replace(/\s+/g, ' ');
 const q = (label: string): string => `‘${inlineWords(label)}’`;
 /** A sentence's full stop, unless it already ends in one (a question keeps its "?"). */
 const stop = (x: string): string => (/[.?!]$/.test(x) ? x : `${x}.`);
@@ -621,7 +621,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
         return s === undefined ? [] : [{ option_id: o.option_id, display: s.display }];
       }) }]) } : {}),
     ...(unchecked.length > 0 ? { unchecked_limits: unchecked.map((l, i) => ({ limit_id: l.limit_id, words: uncheckedWords[i]! })) } : {}),
-    ...((input.blockers ?? []).length > 0 ? { waits_on: input.blockers } : {}),
+    ...((input.blockers ?? []).length > 0 ? { waits_on: input.blockers!.map((b) => ({ ...b, label: inlineWords(b.label) })) } : {}),
   };
   const known = input.current !== undefined && input.run !== undefined;
   return {
