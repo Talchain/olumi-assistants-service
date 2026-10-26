@@ -163,14 +163,15 @@ function savedScenarioOf(read: { readonly status: number; readonly json: Rec }):
  * A program's Run as the reply's `run`, in the shape the scenario read gives a legacy Run, ONLY when this turn stored it (its
  * newest stored Run is not the one it started from): the UI adopts a new analysis from \`turn.run.run_id\` (read-after-write),
  * so a program reply whose turn made a Run must name it (DL 23 Oct: an in-card edit's new Run stayed unseen until a reload).
+ * Current only when it is the saved model's AND today's engine's, as every other reader of a program's Run says (Codex B2 on #3801).
  */
-function programRunOf(graph: unknown, before: string | null): CoreTurnRun | null {
+export function programRunOf(graph: unknown, before: string | null): CoreTurnRun | null {
   const shown = reopenProgram(graph);
   const run = shown?.run ?? null;
   if (run === null || run.run_id === before) return null;
   const at = (run.result.canonical_analysis_view as { run?: { graph_hash_at_run?: unknown } } | undefined)?.run?.graph_hash_at_run;
   return { run_key: run.run_id, run_id: run.run_id, computed_against: typeof at === 'string' ? at : null,
-    state: { kind: shown!.current ? 'complete_current' : 'complete_stale', computed_at: run.computed_at } };
+    state: { kind: shown!.current && shown!.engine_current ? 'complete_current' : 'complete_stale', computed_at: run.computed_at } };
 }
 const newestRunId = (read: ReturnType<typeof programReadOf>): string | null => (read.kind === 'program' ? read.program.runs.at(-1)?.run_id ?? null : null);
 

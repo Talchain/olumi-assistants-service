@@ -4,12 +4,11 @@
  * checked by simulation use 20,000 draws, and the hand value must lie within the 95% Wilson half-width of the sampled share.
  * Φ⁻¹(0.9) = 1.2815516: a half-Normal is beyond 1.2815516 σ exactly 1 time in 5 (2 × (1 − 0.9)).
  */
-import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { ExecutableModel, Goal, Quantity } from '../../executable.js';
 import { simulate } from '../simulate.js';
 import { standardNormals, uniforms } from '../prng.js';
-import { rangeLaw, type Domain, type RangeDist } from '../range-law.js';
+import { rangeLaw, truncatedStandardNormal, type Domain, type RangeDist } from '../range-law.js';
 import { EIGHT_IN_TEN_WORDS, INDEPENDENCE_WORDS, presentAnalysisView, type PresentQuantity } from '../../present/present.js';
 import { ENGINE_VERSIONS } from '../../../model-program-turn/run-receipt.js';
 import { MODEL_PROGRAM, reopenProgram } from '../../../model-program-turn/program-store.js';
@@ -41,6 +40,22 @@ const spread = (d: Quantity, opts = {}) => {
   if (r.kind !== 'normal') throw new Error('expected a spread');
   return r;
 };
+/**
+ * A person's hard bounds as drawn BEFORE W10, copied verbatim from staging 3ea44fea (range-law.ts `rangeLaw`, for a 'bounds'
+ * range with its own domain, and simulate.ts `drawInputs`, its conditioned branch), on the helpers W10 leaves unchanged
+ * (prng.ts `uniforms`, range-law.ts `truncatedStandardNormal`).
+ */
+function preW10BoundsDraws(x: Quantity, seed: number, draws: number): Float64Array {
+  const d = x.dist as RangeDist, { low, high, mode } = d;
+  const sd = (high - low) / Math.sqrt(12);
+  const centre = mode ?? (low + high) / 2;
+  const domains = [d.domain].filter((y): y is Domain => y !== undefined);
+  const lower = Math.max(low, ...domains.map((y) => y.min ?? -Infinity));
+  const upper = Math.min(high, ...domains.map((y) => y.max ?? Infinity));
+  const u = uniforms(seed, `q:${x.id}`, draws), alpha = (lower - centre) / sd, beta = (upper - centre) / sd;
+  for (let i = 0; i < draws; i++) u[i] = centre + sd * truncatedStandardNormal(u[i]!, alpha, beta);
+  return u;
+}
 
 describe('W10: a plausible range is read so that 1 draw in 10 falls below its low end and 1 in 10 above its high end', () => {
   it('(a) symmetric: 10 to 30 around 20 is the Normal on 20 with σ = 10/1.2815516 = 7.80304; 10% below 10, 10% above 30', () => {
@@ -92,15 +107,20 @@ describe('W10: a plausible range is read so that 1 draw in 10 falls below its lo
     expect(Math.abs(share(drawsOf(range('n', 0, 10, { unit: 'people' })), (d) => d < 0) - 0.1)).toBeLessThanOrEqual(W10);
   });
 
-  it('(e) a person\'s hard bounds are drawn byte for byte as before W10', () => {
-    // The digests are of the 20,000 draws as Float64 bytes, and the chances, recorded on the staging engine before W10
-    // (3ea44fea, engine mp-a04e2cebf944; the same at 14970d21) for the same seed: "between 10 and 30" around 12, and
-    // "between 0 and 10" around 2 with a floor of 0.
+  it('(e) a person\'s hard bounds are drawn exactly as before W10, draw for draw', () => {
+    // Exact equality, in this process, with the pre-W10 computation (`preW10BoundsDraws`), so no platform's floating point is
+    // compared with another's: a pinned sha256 of these draws was fb41a2e0… on macOS and 9c37af28… on Linux CI. "Between 10
+    // and 30" around 12, and "between 0 and 10" around 2 with a floor of 0; the chances are the ones recorded on the staging
+    // engine before W10 (3ea44fea, engine mp-a04e2cebf944) for the same seed.
     const x = range('x', 10, 30, { mode: 12, kind: 'bounds' }), n = range('n', 0, 10, { mode: 2, kind: 'bounds', domain: { min: 0 } });
     const r = simulate(model([x, n, fixed('t', 15), fixed('t2', 4)], [goal('g', 'x', 't'), goal('g2', 'n', 't2')]), { seed: SEED, draws: N, record: ALL });
-    const digest = (id: string) => createHash('sha256').update(new Uint8Array(Float64Array.from(r.recorded!.map((d) => d.values[id]![0]!)).buffer)).digest('hex');
-    expect(digest('x')).toBe('fb41a2e0e28f91a28ed80ba38c1244202001a87ff131e086f2468596b988bda8');
-    expect(digest('n')).toBe('d7b968453bb9ddd186c1c5b60745ceca93a3b19baef5e1ba482cb8be3ef46033');
+    const drawn = (id: string) => r.recorded!.map((d) => d.values[id]![0]!);
+    const before = { x: Array.from(preW10BoundsDraws(x, SEED, N)), n: Array.from(preW10BoundsDraws(n, SEED, N)) };
+    expect(new Set(before.x).size).toBeGreaterThan(N - 10); // not vacuous: 20,000 distinct draws
+    expect(drawn('x')).toEqual(before.x);
+    expect(drawn('n')).toEqual(before.n);
+    const shareAtLeast = (v: readonly number[], t: number) => v.filter((d) => d >= t).length / v.length;
+    expect(r.options[0]!.per_goal.map((g) => ('chance' in g ? g.chance : null))).toEqual([shareAtLeast(before.x, 15), shareAtLeast(before.n, 4)]);
     expect(r.options[0]!.per_goal.map((g) => ('chance' in g ? g.chance : null))).toEqual([0.47295, 0.3278]);
     expect(spread(x)).toMatchObject({ ends: 'hard_bounds', centre: 12, sd: expect.closeTo(20 / Math.sqrt(12), 12), lower: 10, upper: 30 });
   });
@@ -163,6 +183,45 @@ describe('W10: the words say how the range was read, once, and what is assumed a
     expect(face).toContain('‘Members today’ follows Olumi’s provisional reading of your range, 100 member to 110 member, as never below 100 member and above '
       + '110 member only 1 time in 10, with 105 member as the middle value');
     expect(count(face, EIGHT_IN_TEN_WORDS)).toBe(1); // the promotion effect's, not the edged one's
+  });
+
+  describe('Codex B1 on #3801: where the domain cuts into a tail, its end is not 1 in 10, so no frequency is said; the law is unchanged', () => {
+    // One person's range x, goal x ≥ its middle. Each cut case's true share beyond its cut end is worked out by hand from
+    // range-law.ts's halves (each keeps ½, conditioned on its part of the domain): lower half Z in [a, 0], a = (lower − m)/σL,
+    // P(X < low) = ½ × (Φ(−1.2815516) − Φ(a)) / (½ − Φ(a)).
+    const faceOf = (x: Quantity, middle: number): string => {
+      const m = model([x, fixed('t', middle)], [goal('g', 'x', 't')]);
+      const v = presentAnalysisView({ model: m, result: simulate(m, { seed: SEED, draws: 2000 }), quantities: { x: person('Figure'), t: person('Target') },
+        aims: { g: { confirmed: true, accepted: true } } }) as unknown as Rec;
+      expect(v.options[0].cell.kind).toBe('figure');
+      return v.options[0].cell.face as string;
+    };
+    const FREQUENCY = /times? (?:out )?(?:of|in) 10/;
+    const CUT: ReadonlyArray<readonly [string, Quantity, number, string]> = [
+      // σ = 7.80304, a = −11/7.80304 = −1.40971, Φ(a) = 0.07931: (0.1 − 0.07931)/(0.5 − 0.07931) × ½ = 0.02459 below 10
+      // (and above 30), never 0.1.
+      ['10, 20, 30 kept within 9 to 31', range('x', 10, 30, { mode: 20, domain: { min: 9, max: 31 } }), 20,
+        '‘Figure’ follows Olumi’s provisional reading of your range, 10 to 30, with 20 as the middle value, kept to Olumi’s reading of what it can be (9 to 31)'],
+      // The low end is the floor (never below 0); above 2, σH = 0.78030, b = 1.1/0.78030 = 1.40971: the same 0.02459, never 0.1.
+      ['0, 1, 2 kept within 0 to 2.1', range('x', 0, 2, { mode: 1, domain: { min: 0, max: 2.1 } }), 1,
+        '‘Figure’ follows Olumi’s provisional reading of your range, 0 to 2, as never below 0, with 1 as the middle value, kept to Olumi’s reading of what it can be (0 to 2.1)'],
+      // σ = 0.35114, a = −0.5/0.35114 = −1.42395, Φ(a) = 0.07723: 0.02693 below 0.05 (and above 0.95), never 0.1.
+      ['a chance 0.05 to 0.95 within 0 to 1', range('x', 0.05, 0.95, { domain: { min: 0, max: 1 } }), 0.5,
+        '‘Figure’ follows Olumi’s provisional reading of your range, 0.05 to 0.95, with 0.5 as the middle value, kept to Olumi’s reading of what it can be (0 to 1)'],
+    ];
+    for (const [name, x, middle, words] of CUT) {
+      it(`${name}: no frequency, the middle value (still the median: the law is unchanged)`, () => {
+        const face = faceOf(x, middle);
+        expect(face).toContain(words);
+        expect(face).not.toMatch(FREQUENCY);
+        expect(spread(x).share_below).toBe(0.5);
+      });
+    }
+    it('contrast: 10, 20, 30 with no domain is exactly 1 in 10 at each end (row (a)), so the 8-in-10 words stay', () => {
+      const free = faceOf(range('x', 10, 30, { mode: 20 }), 20);
+      expect(free).toContain('‘Figure’ follows Olumi’s provisional reading of your range, 10 to 30, as the range it falls in 8 times out of 10, with 20 as the middle value');
+      expect(count(free, EIGHT_IN_TEN_WORDS)).toBe(1);
+    });
   });
 });
 

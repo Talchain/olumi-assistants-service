@@ -640,8 +640,9 @@ describe('the model-program turn on the real core route', () => {
     const oven = sim.options.find((o) => o.option_id === 'second_oven')!.per_goal[0] as { chance: number };
     // W10 (adopted; the √12 law gave 1 − Φ(0.1 / 0.1155) ≈ 0.19, within 0.12 to 0.27): sell through 0.5 to 0.9 read as the
     // range it falls in 8 times out of 10, σ = 0.2/1.2815516 = 0.15606, so 1 − Φ(0.1 / 0.15606 = 0.6408) = 0.2608.
-    expect(oven.chance).toBeGreaterThan(0.19);
-    expect(oven.chance).toBeLessThan(0.34);
+    // NB2 on #3801: within 0.02 of it (4.6 standard errors at 10,000 draws on this test's random seed: √(0.2608 × 0.7392 /
+    // 10,000) = 0.0044), so the √12 law's 0.193238 is outside.
+    expect(Math.abs(oven.chance - 0.2608)).toBeLessThanOrEqual(0.02);
     expect((sim.options.find((o) => o.option_id === 'keep_one')!.per_goal[0] as { chance: number }).chance).toBe(0);
     const view = r.canonical_analysis_view;
     expect(view.schema).toBe('canonical_analysis_view.v1');
@@ -675,7 +676,7 @@ describe('the model-program turn on the real core route', () => {
     // A second oven: about 26% (step 3; W10, before it 19%), on the sales target alone; our one oven: 0% in every draw. Spend
     // = price × ovens, so only the second oven can break the budget, and its price is not known: a target-only chance is not
     // the whole goal.
-    expect(oven.display).toMatch(/^about (19|2[0-9]|3[0-3])%$/);
+    expect(oven.display).toMatch(/^about 2[4-8]%$/); // 0.2608 ± 0.02 (step 3), never the √12 law's 19%
     expect(keep.display).toBe('0%');
     expect(view.goal_chance.unchecked_limits).toEqual([{ limit_id: 'within_budget', words: '‘Within the £3,000’ — needs "oven price".' }]);
     expect(view.leader_licence).toBe('withheld');
@@ -965,8 +966,10 @@ describe('the model-program turn on the real core route', () => {
     const m = club();
     m.quantities = m.quantities.map((x) => (x.id === 'promo_effect' ? { ...x, floor: 0 } : x));
     const face = ((evaluateCanonical(m, { sourceText: CLUB_BRIEF, seed: 7 }).view as Json).options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
+    // Codex B1 on #3801: the floor is 3/1.56061 = 1.92 σ below the low end, inside the 4 σ the tail needs to be whole, so no
+    // frequency is said (the same range with no floor keeps its 8 in 10: HALL below).
     expect(face).toContain('‘promo effect’ follows Olumi’s provisional reading of Olumi’s own estimated range, 3 member / month / promotion to 7 member / month / promotion, '
-      + 'as the range it falls in 8 times out of 10, with 5 member / month / promotion as the middle value, kept to Olumi’s reading of what it can be (never below 0 member / month / promotion)');
+      + 'with 5 member / month / promotion as the middle value, kept to Olumi’s reading of what it can be (never below 0 member / month / promotion)');
   });
 
   it('numbers#2 (spec §3.7): Olumi\'s floor on a worked-out stock is said, saved and applied; a path that keeps to it gives its chance', async () => {

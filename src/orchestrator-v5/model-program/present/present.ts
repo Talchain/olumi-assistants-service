@@ -19,8 +19,9 @@
  *     the Run's own draws (`mainDriverOf`, DRIVER_MIN_SWING); a withheld chance says `{ kind: 'not_recorded' }`, the word
  *     DGAI's parser takes for "absent" (it refuses the WHOLE view when `main_driver` is missing).
  *   - Every range is named as Olumi's provisional reading of the person's range, or of Olumi's own, said plainly and once
- *     (W10, interim): a plausible range as the range it falls in 8 times out of 10, with its middle value, an end on a hard
- *     edge as "never below" / "never above" it; a person's bounds as before, Olumi's provisional conversion (`rangeSpread`,
+ *     (W10, interim): a plausible range as the range it falls in 8 times out of 10, with its middle value (a frequency only
+ *     where its domain leaves that tail whole: Codex B1 on #3801), an end on a hard edge as "never below" / "never above"
+ *     it; a person's bounds as before, Olumi's provisional conversion (`rangeSpread`,
  *     mapper.ts:104-110) held within them. The person's bounds stay theirs and are never called their probability law (DL
  *     ruling 4). Once per result, where the chances shown rest on two or more uncertain inputs, the notes say what Olumi
  *     assumes about how they move together (`INDEPENDENCE_WORDS`): each is drawn on its own stream (prng.ts).
@@ -243,6 +244,8 @@ export const NO_RANGE_REASON = 'No figure this chance rests on has a range to te
 export const NOT_SWEPT_REASON = 'This model is too large to test each figure one at a time in one run, so what the chance rests on most is not measured.';
 /** W10: how a plausible range with neither end on a hard edge is read (range-law.ts rule 1), said once where it is listed. */
 export const EIGHT_IN_TEN_WORDS = 'the range it falls in 8 times out of 10';
+/** Codex B1 on #3801: an end's 1 in 10 is said only where its domain edge is at least this many of that half's σ beyond it. */
+const TAIL_ROOM = 4;
 /** W10: once per result, where the chances shown rest on two or more uncertain inputs (each drawn on its own stream, prng.ts). */
 export const INDEPENDENCE_WORDS = 'Olumi treats these figures as varying independently, except where the model links them.';
 const whoseRange = (author: 'person' | 'olumi' | 'unverified'): string => (author === 'unverified' ? NOT_IN_THEIR_WORDS : author === 'person' ? '(your range)' : '(Olumi’s estimate)');
@@ -371,18 +374,22 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       }
       const at = (v: number): string => sayOf(x.id, v, x.unit);
       const never = [...(reading.edge_below ? [`below ${at(reading.lower)}`] : []), ...(reading.edge_above ? [`above ${at(reading.upper)}`] : [])];
-      // Its centre is the middle value (the median), and its ends 1 in 10 each, only where no end lies past a hard edge
-      // (range-law.ts `share_below` ½); otherwise (a rough 100 to 120 % against a ceiling of 100 %) it is said only as what it
-      // never is.
+      // Its centre is the middle value (the median) only where no end lies past a hard edge (range-law.ts `share_below` ½);
+      // otherwise (a rough 100 to 120 % against a ceiling of 100 %) it is said only as what it never is.
+      // Codex B1 on #3801: an end's "1 time in 10" (and so "8 times out of 10") only where the domain leaves that half's tail
+      // whole, its edge at least TAIL_ROOM of that half's σ beyond the end. A nearer edge cuts the tail (10 to 30 around 20
+      // kept within 9 to 31: 2.5% below 10, not 10%), so no frequency is said there.
       const median = reading.share_below === 0.5;
-      const how = !median ? `never ${never.join(' or ')}`
-        : reading.edge_below && reading.edge_above ? `never ${never.join(' or ')}, with ${at(reading.centre)} as the middle value`
-          : reading.edge_below ? `never ${never[0]} and above ${at(d.high)} only 1 time in 10, with ${at(reading.centre)} as the middle value`
-            : reading.edge_above ? `never ${never[0]} and below ${at(d.low)} only 1 time in 10, with ${at(reading.centre)} as the middle value`
-              : `${EIGHT_IN_TEN_WORDS}, with ${at(reading.centre)} as the middle value`;
+      const whole = { below: reading.lower <= d.low - TAIL_ROOM * reading.sd_below, above: reading.upper >= d.high + TAIL_ROOM * reading.sd_above };
+      const middle = `, with ${at(reading.centre)} as the middle value`;
+      const how = !median ? `, as never ${never.join(' or ')}`
+        : reading.edge_below && reading.edge_above ? `, as never ${never.join(' or ')}${middle}`
+          : reading.edge_below ? `, as never ${never[0]}${whole.above ? ` and above ${at(d.high)} only 1 time in 10` : ''}${middle}`
+            : reading.edge_above ? `, as never ${never[0]}${whole.below ? ` and below ${at(d.low)} only 1 time in 10` : ''}${middle}`
+              : whole.below && whole.above ? `, as ${EIGHT_IN_TEN_WORDS}${middle}` : middle;
       // What it can be, said only where it keeps the draws somewhere that is not already one of its ends.
       const within = (Number.isFinite(reading.lower) && !reading.edge_below) || (Number.isFinite(reading.upper) && !reading.edge_above) ? kept : '';
-      return [`${name} follows Olumi’s provisional reading of ${whose}, ${ends}, as ${how}${within}`];
+      return [`${name} follows Olumi’s provisional reading of ${whose}, ${ends}${how}${within}`];
     }
     if (x.dist?.kind === 'fixed') {
       // executable.ts r3: the author of every fixed value. A structural constant (a conversion, a switch, a count) and a

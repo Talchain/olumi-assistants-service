@@ -453,8 +453,10 @@ describe('present: what each computed chance rests on most (one figure at a time
     expect(driver(hire, 'hire')).toEqual({ kind: 'available',
       driver: { quantity: 'delay', author: 'olumi', low: { value: 2, display: '100%' }, middle: { value: 6, display: '100%' }, high: { value: 10, display: '0%' }, swing_points: 100, draws: 200, untested: [] },
       detail: 'In this model, of the figures tested one at a time, the chance is most sensitive to ‘Start delay’ (Olumi’s estimate): at the low end (2 months) 100%, at the middle (6 months) 100%, at the high end (10 months) 0%.' });
-    expect(cell(hire, 'hire').face).toContain('‘Start delay’ follows Olumi’s provisional reading of Olumi’s own estimated range, 2 months to 10 months, as the range it '
-      + 'falls in 8 times out of 10, with 6 months as the middle value, kept to Olumi’s reading of what it can be (never below 0 months)');
+    // Codex B1 on #3801: the floor of 0 cuts into the lower tail (σL = 4/1.2815516 = 3.12122, a = −6/3.12122 = −1.92232:
+    // ½ × (0.1 − Φ(a))/(½ − Φ(a)) = 0.0769 below 2, not 1 in 10), so no frequency is said; the middle value stays the median.
+    expect(cell(hire, 'hire').face).toContain('‘Start delay’ follows Olumi’s provisional reading of Olumi’s own estimated range, 2 months to 10 months, '
+      + 'with 6 months as the middle value, kept to Olumi’s reading of what it can be (never below 0 months)');
     const outage = driver(present(timed('risk'), { ...labels, delay: { label: 'Outage delay', author: 'olumi' as const } }), 'carry_on');
     expect(outage.kind).toBe('available');
     expect(outage.driver).toEqual({ quantity: 'delay', author: 'olumi', low: { value: 2, display: 'less than 1%' }, middle: { value: 6, display: 'less than 1%' },
