@@ -1338,7 +1338,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(String(sentTools.propose_change)).toContain('An answer to a listed question (a blocker, or an asked item\'s question) goes in answers, on that existing item\'s id from read_canonical_context, saying whose it is: author person, ');
       expect(String(sentTools.propose_change)).toContain('Anything else (a new item or link, a rename, a removal) goes in request, in plain words with their exact words for every figure of theirs, '
         + 'with remove the ids of anything they asked to remove ([] for none); Olumi’s drafter writes it. ');
-      expect(sentSha('propose_change')).toBe('806a9dedeb71c965fd35269ba43f00e2217a4ec1c498ddb5cbf0782967f07847');
+      // 26 Oct (W6 chat): RUN_WORDS_RULE gained one sentence, the leader's words as given (run.leader.words); before it 806a9ded….
+      expect(sentSha('propose_change')).toBe('b5d5bc0e7e8764b4e4dc2449450d622019e46ff3c06d38608c6722d56ba9f688');
       const sentParams = (calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.parameters as Json;
       expect(Object.keys(sentParams.properties)).toEqual(['public_label', 'basis', 'request', 'remove', 'answers']);
       expect(sentParams.required).toContain('answers');
@@ -1355,7 +1356,10 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const read = JSON.parse(typeof output === 'string' ? output : JSON.stringify(output)) as Json;
       const run = (read.data ?? read).run as Json;
       expect(stableStringify(run.goal_chance)).toBe(stableStringify(stored));
-      expect(Object.keys(run).sort()).toEqual(['current', 'engine_current', 'goal_chance', 'options', 'run_id']);
+      // W6 chat (26 Oct): and which option is most likely to achieve the goal, or why none is named: the stored view's own words.
+      const leader = (persisted!.living_model.runs.at(-1).result.canonical_analysis_view as Json).leader as Json;
+      expect(run.leader).toEqual({ licence: leader.licence, words: leader.words });
+      expect(Object.keys(run).sort()).toEqual(['current', 'engine_current', 'goal_chance', 'leader', 'options', 'run_id']);
     });
 
     it('measure RL mrr-r3 on a PROGRAM (25 Oct): the approved apply saves with its Run, then two stray applies: the reply is the AI\'s words, with that save\'s receipt and its stored Run, never "nothing saved"', async () => {
@@ -1412,7 +1416,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(sent).toContain('superseded: the card is out of date because the model changed after it was prepared, so nothing was saved; say so, and ask whether they want that change made again.');
       expect(sent).not.toContain('prepare a new change');
       // 25 Oct (measure RL mrr-r4/r5): the superseded sentence; before it 09fd261b… said "read it again and prepare a new change".
-      expect(createHash('sha256').update(sent, 'utf8').digest('hex')).toBe('4ebb01101f37861e49a7947cf594c693f588ed4894385d930d10a6f2b9988bd6');
+      // 26 Oct (W6 chat): RUN_WORDS_RULE gained one sentence, the leader's words as given (run.leader.words); before it 4ebb0110….
+      expect(createHash('sha256').update(sent, 'utf8').digest('hex')).toBe('8ac4ec6531078147a7541f27d41db10921d93a02c9395839ab10b0b0cb475b77');
     });
 
     it('DL 23 Oct (served capacity: a new Run unseen until reload): a program reply names the Run its turn stored in `run`, and only that Run', async () => {
