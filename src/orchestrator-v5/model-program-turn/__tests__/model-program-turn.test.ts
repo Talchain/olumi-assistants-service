@@ -22,7 +22,7 @@ import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_JSO
 import { runModelProgramTurn } from '../turn.js';
 import { evaluateCanonical, seedOf, RUN_DRAWS } from '../evaluate.js';
 import { programReadOf, reopenProgram, savedProgramOf, sourceTextOf } from '../program-store.js';
-import { applyCanvasFigure, applyProgramChange, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
+import { applyCanvasFigure, applyProgramChange, holdProgramCard, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
 import { log as staticLog } from '../../../utils/telemetry.js';
 import { GROUPS, readingOf, validatePostimage } from '../postimage.js';
 import { proposalPendingAction } from '../../agent-lane/durable-proposal.js';
@@ -940,6 +940,70 @@ describe('the model-program turn on the real core route', () => {
     const saves = registered.length;
     expect(await applyProgramChange(deps, ctx, proposed.data.proposal_id)).toMatchObject({ status: 'ok', data: { already_saved: true } });
     expect(registered.length).toBe(saves);
+  });
+
+  it('seam#3: a card held before an engine update saves its model exactly, with TODAY\'s Run of it in the card\'s Run\'s place, and apply_change reports that saved Run; a card held on today\'s engine saves byte for byte what it showed', async () => {
+    replies = [JSON.stringify(bakery())];
+    await turn({ message: BRIEF });
+    // A card as a deploy holds it: the real proposal path (an answer, no AI call), held again by the real holder in a fresh
+    // store (a restart restores it), its Run as that deploy computed it: `before` names an earlier deploy's engine and Run.
+    const card = async (words: string, value: number, before?: { readonly engine: string; readonly run_id: string; readonly face: string }) => {
+      const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
+      const preparing = new ProposalStore();
+      const proposed = await proposeProgramChange({ dispatch, proposals: preparing }, ctx, ProgramChangeParams.parse({ public_label: `Oven price £${value}`, basis: 'their answer', request: '', remove: [],
+        answers: [{ id: 'oven_price', status: 'known', author: 'person', value, low: null, high: null, range_kind: null, party: null, quote: words, basis: null }] })) as Json;
+      expect(proposed.status, JSON.stringify(proposed)).toBe('ok');
+      const p = preparing.get(proposed.data.proposal_id)! as Json;
+      const program = JSON.parse(JSON.stringify(savedProgramOf({ living_model: p.living_model }))) as Json;
+      const shown = program.runs.at(-1);
+      if (before !== undefined) {
+        shown.receipt.versions.engine = before.engine; shown.run_id = before.run_id; shown.result.canonical_analysis_view.run.run_id = before.run_id;
+        shown.result.canonical_analysis_view.options[0].cell.face = before.face;
+      }
+      const proposals = new ProposalStore();
+      const held = holdProgramCard(proposals, { scenarioId: SCENARIO, userId: null, graphHash: p.base_graph_identity_hash, identity: p.base_model_identity },
+        { label: p.public_label, basis: 'their answer', program: program as never, changes: p.changes });
+      return { deps: { dispatch, proposals }, ctx, held, program, shown };
+    };
+    // The contrast: a card held on today's engine saves exactly what it showed, model and Run, and reports that Run.
+    const today = await card('The oven would cost £2,500.', 2500);
+    const a = await applyProgramChange(today.deps, today.ctx, today.held.proposal_id) as Json;
+    expect(a).toMatchObject({ status: 'ok', data: { saved: true, run: { run_id: today.shown.run_id } } });
+    expect(stableStringify(persisted!.living_model)).toBe(stableStringify(today.held.living_model));
+    const savedRuns = JSON.stringify(persisted!.living_model.runs);
+    expect(persisted!.living_model.runs).toHaveLength(2);
+
+    // A card held by the deploy before an engine update, approved after it.
+    const before = { engine: 'mp-0ldengine000', run_id: 'mp_run_3_0ldengine000', face: 'WORDS FROM BEFORE THE UPDATE' };
+    const old = await card('Actually the oven would cost £3,000.', 3000, before);
+    expect([old.shown.run_id, old.shown.receipt.versions.engine]).toEqual([before.run_id, before.engine]);
+    const saves = registered.length;
+    const b = await applyProgramChange(old.deps, old.ctx, old.held.proposal_id) as Json;
+    expect(b, JSON.stringify(b)).toMatchObject({ status: 'ok', data: { saved: true } });
+    expect(registered.length).toBe(saves + 1);
+    const lm = persisted!.living_model;
+    // The model exactly as the card showed it, with the person's words; every Run before it byte for byte.
+    expect(stableStringify(lm.canonical)).toBe(stableStringify(old.program.canonical));
+    expect(lm.canonical.quantities.find((x: Json) => x.id === 'oven_price')).toMatchObject({ value: 3000, quote: 'Actually the oven would cost £3,000.', author: 'person', status: 'known' });
+    expect(lm.person_words).toEqual([BRIEF, 'The oven would cost £2,500.', 'Actually the oven would cost £3,000.']);
+    expect(JSON.stringify(lm.runs.slice(0, 2))).toBe(savedRuns);
+    // Its Run is today's engine's, of that model, in the card's Run's place (never the card's, nor the card's beside it).
+    expect(lm.runs).toHaveLength(3);
+    const run = lm.runs[2];
+    expect(run.run_id).not.toBe(before.run_id);
+    expect(run.receipt).toEqual({ ...old.shown.receipt, versions: { ...ENGINE_VERSIONS } });
+    expect(run.result.chances).toEqual(old.shown.result.chances);
+    expect(JSON.stringify(lm)).not.toContain(before.face);
+    // What apply_change reports is THAT saved Run, never the card's words.
+    expect(b.data.run.run_id).toBe(run.run_id);
+    expect(JSON.stringify(b.data)).not.toContain(before.face);
+    // A reopen reads it as current, on today's engine: nothing stored is "from before an update" on arrival.
+    const cold = reopenProgram(JSON.parse(JSON.stringify(persisted)))!;
+    expect([cold.run!.run_id, cold.current, cold.engine_current, (cold.view as Json).staleness.stale]).toEqual([run.run_id, true, true, false]);
+    // The same approval again finds its own save: no second Run, no second write.
+    const snapshot = JSON.stringify(persisted);
+    expect(await applyProgramChange(old.deps, old.ctx, old.held.proposal_id)).toMatchObject({ status: 'ok', data: { already_saved: true } });
+    expect([registered.length, JSON.stringify(persisted)]).toEqual([saves + 1, snapshot]);
   });
 
   it('DL 24 Oct (DoD-G classes 12 and 4): an update returns ONLY what it changes, in the canonical records\' own schema, and the host merges it by id: every record it did not return is the saved one, byte for byte; a new id is added; remove deletes; an answer stays on its item; the words checks and the compiler still refuse', async () => {

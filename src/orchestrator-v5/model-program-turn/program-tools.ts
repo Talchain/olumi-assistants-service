@@ -9,8 +9,9 @@
  *    saved model (`proposePostimage`). The one validator checks either exactly (`validatePostimage`), and it is compiled
  *    and evaluated now, so the card the person approves holds the exact model, EVERY change on it, and the Run it would
  *    store; nothing is saved;
- *  · apply_change: on the person's approval of THAT proposal, its model and Run are written as ONE core write on the
- *    proposal's base (CAS); a model that moved since is `superseded`; this operation's own earlier save is never repeated;
+ *  · apply_change: on the person's approval of THAT proposal, its model and Run (today's engine's, when the card's is from
+ *    before an update) are written as ONE core write on the proposal's base (CAS); a model that moved since is `superseded`;
+ *    this operation's own earlier save is never repeated;
  *  · run_analysis: shows the stored Run when it is current; otherwise evaluates a NEW Run and stores it.
  * The canvas's figure edits (`applyCanvasFigure`) are the person's own hand: one figure, built exactly from its target and
  * value (no AI call), through the SAME validator, saved with its Run; the typed edit is its own approval, so no card.
@@ -252,8 +253,14 @@ export async function applyProgramChange(deps: ProgramToolDeps, ctx: Ctx, propos
   if (decision.status === 'already_applied') return alreadySaved(decision.receipts[0] ?? null);
   if (decision.status !== 'execute') return refused(decision.status);
   if (p.base_model_identity !== before.identity) return refused('superseded');
-  // The approved program, exactly: its model (the display graph is that model's projection) and the Run the card showed.
-  const graph = postimageOf(program);
+  // The approved program, exactly: its model (the display graph is that model's projection) and the Run the card showed, while
+  // that Run is still this model's on today's engine. A card outlives a deploy (it is held for a day and restored on restart),
+  // so the Run it showed may be from before an update, one a reopen says is "from before an update" (seam#3): its model is
+  // saved exactly, with the Run today's engine computes for it in that Run's place (as run_analysis would), never the card's.
+  // Computed once, before the write, so a retry of this operation sends these bytes or finds its own save; never a second Run.
+  const shown = shownRun(program.runs, program.canonical, program.person_words);
+  const { program: saved, graph } = shown === undefined || (shown.current && shown.engine_current) ? { program, graph: postimageOf(program) }
+    : withNewRun({ ...program, runs: program.runs.slice(0, -1) });
   const commit = async (): Promise<ToolOutcome> => {
     const { write } = await savePostimage(deps.dispatch, { scenarioId: ctx.scenario_id, operationId, expectedIdentity: before.identity, ownVersion }, graph);
     if (write.status === 'unknown') return write.outcome;
@@ -263,7 +270,7 @@ export async function applyProgramChange(deps: ProgramToolDeps, ctx: Ctx, propos
     if (write.status === 'already_saved') return alreadySaved(write.receipt);
     deps.proposals.markApplied(p.proposal_id, [write.receipt as never]);
     return ok({ saved: true, receipt: write.receipt, revision: { graph_hash: write.after.graphHash, graph_identity_hash: write.after.identity },
-      run: runWords(program.runs.at(-1) ?? null) }, { mutated: true, ran: true });
+      run: runWords(saved.runs.at(-1) ?? null) }, { mutated: true, ran: true });
   };
   const reconcile = async (): Promise<ToolOutcome> => {
     const own = await ownVersion().catch(() => null);
