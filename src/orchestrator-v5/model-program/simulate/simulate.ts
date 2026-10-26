@@ -63,6 +63,7 @@
  *     read; they never change a result and are never stored with a Run.
  */
 import type { Aggregation, Cmp, ExecutableModel, Goal, Limit, Option, OptionSet, Quantity, Reading, Risk, Window } from '../executable.js';
+import { pairedDifference, wilson95, type PairedDifference } from './paired.js';
 import { standardNormals, uniforms } from './prng.js';
 import { fromStandardNormal, fromUniform, rangeLaw, truncatedStandardNormal, type RangeDist, type SpreadReading } from './range-law.js';
 import type { Chance, ChanceOrWithheld, OptionResult, PerDraw, PerDrawCondition, PerDrawOption, RecordedDraw, SimResult, WithheldChance, WithheldChanceEntry } from './result.js';
@@ -84,15 +85,8 @@ export interface SimulateOptions {
   perDraw?: boolean;
 }
 
-const Z95 = 1.959963984540054;
-
-/** Wilson score interval at 95% for k successes in n draws: the SIMULATION precision of a chance. */
-export function wilson95(k: number, n: number): [number, number] {
-  const p = k / n, z2 = Z95 * Z95, denom = 1 + z2 / n;
-  const centre = (p + z2 / (2 * n)) / denom;
-  const half = (Z95 * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / denom;
-  return [Math.max(0, centre - half), Math.min(1, centre + half)];
-}
+/** The SIMULATION precision of a chance (paired.ts owns it, beside the paired gap). */
+export { wilson95 };
 
 type Op = 'sum' | 'difference' | 'product' | 'ratio';
 type StockNode = { readonly kind: 'stock'; readonly start: number; readonly inflows: readonly number[]; readonly outflows: readonly number[] };
@@ -590,7 +584,7 @@ class Tally {
 }
 
 function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: { low: Int32Array; high: Int32Array }[],
-  record: ReadonlySet<number>, recorded: RecordedDraw[], perDraw?: PerDrawOption[]): OptionResult {
+  record: ReadonlySet<number>, recorded: RecordedDraw[], perDraw?: PerDrawOption[], headlines?: Int8Array[]): OptionResult {
   const n = c.nodes.length, N = c.periods;
   /** Every quantity at each time k = 0..N, evaluated from the stocks' boundary levels S[k]: boundaries for a state, intervals for a flow. */
   const vals = new Float64Array((N + 1) * n);
@@ -609,8 +603,8 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
   const keep = perDraw !== undefined;
   const goals = c.goals.map(() => new Tally(draws, keep)), limits = c.limits.map(() => new Tally(draws, keep));
   const joint = new Uint8Array(draws), within = new Uint8Array(draws), both = new Uint8Array(draws);
-  /** SC0: the headline per draw (1, 0, −1 outside the domain) and each risk's firing per draw, only when asked for. */
-  const headline = keep ? new Int8Array(draws) : undefined;
+  /** The headline per draw (1, 0, −1 outside the domain), kept for the paired gaps (SC2); each risk's firing only when asked (SC0). */
+  const headline = new Int8Array(draws);
   const firedIn = keep ? c.risks.map(() => new Int8Array(draws)) : undefined;
   /** The values that left their domain in this draw, once each (`off` marks them). */
   const off = new Uint8Array(n), left: number[] = [];
@@ -689,7 +683,7 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
     joint[d] = allGoals;
     within[d] = allLimits;
     both[d] = allGoals & allLimits;
-    if (headline !== undefined) headline[d] = badGoal || badLimit ? -1 : both[d]!;
+    headline[d] = badGoal || badLimit ? -1 : both[d]!;
     // fired: 1 fired, 0 not, −1 never read (beyond the horizon), 2 its chance outside its domain (said as −2).
     if (firedIn !== undefined) c.risks.forEach((_, i) => { firedIn[i]![d] = fired[i] === 2 ? -2 : fired[i]!; });
 
@@ -717,12 +711,13 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
   const summary = (t: Tally) => (t.bad > 0 ? invalid(t.bad, t.badIds) : quantiles(t.agg));
   const meanOver = (a: Uint8Array, idx: Int32Array): number => idx.reduce((s, i) => s + a[i]!, 0) / idx.length;
   const allExactGoals = exactGoal.every(Boolean), allExactLimits = exactLimit.every(Boolean);
+  headlines?.push(headline);
   if (perDraw !== undefined) {
     // The tallies' own arrays, handed over: a draw outside the domain has a NaN value and met −1.
     const conditionOf = (t: Tally, id: string): PerDrawCondition => ({ id, value: t.agg, against: t.target!,
       met: Int8Array.from(t.met, (m, d) => (Number.isNaN(t.agg[d]!) ? -1 : m)) });
     perDraw.push({ option_id: p.option_id, goals: c.goals.map((g, i) => conditionOf(goals[i]!, g.id)),
-      limits: c.limits.map((l, i) => conditionOf(limits[i]!, l.id)), joint_within_limits: headline!,
+      limits: c.limits.map((l, i) => conditionOf(limits[i]!, l.id)), joint_within_limits: headline,
       risks: c.risks.map((r, i) => ({ risk_id: r.id, fired: firedIn![i]! })) });
   }
   return {
@@ -762,7 +757,7 @@ function withheldList(options: readonly OptionResult[]): WithheldChanceEntry[] {
  * than its timing, its fired state read three times and its severity); each condition's window, read twice for a ratio;
  * each set's timing; eight a draw for each risk (its reset, timing, occurrence, chance, uniform and severity); and the sorts (each ranged input's terciles, each
  * condition's quantiles per option). `bytes` is what the run holds at once: each ranged input's draws with its terciles
- * (16 per draw, the sort's index included), each risk's uniforms, every option's tallies, one quantile copy and one
+ * (16 per draw, the sort's index included), each risk's uniforms, every option's tallies and kept headline, one quantile copy and one
  * option's values.
  */
 export function costOf(model: ExecutableModel, draws: number): { readonly operations: number; readonly bytes: number } {
@@ -775,7 +770,7 @@ export function costOf(model: ExecutableModel, draws: number): { readonly operat
   const sets = model.options.reduce((s, o) => s + o.sets.length, 0);
   const sorts = Math.ceil(Math.log2(draws + 1)) * (ranged + options * checks.length);
   return { operations: draws * (options * (times * reads + windows + 8 * model.risks.length) + sets * (times + 1) + sorts),
-    bytes: draws * (16 * ranged + 8 * model.risks.length + options * (9 * checks.length + 3) + 8) + 8 * times * model.quantities.length };
+    bytes: draws * (16 * ranged + 8 * model.risks.length + options * (9 * checks.length + 4) + 8) + 8 * times * model.quantities.length };
 }
 
 export function simulate(model: ExecutableModel, opts: SimulateOptions): SimResult {
@@ -792,11 +787,16 @@ export function simulate(model: ExecutableModel, opts: SimulateOptions): SimResu
   const record = new Set(opts.record ?? []);
   const recorded: RecordedDraw[] = [];
   const perDraw: PerDrawOption[] | undefined = opts.perDraw === true ? [] : undefined;
-  const options = plans.map((p) => runOption(c, p, inputs, draws, thirds, record, recorded, perDraw));
+  const headlines: Int8Array[] = [];
+  const options = plans.map((p) => runOption(c, p, inputs, draws, thirds, record, recorded, perDraw, headlines));
+  // SC2: every pair of options on the same draws, a − b, in model order; exact where both headlines are fixed in every draw.
+  const exactHeadline = (o: OptionResult): boolean => !('withheld' in o.joint_within_limits) && o.joint_within_limits.precision_95[0] === o.joint_within_limits.precision_95[1];
+  const paired: { a: string; b: string; joint_within_limits: PairedDifference }[] = options.flatMap((oa, i) => options.slice(i + 1).map((ob, k) => ({
+    a: oa.option_id, b: ob.option_id, joint_within_limits: pairedDifference(headlines[i]!, headlines[i + 1 + k]!, exactHeadline(oa) && exactHeadline(ob)) })));
   // The compiler's withheld[] is echoed unchanged (executable.ts r3); an older model without it echoes none.
   const echoed = (model.withheld ?? []).map((x) => ({ ...x }));
   const per_draw: PerDraw | undefined = perDraw === undefined ? undefined
     : { inputs: Object.fromEntries(c.ranged.map((r, slot) => [c.ids[r.q]!, inputs.drawn[slot]!] as const)), options: perDraw };
-  return { draws, seed: opts.seed, options, withheld: echoed, withheld_chances: withheldList(options), ...(opts.record !== undefined ? { recorded } : {}),
+  return { draws, seed: opts.seed, options, withheld: echoed, withheld_chances: withheldList(options), paired, ...(opts.record !== undefined ? { recorded } : {}),
     ...(per_draw !== undefined ? { per_draw } : {}) };
 }
