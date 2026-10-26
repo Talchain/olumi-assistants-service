@@ -225,12 +225,16 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const raw = value / shown.unit.scale;
     return Number.isFinite(raw) ? { observed_state: { value: raw, raw_value: raw, unit } } : {};
   };
-  /** The existing horizon reader says “within N months”: only a fixed window from now can mean that. */
+  /**
+   * The existing horizon reader says “within N months”, as the person's own: only a fixed window from now that they stated,
+   * on a goal reached or ended by then, can mean that (integrated review 26 Oct: a "never below" or average goal was read as a
+   * deadline, and Olumi's reading of a date was shown as theirs). Olumi's reading stays in the result's own words.
+   */
   const horizonOf = (g: CanonicalModelT['goals'][number]): Rec => {
     const w = g.measure?.window;
-    if (!w || w.origin_event !== null || w.origin_offset !== null || w.start !== 0) return {};
+    if (!w || w.origin_event !== null || w.origin_offset !== null || w.start !== 0 || (g.measure!.aggregation !== 'max' && g.measure!.aggregation !== 'end')) return {};
     const q = Q.get(w.periods);
-    if (!q || q.status !== 'known' || (has(q.low) && has(q.high) && q.low !== q.high)) return {};
+    if (!q || q.status !== 'known' || whoOf(q, q.id) !== 'person' || (has(q.low) && has(q.high) && q.low !== q.high)) return {};
     const value = q.value ?? q.low, u = parseUnit(q.unit);
     if (!has(value) || !Number.isInteger(value) || value <= 0 || !u.ok || u.unit.scale !== 1) return {};
     const dims = Object.entries(u.unit.dims);
@@ -270,8 +274,10 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
         ...(point !== null && target ? goalTarget(point, target, g.measure.frame) : {}) } : {}),
       ...(has(g.question) ? { user_questions: [g.question] } : {}),
       ...horizonOf(g),
-      // A total over a window or a per-quantity ratio is not the measured quantity's level today.
+      // A total over a window or a per-quantity ratio is not the measured quantity's level today, and a change from a stated
+      // value or from an option is not a change from today (integrated review 26 Oct: "Today: X" beside "up N% from today").
       ...(metric?.status === 'derived' && g.measure?.per === null && g.measure.aggregation !== 'sum' && goalUnit
+        && (g.measure.frame === 'level' || g.measure.reference?.kind === 'now')
         ? { ...derivedObservation(metric, goalUnit), ...basisOf(metric) } : {}),
     });
     items.push({ record_id: g.id, family: 'goal', shown_as: { node: g.id }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: g.approval });
