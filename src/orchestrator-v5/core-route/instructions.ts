@@ -232,9 +232,10 @@ export const PROGRAM_TOOL_DESCRIPTIONS = {
     + 'An answer to a listed question (a blocker, or an asked item\'s question) goes in answers, on that existing item\'s id from read_canonical_context, saying whose it is: author person, status known, with their figure and their exact words this turn as quote; author person, status unknown when they do not know, with their words as quote and in basis what would size it; author olumi, status estimated, for Olumi\'s estimate of a size, with low, high, range_kind and basis and no quote. A range gives range_kind bounds or plausible only when their words say firm or rough, null otherwise; a reading of their words ("all" as 100%) says so in basis. '
     + 'Anything else (a new item or link, a rename, a removal) goes in request, in plain words with their exact words for every figure of theirs, with remove the ids of anything they asked to remove ([] for none); Olumi’s drafter writes it. '
     + 'The card shows every change, before and after. Anything left out without being listed, or a figure of theirs not in their words, is refused. '
-    + 'Put the whole change in ONE propose_change: a second proposal in the same turn is refused. '
+    + 'Put the whole change in ONE propose_change: once a card has been prepared, a second proposal in the same turn is refused. '
     + 'Never invent a figure for them, and never put an Olumi estimate in as theirs. The result shows what the card would show (would_show). ' + RUN_WORDS_RULE + ' '
-    + 'A refusal says why (their words do not contain the quote; the edit does not fit; the changed model does not calculate, with the reasons; nothing would change): say it plainly and ask for what is needed.',
+    + 'A refusal says why (their words do not contain the quote; the edit does not fit; the changed model does not calculate, with the reasons; nothing would change): say it plainly and ask for what is needed. '
+    + 'After a does_not_compile refusal you may make ONE corrected propose_change in the same turn, using the refusal\'s reasons.',
   apply_change:
     'Save the exact proposal the person approved on its card, with the Run its card showed. The approval is the card’s, never a typed yes. '
     + 'saved: the receipt, the new revision and run, the Run. already_saved: this same proposal was saved before; never save it again. '
