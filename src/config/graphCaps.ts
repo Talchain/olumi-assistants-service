@@ -55,3 +55,7 @@ export const GRAPH_MAX_EDGES = resolveCap(
   process.env.GRAPH_MAX_EDGES,
   DEFAULT_MAX_EDGES
 );
+
+// A MODEL PROGRAM's stored graph: CEE's own compiler and simulator analyse it, never PLoT, so PLoT's 50/100 above does not bind it (W11).
+export const PROGRAM_GRAPH_MAX_NODES = 150;
+export const PROGRAM_GRAPH_MAX_EDGES = 300;

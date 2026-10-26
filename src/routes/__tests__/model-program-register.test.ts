@@ -49,7 +49,8 @@ import { savedProgramOf } from '../../orchestrator-v5/model-program-turn/program
 import { ProposalStore } from '../../orchestrator-v5/agent-lane/proposal.js';
 import { isSavedRead, readSaved } from '../../orchestrator-v5/path-b/tools/context-tool.js';
 import { GraphStaleWriteError } from '../../orchestrator-v5/session/store.js';
-import { GRAPH_MAX_NODES } from '../../config/graphCaps.js';
+import { GRAPH_MAX_NODES, PROGRAM_GRAPH_MAX_NODES } from '../../config/graphCaps.js';
+import { runModelProgramTurn } from '../../orchestrator-v5/model-program-turn/turn.js';
 import { computeGraphIdentityHash } from '../../orchestrator-v5/context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
 
@@ -314,7 +315,8 @@ describe('a model program\'s postimage through the real /graph/register', () => 
       ['nodes not a list', { ...next, nodes: 'none' }, 422, 'GRAPH_SHAPE_INVALID', () => {}],
       // The graph contract refuses it (the legacy kind repair never runs on a program: DL 26 Oct, spec §3).
       ['a node with no kind', { ...next, nodes: nodes.map((n, i) => (i === 0 ? { ...n, kind: undefined } : n)) }, 422, 'GRAPH_CONTRACT_INVALID', () => {}],
-      ['too many nodes', { ...next, nodes: [...nodes, ...Array.from({ length: GRAPH_MAX_NODES }, (_, i) => ({ id: `extra_${i}`, kind: 'factor', label: 'x' }))] }, 422, 'GRAPH_TOO_LARGE', () => {}],
+      // A program's own cap (W11): CEE analyses it, never PLoT, so PLoT's 50 does not bind it; past its own 150 it still refuses.
+      ['too many nodes', { ...next, nodes: [...nodes, ...Array.from({ length: PROGRAM_GRAPH_MAX_NODES }, (_, i) => ({ id: `extra_${i}`, kind: 'factor', label: 'x' }))] }, 422, 'GRAPH_TOO_LARGE', () => {}],
       ['a duplicate node id', { ...next, nodes: [...nodes, { ...nodes.find((n) => n.kind === 'factor')! }] }, 422, 'GRAPH_INVARIANT_VIOLATION', () => {}],
       ['a link to no node', { ...next, edges: [...edges, { ...edges[0]!, id: 'dangling', to: 'no_such_node' }] }, 422, 'GRAPH_INVARIANT_VIOLATION', () => {}],
     ];
@@ -337,6 +339,86 @@ describe('a model program\'s postimage through the real /graph/register', () => 
         expect(w.expectedGraphIdentityHash).not.toBe(computeGraphIdentityHash(graph as never)!.value);
       }
     }
+  });
+
+  /**
+   * W11 (48-draft benchmark, 26 Oct): about 1 in 5 complete first drafts was refused at save ("The model could not be saved
+   * (refused). Nothing was changed."), under every drafter prompt; all 31 that saved had at most 49 cards. The register held a
+   * program to PLoT's 50-card cap, which a program never reaches (CEE's own compiler and simulator analyse it). Each row runs
+   * the FIRST-DRAFT TURN itself (the drafter's answer canned at its call) through the REAL register and the REAL read.
+   */
+  describe('W11: a rich first model is not refused by the PLoT 50-card cap', () => {
+    /** The bakery with `n` more of their stated running costs: each one a card on the canvas, each in the brief's words. */
+    const richer = (n: number): { model: CanonicalModelT; brief: string } => {
+      const m = bakery();
+      const lines = Array.from({ length: n }, (_, i) => `cost line ${i} is £${10 + i}`);
+      m.quantities.push(...lines.map((quote, i) => q(`shop_cost_${i}`, 'GBP', { value: 10 + i, quote })));
+      return { model: m, brief: [BRIEF, ...lines].join('. ') };
+    };
+    /** The postimage a first draft of `richer(n)` saves, and the cards it draws. */
+    const programOf = (n: number) => {
+      const { model, brief } = richer(n);
+      const { graph } = withNewRun({ model_program: MODEL_PROGRAM, canonical: model, seed: seedOf(SCENARIO), person_words: [brief], runs: [] });
+      return { model, brief, graph, cards: (graph.nodes as Rec[]).length };
+    };
+    /** The first-draft turn on an empty scenario; every register answer it got, as the route sent it. */
+    const firstDraft = async (n: number) => {
+      const { app, dispatch } = await realRoutes();
+      const answers: Rec[] = [];
+      const seen = async (path: string, body: unknown) => { const r = await dispatch(path, body); if (path.endsWith('/graph/register')) answers.push(r.json); return r; };
+      const { model, brief, cards } = programOf(n);
+      const out = await runModelProgramTurn({ scenarioId: SCENARIO, turnId: 'w11-first-draft', message: brief, saved: { graph: null, identity: null }, dispatch: seen,
+        call: async () => ({ text: JSON.stringify(model), status: 'completed', incomplete: null, usage: null }) });
+      const read = await readSaved({ dispatch }, SCENARIO);
+      await app.close();
+      return { out, read, answers, cards };
+    };
+
+    it('(a) a program first draft of 51–149 cards saves, with its receipt; the readback is the model and Run sent, every card', async () => {
+      const { out, read, answers, cards } = await firstDraft(60);
+      expect(cards).toBeGreaterThan(GRAPH_MAX_NODES);
+      expect(cards).toBeLessThan(PROGRAM_GRAPH_MAX_NODES);
+      expect(answers).toHaveLength(1);
+      expect(answers[0]!.registered, JSON.stringify(answers[0])).toBe(true);
+      expect(out.toolCalls[0]).toEqual({ name: 'draft_canonical_model', ok: true, outcome: 'ok', mutated: true });
+      expect(out.payload.model_program).toMatchObject({ turn: 'draft', saved: true, write: 'saved', readback: { read: true, canonical_identical: true, runs_identical: true } });
+      expect(out.verifiedSave).toBe(true);
+      expect(append).toHaveBeenCalledTimes(1);
+      if (!isSavedRead(read)) throw new Error('no readback');
+      expect((read.graph.nodes as Rec[]).length).toBe(cards);
+      // The receipt the turn reports is the model a fresh read serves.
+      expect((out.toolResults[0]!.model_version as Rec).graph_identity_hash).toBe(read.identity);
+      expect(out.assistantText.split('\n\n')[0]).toBe('I\'ve drafted a first model of: Should the bakery buy a second oven?');
+    });
+
+    it('(b) a program first draft past 150 cards is still refused GRAPH_TOO_LARGE at the program cap, nothing is written, and the code reaches the tool call (the words unchanged)', async () => {
+      const { out, read, answers, cards } = await firstDraft(PROGRAM_GRAPH_MAX_NODES);
+      expect(cards).toBeGreaterThan(PROGRAM_GRAPH_MAX_NODES);
+      expect(answers.map((a) => a.details)).toEqual([{ code: 'GRAPH_TOO_LARGE', nodes: cards, max_nodes: PROGRAM_GRAPH_MAX_NODES }]);
+      expect(out.toolCalls).toEqual([{ name: 'draft_canonical_model', ok: false, outcome: 'refused', mutated: false, refusal: 'save_refused', code: 'GRAPH_TOO_LARGE' }]);
+      expect(out.assistantText).toBe('The model could not be saved (refused). Nothing was changed.');
+      expect(out.payload.model_program).toMatchObject({ turn: 'draft', saved: false, write: 'refused' });
+      expect([out.mutated, out.verifiedSave, append.mock.calls.length, isSavedRead(read)]).toEqual([false, false, 0, false]);
+    });
+
+    it('(c) CONTRAST: a legacy (non-program) graph of 51 cards is refused exactly as today, from CEE\'s writer or a client; the same graph as a program saves', async () => {
+      const { graph, brief, cards } = programOf(GRAPH_MAX_NODES + 1 - programOf(0).cards);
+      expect(cards).toBe(GRAPH_MAX_NODES + 1);
+      const { model_program: _p, ...lm } = graph.living_model as Rec;
+      const legacy = { ...graph, living_model: lm };
+      const today = { schema: 'error.v1', code: 'BAD_INPUT', message: 'This model has too many nodes to register.',
+        details: { code: 'GRAPH_TOO_LARGE', nodes: GRAPH_MAX_NODES + 1, max_nodes: GRAPH_MAX_NODES } };
+      for (const [name, payload, asCeeWriter] of [['legacy core write', { graph: legacy, thin_core: true, brief_text: brief }, true],
+        ['legacy client write', { graph: legacy }, false], ['a program from a client (no program cap)', { graph, thin_core: true }, false]] as const) {
+        const res = await register(payload, asCeeWriter);
+        expect([name, res.statusCode], res.body).toEqual([name, 422]);
+        expect([name, { ...res.json(), request_id: undefined }]).toEqual([name, { ...today, request_id: undefined }]);
+      }
+      expect(append).not.toHaveBeenCalled();
+      const program = await register({ graph, thin_core: true, brief_text: brief }, true);
+      expect(program.statusCode, program.body).toBe(200);
+      expect(append).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('NEGATIVE: the same graph from a client (not CEE\'s writer) is refused, and nothing is stored', async () => {

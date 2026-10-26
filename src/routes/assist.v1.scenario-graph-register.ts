@@ -12,7 +12,7 @@ import { GoalScopeIdentityConflict, assertNoScopedIdentityConflict, assertNoPend
 
 import type { FastifyInstance } from "fastify";
 
-import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES } from "../config/graphCaps.js";
+import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES, PROGRAM_GRAPH_MAX_EDGES, PROGRAM_GRAPH_MAX_NODES } from "../config/graphCaps.js";
 import { withoutParkedHorizonAttestations } from "../adapters/llm/normalisation.js";
 import { normaliseGraphNodeKindField } from "../orchestrator-v5/graph-registration/normalise-node-kind.js";
 import { CEE_OWNED_EDGE_FIELDS } from "../orchestrator-v5/graph-management/field-safety.js";
@@ -682,17 +682,19 @@ export default async function route(app: FastifyInstance) {
       const programSave = corePostimage && isProgramGraph(submitted);
 
       // Caps BEFORE normalisation, so a hostile 10k-node array is rejected in
-      // O(1) rather than walked.
-      if (submittedNodes.length > GRAPH_MAX_NODES) {
+      // O(1) rather than walked. A model program's save is held to its own cap (`graphCaps.ts`: it never reaches PLoT).
+      const maxNodes = programSave ? PROGRAM_GRAPH_MAX_NODES : GRAPH_MAX_NODES;
+      const maxEdges = programSave ? PROGRAM_GRAPH_MAX_EDGES : GRAPH_MAX_EDGES;
+      if (submittedNodes.length > maxNodes) {
         return invalid("GRAPH_TOO_LARGE", "This model has too many nodes to register.", {
           nodes: submittedNodes.length,
-          max_nodes: GRAPH_MAX_NODES,
+          max_nodes: maxNodes,
         });
       }
-      if (submittedEdges.length > GRAPH_MAX_EDGES) {
+      if (submittedEdges.length > maxEdges) {
         return invalid("GRAPH_TOO_LARGE", "This model has too many connections to register.", {
           edges: submittedEdges.length,
-          max_edges: GRAPH_MAX_EDGES,
+          max_edges: maxEdges,
         });
       }
 

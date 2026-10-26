@@ -34,7 +34,7 @@ vi.mock('../../orchestrator/user-identity.js', async (importOriginal) => ({ ...(
 
 import registerRoute from '../assist.v1.scenario-graph-register.js';
 import scenarioGraphRoute from '../assist.v1.scenario-graph.js';
-import { GRAPH_MAX_NODES } from '../../config/graphCaps.js';
+import { PROGRAM_GRAPH_MAX_NODES } from '../../config/graphCaps.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { seedOf } from '../../orchestrator-v5/model-program-turn/evaluate.js';
 import { withNewRun } from '../../orchestrator-v5/model-program-turn/program-save.js';
@@ -82,7 +82,7 @@ async function realRoutes() {
 
 /**
  * The bakery saved, and a pressed card on it: `tooLarge`, a program the store will not take (more figures than a saved model
- * may hold); otherwise one ordinary new figure.
+ * may hold: a program's own cap, W11); otherwise one ordinary new figure.
  */
 async function pressedCard(tooLarge: boolean) {
   const routes = await realRoutes();
@@ -92,7 +92,7 @@ async function pressedCard(tooLarge: boolean) {
   const base = await readSaved({ dispatch: routes.dispatch }, SCENARIO);
   if (!isSavedRead(base)) throw new Error('no saved base');
   const big = bakery();
-  big.quantities.push(...Array.from({ length: tooLarge ? GRAPH_MAX_NODES : 1 }, (_, i) => q(`stall_${i}`, 'loaf/week', { status: 'asked', question: `How many loaves does stall ${i} sell?` })));
+  big.quantities.push(...Array.from({ length: tooLarge ? PROGRAM_GRAPH_MAX_NODES : 1 }, (_, i) => q(`stall_${i}`, 'loaf/week', { status: 'asked', question: `How many loaves does stall ${i} sell?` })));
   const next: SavedProgram = withNewRun({ ...first.program, canonical: big }).program;
   const proposals = new ProposalStore();
   const card = holdProgramCard(proposals, { scenarioId: SCENARIO, userId: null, graphHash: base.graphHash, identity: base.identity! },

@@ -72,6 +72,8 @@ let runs = 0;
 let timingRun = false;
 const runTimings: unknown[] = [];
 const registered: Json[] = [];
+/** The register's refusal for every write, as the real register sends it (a 422 body), or none. */
+let registerRefusal: Json | null = null;
 const canvasForwards: { headers: Json; body: Json }[] = [];
 const turnRows = new Map<string, any>();
 /** The scenario's turn fence (`v5_turn_fence`): a claim takes the next generation; a Stop sets the row's tombstone. */
@@ -218,6 +220,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     app.post('/assist/v1/scenarios/:id/graph', async () => graphRead());
     app.post('/assist/v1/scenarios/:id/graph/register', async (req, reply) => {
       const b = req.body as Json;
+      if (registerRefusal !== null) return reply.code(422).send(registerRefusal);
       // The commit's own gate (append_turn_atomic_v4, 20260806120000): keyed by the BOUND fence handle's generation, a
       // stopped row refuses in the transaction. The real route commits a core turn's write under the turn's handle.
       const bound = currentTurnFence();
@@ -280,7 +283,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   beforeEach(() => {
     SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); canonicalDraft = undefined; registered.length = 0; fenceRows.clear(); canvasForwards.length = 0; turnRows.clear(); conversationIds.clear();
     readiness = { status: 'blocked', may_run: false, options: [], blockers: [] }; runState = undefined; carriedResult = undefined; otherRun = undefined; runs = 0; timingRun = false; runTimings.length = 0;
-    pausedRun = null; calls = []; outputs = []; preparedId = ''; holdProvider = undefined; holdWhen = undefined;
+    pausedRun = null; calls = []; outputs = []; preparedId = ''; holdProvider = undefined; holdWhen = undefined; registerRefusal = null;
   });
   const post = (payload: Json) => app.inject({ method: 'POST', url: '/agent/v1/core-turn',
     payload: { kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', ...payload } });
@@ -902,6 +905,23 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(j.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'olumi' })]);
     expect(j.model.scenario_revision).toBe((await freshRead()).content_hash);
     expect((registered[0]!.graph as Json).living_model.model_program).toBe('v1');
+  });
+  it('W11: a first draft the register refuses names the register\'s own code on the wire\'s tool call, the words unchanged; a refusal with no code names none', async () => {
+    persisted = null;
+    canonicalDraft = JSON.stringify(bakery());
+    const draft = () => app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: BAKERY_BRIEF, source: 'composer' } });
+    // The real register's answer to a program past its cap (`model-program-register.test.ts`, W11 (b)), in its own shape.
+    registerRefusal = { schema: 'error.v1', code: 'BAD_INPUT', message: 'This model has too many nodes to register.', details: { code: 'GRAPH_TOO_LARGE', nodes: 162, max_nodes: 150 } };
+    const r = await draft();
+    expect(r.statusCode, r.body).toBe(200);
+    expect(r.json()._agent.tool_calls).toEqual([{ name: 'draft_canonical_model', outcome: 'refused', refusal: 'save_refused', code: 'GRAPH_TOO_LARGE' }]);
+    expect(r.json().assistant_text).toBe('The model could not be saved (refused). Nothing was changed.');
+    // Contrast: a refusal that gives no code names none.
+    registerRefusal = { schema: 'error.v1', code: 'BAD_INPUT', message: 'Refused.', details: {} };
+    const none = await draft();
+    expect(none.statusCode, none.body).toBe(200);
+    expect(none.json()._agent.tool_calls).toEqual([{ name: 'draft_canonical_model', outcome: 'refused', refusal: 'save_refused' }]);
+    expect([registered.length, persisted]).toEqual([0, null]);
   });
   it('DL 22 Oct (marketing on 7ee0d90f): a change that would cut the goal\u2019s path is said back; the AI\u2019s re-linked retry is the card', async () => {
     // f's unit stated, as every factor has one: Olumi's re-link from it can be sized per unit (the Run's own target verdict, C1).

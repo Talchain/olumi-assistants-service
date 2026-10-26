@@ -43,7 +43,8 @@ export interface ProgramTurnInput {
 }
 export interface ProgramTurnOutput {
   readonly assistantText: string;
-  readonly toolCalls: { readonly name: string; readonly ok: boolean; readonly outcome: string; readonly refusal?: string; readonly mutated?: boolean; readonly proposal_id?: string }[];
+  /** `code`: a refused save's own reason from the register (`details.code`, e.g. GRAPH_TOO_LARGE), when it gave one. */
+  readonly toolCalls: { readonly name: string; readonly ok: boolean; readonly outcome: string; readonly refusal?: string; readonly code?: string; readonly mutated?: boolean; readonly proposal_id?: string }[];
   readonly toolResults: ToolResult[];
   readonly mutated: boolean;
   readonly verifiedSave: boolean;
@@ -156,7 +157,8 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
       // the model read back is not the one sent, so this model is never narrated as saved.
       : write.status === 'unknown' ? 'The save could not be confirmed, so the model may or may not have changed. Reload to see the current model before changing it again.'
         : `The model could not be saved (${write.status}). Nothing was changed.`,
-    toolCalls: [{ name: kind === 'draft' ? 'draft_canonical_model' : 'run_program', ok: saved, outcome: saved ? 'ok' : write.status, mutated: saved, ...(saved ? {} : { refusal: `save_${write.status}` }) },
+    toolCalls: [{ name: kind === 'draft' ? 'draft_canonical_model' : 'run_program', ok: saved, outcome: saved ? 'ok' : write.status, mutated: saved, ...(saved ? {} : { refusal: `save_${write.status}` }),
+      ...(write.status === 'refused' && write.code !== null ? { code: write.code } : {}) },
       ...(reading !== undefined ? [reading.call] : [])],
     toolResults: [{ ok: saved, mutated: saved, ...(isRec(receipt) ? { model_version: receipt } : {}) }, ...(reading !== undefined ? [reading.result] : [])],
     mutated: saved, verifiedSave: write.status === 'saved',

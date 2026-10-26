@@ -312,6 +312,8 @@ export interface AgentTurnResult {
   readonly tool_calls: readonly {
     name: string; ok: boolean; mutated: boolean;
     proposal_id?: string; outcome?: string; refusal?: string;
+    /** A refused save's own reason from the register (`details.code`, e.g. GRAPH_TOO_LARGE): set by the model-program turn. */
+    code?: string;
     /** A Run that RAN (a new Run on record), as the kit reads it; absent otherwise. `core`'s typed rows carry it already. */
     ran?: true;
     /** A refused call's conflict fields — which parts of what the model sent fired (names only, never the figure). */
