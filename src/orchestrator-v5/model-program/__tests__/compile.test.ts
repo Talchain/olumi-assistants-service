@@ -739,6 +739,39 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(asked.perOption.find((o) => o.option_id === 'promo')).toMatchObject({ status: 'asks', asks: ['opens'] });
   });
 
+  it('Codex r1 #3771: a setting is read within what it sets in ITS own unit, and within every quantity it sets at once, whatever the order', () => {
+    // A share in "1" capped at 1, set by an option to a figure in "%": the cap is 100 % for the setting.
+    const shareModel = (target: Partial<CanonicalQuantityT>, setting: Partial<CanonicalQuantityT>) => compile(model({
+      question: 'Will enough visitors join?', period: 'month',
+      quantities: [person('visitors', 'visitor', 1000, '1,000 visitors'), qty('share', '1', { value: 0.2, quote: 'a fifth join', ...target }),
+        qty('boost_share', '%', { value: 50, quote: 'half would join', ...setting }),
+        derived('joined', 'visitor'), person('want', 'visitor', 300, '300 to join'), person('one', 'month', 1, 'this month')],
+      relations: [def('joined_rel', 'joined', 'product', ['visitors', 'share'])],
+      goals: [goal('enough', 'joined', '>=', 'want', 'end', 'one', '300 to join')],
+      options: [option('boost', 'Boost sign-ups', [set('share', 'boost_share', 'half would join')], 'boost sign-ups'), option('carry_on', 'Carry on as now', [], 'carry on as now')],
+    }));
+    const recounts = (r: ReturnType<typeof compile>) => r.blockers.filter((b) => b.code === 'recount').map((b) => b.id);
+    expect(recounts(shareModel({ floor: 0, ceiling: 1 }, {}))).toEqual([]);                     // 50 % within 0 to 1
+    const over = shareModel({ floor: 0, ceiling: 1 }, { value: 150 });
+    expect(recounts(over)).toEqual(['boost_share']);
+    expect(over.perOption.find((o) => o.option_id === 'boost')!.reasons.join(' ')).toContain('"boost share" is given as 150 %, but Olumi reads it as never above 100 %');
+    // The other way: a target capped at 100 % set by a figure in "1": 2 is 200 %, outside.
+    const back = (v: number) => recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 100 }, { unit: '1', value: v }));
+    expect(back(2)).toEqual(['boost_share']);
+    expect(back(0.5)).toEqual([]);
+    // One figure setting two quantities, capped at 100 and at 1,000 a month: 200 is outside the first, in either order.
+    const shared = (reversed: boolean) => {
+      const g = gymFilled();
+      g.quantities = g.quantities.map((q) => (q.id === 'joins' ? { ...q, ceiling: 100 } : q.id === 'promo_joins' ? { ...q, value: 200 } : q));
+      g.quantities.push(qty('extra_joins', 'member/month', { value: 0, quote: 'no extra joins now', ceiling: 1000 }));
+      g.relations = g.relations.map((r) => (r.form === 'stock' ? { ...r, inflows: [...r.inflows, 'extra_joins'] } : r));
+      const second = option('referrals', 'Run referrals', [set('extra_joins', 'promo_joins', 'a promotion could bring 40 a month')], 'run referrals');
+      g.options = reversed ? [second, ...g.options] : [...g.options, second];
+      return compile(g);
+    };
+    for (const reversed of [false, true]) expect(recounts(shared(reversed)), `reversed ${reversed}`).toEqual(['promo_joins']);
+  });
+
   it('DL ruling 4 (S2 law 9d34ef05+): a plausible range is a spread, never a point and never an invented domain; one with no room is HELD; a most likely figure at an end is an error', () => {
     const withCosts = (f: Partial<CanonicalQuantityT>) => { const m = bakery(); m.quantities = m.quantities.map((q) => (q.id === 'costs' ? { ...q, value: null, ...f } : q)); return compile(m); };
     // A wide money range with no most likely figure: read unbounded (money carries no invented domain), so it calculates.

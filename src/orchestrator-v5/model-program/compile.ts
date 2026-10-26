@@ -676,10 +676,16 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
    * inferred from its unit's name. An option's setting stands in for the quantity it sets, so it is read within that
    * quantity's bounds unless it declares its own. Each truncation is Olumi's conversion, disclosed.
    */
-  const setOf = new Map(model.options.flatMap((o) => o.sets.flatMap((s) => (has(s.to) ? [[s.to, s.quantity] as const] : []))));
+  const setsOf = new Map<string, string[]>();
+  for (const o of model.options) for (const s of o.sets) if (has(s.to)) setsOf.set(s.to, [...(setsOf.get(s.to) ?? []), s.quantity]);
+  /** In q's own unit: its own bounds; with none, every quantity it sets, each converted into q's unit and all respected at
+   *  once (the highest floor, the lowest ceiling), whatever the options' order (Codex r1 #3771). */
   const boundsOf = (q: CanonicalQuantityT): Pick<CanonicalQuantityT, 'floor' | 'ceiling'> => {
-    const own = { floor: q.floor ?? null, ceiling: q.ceiling ?? null }, set = Q.get(setOf.get(q.id) ?? '');
-    return own.floor === null && own.ceiling === null && set ? { floor: set.floor ?? null, ceiling: set.ceiling ?? null } : own;
+    if (has(q.floor) || has(q.ceiling)) return { floor: q.floor ?? null, ceiling: q.ceiling ?? null };
+    const into = (v: number, from: string) => (v * (U.get(from)?.scale ?? 1)) / (U.get(q.id)?.scale ?? 1);
+    const targets = (setsOf.get(q.id) ?? []).flatMap((id) => (Q.has(id) ? [Q.get(id)!] : []));
+    const floors = targets.flatMap((t) => (has(t.floor) ? [into(t.floor, t.id)] : [])), ceilings = targets.flatMap((t) => (has(t.ceiling) ? [into(t.ceiling, t.id)] : []));
+    return { floor: floors.length ? Math.max(...floors) : null, ceiling: ceilings.length ? Math.min(...ceilings) : null };
   };
   const domainOf = (q: CanonicalQuantityT): Domain | undefined => {
     if (chances.has(q.id)) return { min: 0, max: 1 };
