@@ -42,7 +42,8 @@ const GRAPH = { nodes: [{ id: 'goal', kind: 'goal', label: 'Growth' }, { id: 'fa
 const REFUSAL = { error: 'model_write_ownership_refused', message: "Nothing was saved. You don't have access to change this model." };
 beforeEach(() => vi.clearAllMocks());
 
-const ROUTES = ['/orchestrate/v2/turn', '/proxy/v5/turn/stream'];
+// The streamed proxy no longer reaches this route (inventory F1b: every browser turn is the core route's); its own route stays.
+const ROUTES = ['/orchestrate/v2/turn'];
 it.each(ROUTES.flatMap(route => (['not_owner', 'owner_unreadable'] as const).map(reason => ({ route, reason }))))(
   'door refusal $reason on $route is honest, terminal, and distinct from a revision conflict', async ({ route, reason }) => {
     const append = vi.fn(async () => ({ id: 'must-not-write' }));

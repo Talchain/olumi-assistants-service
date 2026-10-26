@@ -58,9 +58,8 @@ describe('PROXY_V5_TARGET', () => {
    * have matched the regex at all.
    *
    * The property it was reaching for is behavioural, so it is asserted as
-   * behaviour: whatever arrives, the proxy can only ever resolve to one of the
-   * two mounted turn routes, and only the closed vocabulary moves it off the
-   * deployment default.
+   * behaviour: whatever arrives, the proxy can only ever resolve to the core
+   * route (inventory F1b: the legacy turn routes take no browser traffic).
    */
   async function freshResolver(envTarget: string | undefined) {
     vi.resetModules();
@@ -83,58 +82,13 @@ describe('PROXY_V5_TARGET', () => {
     }
   }
 
-  it('keeps the DEPLOYMENT DEFAULT when no mode is sent', async () => {
-    expect((await freshResolver(undefined))(undefined)).toBe('/orchestrate/v2/turn');
-    expect((await freshResolver('orchestrator'))(undefined)).toBe('/orchestrate/v2/turn');
-    expect((await freshResolver('agent'))(undefined)).toBe('/agent/v1/turn');
-  });
-
-  it('lets the closed vocabulary override the default in BOTH directions', async () => {
-    // The contrast pair: each explicit mode must win against the OPPOSITE
-    // default, or "override" is indistinguishable from "happened to match".
-    const onConventionalDefault = await freshResolver('orchestrator');
-    expect(onConventionalDefault('openai')).toBe('/agent/v1/turn');
-    expect(onConventionalDefault('conventional')).toBe('/orchestrate/v2/turn');
-    const onAgentDefault = await freshResolver('agent');
-    expect(onAgentDefault('conventional')).toBe('/orchestrate/v2/turn');
-    expect(onAgentDefault('openai')).toBe('/agent/v1/turn');
-  });
-
-  it('core-route selects the thin core route on EITHER default; near-misses never do (DL 22 Oct)', async () => {
-    expect((await freshResolver('orchestrator'))('core-route')).toBe('/agent/v1/core-turn');
-    expect((await freshResolver('agent'))('core-route')).toBe('/agent/v1/core-turn');
-    // CONTRAST: the PATH-B header word keeps the legacy agent route; a near-miss or a path falls back to the default.
-    const resolve = await freshResolver('orchestrator');
-    expect(resolve('core')).toBe('/agent/v1/turn');
-    for (const mode of ['Core-Route', 'core-route ', 'core_route', '/agent/v1/core-turn', ['core-route']]) {
-      expect(resolve(mode), `mode ${JSON.stringify(mode)}`).toBe('/orchestrate/v2/turn');
-    }
-  });
-
-  it('treats anything outside the vocabulary as ABSENT, never as a route', async () => {
-    const resolve = await freshResolver('orchestrator');
-    const hostile: unknown[] = [
-      'agent',                       // the CONFIG word, not the header word
-      'OpenAI', 'OPENAI', ' openai', // near-misses must not match
-      '/agent/v1/turn',              // a path must not be taken as a mode
-      '/admin/internal/dangerous',
-      ['openai'],                    // a duplicated header arrives as an array
-      ['openai', 'conventional'],
-      42, null, {}, '',
-    ];
-    for (const mode of hostile) {
-      expect(resolve(mode), `mode ${JSON.stringify(mode)} must fall back to the default`)
-        .toBe('/orchestrate/v2/turn');
-    }
-  });
-
-  it('can ONLY ever resolve to one of the three mounted turn routes', async () => {
-    const allowed = new Set(['/orchestrate/v2/turn', '/agent/v1/turn', '/agent/v1/core-turn']);
+  it('F1b (26 Oct): on either deployment default, every mode and none resolves to the core route; nothing else is ever a target', async () => {
     for (const env of [undefined, 'orchestrator', 'agent']) {
       const resolve = await freshResolver(env);
-      for (const mode of [undefined, 'openai', 'conventional', 'core-route', 'agent', '/x', ['openai'], 7]) {
-        expect(allowed.has(resolve(mode)), `env=${env} mode=${JSON.stringify(mode)}`).toBe(true);
+      for (const mode of [undefined, 'openai', 'conventional', 'core', 'core-route', 'agent', 'Core-Route', '/agent/v1/turn', '/admin/internal/dangerous',
+        ['openai'], ['openai', 'conventional'], 42, null, {}, '']) {
+        expect(resolve(mode), `env=${env} mode=${JSON.stringify(mode)}`).toBe('/agent/v1/core-turn');
       }
     }
-  });
+  }, 30_000);
 });

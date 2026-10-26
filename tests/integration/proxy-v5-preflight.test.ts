@@ -64,7 +64,7 @@ const mockConfig = {
   },
   features: {},
   // tryConsumeToken in utils/quota.ts reads these fields. The proxy's
-  // internal app.inject('/orchestrate/v2/turn') goes through authPlugin
+  // internal app.inject('/agent/v1/core-turn') goes through authPlugin
   // which calls tryConsumeToken with the injected key, so the mock must
   // supply rate-limit and redis config. Generous limits keep the test
   // deterministic (one POST per test run).
@@ -103,7 +103,7 @@ const { authPlugin } = await import('../../src/plugins/auth.js');
 // ---------------------------------------------------------------------------
 
 interface BuildAppOpts {
-  /** Override the internal /orchestrate/v2/turn handler the proxy app.inject's into. */
+  /** Override the internal /agent/v1/core-turn handler the proxy app.inject's into (its one target, inventory F1b). */
   readonly internalHandler?: (req: unknown, reply: { send: (b: unknown) => unknown; header: (k: string, v: string) => unknown; code: (n: number) => unknown }) => unknown;
 }
 
@@ -133,7 +133,7 @@ async function buildApp(opts: BuildAppOpts = {}): Promise<FastifyInstance> {
 
   // Internal route the proxy injects into. Mock by default; tests can
   // override with internalHandler.
-  app.post('/orchestrate/v2/turn', async (req, reply) => {
+  app.post('/agent/v1/core-turn', async (req, reply) => {
     if (opts.internalHandler) {
       // Cast to the structural-typed handler shape used in test overrides.
       // Real Fastify reply has more methods; the test handler only needs send/header/code.
@@ -283,7 +283,7 @@ describe('OPTIONS /proxy/v5/turn — preflight regression cover', () => {
   it('normal POST round-trip still hashes JSON body', async () => {
     // The proxy is in `isPublicRoute` so auth is bypassed at the
     // /proxy/v5/turn surface (the proxy injects its own
-    // X-Olumi-Assist-Key into the internal /orchestrate/v2/turn call).
+    // X-Olumi-Assist-Key into the internal /agent/v1/core-turn call).
     // No need for a client-supplied auth header on this POST.
     const res = await app.inject({
       method: 'POST',

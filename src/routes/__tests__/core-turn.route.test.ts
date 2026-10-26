@@ -1,12 +1,12 @@
 /**
- * ⭐ THE CORE ROUTE (`POST /agent/v1/core-turn`, R2; DL 22 Oct). The real route over a core scenario (a living model), with a
- * scripted AI (0 live provider calls) and the graph / register / versions / orchestrate routes as doubles in the served shapes:
- * a typed turn, a Run press, a card's approval, a resend of the same turn id, two turns at once, a legacy scenario, a canvas
- * edit, the first draft's streamed graph, and the contract's exact shape. SYNTHETIC wording (the KNOWN_ANSWER fixture).
+ * ⭐ THE CORE ROUTE (`POST /agent/v1/core-turn`, R2; DL 22 Oct). The real route over a saved MODEL PROGRAM (the synthetic bakery;
+ * inventory F1b, 26 Oct: the route is program-only), with a scripted AI (0 live provider calls) and the graph / register /
+ * versions routes as doubles in the served shapes: a typed turn, a card's approval, a resend of the same turn id, two turns at
+ * once, a Stop, a canvas edit, a Run press, a saved scenario that is not a program (refused), the first draft's streamed graph,
+ * and the contract's exact shape.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { AnalysisStateV1Schema } from '@talchain/schemas/boundary';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
@@ -15,13 +15,13 @@ import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha
 import { registrationTurnId } from '../../orchestrator-v5/graph-registration/registration-identity.js';
 import { toOutboundGraph } from '../../orchestrator-v5/goal-target/outbound-graph.js';
 import { mapLivingModel } from '../../orchestrator-v5/path-b/living-model/mapper.js';
-import { KNOWN_ANSWER, OPTION_EFFECTS } from '../../orchestrator-v5/path-b/living-model/__tests__/fixtures.js';
+import { KNOWN_ANSWER } from '../../orchestrator-v5/path-b/living-model/__tests__/fixtures.js';
 import { withCanonicalAnalysisView } from '../../orchestrator-v5/agent-lane/__tests__/fixtures/canonical-analysis-read.js';
 import { streamWhenAsked } from '../../orchestrator-v5/agent-lane/__tests__/stream-when-asked.js';
 import { SELECTION_NOTE_PREFIX } from '../../orchestrator-v5/agent-lane/selection-context.js';
 import { TODAY_PREFIX } from '../../orchestrator-v5/agent-lane/turn-context.js';
 import { corePromptCacheKey, PAUSE_NO_CARD, STATE_BLOCK_PREFIX } from '../../orchestrator-v5/agent-lane/core/sdk-turn.js';
-import { CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL, instructionsForMode, PROGRAM_TOOL_DESCRIPTIONS } from '../../orchestrator-v5/core-route/instructions.js';
+import { PROGRAM_TOOL_DESCRIPTIONS, programInstructions } from '../../orchestrator-v5/core-route/instructions.js';
 import { TOOL_DESCRIPTIONS } from '../../orchestrator-v5/path-b/tools/index.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { ASK_CHALLENGE_CHIP_ID } from '../../orchestrator-v5/core-route/turn-request.js';
@@ -29,24 +29,29 @@ import { bakery, BRIEF as BAKERY_BRIEF, club, CLUB_BRIEF, q, updateOf } from '..
 import type { CanonicalQuantityT } from '../../orchestrator-v5/model-program/canonical.js';
 import { DRAFTING_INSTRUCTIONS } from '../../orchestrator-v5/model-program-turn/prompt.js';
 import type { LivingModelT } from '../../schemas/living-model.js';
-import { GOAL_CHANCE_LICENSED, PERIOD_END_EFFECTS_UNSTATED } from '../../orchestrator-v5/goal-target/goal-chance-licence.js';
-import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../orchestrator/context/option-result-source.js';
+import { seedOf } from '../../orchestrator-v5/model-program-turn/evaluate.js';
+import { withNewRun } from '../../orchestrator-v5/model-program-turn/program-save.js';
+import { MODEL_PROGRAM, savedProgramOf } from '../../orchestrator-v5/model-program-turn/program-store.js';
+import { PROGRAM_TURN_GUIDANCE } from '../../orchestrator-v5/model-program-turn/program-tools.js';
 import { coreBudget } from '../../orchestrator-v5/agent-lane/model-budgets.js';
 
 type Json = Record<string, any>;
 let SCENARIO = '';
 const BRIEF = 'we need at least 100 units; today we are at 70. f is at 0.5. push f to 1, or we hold. each +1 in f adds 50 units on average, with a standard deviation of 10. Sam disagrees';
+/** A saved Living Model: out of the alpha, refused on this route (inventory F1b). */
 const postimage = (m: LivingModelT): Json => ({ ...mapLivingModel(m).graph, living_model: m });
-const SAID = 'Actually f is at 0.6 now.';
-const corrected = (): LivingModelT => {
-  const m = structuredClone(KNOWN_ANSWER);
-  m.factors[0] = { ...m.factors[0]!, value: 0.6, quote: SAID };
-  return m;
-};
-const CHANGE = { public_label: 'Set f to 0.6, as you said', basis: 'The person corrected f.', model: corrected(), remove: [] as string[] };
+/** The bakery saved as a MODEL PROGRAM with its first Run: the core route's one kind of saved scenario. */
+const programGraph = (m = bakery()): Json => withNewRun({ model_program: MODEL_PROGRAM, canonical: m, seed: seedOf(SCENARIO), person_words: [BAKERY_BRIEF], runs: [] }).graph as Json;
+/** Their answer to the bakery's one question (the oven's price), on that item: a card holding ONE figure of theirs, no drafter call. */
+const answer = (value: number, quote: string): Json => ({ public_label: `Oven price ${quote}`, basis: 'their answer', request: '', remove: [],
+  answers: [{ id: 'oven_price', value, low: null, high: null, range_kind: null, party: null, quote, basis: null, status: 'known', author: 'person' }] });
+const SAID = 'The second oven would cost £2,500.';
+const CHANGE = answer(2500, '£2,500');
 /** The SDK's final output, with the bytes a host "tidy" would touch: leading space, markdown, a trailing newline. */
-const ANSWER = '  The model holds **f at 0.5** today:\n\n- Push sets it to 1\n- Hold keeps it\n';
-const CONTRACT_KEYS = ['turn_id', 'durability', 'assistant_text', 'model', 'cards', 'notes', 'run', 'analysis_state', 'receipts', 'paused', 'error', 'action_bar', '_agent', '_provider_calls'];
+const ANSWER = '  The model holds **the oven price** as a question:\n\n- A second oven\n- Keep our one oven\n';
+/** Every turn's keys; a program turn adds its view and its own record after `analysis_state`. */
+const BASE_KEYS = ['turn_id', 'durability', 'assistant_text', 'model', 'cards', 'notes', 'run', 'analysis_state', 'receipts', 'paused', 'error', 'action_bar', '_agent', '_provider_calls'];
+const CONTRACT_KEYS = [...BASE_KEYS.slice(0, 8), 'canonical_analysis_view', 'model_program', ...BASE_KEYS.slice(8)];
 const LEGACY_ENVELOPE = ['response_version', 'blocks', 'suggested_actions', 'insights', 'stage_indicator'];
 /** The UI's reader of this contract, field for field (DGAI 748f20a1 `src/v5/coreTurnContract.ts`): a body it refuses shows "reply not received". */
 const uiId = z.string().min(1).nullable();
@@ -68,13 +73,9 @@ let runState: Json | undefined;
 let carriedResult: Json | undefined;
 /** When set, the read selects ANOTHER Run than the one this turn confirmed (one that landed while the reply was written). */
 let otherRun: string | undefined;
-let runs = 0;
-let timingRun = false;
-const runTimings: unknown[] = [];
 const registered: Json[] = [];
 /** The register's refusal for every write, as the real register sends it (a 422 body), or none. */
 let registerRefusal: Json | null = null;
-const canvasForwards: { headers: Json; body: Json }[] = [];
 const turnRows = new Map<string, any>();
 /** The scenario's turn fence (`v5_turn_fence`): a claim takes the next generation; a Stop sets the row's tombstone. */
 const fenceRows = new Map<string, { generation: number; stopped_at: string | null }>();
@@ -134,16 +135,28 @@ vi.mock('../../orchestrator/user-identity.js', async (original) => ({
   ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
 }));
 /** Spies that call the real legacy functions, so a row can say a program turn never reaches them (spec §3, DL 26 Oct). */
-const legacy = vi.hoisted(() => ({ livingView: vi.fn(), capabilities: vi.fn(), rank: vi.fn(), restoreRun: vi.fn() }));
+const legacy = vi.hoisted(() => ({ livingView: vi.fn(), capabilities: vi.fn(), rank: vi.fn(), restoreRun: vi.fn(), heldWriter: vi.fn() }));
+/** The program's own reader, spied the same way: the contrast that the probe sees a call the route does make. */
+const program = vi.hoisted(() => ({ read: vi.fn() }));
 vi.mock('../../orchestrator-v5/path-b/living-model/view.js', async (load) => {
   const actual = await load<typeof import('../../orchestrator-v5/path-b/living-model/view.js')>();
   legacy.livingView.mockImplementation(actual.livingViewOf);
   return { ...actual, livingViewOf: legacy.livingView };
 });
-vi.mock('../../orchestrator-v5/core-route/deps.js', async (load) => {
-  const actual = await load<typeof import('../../orchestrator-v5/core-route/deps.js')>();
-  legacy.capabilities.mockImplementation(actual.coreTurnCapabilities);
-  return { ...actual, coreTurnCapabilities: legacy.capabilities };
+vi.mock('../../orchestrator-v5/agent-lane/runtime/agent-capabilities.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/agent-lane/runtime/agent-capabilities.js')>();
+  legacy.capabilities.mockImplementation(actual.createAgentCapabilities);
+  return { ...actual, createAgentCapabilities: legacy.capabilities };
+});
+vi.mock('../../orchestrator-v5/handlers/approve-held-proposal.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/handlers/approve-held-proposal.js')>();
+  legacy.heldWriter.mockImplementation(actual.commitHeldProposalInProcess);
+  return { ...actual, commitHeldProposalInProcess: legacy.heldWriter };
+});
+vi.mock('../../orchestrator-v5/model-program-turn/program-tools.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/model-program-turn/program-tools.js')>();
+  program.read.mockImplementation(actual.readProgramContext);
+  return { ...actual, readProgramContext: program.read };
 });
 vi.mock('../../orchestrator-v5/agent-lane/actions/rank.js', async (load) => {
   const actual = await load<typeof import('../../orchestrator-v5/agent-lane/actions/rank.js')>();
@@ -246,39 +259,6 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     app.post('/assist/v1/scenarios/:id/versions', async (req) => ({ versions: registered.map((b, i) => ({
       version_id: `v_${i + 1}`, sequence: i + 1, created_at: '2026-10-22T10:00:00.000Z',
       creation: { kind: 'committed_mutation', mutation_id: `m_${i + 1}`, source_turn_id: registrationTurnId((req.params as { id: string }).id, String(b.operation_id)) } })) }));
-    app.post('/orchestrate/v2/turn', async (req) => {
-      const b = req.body as Json;
-      // A canvas edit (the existing core canvas-edit path, as a double): the person's own value lands in the living model.
-      if (b.kind === 'system_event') {
-        canvasForwards.push({ headers: req.headers as Json, body: b });
-        const m = structuredClone((persisted as Json).living_model) as LivingModelT;
-        m.options = m.options.map((o) => o.id === 'push' ? { ...o, settings: [{ ...o.settings[0]!, value: Number(b.event.value), quote: null }] } : o);
-        persisted = postimage(m);
-        return { response_version: 2, assistant_text: '', graph_hash: hashOf(persisted) };
-      }
-      // The Run: one engine result, on the saved revision.
-      runs += 1;
-      const timing = b.chip?.parameters?.effects_timing;
-      runTimings.push(timing);
-      carriedResult = { type: 'analysis_result', computed_against_hash: hashOf(persisted), leading_option_id: null, summary: 'Engine summary.',
-        enrichment: { option_comparison: [{ option_id: 'push', option_label: 'Push', win_probability: 0.7, outcome: { mean: 115 } },
-          { option_id: 'hold', option_label: 'Hold', win_probability: 0.3, outcome: { mean: 95 } }], inference_warnings: [] } };
-      // Engine double: a valid timing reading licenses its synthetic chances; otherwise every target is withheld.
-      if (timingRun) {
-        const options = (persisted!.nodes as Json[]).filter((n) => n.kind === 'option');
-        const hasReading = timing === 'not_stated' || timing === 'in_place_by_period';
-        carriedResult.enrichment = {
-          option_comparison: options.map((o) => ({ option_id: o.id, option_label: o.label, ...(hasReading ? { probability_of_goal: 0.5 } : {}) })),
-          inference_warnings: [hasReading
-            ? { code: GOAL_CHANCE_LICENSED, effects_timing: timing, effects_timing_origin: 'olumi' }
-            : { code: GOAL_FIGURES_TARGET_NOT_TESTABLE, option_ids: options.map((o) => o.id),
-                message: 'The model has not established how much of these effects would be in place by then.',
-                detail: { reason: PERIOD_END_EFFECTS_UNSTATED, effects_timing: null, effects_timing_origin: null } }],
-        };
-      }
-      runState = { run_state: { kind: 'complete_current', computed_at: '2026-10-22T10:00:00.000Z' } };
-      return { response_version: 2, assistant_text: '', blocks: [carriedResult], analysis_state: runState, analysis_ready: readiness, graph_hash: hashOf(persisted) };
-    });
     // The real Stop handler (route-v2's `/orchestrate/v2/turn/stop` body), over the same store.
     const { recordExplicitTurnStop } = await import('../turn-stop.js');
     app.post('/orchestrate/v2/turn/stop', async (req, reply) => { const r = await recordExplicitTurnStop(req, 'req-stop'); return reply.code(r.status).send(r.body as never); });
@@ -287,8 +267,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
-    SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); canonicalDraft = undefined; canonicalDrafts = []; registered.length = 0; fenceRows.clear(); canvasForwards.length = 0; turnRows.clear(); conversationIds.clear();
-    readiness = { status: 'blocked', may_run: false, options: [], blockers: [] }; runState = undefined; carriedResult = undefined; otherRun = undefined; runs = 0; timingRun = false; runTimings.length = 0;
+    SCENARIO = randomUUID(); persisted = programGraph(); canonicalDraft = undefined; canonicalDrafts = []; registered.length = 0; fenceRows.clear(); turnRows.clear(); conversationIds.clear();
+    readiness = { status: 'blocked', may_run: false, options: [], blockers: [] }; runState = undefined; carriedResult = undefined; otherRun = undefined;
     pausedRun = null; calls = []; outputs = []; preparedId = ''; holdProvider = undefined; holdWhen = undefined; registerRefusal = null;
   });
   const post = (payload: Json) => app.inject({ method: 'POST', url: '/agent/v1/core-turn',
@@ -296,16 +276,36 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   const typed = (message: string, turnId = randomUUID()) => post({ turn_id: turnId, message, source: 'composer' });
   const freshRead = async (): Promise<Json> => (await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} })).json() as Json;
   const ids = (graph: Json | undefined): string[] => ((graph?.nodes ?? []) as Json[]).map((n) => String(n.id)).sort();
+  const challengeOn = (id: string) => post({ turn_id: randomUUID(), message: 'Challenge this', source: 'chip_click', chip: { id: ASK_CHALLENGE_CHIP_ID },
+    selected_elements: { node_ids: [id] } });
+  /** The press of a card's own approve button. */
+  const pressOf = (card: Json): Json => ({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click',
+    chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
+  /** A card holding their answer, proposed on a typed turn: its press (`preparedId` is the card). */
+  const propose = async (said = SAID, args: Json = CHANGE): Promise<Json> => {
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args }], [{ type: 'message', text: 'I prepared that change.' }]];
+    const cards = ((await typed(said)).json() as Json).cards as Json[];
+    const card = cards.find((c) => c.proposal_id !== preparedId) ?? cards[0]!;
+    preparedId = String(card.proposal_id);
+    return pressOf(card);
+  };
+  /** A program figure as saved now. */
+  const figure = (id: string): number | null => savedProgramOf(persisted)!.canonical.quantities.find((x) => x.id === id)!.value;
+  /** How many Runs the saved program holds. */
+  const storedRuns = (): number => savedProgramOf(persisted)!.runs.length;
+  /** One figure typed on a card: the person's own hand on the bakery's weekly sales (`applyCanvasFigure`). */
+  const canvasEdit = (turnId: string, value = 320) => post({ kind: 'system_event', turn_id: turnId,
+    event: { kind: 'factor_value_edit', target_id: 'base_sales', raw_value: value } });
 
   it('a typed turn: the AI’s reply byte for byte, and the saved model in the contract’s exact shape', async () => {
-    const r = await typed('What does the model hold for f today?');
+    const r = await typed('What does the model hold for the oven today?');
     expect(r.statusCode, r.body).toBe(200);
     const j = r.json() as Json;
     expect(Object.keys(j)).toEqual(CONTRACT_KEYS);
     for (const k of LEGACY_ENVELOPE) expect(j, `no legacy envelope key ${k}`).not.toHaveProperty(k);
     // NEGATIVE: nothing is composed around the SDK's final output, not even a trim.
     expect(j.assistant_text).toBe(ANSWER);
-    expect(j).toMatchObject({ durability: 'recorded', cards: [], notes: [], run: null, receipts: [], paused: null, error: null });
+    expect(j).toMatchObject({ durability: 'recorded', cards: [], notes: [], run: null, receipts: [], paused: null, error: null, action_bar: null });
     expect(j).not.toHaveProperty('analysis_result');
     const read = await freshRead();
     expect(j.model.revision).toBe(read.graph_hash);
@@ -316,32 +316,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(turnRows.get(j.turn_id)?.assistant_message, 'the answer row records the same words').toBe(ANSWER);
   });
 
-  it('DL 93d79c3e 09:24Z: the turn carries the panel\'s action bar, ranked from its own read: only the pre-mortem a core press serves', async () => {
-    const j = (await typed('What does the model hold for f today?')).json() as Json;
-    const read = await freshRead();
-    const offers = [...j.action_bar.priority, ...j.action_bar.standard, ...j.action_bar.more] as Json[];
-    expect(offers.map((o) => o.action_id)).toEqual(['pre_mortem']);
-    expect(offers[0]).toMatchObject({ press_id: 'agent-next-pre-mortem', enabled: true });
-    expect(j.action_bar.revision.graph_hash, 'bound to the saved model the turn answered on').toBe(read.graph_hash);
-  });
-
-  it('a Run press: run_analysis is the first call’s forced tool, ONE Run, and the fresh analysis_result rides the contract', async () => {
-    outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_press', args: { reason: 'The person pressed Run.', effects_timing: 'not_stated' } }],
-      [{ type: 'message', text: 'The analysis ran on your saved model.' }]];
-    const r = await post({ turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } });
-    expect(r.statusCode, r.body).toBe(200);
-    const j = r.json() as Json;
-    expect(calls[0]?.tool_choice).toMatchObject({ type: 'function', name: 'run_analysis' });
-    expect(runs).toBe(1);
-    expect(j.assistant_text).toBe('The analysis ran on your saved model.');
-    const read = await freshRead();
-    expect(j.analysis_result).toEqual(read.analysis_result);
-    expect(j.run).toMatchObject({ run_id: read.canonical_analysis_view.run.run_id, state: { kind: 'complete_current' } });
-    expect(j.run.run_id).not.toBeNull();
-    expect(j.analysis_state).toEqual(read.analysis_state);
-  });
-
-  it('a card: proposed on a typed turn, approved by its own press as ONE commit with the person’s receipt, and a resend of the press writes nothing', async () => {
+  it('a card: proposed on a typed turn, approved by its own press as ONE commit with the person’s receipt and its own Run, and a resend of the press writes nothing', async () => {
     outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'I prepared that change; press its card to save it.' }]];
     const first = (await typed(SAID)).json() as Json;
     expect(first.cards.map((c: Json) => c.proposal_id), JSON.stringify(first._agent)).toEqual([expect.stringMatching(/^prop_/)]);
@@ -350,9 +325,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(card.issued_turn_id, 'the card names the reply that issued it, so it reattaches on reopen').toBe(first.turn_id);
     expect(registered, 'a proposal writes nothing').toHaveLength(0);
 
-    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved: f is 0.6 now.' }]];
-    const pressId = randomUUID();
-    const press = { turn_id: pressId, message: card.approve_action.message, source: 'chip_click', chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } };
+    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved: the oven costs £2,500.' }]];
+    const press = pressOf(card);
     const approved = await post(press);
     expect(approved.statusCode, approved.body).toBe(200);
     const a = approved.json() as Json;
@@ -362,51 +336,53 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       .toEqual({ model: calls[0]!.model, reasoning: calls[0]!.reasoning, max_output_tokens: calls[0]!.max_output_tokens });
     expect(calls[0]!.reasoning, 'control: the typed turn sends an effort').toEqual({ effort: coreBudget().reasoning_effort });
     expect(registered, JSON.stringify(a._agent)).toHaveLength(1);
-    expect(((persisted as Json).living_model as LivingModelT).factors[0]).toMatchObject({ value: 0.6 });
+    expect(figure('oven_price')).toBe(2500);
     expect(a.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
     expect(a.cards, 'the applied card is no longer waiting').toEqual([]);
-    expect(a.assistant_text).toBe('Saved: f is 0.6 now.');
-    // CONTRAST (the row below): readiness admits no Run here, so none ran and no result is claimed.
-    expect(runs).toBe(0);
-    expect(a).not.toHaveProperty('analysis_result');
+    expect(a.assistant_text).toBe('Saved: the oven costs £2,500.');
+    // The card's model is saved with its own Run, which the reply names.
+    expect(storedRuns()).toBe(2);
+    expect(a.run).toMatchObject({ run_id: savedProgramOf(persisted)!.runs.at(-1)!.run_id });
 
     const callsBefore = calls.length;
     const again = (await post(press)).json() as Json;
-    expect(again).toMatchObject({ durability: 'replayed', assistant_text: 'Saved: f is 0.6 now.', error: null });
+    expect(again).toMatchObject({ durability: 'replayed', assistant_text: 'Saved: the oven costs £2,500.', error: null });
     expect(calls.length, 'a replay calls no model').toBe(callsBefore);
     expect(registered, 'and writes nothing').toHaveLength(1);
   });
 
   it('DL 93d79c3e 09:40Z (Lenses on 50f76df0): a Stop during a core turn is recorded as its tombstone, and the write the AI then makes commits nothing', async () => {
-    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'Prepared.' }]];
-    const card = ((await typed(SAID)).json() as Json).cards[0];
-    preparedId = String(card.proposal_id);
+    const press = await propose();
     let release!: () => void;
     holdProvider = new Promise<void>((resolve) => { release = resolve; });
     outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved.' }]];
-    const pressId = randomUUID();
     const before = calls.length;
-    const approval = post({ turn_id: pressId, message: card.approve_action.message, source: 'chip_click', chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
+    const approval = post(press);
     // The press's first call is held: the turn is admitted, and nothing is written yet.
     await vi.waitFor(() => expect(calls.length).toBe(before + 1));
-    const stop = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn/stop', payload: { scenario_id: SCENARIO, turn_id: pressId } });
+    const stop = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn/stop', payload: { scenario_id: SCENARIO, turn_id: press.turn_id } });
     expect(stop.statusCode, stop.body).toBe(200);
-    expect(stop.json()).toMatchObject({ stopped: true, claimed: true, turn_id: pressId });
-    expect(fenceRows.get(`${SCENARIO}:${pressId}`)?.stopped_at, 'the tombstone').not.toBeNull();
+    expect(stop.json()).toMatchObject({ stopped: true, claimed: true, turn_id: press.turn_id });
+    expect(fenceRows.get(`${SCENARIO}:${press.turn_id}`)?.stopped_at, 'the tombstone').not.toBeNull();
     release();
     const a = (await approval).json() as Json;
     expect(calls.at(-2)?.tool_choice, 'control: the AI did send its apply').toMatchObject({ type: 'function', name: 'apply_change' });
     expect(registered, 'nothing committed after the Stop').toHaveLength(0);
-    expect(((persisted as Json).living_model as LivingModelT).factors[0]).toMatchObject({ value: 0.5 });
+    expect(figure('oven_price')).toBeNull();
     expect(a.receipts).toEqual([]);
   });
 
   describe('DL 93d79c3e (marketing on 05745055): a card press applies THAT card, whatever id the AI sends', () => {
-    const propose = async () => {
-      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'I prepared that change.' }]];
-      const card = ((await typed(SAID)).json() as Json).cards[0];
-      preparedId = String(card.proposal_id);
-      return { turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click', chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } };
+    /** A second card on the same item, held beside the first: their later answer. */
+    const LATER = 'Actually it would be £2,700.';
+    const proposeLater = async (): Promise<string> => {
+      const first = preparedId;
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'propB', args: answer(2700, '£2,700') }], [{ type: 'message', text: 'I prepared that change too.' }]];
+      const held = (((await typed(LATER)).json() as Json).cards as Json[]).map((c) => String(c.proposal_id));
+      const idB = held.find((id) => id !== first)!;
+      expect(held, 'both cards are held').toEqual(expect.arrayContaining([first, idB]));
+      preparedId = first;
+      return idB;
     };
     it('the AI sends an empty id on the press: the pressed card is applied, once, with the person\'s receipt; nothing is left paused', async () => {
       const press = await propose();
@@ -415,7 +391,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(r.statusCode, r.body).toBe(200);
       const a = r.json() as Json;
       expect(registered, JSON.stringify(a._agent)).toHaveLength(1);
-      expect(((persisted as Json).living_model as LivingModelT).factors[0]).toMatchObject({ value: 0.6 });
+      expect(figure('oven_price')).toBe(2500);
       expect(a.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
       expect(a.cards).toEqual([]);
       expect(a.paused).toBeNull();
@@ -423,20 +399,12 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     });
     it('Codex r1 on #3695: two held cards; the AI applies the OTHER one on the press of the first: the pressed card is the one applied', async () => {
       const pressA = await propose();
-      const idA = preparedId;
-      const sevenSaid = 'f is at 0.7 by now.';
-      const seven = structuredClone(KNOWN_ANSWER);
-      seven.factors[0] = { ...seven.factors[0]!, value: 0.7, quote: sevenSaid };
-      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'propB', args: { ...CHANGE, public_label: 'Set f to 0.7', model: seven } }],
-        [{ type: 'message', text: 'I prepared that change too.' }]];
-      const held = ((await typed(sevenSaid)).json() as Json).cards.map((c: Json) => String(c.proposal_id));
-      const idB = held.find((id: string) => id !== idA)!;
-      expect(held, 'both cards are held').toEqual(expect.arrayContaining([idA, idB]));
+      const idB = await proposeLater();
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply', args: { proposal_id: idB } }], [{ type: 'message', text: 'Saved.' }]];
       const r = await post(pressA);
       expect(r.statusCode, r.body).toBe(200);
       expect(registered).toHaveLength(1);
-      expect(((persisted as Json).living_model as LivingModelT).factors[0], 'A, the pressed card, never B').toMatchObject({ value: 0.6 });
+      expect(figure('oven_price'), 'A, the pressed card, never B').toBe(2500);
     });
 
     it('a pause the AI left on an empty id never keeps the held card from its press: none is kept now, and an older one does not block the re-press', async () => {
@@ -454,18 +422,18 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const r = await post(press);
       expect(r.statusCode, r.body).toBe(200);
       expect(registered).toHaveLength(1);
-      expect(((persisted as Json).living_model as LivingModelT).factors[0]).toMatchObject({ value: 0.6 });
+      expect(figure('oven_price')).toBe(2500);
       expect((r.json() as Json).receipts).toEqual([expect.objectContaining({ authorised_by: 'person' })]);
     });
 
     it('STEP 0 (served 25 Oct 08:39Z): after the press applies the card, the AI applies again with an empty id: no pause is kept, the reply is paused null with the AI\'s own words, and the UI reads it', async () => {
       const press = await propose();
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }],
-        [{ type: 'function_call', name: 'apply_change', call_id: 'again', args: { proposal_id: '' } }], [{ type: 'message', text: 'Saved: f is 0.6 now.' }]];
+        [{ type: 'function_call', name: 'apply_change', call_id: 'again', args: { proposal_id: '' } }], [{ type: 'message', text: 'Saved: the oven costs £2,500.' }]];
       const a = (await post(press)).json() as Json;
       expect(pausedRun, JSON.stringify(a._agent)).toBeNull();
       expect(a.paused).toBeNull();
-      expect(a.assistant_text).toBe('Saved: f is 0.6 now.');
+      expect(a.assistant_text).toBe('Saved: the oven costs £2,500.');
       expect(UI_CORE_TURN.safeParse(a).success, JSON.stringify(a.paused)).toBe(true);
       expect(registered, 'the pressed card, applied once').toHaveLength(1);
       expect(a.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
@@ -476,14 +444,14 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const warn = vi.spyOn(console, 'warn');
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }],
         [{ type: 'function_call', name: 'apply_change', call_id: 'again', args: { proposal_id: '' } }],
-        [{ type: 'function_call', name: 'apply_change', call_id: 'again2', args: { proposal_id: '' } }], [{ type: 'message', text: 'Saved: f is 0.6 now.' }]];
+        [{ type: 'function_call', name: 'apply_change', call_id: 'again2', args: { proposal_id: '' } }], [{ type: 'message', text: 'Saved: the oven costs £2,500.' }]];
       const r = await post(press);
       const finalOutputRead = warn.mock.calls.some((c) => String(c[0]).includes('Accessed finalOutput before agent run is completed'));
       warn.mockRestore();
       expect(r.statusCode, r.body).toBe(200);
       const a = r.json() as Json;
       expect(a.error, JSON.stringify(a._agent)).toBeNull();
-      expect(a.assistant_text).toBe('Saved: f is 0.6 now.');
+      expect(a.assistant_text).toBe('Saved: the oven costs £2,500.');
       expect(finalOutputRead, 'no unfinished run is read as the reply').toBe(false);
       expect(a.paused).toBeNull();
       expect(pausedRun).toBeNull();
@@ -497,19 +465,15 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     });
     it('Codex on #3758: A saves, then an empty stray, then a stray naming the other held card B: every refusal the AI reads speaks of its own call, never "nothing was changed" this turn; A\'s receipt stays', async () => {
       const pressA = await propose();
-      const sevenSaid = 'f is at 0.7 by now.';
-      const seven = structuredClone(KNOWN_ANSWER);
-      seven.factors[0] = { ...seven.factors[0]!, value: 0.7, quote: sevenSaid };
-      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'propB', args: { ...CHANGE, public_label: 'Set f to 0.7', model: seven } }],
-        [{ type: 'message', text: 'I prepared that change too.' }]];
-      const idB = (((await typed(sevenSaid)).json() as Json).cards as Json[]).map((c) => String(c.proposal_id)).find((id) => id !== preparedId)!;
+      const idB = await proposeLater();
       calls.length = 0;
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }],
         [{ type: 'function_call', name: 'apply_change', call_id: 'stray', args: { proposal_id: '' } }],
-        [{ type: 'function_call', name: 'apply_change', call_id: 'strayB', args: { proposal_id: idB } }], [{ type: 'message', text: 'Saved: f is 0.6 now.' }]];
+        [{ type: 'function_call', name: 'apply_change', call_id: 'strayB', args: { proposal_id: idB } }], [{ type: 'message', text: 'Saved: the oven costs £2,500.' }]];
       const a = (await post(pressA)).json() as Json;
-      expect(a.assistant_text).toBe('Saved: f is 0.6 now.');
+      expect(a.assistant_text).toBe('Saved: the oven costs £2,500.');
       expect(registered, 'A applied once, B never').toHaveLength(1);
+      expect(figure('oven_price')).toBe(2500);
       expect(a.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
       // Every tool answer the AI read this turn, the two refusals included: each about its own call, none about the turn.
       const answers = calls.flatMap((c) => ((c.input ?? []) as Json[]).filter((i) => i.type === 'function_call_output').map((i) => JSON.stringify(i.output)));
@@ -520,9 +484,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const pressA = await propose();
       calls.length = 0;
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }],
-        [{ type: 'function_call', name: 'propose_change', call_id: 'blocked', args: CHANGE }], [{ type: 'message', text: 'Saved: f is 0.6 now.' }]];
+        [{ type: 'function_call', name: 'propose_change', call_id: 'blocked', args: CHANGE }], [{ type: 'message', text: 'Saved: the oven costs £2,500.' }]];
       const a = (await post(pressA)).json() as Json;
-      expect(a.assistant_text).toBe('Saved: f is 0.6 now.');
+      expect(a.assistant_text).toBe('Saved: the oven costs £2,500.');
       expect(registered, 'A applied once, nothing proposed').toHaveLength(1);
       expect(a.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
       const answers = calls.flatMap((c) => ((c.input ?? []) as Json[]).filter((i) => i.type === 'function_call_output').map((i) => JSON.stringify(i.output)));
@@ -573,179 +537,21 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     });
   });
 
-  it('Lenses 22 Oct (15c72e9d): an approval whose saved model admits a Run carries that automatic Run\u2019s analysis_result in the contract, as a Run press does', async () => {
-    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'I prepared that change; press its card to save it.' }]];
-    const card = ((await typed(SAID)).json() as Json).cards[0];
-    preparedId = String(card.proposal_id);
-    readiness = { status: 'ready', may_run: true, options: [], blockers: [] };
-    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved, and the analysis ran.' }]];
-    const r = await post({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click',
-      chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
-    expect(r.statusCode, r.body).toBe(200);
-    const a = r.json() as Json;
-    expect(runs, JSON.stringify(a._agent)).toBe(1);
-    const read = await freshRead();
-    expect(a.analysis_result, 'the automatic Run\u2019s fresh result, as the read now holds it').toEqual(read.analysis_result);
-    expect(a.run).toMatchObject({ run_id: read.canonical_analysis_view.run.run_id, state: { kind: 'complete_current' } });
-  });
-
-  describe.each([
-    ['capacity brief', KNOWN_ANSWER, 'not_stated', true],
-    // CONTRAST: this shape's goal carries no target the licence reads (goal_threshold_raw null), so its chance needs no timing reading.
-    ['widgets brief', OPTION_EFFECTS, 'in_place_by_period', false],
-  ] as const)('automatic Run timing: %s', (_brief, base, reading, needsReading) => {
-    it.each(['unrelated change', 'subject changed', 'no prior reading'] as const)('%s', async (row) => {
-      // Small synthetic change-at-period-end models, with the same timing carrier as the captured approval.
-      const initial = structuredClone(base);
-      initial.aims[0]!.source = 'olumi';
-      initial.aims[0]!.quote = null;
-      Object.assign(initial.aims[0]!.target!, { comparator: 'increase', value: 10, unit: '%', current: null,
-        current_unit: null, change_kind: 'relative', baseline: 'today', period_months: 3 });
-      for (const link of initial.links) link.effect.unit = '%';
-      persisted = postimage(initial);
-      expect(persisted.nodes.find((n: Json) => n.kind === 'goal').goal_target_basis).toMatchObject({
-        period_months: 3, effects_at_period_end: false, source: 'olumi_reading',
-      });
-      timingRun = true;
-      readiness = { status: 'ready', may_run: true, options: [], blockers: [] };
-      if (row !== 'no prior reading') {
-        outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'pressed', args: { reason: 'Run pressed.', effects_timing: reading } }],
-          [{ type: 'message', text: 'Ran.' }]];
-        const pressed = await post({ turn_id: randomUUID(), message: 'Run analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } });
-        expect(pressed.statusCode, pressed.body).toBe(200);
-        expect(runTimings).toEqual([reading]);
-      }
-      const model = structuredClone(initial);
-      // As in the capture: add an unrelated factor, leaving every option and the goal unchanged.
-      model.factors.push({ ...structuredClone(KNOWN_ANSWER.factors[0]!), id: 'extra', label: 'Extra factor', value: null, low: 0.2, high: 0.3, source: 'olumi', quote: null });
-      if (row === 'subject changed') model.options[0]!.label += ' revised';
-      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop',
-        args: { public_label: 'Add extra factor', basis: 'An additional consideration.', model, remove: [] } }],
-        [{ type: 'message', text: 'Prepared.' }]];
-      const proposed = await typed('Add an extra factor.');
-      expect(proposed.statusCode, proposed.body).toBe(200);
-      const card = (proposed.json() as Json).cards[0];
-      expect(card).toBeDefined();
-      preparedId = String(card.proposal_id);
-      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved and analysed.' }]];
-      const approved = await post({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click',
-        chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
-      expect(approved.statusCode, approved.body).toBe(200);
-      expect(registered).toHaveLength(1);
-      const chances = (result: Json) => {
-        expect(result.enrichment.option_comparison).toHaveLength(initial.options.length);
-        for (const option of result.enrichment.option_comparison) expect(option.probability_of_goal, option.option_id).toBe(0.5);
-      };
-      if (row === 'unrelated change' || !needsReading) {
-        // CONTRAST: a reading to carry, or a goal whose chance needs none: the automatic Run runs, as before.
-        expect(runs).toBe(row === 'no prior reading' ? 1 : 2);
-        expect(runTimings.at(-1)).toBe(row === 'unrelated change' ? reading : null);
-        const result = (approved.json() as Json).analysis_result;
-        expect(result).toEqual((await freshRead()).analysis_result);
-        if (row === 'unrelated change') chances(result);
-        return;
-      }
-      // ⭐ DL 22 Oct (hiring a, 2fa753d6): no reading to carry, so no automatic Run that could only withhold every chance
-      // (it was a GOAL_FIGURES_TARGET_NOT_TESTABLE / PERIOD_END_EFFECTS_UNSTATED result). The reply is told to invite Run.
-      expect(runs).toBe(row === 'no prior reading' ? 0 : 1);
-      expect(approved.json() as Json).not.toHaveProperty('analysis_result');
-      expect(JSON.stringify(calls.at(-1)!.input)).toContain('run_awaits_timing');
-      // The invited Run, with the AI's reading, gives the chances.
-      outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'invited', args: { reason: 'Run pressed.', effects_timing: reading } }],
-        [{ type: 'message', text: 'Ran.' }]];
-      const invited = await post({ turn_id: randomUUID(), message: 'Run analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } });
-      expect(invited.statusCode, invited.body).toBe(200);
-      expect(runTimings.at(-1)).toBe(reading);
-      chances((await freshRead()).analysis_result);
-    });
-  });
-
-  it('Codex r1 on #3668: a Run that lands while the approval\u2019s reply is written is not that approval\u2019s: its result is not shipped', async () => {
-    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'Prepared.' }]];
-    const card = ((await typed(SAID)).json() as Json).cards[0];
-    preparedId = String(card.proposal_id);
-    readiness = { status: 'ready', may_run: true, options: [], blockers: [] };
-    // ⭐ DETERMINISTIC (DL 22 Oct: a timer-polled flip raced the automatic Run's own confirming read, about 1 run in 4): the other
-    // Run lands exactly when the reply call is made, so after the approval's tool (its Run and that Run's confirming read) and
-    // before the turn's final read. The gate is already resolved: no timer and no wait decide the order.
-    let landedAfterRuns: number | undefined;
-    holdProvider = Promise.resolve();
-    holdWhen = (body) => {
-      const reply = Array.isArray(body.input) && (body.input as Json[]).some((i) => i.type === 'function_call_output');
-      if (reply) {
-        landedAfterRuns = runs;
-        otherRun = 'another-run';
-        carriedResult = { ...carriedResult, summary: 'Another Run\u2019s summary.' };
-      }
-      return reply;
-    };
-    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved, and the analysis ran.' }]];
-    const r = await post({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click',
-      chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
-    expect(r.statusCode, r.body).toBe(200);
-    expect(landedAfterRuns, 'the other Run lands after the approval\u2019s own automatic Run').toBe(1);
-    const a = r.json() as Json;
-    expect(a.analysis_result, 'never another Run\u2019s result beside this Run\u2019s narration').toBeUndefined();
-    expect(a.run).toMatchObject({ run_id: 'another-run' });
-  });
-
-  it('analysis_state is the read\u2019s FULL v1 state on a typed turn, a card turn and a Run turn (contract v1.4/v1.5)', async () => {
-    const typedTurn = (await typed('What does the model hold for f today?')).json() as Json;
-    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'Prepared.' }]];
-    const cardTurn = (await typed(SAID)).json() as Json;
-    outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_press', args: { reason: 'The person pressed Run.', effects_timing: 'not_stated' } }],
-      [{ type: 'message', text: 'Ran.' }]];
-    const runTurn = (await post({ turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } })).json() as Json;
-    expect(cardTurn.cards).toHaveLength(1);
-    expect(runs).toBe(1);
-    for (const [turn, kind] of [[typedTurn, 'never_run'], [cardTurn, 'never_run'], [runTurn, 'complete_current']] as const) {
-      expect(AnalysisStateV1Schema.safeParse(turn.analysis_state).success, JSON.stringify(turn.analysis_state)).toBe(true);
-      expect(Object.keys(turn.analysis_state).sort()).toEqual(Object.keys(SERVED_STATE).sort());
-      expect(turn.analysis_state.run_state.kind).toBe(kind);
-    }
-    expect(runTurn.analysis_state).toEqual((await freshRead()).analysis_state);
-  });
-
-  it('a value change on a factor WITH a unit: its card carries the factor_value field the canvas ghost reads (record.ts, the #2880 projection)', async () => {
-    const hours = structuredClone(KNOWN_ANSWER);
-    hours.factors[0] = { ...hours.factors[0]!, unit: 'hours' };
-    persisted = postimage(hours);
-    const next = structuredClone(hours);
-    next.factors[0] = { ...next.factors[0]!, value: 0.6, quote: SAID };
-    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: { ...CHANGE, model: next } }], [{ type: 'message', text: 'Prepared.' }]];
-    const j = (await typed(SAID)).json() as Json;
-    expect(j.cards).toHaveLength(1);
-    expect(j.cards[0].fields).toEqual([expect.objectContaining({ kind: 'factor_value', node_id: 'f', current: { value: 0.6, unit: 'hours', source: 'yours' }, filled_missing: false })]);
-    // CONTRAST: the same change on KNOWN_ANSWER's unitless f is shown as a change note only (the builder projects a unit-bearing point value).
-    // A new scenario: the store double holds one scenario's rows at a time.
-    SCENARIO = randomUUID(); turnRows.clear(); persisted = postimage(KNOWN_ANSWER);
-    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'Prepared.' }]];
-    const unitless = (await typed(SAID)).json() as Json;
-    expect(unitless.cards).toHaveLength(1);
-    expect(unitless.cards[0].fields).toEqual([]);
-    expect(unitless.cards[0].adds).toEqual([expect.objectContaining({ kind: 'change_note', field_id: 'change_note:factor:f' })]);
-  });
-
-  describe('Codex r1 on #3650: a canvas edit claims its turn and takes the slot BEFORE it is forwarded', () => {
+  describe('Codex r1 on #3650: a canvas edit claims its turn and takes the slot BEFORE it saves', () => {
     const afterTool = (body: Json): boolean => Array.isArray(body.input) && (body.input as Json[]).some((i) => i.type === 'function_call_output');
     /** A card, then its approval held mid-turn: committed (one register), its reply not yet written. */
     const approvalHeldAfterCommit = async () => {
-      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'Prepared.' }]];
-      const card = ((await typed(SAID)).json() as Json).cards[0];
-      preparedId = String(card.proposal_id);
+      const press = await propose();
       let release!: () => void;
       holdProvider = new Promise<void>((resolve) => { release = resolve; });
       holdWhen = afterTool;
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved.' }]];
-      const pressId = randomUUID();
-      const approval = post({ turn_id: pressId, message: card.approve_action.message, source: 'chip_click', chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
+      const approval = post(press);
       await vi.waitFor(() => expect(registered).toHaveLength(1));
-      return { approval, pressId, release };
+      return { approval, pressId: String(press.turn_id), release };
     };
-    const canvasEdit = (turnId: string) => post({ kind: 'system_event', turn_id: turnId,
-      event: { kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 0.8, base_graph_hash: hashOf(persisted) } });
 
-    it('an edit sent under the turn id an approval is answering is refused, and never forwarded: one write for that turn id', async () => {
+    it('an edit sent under the turn id an approval is answering is refused, and never saved: one write for that turn id', async () => {
       const { approval, pressId, release } = await approvalHeldAfterCommit();
       const pending = canvasEdit(pressId);
       const settled = await Promise.race([pending.then(() => 'answered'), new Promise((resolve) => setTimeout(() => resolve('waiting'), 150))]);
@@ -758,35 +564,36 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(a.statusCode, a.body).toBe(200);
       expect((a.json() as Json)).toMatchObject({ durability: 'recorded', error: null });
       expect(registered).toHaveLength(1);
-      expect(canvasForwards).toHaveLength(0);
+      expect(figure('base_sales')).toBe(300);
     });
 
     it('an edit under its own turn id waits for the running turn, then runs: never interleaved with it', async () => {
       const { approval, release } = await approvalHeldAfterCommit();
       const edit = canvasEdit(randomUUID());
       await new Promise((resolve) => setTimeout(resolve, 150));
-      expect(canvasForwards, 'nothing is forwarded while the approval holds the scenario').toHaveLength(0);
+      expect(registered, 'nothing more is saved while the approval holds the scenario').toHaveLength(1);
       release();
       const [a, e] = await Promise.all([approval, edit]);
       expect([a.statusCode, e.statusCode]).toEqual([200, 200]);
-      expect(canvasForwards).toHaveLength(1);
+      expect(registered).toHaveLength(2);
+      expect([figure('oven_price'), figure('base_sales')], 'the edit saved on what the approval saved').toEqual([2500, 320]);
     });
 
     it('the same edit resent replays it: no second change', async () => {
       const turnId = randomUUID();
-      const event = { kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 0.8, base_graph_hash: hashOf(persisted) };
-      expect((await post({ kind: 'system_event', turn_id: turnId, event })).statusCode).toBe(200);
-      const again = await post({ kind: 'system_event', turn_id: turnId, event });
+      expect((await canvasEdit(turnId)).statusCode).toBe(200);
+      const again = await canvasEdit(turnId);
       expect(again.statusCode, again.body).toBe(200);
       expect((again.json() as Json).durability).toBe('replayed');
-      // CONTRAST: a different edit under that turn id is refused, and never forwarded.
-      const other = await post({ kind: 'system_event', turn_id: turnId, event: { kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 0.9, base_graph_hash: hashOf(persisted) } });
+      // CONTRAST: a different edit under that turn id is refused, and never saved.
+      const other = await canvasEdit(turnId, 330);
       expect(other.statusCode).toBe(409);
-      expect(canvasForwards.map((f) => f.body.event.value)).toEqual([0.8, 0.8]);
+      expect(registered).toHaveLength(1);
+      expect(figure('base_sales')).toBe(320);
     });
   });
 
-  it('Codex r1 on #3650: a reply whose words equal a host failure sentence is the AI\u2019s reply, recorded and replayed byte for byte', async () => {
+  it('Codex r1 on #3650: a reply whose words equal a host failure sentence is the AI’s reply, recorded and replayed byte for byte', async () => {
     const SAME = 'The saved change is kept, but the reply didn’t arrive. Send a new message to continue.';
     outputs = [[{ type: 'message', text: SAME }]];
     const turnId = randomUUID();
@@ -810,16 +617,16 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
   it('⭐ REPLAY: a resend of the same turn id returns the recorded reply on today’s state: no model call, no write, no Run', async () => {
     const turnId = randomUUID();
-    const first = (await typed('What does the model hold for f today?', turnId)).json() as Json;
+    const first = (await typed('What does the model hold for the oven today?', turnId)).json() as Json;
     expect(calls).toHaveLength(1);
-    const again = await typed('What does the model hold for f today?', turnId);
+    const again = await typed('What does the model hold for the oven today?', turnId);
     expect(again.statusCode, again.body).toBe(200);
     const j = again.json() as Json;
     expect(j.durability).toBe('replayed');
     expect(j.assistant_text).toBe(first.assistant_text);
     expect(calls, 'no second provider call').toHaveLength(1);
     expect(registered).toHaveLength(0);
-    expect(runs).toBe(0);
+    expect(storedRuns()).toBe(1);
     // CONTRAST: the same id with different words is refused, and nothing runs.
     const reused = await typed('A different question.', turnId);
     expect(reused.statusCode).toBe(409);
@@ -827,16 +634,15 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(calls).toHaveLength(1);
   });
 
-  it('a Run press resent replays its result and never runs again', async () => {
-    outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_press', args: { reason: 'The person pressed Run.', effects_timing: 'not_stated' } }],
-      [{ type: 'message', text: 'The analysis ran.' }]];
+  it('a program Run press needs no model call; resent, it replays and stores no second Run', async () => {
     const press = { turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } };
-    await post(press);
-    expect(runs).toBe(1);
+    const first = await post(press);
+    expect(first.statusCode, first.body).toBe(200);
+    const stored = storedRuns();
     const again = (await post(press)).json() as Json;
     expect(again.durability).toBe('replayed');
-    expect(runs).toBe(1);
-    expect(again.analysis_result).toEqual((await freshRead()).analysis_result);
+    expect(storedRuns()).toBe(stored);
+    expect(calls).toHaveLength(0);
   });
 
   it('two turns at once: the second waits on the scenario’s slot and starts from what the first saved', async () => {
@@ -848,44 +654,51 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     const second = typed('Second question.');
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(calls.length, 'the second turn sends nothing while the first is running').toBe(1);
-    // The first turn's model moves meanwhile: a distinctive view, held in the living model only.
-    const moved = structuredClone(KNOWN_ANSWER);
-    moved.views.push({ holder: 'Ana', position: 'prefers a slower push', quote: null });
-    persisted = postimage(moved);
+    // The first turn's model moves meanwhile: a distinctive label, held in the program only.
+    const moved = bakery();
+    moved.quantities = moved.quantities.map((x) => (x.id === 'base_sales' ? { ...x, label: 'loaves Ana counts each week' } : x));
+    persisted = programGraph(moved);
     release();
     const [a, b] = await Promise.all([first, second]);
     expect([a.statusCode, b.statusCode]).toEqual([200, 200]);
     expect(calls).toHaveLength(2);
     const stateBlock = (b: Json): string => ((b.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content)).join('\n');
-    expect(stateBlock(calls[0]!), 'CONTROL: the first turn read the model before the move').not.toContain('prefers a slower push');
-    expect(stateBlock(calls[1]!), 'the waiting turn reads the model as it now stands').toContain('prefers a slower push');
+    expect(stateBlock(calls[0]!), 'CONTROL: the first turn read the model before the move').not.toContain('loaves Ana counts each week');
+    expect(stateBlock(calls[1]!), 'the waiting turn reads the model as it now stands').toContain('loaves Ana counts each week');
   });
 
-  it('a legacy scenario (a graph with no living model) is refused with a typed 409: no model call, the claim released', async () => {
-    persisted = mapLivingModel(KNOWN_ANSWER).graph as Json;
-    const turnId = randomUUID();
-    const r = await typed('What does the model hold?', turnId);
-    expect(r.statusCode).toBe(409);
-    const j = r.json() as Json;
-    expect(Object.keys(j)).toEqual(CONTRACT_KEYS.filter((k) => k !== '_agent'));
-    expect(j.error).toMatchObject({ code: 'legacy_scenario', retry_safe: true, nothing_saved: true });
-    expect(calls).toHaveLength(0);
-    expect(turnRows.has(`${turnId}:claim`), 'a resend may run once the scenario is current').toBe(false);
-    // CONTRAST: the same graph WITH its living model is a core scenario and runs.
-    persisted = postimage(KNOWN_ANSWER);
+  it('F1b: a saved scenario that is not a model program (a Living Model, or a graph with neither) is refused with a typed 409 on every kind of turn: no model call, nothing saved, the claim released', async () => {
+    for (const graph of [postimage(KNOWN_ANSWER), mapLivingModel(KNOWN_ANSWER).graph as Json]) {
+      SCENARIO = randomUUID(); turnRows.clear(); persisted = graph; calls = [];
+      const turnId = randomUUID();
+      const r = await typed('What does the model hold?', turnId);
+      expect(r.statusCode).toBe(409);
+      const j = r.json() as Json;
+      expect(Object.keys(j)).toEqual(BASE_KEYS.filter((k) => k !== '_agent'));
+      expect(j.error).toMatchObject({ code: 'legacy_scenario', retry_safe: true, nothing_saved: true });
+      expect(calls).toHaveLength(0);
+      expect(turnRows.has(`${turnId}:claim`), 'a resend may run once the scenario is current').toBe(false);
+      // A canvas edit on it is refused the same way, and saves nothing.
+      const edit = await post({ kind: 'system_event', turn_id: randomUUID(), event: { kind: 'factor_value_edit', target_id: 'f', raw_value: 0.8 } });
+      expect(edit.statusCode, edit.body).toBe(409);
+      expect((edit.json() as Json).error).toMatchObject({ code: 'legacy_scenario', nothing_saved: true });
+    }
+    expect(registered).toHaveLength(0);
+    // CONTRAST: a saved program runs.
+    SCENARIO = randomUUID(); turnRows.clear(); persisted = programGraph();
     expect((await typed('What does the model hold?')).statusCode).toBe(200);
+    expect(calls).toHaveLength(1);
   });
 
   it('⭐ scenario_revision is the graph read’s content_hash (identity.v1) after a core turn, and a canvas edit moves both', async () => {
-    const turn = (await typed('What does the model hold for f today?')).json() as Json;
+    const turn = (await typed('What does the model hold for the oven today?')).json() as Json;
     const before = await freshRead();
     expect(turn.model.scenario_revision).toBe(before.content_hash);
     expect(before.content_hash).toBe(before.graph_identity_hash.value);
-    const edit = await post({ kind: 'system_event', turn_id: randomUUID(), event: { kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 0.8, base_graph_hash: before.graph_hash } });
+    const edit = await canvasEdit(randomUUID());
     expect(edit.statusCode, edit.body).toBe(200);
     const e = edit.json() as Json;
-    expect(canvasForwards).toHaveLength(1);
-    expect(canvasForwards[0]!.headers['x-olumi-ai-mode'], 'the existing core canvas-edit path').toBe('core');
+    expect(figure('base_sales')).toBe(320);
     const after = await freshRead();
     expect(e.model.scenario_revision).toBe(after.content_hash);
     expect(e.model.scenario_revision).not.toBe(turn.model.scenario_revision);
@@ -929,33 +742,10 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(none.json()._agent.tool_calls).toEqual([{ name: 'draft_canonical_model', outcome: 'refused', refusal: 'save_refused' }]);
     expect([registered.length, persisted]).toEqual([0, null]);
   });
-  it('DL 22 Oct (marketing on 7ee0d90f): a change that would cut the goal\u2019s path is said back; the AI\u2019s re-linked retry is the card', async () => {
-    // f's unit stated, as every factor has one: Olumi's re-link from it can be sized per unit (the Run's own target verdict, C1).
-    const united: LivingModelT = { ...structuredClone(KNOWN_ANSWER), factors: KNOWN_ANSWER.factors.map((f) => ({ ...f, unit: 'level' })) };
-    persisted = postimage(united);
-    const remeasured = structuredClone(united);
-    remeasured.aims[0]!.target = { ...remeasured.aims[0]!.target!, quantity: 'new customers', unit: 'customers', value: 20, current: null };
-    remeasured.links = [];
-    const relinked = { ...structuredClone(remeasured), links: [{ id: 'f_customers', from: 'f', to: 'g', source: 'olumi' as const, party: null, quote: null,
-      effect: { estimate_by: null, form: 'range' as const, value: null, low: 2, high: 8, sd: null, unit: 'customers', sign: '+' as const } }] };
-    const change = (model: LivingModelT) => ({ public_label: 'Measure the goal in customers', basis: 'The person restated the goal.', model, remove: ['f_g'] });
-    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'cut', args: change(remeasured) }],
-      [{ type: 'function_call', name: 'propose_change', call_id: 'relink', args: change(relinked) }],
-      [{ type: 'message', text: 'I prepared the change, with what drives the goal linked to its new measure.' }]];
-    const r = await typed('Measure the goal in new customers: we need 20.');
-    expect(r.statusCode, r.body).toBe(200);
-    const j = r.json() as Json;
-    expect(j._agent.tool_calls.map((c: Json) => [c.name, c.outcome])).toEqual([['propose_change', 'refused'], ['propose_change', 'ok']]);
-    // DL 22 Oct: the self-check's refusal is on the wire, as the refused call's typed reason; an ok call names none.
-    expect(j._agent.tool_calls.map((c: Json) => c.refusal ?? null)).toEqual(['not_run_ready', null]);
-    expect(j.cards).toHaveLength(1);
-    expect(JSON.stringify(j.cards[0].adds)).toContain('f_customers');
-    expect(registered, 'a card writes nothing').toHaveLength(0);
-  });
 
   it('⭐ STEP 0 (arch plan, DL 23 Oct): ONE summary log line per turn, keyed by scenario and turn, by id and code only', async () => {
     const info = vi.spyOn((await import('../../utils/telemetry.js')).log, 'info');
-    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'Press its card to look at that condition again.' }]];
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'Press its card to look at that price again.' }]];
     const turnId = randomUUID();
     const r = await typed(SAID, turnId);
     expect(r.statusCode, r.body).toBe(200);
@@ -973,7 +763,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(line.tool_calls.map((c: Json) => [c.name, c.outcome])).toEqual([['propose_change', 'ok']]);
     // Ids and codes only: no said words or reply words.
     const text = JSON.stringify(line);
-    for (const words of [SAID, 'look at that condition']) expect(text).not.toContain(words);
+    for (const words of [SAID, '£2,500', 'look at that price']) expect(text).not.toContain(words);
   });
   it('Codex r1 on #3691: a failed turn writes its ONE summary line, with the calls made before it failed and no error words', async () => {
     const info = vi.spyOn((await import('../../utils/telemetry.js')).log, 'info');
@@ -993,11 +783,12 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     const telemetry = (await import('../../utils/telemetry.js')).log;
     const info = vi.spyOn(telemetry, 'info');
     const summaries = () => info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : []));
-    outputs = [[{ type: 'function_call', name: 'offer_public_research', call_id: 'withheld', args: { query: 'synthetic query' } }], [{ type: 'refuse' }]];
-    const failed = await typed('Look this up for me.');
+    // A Challenge is a chip: it carries no consent to Run, so the program's run_analysis is withheld on it.
+    outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'withheld', args: {} }], [{ type: 'refuse' }]];
+    const failed = await challengeOn(String(((persisted as Json).nodes as Json[])[0]!.id));
     expect(failed.statusCode).not.toBe(200);
     expect(summaries().map((l) => [l.failed, l.tool_calls.map((c: Json) => [c.name, c.outcome])]))
-      .toEqual([['turn_failed', [['offer_public_research', 'refused']]]]);
+      .toEqual([['turn_failed', [['run_analysis', 'refused']]]]);
     // The conversation cannot be read: refused before any AI call, so no line.
     store.readOpenAiConversationId.mockRejectedValueOnce(new Error('store down'));
     const unread = await typed('Anything new?');
@@ -1008,79 +799,65 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
   describe('⭐ CACHING (DL 22 Oct): the provider\'s cached prefix is the same bytes on every call', () => {
     /** The standing instructions: the same on every turn of every scenario; this turn's facts and guidance follow them. */
-    // These rows run on a saved Living Model (not a program): it keeps the Living Model text, byte for byte (Codex r1 BLOCK 4 on #3709).
-    const STANDING = instructionsForMode('core', CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL);
-    const challengeOn = (id: string) => post({ turn_id: randomUUID(), message: 'Challenge this', source: 'chip_click', chip: { id: ASK_CHALLENGE_CHIP_ID },
-      selected_elements: { node_ids: [id] } });
+    const STANDING = programInstructions();
+    /** The turn's system items, in order: its state block, then its guidance. */
+    const systemItems = (b: Json): string[] => ((b.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content));
+    /** A card a Challenge can be grounded on: a factor of the saved program. */
+    const factorId = (): string => String((((persisted as Json).nodes ?? []) as Json[]).find((n) => n.kind === 'factor')!.id);
 
-    it('(1) ONE tool list, byte for byte, on typed, approval, Run-press and Challenge calls; what a turn may call rides tool_choice', async () => {
-      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'Press its card to save it.' }]];
-      const card = ((await typed(SAID)).json() as Json).cards[0];
-      preparedId = String(card.proposal_id);
+    it('(1) ONE tool list, byte for byte, on typed, approval and Challenge calls; what a turn may call rides tool_choice', async () => {
+      const press = await propose();
       const typedCalls = calls.length;
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved.' }]];
-      expect((await post({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click',
-        chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } })).statusCode).toBe(200);
+      expect((await post(press)).statusCode).toBe(200);
       const pressCalls = calls.length;
-      outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run', args: { reason: 'The person pressed Run.', effects_timing: 'not_stated' } }],
-        [{ type: 'message', text: 'The analysis ran.' }]];
-      expect((await post({ turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } })).statusCode).toBe(200);
-      const runCalls = calls.length;
-      const factor = (((persisted as Json).nodes ?? []) as Json[]).find((n) => n.kind === 'factor')!;
       outputs = [[{ type: 'message', text: 'Here is the strongest case against that figure.' }]];
-      expect((await challengeOn(String(factor.id))).statusCode).toBe(200);
-      expect([typedCalls, pressCalls - typedCalls, runCalls - pressCalls, calls.length - runCalls], 'two calls each, then one').toEqual([2, 2, 2, 1]);
+      expect((await challengeOn(factorId())).statusCode).toBe(200);
+      expect([typedCalls, pressCalls - typedCalls, calls.length - pressCalls], 'two calls each, then one').toEqual([2, 2, 1]);
 
       const lists = calls.map((b) => JSON.stringify(b.tools));
       expect(lists[0]!.length).toBeGreaterThan(2);
       expect(new Set(lists).size, 'every call sends the same tools array').toBe(1);
-      // The restriction lives in tool_choice: a withheld tool stays in the list; a press opens on its own tool; a Run press's later calls are restricted.
-      const names = (calls[0]!.tools as Json[]).map((t) => String(t.name));
-      const typedChoice = calls[0]!.tool_choice as Json;
-      expect(typedChoice.type).toBe('allowed_tools');
-      expect(names.filter((n) => !(typedChoice.tools as Json[]).some((t) => t.name === n)), 'research is withheld on this route, and still listed')
-        .toEqual(['offer_public_research']);
+      // The restriction lives in tool_choice: a typed turn may call every tool; a press opens on its own tool; a Challenge is a
+      // chip, so its Run stays listed and is withheld.
+      expect((calls[0]!.tool_choice as Json | undefined)?.type, 'a typed turn withholds nothing').not.toBe('allowed_tools');
       expect(calls[typedCalls]!.tool_choice).toMatchObject({ type: 'function', name: 'apply_change' });
-      expect(calls[pressCalls]!.tool_choice).toMatchObject({ type: 'function', name: 'run_analysis' });
-      const after = calls[pressCalls + 1]!.tool_choice as Json;
-      expect(after.type).toBe('allowed_tools');
-      expect((after.tools as Json[]).map((t) => t.name), 'a Run press withholds the writers').not.toContain('propose_change');
-      expect(((calls[calls.length - 1]!.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content).slice(0, SELECTION_NOTE_PREFIX.length)),
-        'the Challenge call carried its note, after its state block').toEqual([expect.stringContaining(STATE_BLOCK_PREFIX), SELECTION_NOTE_PREFIX]);
+      const challenge = calls[calls.length - 1]!;
+      expect((challenge.tool_choice as Json).type).toBe('allowed_tools');
+      expect(((challenge.tool_choice as Json).tools as Json[]).map((t) => t.name)).not.toContain('run_analysis');
+      expect((challenge.tools as Json[]).map((t) => t.name)).toContain('run_analysis');
+      const items = systemItems(challenge);
+      expect(items[0], 'the Challenge call carried its state block first').toContain(STATE_BLOCK_PREFIX);
+      expect(items.at(-1)!.startsWith(SELECTION_NOTE_PREFIX), 'then its note, last').toBe(true);
       expect(new Set(calls.map((b) => b.instructions)), 'the standing instructions, the same bytes on every call of every turn kind')
         .toEqual(new Set([STANDING]));
     });
 
     it('(5) the standing instructions open every call of two different scenarios; the Challenge note follows the state block in the turn\'s input', async () => {
-      /** The turn's system items, in order: its state block, then its guidance. */
-      const systemItems = (b: Json): string[] => ((b.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content));
-      const factor = (((persisted as Json).nodes ?? []) as Json[]).find((n) => n.kind === 'factor')!;
       outputs = [[{ type: 'message', text: 'Here is the strongest case against that figure.' }]];
-      expect((await challengeOn(String(factor.id))).statusCode).toBe(200);
+      expect((await challengeOn(factorId())).statusCode).toBe(200);
       const challenged = calls[0]!;
       expect(challenged.instructions).toBe(STANDING);
       const one = systemItems(challenged);
-      expect(one).toHaveLength(2);
-      expect(one[0]).toContain(STATE_BLOCK_PREFIX);
+      expect(one).toEqual([expect.stringContaining(STATE_BLOCK_PREFIX), PROGRAM_TURN_GUIDANCE, expect.stringMatching(new RegExp(`^${SELECTION_NOTE_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))]);
       expect(one[0]).toContain(TODAY_PREFIX);
-      expect(one[1]!.startsWith(SELECTION_NOTE_PREFIX), 'the note follows the state block').toBe(true);
 
-      // A second scenario, another saved model: a typed turn, with no guidance of its own.
+      // A second scenario, another saved program: a typed turn, with no guidance but the program's own.
       const first = { scenario: SCENARIO, body: challenged };
-      SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); calls = [];
+      SCENARIO = randomUUID(); persisted = programGraph(); calls = [];
       outputs = [[{ type: 'message', text: 'Tell me more about the situation first.' }]];
       expect((await typed('We are weighing two staffing options.')).statusCode).toBe(200);
-      const drafting = calls[0]!;
+      const second = calls[0]!;
       expect(SCENARIO).not.toBe(first.scenario);
-      expect(drafting.instructions, 'byte-equal across the two scenarios').toBe(first.body.instructions);
-      expect(systemItems(drafting)).toEqual([expect.stringContaining(STATE_BLOCK_PREFIX)]);
+      expect(second.instructions, 'byte-equal across the two scenarios').toBe(first.body.instructions);
+      expect(systemItems(second)).toEqual([expect.stringContaining(STATE_BLOCK_PREFIX), PROGRAM_TURN_GUIDANCE]);
       expect(String(challenged.instructions), 'no Challenge note in the instructions').not.toContain(SELECTION_NOTE_PREFIX);
 
       // The prefix the provider caches (the tools, then the standing instructions) is byte-equal across the two scenarios.
-      expect(JSON.stringify(drafting.tools)).toBe(JSON.stringify(first.body.tools));
-      expect(drafting.prompt_cache_key).toBe(first.body.prompt_cache_key);
-      expect(drafting.prompt_cache_key).toBe(corePromptCacheKey(String(drafting.model), STANDING));
-      expect([drafting.prompt_cache_retention, first.body.prompt_cache_retention]).toEqual(['24h', '24h']);
+      expect(JSON.stringify(second.tools)).toBe(JSON.stringify(first.body.tools));
+      expect(second.prompt_cache_key).toBe(first.body.prompt_cache_key);
+      expect(second.prompt_cache_key).toBe(corePromptCacheKey(String(second.model), STANDING));
+      expect([second.prompt_cache_retention, first.body.prompt_cache_retention]).toEqual(['24h', '24h']);
     });
 
     /** Draft a saved PROGRAM scenario (the canonical drafter's first turn), then clear the calls. */
@@ -1103,16 +880,14 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       return String((drafted.json() as Json).assistant_text);
     };
 
-    it('(6) ALPHA (23 Oct) + Codex r1 BLOCK 4 on #3709: a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model keeps the old text, byte for byte', async () => {
+    it('(6) ALPHA (23 Oct) + F1b (26 Oct): a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model is refused before any call', async () => {
       // Pinned from the request bodies the provider received on this route, not from the module that builds them.
       const PROGRAM_SHA = 'd9836e169d977115ce426a2471307d416264a17479ee14eace51c59ea9cb13ab'; // 26 Oct: integrated review words#7 (the "on Olumi’s reading of …" basis). // 25 Oct: alpha G10 (no threshold sentences). // 25 Oct: alpha G5 (no note_on_item sentence). // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
-      const LIVING_MODEL_SHA = '7a1bced23a44dccc478a00d075b28bbe2dda487a4b6da868ae3a477698097e44'; // staging 646d374e's
       const sha = (c: Json) => createHash('sha256').update(String(c.instructions), 'utf8').digest('hex');
+      persisted = postimage(KNOWN_ANSWER);
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
-      expect((await typed('What does the model hold now?')).statusCode).toBe(200);
-      expect(calls).toHaveLength(1);
-      expect(sha(calls[0]!)).toBe(LIVING_MODEL_SHA);
-      expect(String(calls[0]!.instructions)).not.toContain('HOW THE MODEL WORKS');
+      expect((await typed('What does the model hold now?')).statusCode).toBe(409);
+      expect(calls).toHaveLength(0);
       await savedProgram();
       outputs = [[{ type: 'message', text: 'Tell me more about the situation first.' }]];
       expect((await typed('What does the model hold now?')).statusCode).toBe(200);
@@ -1184,12 +959,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(skipped, 'only the person\'s two typed messages are skipped').toEqual(TYPED);
     });
 
-    it('Challenge on a PROGRAM board (served 502 on board 5715db98, 24 Oct): no first tool is forced, as its tools have no note_on_item; the note rides the turn and a reply comes back. A Living Model board keeps note_on_item', async () => {
-      // Contrast first: a saved Living Model's Challenge opens on its note tool, as before.
-      const factor = (((persisted as Json).nodes ?? []) as Json[]).find((n) => n.kind === 'factor')!;
-      outputs = [[{ type: 'message', text: 'Here is the strongest case against that figure.' }]];
-      expect((await challengeOn(String(factor.id))).statusCode).toBe(200);
-      expect(calls.at(-1)!.tool_choice).toMatchObject({ type: 'function', name: 'note_on_item' });
+    it('Challenge on a PROGRAM board (served 502 on board 5715db98, 24 Oct): no first tool is forced, as its tools have no note_on_item; the note rides the turn and a reply comes back', async () => {
       // A program board: the four program tools, none forced; the Challenge note follows the state block; the AI answers in words.
       await savedProgram();
       const item = (((persisted as Json).nodes ?? []) as Json[]).find((n) => n.kind === 'factor') ?? ((persisted as Json).nodes as Json[])[0]!;
@@ -1597,26 +1367,34 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       return String(calls[0]!.instructions);
     };
 
-    it('SPEC §3 (DL 26 Oct): a program\'s draft, typed turn and Run press never enter the Living Model reader, the legacy Run pipeline or the action ranker; a Living Model turn still does', async () => {
-      const clear = () => { for (const spy of Object.values(legacy)) spy.mockClear(); };
-      clear();
+    it('SPEC §3 + F1b (DL 26 Oct): a program\'s draft, typed turn, card (proposed, pressed, saved, read back), canvas edit and Run press never enter the Living Model reader, the legacy capabilities, the held-approval writer, the Run restore or the action ranker; the program\'s own reader does run', async () => {
+      const counts = () => Object.values(legacy).map((spy) => spy.mock.calls.length);
+      const none = Object.values(legacy).map(() => 0);
+      for (const spy of [...Object.values(legacy), program.read]) spy.mockClear();
       await savedProgram();
-      expect([legacy.livingView.mock.calls.length, legacy.capabilities.mock.calls.length, legacy.rank.mock.calls.length], 'the draft').toEqual([0, 0, 0]);
+      expect(counts(), 'the draft').toEqual(none);
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
       const typedTurn = (await typed('What does the model hold now?')).json() as Json;
       expect([typedTurn.error, typedTurn.action_bar]).toEqual([null, null]);
-      expect([legacy.livingView.mock.calls.length, legacy.capabilities.mock.calls.length, legacy.rank.mock.calls.length], 'the typed turn').toEqual([0, 0, 0]);
-      const press = await post({ turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } });
-      expect(press.statusCode, press.body).toBe(200);
-      expect([legacy.livingView.mock.calls.length, legacy.capabilities.mock.calls.length, legacy.rank.mock.calls.length, legacy.restoreRun.mock.calls.length], 'the Run press')
-        .toEqual([0, 0, 0, 0]);
-      // CONTRAST: a Living Model scenario's typed turn reads its living model, builds the Run pipeline once and ranks its bar.
-      SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); turnRows.clear(); conversationIds.clear(); clear();
-      outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
-      expect((await typed('What does the model hold now?')).statusCode).toBe(200);
-      expect(legacy.livingView).toHaveBeenCalled();
-      expect(legacy.capabilities).toHaveBeenCalledTimes(1);
-      expect(legacy.rank).toHaveBeenCalled();
+      expect(counts(), 'the typed turn').toEqual(none);
+      // CONTRAST: the probe sees the program's own reader, which every agent turn on a program calls.
+      expect(program.read).toHaveBeenCalled();
+      const press = await propose();
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved.' }]];
+      const saved = (await post(press)).json() as Json;
+      expect(saved.receipts, JSON.stringify(saved._agent)).toEqual([expect.objectContaining({ authorised_by: 'person' })]);
+      expect(counts(), 'the card, its press, its save and readback').toEqual(none);
+      expect((await canvasEdit(randomUUID())).statusCode).toBe(200);
+      expect(counts(), 'the canvas edit').toEqual(none);
+      const run = await post({ turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } });
+      expect(run.statusCode, run.body).toBe(200);
+      expect(counts(), 'the Run press').toEqual(none);
+      // CONTRAST (F1b): a saved Living Model is refused before any of them, and the probes are live: each spy counts a direct call.
+      SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); turnRows.clear(); conversationIds.clear();
+      expect((await typed('What does the model hold now?')).statusCode).toBe(409);
+      expect(counts(), 'the refused Living Model turn').toEqual(none);
+      (await import('../../orchestrator-v5/path-b/living-model/view.js')).livingViewOf(persisted);
+      expect(legacy.livingView).toHaveBeenCalledTimes(1);
     });
 
     it('(7) Codex r1 BLOCK 1 on #3707: a loose figure goes in exactly as said, with no bounds Olumi adds; Olumi asks for their range', async () => {

@@ -10,8 +10,10 @@
  *  5. the answer row: the replay's record, carrying every held card;
  *  6. the contract.
  * The reply is the SDK's final output, untouched: nothing is composed around it. Science stays under the AI, as its tools and
- * their checks. A canvas edit goes through the existing core canvas-edit path (`/orchestrate/v2/turn` with the core header).
- * A legacy scenario (a saved graph with no living model) is refused: it is out of the PoC.
+ * their checks. A canvas edit saves one figure of the program (`applyCanvasFigure`).
+ * ⭐ PROGRAM ONLY (inventory F1b, 26 Oct; Paul: "all of the old code stripped"): a scenario is a MODEL PROGRAM, or has no model
+ * yet and is drafted as one. Any other saved scenario (a Living Model, or a graph with neither) is refused `legacy_scenario`,
+ * before any model call or write: no Living Model reader, Run pipeline, held-approval writer or action bar runs here.
  *
  * The protections are the legacy route's, reused: its claim and replay primitives (`core-route/turn-request.ts`), its write
  * accounting (ported below, line for line), its approval consent check, its delivery-unknown handling and its answer floor.
@@ -23,11 +25,10 @@ import { config } from '../config/index.js';
 import { getRuntimeEnv } from '../config/env-resolver.js';
 import { OPENAI_ONLY, providerCallsMade, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { requestWasTyped } from '../cee/provenance/provenance-of.js';
-import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { acquireCoreTurnSlot, CoreDeliveryUnknownError, CoreStateUnavailableError, runCoreTurn, type CoreTurnCalls } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { coreBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { AI_CORE_MODE, laneModeFor, type AgentLaneMode, type AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
-import type { InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import type { InternalDispatch } from '../orchestrator-v5/core-route/internal-dispatch.js';
 import { WITHHELD_ON_CHIP_TURN, type AgentTurnResult } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { providerFailureOf } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
@@ -46,28 +47,19 @@ import { heldCardStillApplies, heldCardSubjectMoved } from '../orchestrator-v5/a
 import { parseProposalEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { editsRefusedSentence } from '../orchestrator-v5/agent-lane/proposal-object/reply.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
-import { readRecordedRun, restoreRunOperation, runOperationTurnId, type RecoveredRun } from '../orchestrator-v5/agent-lane/run-operation.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
-import { awaitsTimingReading, carriedEffectsTiming } from '../orchestrator-v5/goal-target/carried-effects-timing.js';
-import { bindHeldApprovalWriter, commitHeldProposalInProcess } from '../orchestrator-v5/handlers/approve-held-proposal.js';
 import { isRevisionConflict, ModelReadFailedError, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
 import { MODEL_WRITE_OWNERSHIP_REFUSAL_BODY, ModelWriteOwnershipRefused, readSuccessfulDoorEntries, readUnsavableEffects, recordReleasedTurnClaim } from '../orchestrator-v5/ownership/door-ownership.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
-import { readCanonicalContext, type TurnCheck } from '../orchestrator-v5/path-b/tools/index.js';
+import type { TurnCheck } from '../orchestrator-v5/path-b/tools/index.js';
 import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/change-tools.js';
-import { NOTE_ON_ITEM } from '../orchestrator-v5/path-b/tools/note-on-item.js';
-import type { Restructure } from '../orchestrator-v5/path-b/tools/goal-path.js';
-import { livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
 import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-context.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { runWithTurnFence, unclaimedTurnFenceHandle, type TurnFenceHandle } from '../orchestrator-v5/session/turn-fence.js';
 import { parsePendingAction, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
-import {
-  appliedGraphWire, constructionDeadline, CORE_RUN_PRESS_WITHHELD, coreTurnCapabilities, coreTurnStores, coreTurnTools, graphReadyEmitter,
-} from '../orchestrator-v5/core-route/deps.js';
-import { coreActionBarOf } from '../orchestrator-v5/core-route/action-bar.js';
-import { CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL, instructionsForMode, programInstructions } from '../orchestrator-v5/core-route/instructions.js';
+import { appliedGraphWire, coreTurnStores, graphReadyEmitter, programTurnTools } from '../orchestrator-v5/core-route/deps.js';
+import { programInstructions } from '../orchestrator-v5/core-route/instructions.js';
 import {
   AGENT_TURN_CLAIM_WAIT, agentTurnRequestHash, challengeTargetOf, chipOperationOf, claimHashFor, claimTurnIdOf, isChiplessRetry,
   recordedOutcomeOf, requestHashOfAnswer, requestHashOfClaim, sameAgentTurnRequest, typedRowProof, withChipOperation, withRecordedOutcome,
@@ -111,6 +103,9 @@ const RECORDED: Readonly<Record<RecordedOutcome, { readonly said?: string; reado
     retry_safe: false, nothing_saved: false } },
 };
 
+/** A saved scenario that is not a model program: out of the alpha, refused on every kind of turn (inventory F1b). */
+const LEGACY_SCENARIO = 'This scenario was saved before the current Olumi model and cannot be opened on this route. Nothing was changed.';
+
 /** The saved scenario as one graph read gives it, in the contract's terms. */
 interface SavedScenario {
   readonly status: number;
@@ -121,12 +116,7 @@ interface SavedScenario {
   readonly briefText: unknown;
   readonly analysisState: unknown;
   readonly analysisResult: unknown;
-  readonly analysisReady: unknown;
   readonly run: CoreTurnRun | null;
-  /** The selected Run, only while it is current and identified (what `readRecordedRun` binds a recovered Run to). */
-  readonly currentRun?: { readonly runId: string; readonly graphHashAtRun: string; readonly computedAt: string };
-  /** The read's own body: what the panel's action bar is ranked from (`coreActionBarOf`), as the reload ranks it. */
-  readonly body: Rec;
 }
 
 function savedScenarioOf(read: { readonly status: number; readonly json: Rec }): SavedScenario {
@@ -136,26 +126,15 @@ function savedScenarioOf(read: { readonly status: number; readonly json: Rec }):
   const runState = isRec(currentRead?.run_state) ? currentRead.run_state : undefined;
   const view = isRec(json.canonical_analysis_view) ? json.canonical_analysis_view : undefined;
   const runId = isRec(view?.run) ? str(view.run.run_id) : null;
-  // Readiness as the legacy readback takes it: the read's own, else the canonical builder over the same graph.
-  let analysisReady: unknown = json.analysis_ready ?? currentRead?.analysis_ready;
-  if (analysisReady === undefined && graph !== null) {
-    try { analysisReady = buildCanonicalAnalysisReadyFromGraph(graph); } catch { /* readiness is never a gate on the answer */ }
-  }
-  const current = runState?.kind === 'complete_current' ? {
-    runId: str(currentRead?.run_id), graphHashAtRun: str(currentRead?.computed_against_hash), computedAt: str(runState.computed_at),
-  } : undefined;
   return {
-    status: read.status, graph, revision: str(json.graph_hash), body: json,
+    status: read.status, graph, revision: str(json.graph_hash),
     identity: isRec(json.graph_identity_hash) ? str(json.graph_identity_hash.value) : str(json.graph_identity_hash), briefText: json.brief_text,
     analysisState: isRec(json.analysis_state) ? json.analysis_state : null,
     analysisResult: isRec(json.analysis_result) ? json.analysis_result : undefined,
-    analysisReady,
     run: runState === undefined || runState.kind === 'never_run' ? null : {
       run_key: runId, run_id: runId, computed_against: str(currentRead?.computed_against_hash),
       state: { kind: String(runState.kind), computed_at: str(runState.computed_at) },
     },
-    ...(current?.runId != null && current.graphHashAtRun != null && current.computedAt != null
-      ? { currentRun: { runId: current.runId, graphHashAtRun: current.graphHashAtRun, computedAt: current.computedAt } } : {}),
   };
 }
 
@@ -174,12 +153,6 @@ export function programRunOf(graph: unknown, before: string | null): CoreTurnRun
     state: { kind: shown!.current && shown!.engine_current ? 'complete_current' : 'complete_stale', computed_at: run.computed_at } };
 }
 const newestRunId = (read: ReturnType<typeof programReadOf>): string | null => (read.kind === 'program' ? read.program.runs.at(-1)?.run_id ?? null : null);
-
-/** Whether readiness admits a Run: `may_run` when present, else `status === 'ready'` (the legacy route's `admitsRunOffer`). */
-const admitsRun = (analysisReady: unknown): boolean => {
-  const ar = (analysisReady ?? {}) as { may_run?: unknown; status?: unknown };
-  return typeof ar.may_run === 'boolean' ? ar.may_run : ar.status === 'ready';
-};
 
 /** The held proposals' cards on this read, as `_proposal_fields` builds them, each with the reply that issued it. */
 async function heldCardsOf(store: ReturnType<typeof getSessionStore>, scenarioId: string, pending: readonly PendingAction[],
@@ -203,11 +176,11 @@ async function heldCardsOf(store: ReturnType<typeof getSessionStore>, scenarioId
   return [...(wire?.proposals ?? [])];
 }
 
-/** Each saved version this turn's tools reported, with who authorised it: the drafted first model is Olumi's, an approved card the person's. */
+/** Each saved version this turn's tools reported, with who authorised it: an approved card is the person's. */
 function receiptsOf(result: Pick<AgentTurnResult, 'tool_calls' | 'tool_results'>): CoreTurnReceipt[] {
   const byVersion = new Map<string, CoreTurnReceipt>();
   result.tool_calls.forEach((call, i) => {
-    const by: AuthorisedBy | undefined = call.name === 'build_model_from_brief' ? 'olumi' : call.name === APPLY_CHANGE ? 'person' : undefined;
+    const by: AuthorisedBy | undefined = call.name === APPLY_CHANGE ? 'person' : undefined;
     if (by === undefined) return;
     // A core writer's receipt is the register's `model_version` (`version_number`), read as the collector reads that shape.
     const own = (result.tool_results[i] as { receipts?: readonly unknown[] } | undefined)?.receipts ?? [];
@@ -240,18 +213,6 @@ function turnLog(result: AgentTurnResult | undefined, seen: Pick<AgentTurnResult
   };
 }
 
-/** note_on_item's note, only while the saved model is still the one it was read on (its identity.v1 basis). */
-function notesOf(result: Pick<AgentTurnResult, 'tool_results'>, identityNow: string | null): CoreTurnNote[] {
-  return result.tool_results.flatMap((r) => {
-    const directive = (r as { ui_directive?: unknown }).ui_directive;
-    const basis = (r as { note_basis?: unknown }).note_basis;
-    if (!isRec(directive) || typeof basis !== 'string' || identityNow === null || basis !== identityNow) return [];
-    const target = Array.isArray(directive.targets) && isRec(directive.targets[0]) ? str(directive.targets[0].id) : null;
-    const text = str(directive.note);
-    return target !== null && text !== null ? [{ element_id: target, text }] : [];
-  });
-}
-
 /**
  * A program's first goal whose chance is withheld, as a note on its card (DL 24 Oct, "Olumi speaks on the item"): the compiler's
  * own reason, then the AI's question (the goal's, else the first asked figure's). One per turn, as the canvas holds one. Not on
@@ -273,12 +234,12 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
   const baseMode: AgentLaneMode = config.proxy.agentLanePreview === true ? 'preview' : 'full';
 
   /** The internal dispatch, PER REQUEST, carrying the caller's own identity (the legacy route's `dispatchFor`). */
-  const dispatchFor = (authorization: string | undefined, extraHeaders?: Record<string, string>): InternalDispatch =>
+  const dispatchFor = (authorization: string | undefined): InternalDispatch =>
     async (path, body) => {
       const res = await app.inject({
         method: 'POST',
         url: path,
-        headers: { ...internalHeaders(config.auth.assistApiKey ?? config.auth.assistApiKeys?.[0] ?? '', authorization), ...extraHeaders },
+        headers: internalHeaders(config.auth.assistApiKey ?? config.auth.assistApiKeys?.[0] ?? '', authorization),
         payload: body as Record<string, unknown>,
       });
       let json: Record<string, unknown> = {};
@@ -303,9 +264,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
     const store = getSessionStore();
     const kind = typeof body.kind === 'string' ? body.kind : 'message';
     /**
-     * ⭐ A CANVAS EDIT is the person's own hand on their model: the EXISTING core canvas-edit path (`/orchestrate/v2/turn` with
-     * the core header: the living model first, then the graph regenerated from it), as the legacy route forwards it. No model
-     * call and no reply of Olumi's; the contract carries the saved state and any refusal. No other kind but a message is taken.
+     * ⭐ A CANVAS EDIT is the person's own hand on their model: one figure of the program, saved with a new Run. No model call and
+     * no reply of Olumi's; the contract carries the saved state and any refusal. No other kind but a message is taken.
      */
     const canvasEdit = kind === 'system_event';
     if (!canvasEdit && kind !== 'message') {
@@ -405,24 +365,11 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             agent: { forwarded_kind: kind, program: true },
           }));
         }
-        const forwarded = await dispatchFor(authorization, { 'x-olumi-ai-mode': AI_CORE_MODE })('/orchestrate/v2/turn', body);
-        const after = savedScenarioOf(await internal(graphPath, { ...FRESH_READ }));
-        let pending: readonly PendingAction[] = [];
-        try { pending = await store.readMostRecentPendingActions?.(scenarioId, { validation: 'strict' }) ?? []; } catch { pending = []; }
-        const refusal = isRec(forwarded.json.error) ? forwarded.json.error : undefined;
-        return send(forwarded.status, coreTurnContract({
-          turnId, durability: claim.held === 'same' ? 'replayed' : forwarded.status === 200 ? 'recorded' : 'not_recorded',
-          revision: after.revision, scenarioRevision: after.identity, graph: appliedGraphWire(after.graph),
-          cards: await heldCardsOf(store, scenarioId, pending, after), run: after.run, analysisState: after.analysisState,
-          receipts: collectTurnReceipts([forwarded.json]).map((r) => ({ ...r, authorised_by: 'person' as const })),
-          actionBar: coreActionBarOf(scenarioId, after.body),
-          error: forwarded.status === 200 ? null : {
-            code: str(refusal?.code) ?? str(forwarded.json.error) ?? str(forwarded.json.code) ?? 'CANVAS_EDIT_REFUSED',
-            message: str(refusal?.message) ?? str(forwarded.json.message) ?? str(forwarded.json.detail) ?? 'That change could not be saved.',
-            retry_safe: false, nothing_saved: forwarded.status < 500,
-          },
-          agent: { forwarded_kind: kind, ...(claim.held === 'same' ? { replayed: true } : {}) },
-        }));
+        // Any other saved scenario is out of the alpha: refused with its reason, nothing written (inventory F1b).
+        return send(409, coreTurnContract({ turnId, durability: 'not_recorded', revision: current.revision, scenarioRevision: current.identity, graph: appliedGraphWire(current.graph),
+          error: current.graph === null ? { code: 'CANVAS_EDIT_REFUSED', message: 'There is no saved model to edit yet.', retry_safe: false, nothing_saved: true }
+            : { code: 'legacy_scenario', message: LEGACY_SCENARIO, retry_safe: false, nothing_saved: true },
+          agent: { forwarded_kind: kind } }));
       } finally {
         slot.release();
       }
@@ -459,7 +406,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         cards: await heldCardsOf(store, scenarioId, pending, now),
         run: now.run, analysisState: now.analysisState, ...(runPress ? { analysisResult: now.analysisResult } : {}),
         paused: paused != null ? { proposal_id: paused.proposal_id } : null, error: outcome === undefined ? null : RECORDED[outcome].error,
-        actionBar: coreActionBarOf(scenarioId, now.body), agent: { replayed: true }, providerCalls: recordedProviderCalls(),
+        agent: { replayed: true }, providerCalls: recordedProviderCalls(),
       }));
     };
 
@@ -530,17 +477,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         writesDispatched += 1;
         return undoRefusedWrite(() => fenced(sendIt));
       }
-      // A v2 turn can commit through several subdoors before a later refusal: its 409 cannot prove nothing was written.
-      if (path === '/orchestrate/v2/turn') {
-        writesDispatched += 1;
-        return sendIt();
-      }
       return readingDispatch(path, b);
     };
-    const capDispatch = bindHeldApprovalWriter(countingDispatch, (input) => {
-      writesDispatched += 1;
-      return undoRefusedWrite(() => readCache.around(async () => promoteRevisionConflictResponse(await commitHeldProposalInProcess(input, String(req.id)))));
-    });
     /** A refusal before any model call or write: the claim is released, so the same turn may be sent again. */
     const refuseUnrun = async (status: number, code: string, message: string) => {
       const released = await releaseUnwrittenTurnClaim();
@@ -563,10 +501,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       // A model program that cannot be read is refused with its way on, never run as a legacy model or as no model.
       const programRead = programReadOf(saved.graph);
       if (programRead.kind === 'unreadable') return await refuseUnrun(409, 'MODEL_PROGRAM_UNREADABLE', unreadableWords(programRead.reason));
-      // A program's living model is its own: the Living Model reader never runs on one.
-      if (programRead.kind === 'none' && saved.graph !== null && livingViewOf(saved.graph) === undefined) {
-        return await refuseUnrun(409, 'legacy_scenario', 'This scenario was saved before the current Olumi model and cannot be opened on this route. Nothing was changed.');
-      }
+      // A saved scenario that is not a program (a Living Model, or a graph with neither) is out of the alpha (inventory F1b).
+      if (programRead.kind === 'none' && saved.graph !== null) return await refuseUnrun(409, 'legacy_scenario', LEGACY_SCENARIO);
 
       // The held cards as the turn found them (the latest answer row), restored to this process when it forgot them.
       let heldAtStart: readonly PendingAction[] = [];
@@ -655,42 +591,6 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       const program = programRead.kind === 'program';
       // A Run press on a program is the host's own (the stored Run, or a new one): no model call.
       const modelProgram = saved.graph === null || (program && runPress);
-      // ── THE RUN (a Run press spends its ONE Run; a restore's Run is that restore's), ported from the legacy route. A turn that
-      // drafts or works on a model program runs the program's own Run (`program-tools.ts`), so none of this is built for it. ──
-      const livingModelRun = !program && !modelProgram;
-      const restoreRun = livingModelRun && runPress ? await restoreRunOperation(scenarioId) : null;
-      let recoveredRun: RecoveredRun | undefined;
-      if (typeof restoreRun === 'string') {
-        recoveredRun = await readRecordedRun(store, scenarioId, restoreRun, async () => savedScenarioOf(await readingDispatch(graphPath, { ...FRESH_READ })));
-      }
-      const runOperationKey = restoreRun === null ? turnId : restoreRun;
-      const constructionDeadlineAt = constructionDeadline(startedAt);
-      const capabilities = !livingModelRun ? undefined : coreTurnCapabilities(capDispatch, proposals, { ...(recoveredRun !== undefined ? { recoveredRun } : {}),
-        ...(runPress && runOperationKey !== undefined ? { runOperationId: runOperationTurnId(scenarioId, runOperationKey) } : {}),
-        deadlineAt: constructionDeadlineAt });
-      let runPressConsumed = false;
-      const runAnalysis = async (args: Parameters<ReturnType<typeof coreTurnCapabilities>['runAnalysis']>[1]) => {
-        if (capabilities === undefined || restoreRun === undefined) return { ok: false, mutated: false, ran: false, refusal: 'run_failed' };
-        if (!runPress) return capabilities.runAnalysis(toolCtx, args);
-        if (runPressConsumed) return { ok: false, mutated: false, ran: false, refusal: 'run_press_consumed',
-          detail: 'This Run press has already been used. No second analysis ran.' };
-        runPressConsumed = true;
-        return capabilities.runAnalysis(toolCtx, { reason: args.reason, effects_timing: args.effects_timing });
-      };
-      // The automatic Run after a committed change: ONCE per request, on the saved revision, when its readiness admits a Run.
-      let committedAnalysis: Promise<{ readonly run?: Record<string, unknown>; readonly ready?: unknown; readonly awaitsTiming?: true }> | undefined;
-      const analyseCommittedChange = () => committedAnalysis ??= (async () => {
-        if (capabilities === undefined) return {};
-        const savedRead = savedScenarioOf(await readingDispatch(graphPath, {}));
-        if (!admitsRun(savedRead.analysisReady)) return { ready: savedRead.analysisReady };
-        // The AI's timing reading, carried from the Run current when the turn began while this change left its subject as it was.
-        const turnStart = start.json as { graph?: unknown; analysis_result?: unknown };
-        const timing = carriedEffectsTiming(turnStart, savedRead.graph);
-        // None to carry where the chance needs one: no Run that could only withhold; the reply invites Run (`awaitsTimingReading`).
-        if (awaitsTimingReading(savedRead.graph, timing)) return { awaitsTiming: true };
-        return { run: await capabilities.runAnalysis(toolCtx, { reason: 'Analyse the model as just saved.',
-          effects_timing: timing }, { afterCommittedChange: true }) };
-      })();
 
       // ── THE SDK TURN (or the declined card, which needs none). ───────────────────────────────────────────────────────────
       let result: AgentTurnResult & { readonly sdk?: Awaited<ReturnType<typeof runCoreTurn>>['sdk'] };
@@ -718,42 +618,26 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         result = { assistant_text: '', items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
           timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
       } else {
-        // The agent's view, read only for its turn: a program's own; the Living Model reader only on a Living Model.
-        const canonical = modelProgram ? undefined : program ? await readProgramContext({ dispatch: readingDispatch, proposals }, { scenario_id: scenarioId, authenticated_user_id: userId })
-          : await readCanonicalContext({ dispatch: readingDispatch }, { scenario_id: scenarioId });
-        // This turn's repairs: a refusal they make is settled as base at the turn's end (`goal-path.ts`).
-        const restructure: Restructure = { repairs: 0 };
+        // The agent's view, read only for its turn: the program's own.
+        const canonical = modelProgram ? undefined : await readProgramContext({ dispatch: readingDispatch, proposals }, { scenario_id: scenarioId, authenticated_user_id: userId });
         try {
           result = modelProgram ? await programTurn() : await runCoreTurn({
             // One budget for every call (DL 22 Oct, M4): a press at the typed turn's effort reads the typed turns' cached prefix.
             ctx: coreCtx, message, budget: coreBudget(), userId,
             calls: seen,
-            tools: coreTurnTools({ ctx: coreCtx, mode: MODE, scenario: program ? 'program' : 'core', requestId: String(req.id), message,
-              dispatch: capDispatch, proposals, deadlineAt: constructionDeadlineAt, capabilities,
-              ...(challenge !== null ? { noteOnlyOn: challenge.grounded.element_ids[0] } : {}),
-              onModelRegistered: graphReadyEmitter(startedAt),
-              runAnalysis,
-              analyseAfterCommit: analyseCommittedChange,
-              // No research control is in this contract, so no search may be promised (fail closed).
-              researchShowable: async () => false,
-              onVerifiedSave: () => { verifiedSave = true; }, restructure }),
-            settle: async () => { await restructure.settle?.(); },
+            tools: programTurnTools({ ctx: coreCtx, mode: MODE, dispatch: countingDispatch, proposals, onVerifiedSave: () => { verifiedSave = true; } }),
             // The standing instructions, the same bytes on every call of every scenario (the cached prefix); this turn's own
-            // guidance (the drafting arm, a Challenge's note) follows its state block in the turn's input.
-            // A program scenario gets the model-program instructions (#3707); every other scenario keeps the Living Model's,
-            // byte for byte as before (Codex r1 BLOCK 4 on #3709).
-            instructions: program ? programInstructions() : instructionsForMode(MODE, CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL),
-            turnGuidance: [...(program ? [PROGRAM_TURN_GUIDANCE] : []), ...(challenge === null ? [] : [challenge.note])],
+            // guidance (how the program's tools work, a Challenge's note) follows its state block in the turn's input.
+            instructions: programInstructions(),
+            turnGuidance: [PROGRAM_TURN_GUIDANCE, ...(challenge === null ? [] : [challenge.note])],
             briefText: saved.briefText,
             // A program's first agent turn opens its Conversation with the turns before it, the host-written draft reply included.
             ...(program ? { earlierTurns } : {}),
             canonicalState: canonical?.status === 'ok' ? canonical.data : undefined,
-            // A Run press permits calculation and reading only; any other press carries no consent to Run.
-            withheldTools: runPress ? CORE_RUN_PRESS_WITHHELD : [...(chip !== null ? ['run_analysis'] : []), 'offer_public_research'],
-            // A Challenge opens on its note tool on a Living Model board; a program board has no note tool, so the AI answers its
-            // note (in turnGuidance) in words (served 502, 24 Oct: a forced tool the program tools lack).
-            ...(runPress ? { firstTool: 'run_analysis' } : coreCardOnly && press !== undefined ? { firstTool: APPLY_CHANGE }
-              : challenge !== null && !program ? { firstTool: NOTE_ON_ITEM } : {}),
+            // A press carries no consent to Run (a Run press is the host's own, above).
+            withheldTools: chip !== null ? ['run_analysis'] : [],
+            // A program board has no note tool, so the AI answers a Challenge's note (in turnGuidance) in words.
+            ...(coreCardOnly && press !== undefined ? { firstTool: APPLY_CHANGE } : {}),
             ...(press !== undefined ? { press } : {}),
             // A pause must name a card this scenario holds, awaiting approval (`sdk-turn.ts`).
             isPendingCard: (id) => proposals.outstanding(coreCtx.scenario_id, coreCtx.authenticated_user_id).some((p) => p.proposal_id === id),
@@ -877,8 +761,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         revision: after.revision, scenarioRevision: after.identity, graph: appliedGraphWire(after.graph),
         cards,
         // A held change card is the person's next step (it may hold their answer), so the goal's question is not asked beside it.
-        notes: [...notesOf(result, after.identity), ...(cards.some((c) => c.reading !== true) ? [] : withheldGoalNote(after.graph, programPayload?.model_program['turn']))],
-        run: isProgramGraph(after.graph) ? programRunOf(after.graph, newestRunId(programRead)) : after.run, analysisState: after.analysisState, ...(ranThisTurn ? { analysisResult: after.analysisResult } : {}),
+        notes: cards.some((c) => c.reading !== true) ? [] : withheldGoalNote(after.graph, programPayload?.model_program['turn']),
+        run: programRunOf(after.graph, newestRunId(programRead)), analysisState: after.analysisState, ...(ranThisTurn ? { analysisResult: after.analysisResult } : {}),
         receipts: programPayload === undefined ? receiptsOf(result)
           : collectTurnReceipts(result.tool_results).map((r) => ({ ...r, authorised_by: programPayload!.model_program['turn'] === 'draft' ? 'olumi' as const : 'person' as const })),
         // A program scenario's analysis is its newest STORED Run as the scenario read serves it (never a recompute), on every turn.
@@ -887,7 +771,6 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           model_program: programPayload?.model_program ?? { turn: 'agent' } } } : {}),
         paused: paused !== undefined ? { proposal_id: paused.proposal_id } : null,
         error: noReply ? RECORDED.reply_empty.error : null,
-        actionBar: coreActionBarOf(scenarioId, after.body),
         // A refused or unavailable call names its typed reason (DL 22 Oct: which of Class 3's offers fired was not on the wire).
         agent: { mode: MODE, stopped_reason: result.stopped_reason, tool_calls: toolCallsOf(result), ...(result.sdk !== undefined ? { sdk: result.sdk } : {}) },
         providerCalls: recordedProviderCalls(),

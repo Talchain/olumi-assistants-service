@@ -167,23 +167,16 @@ describe("POST /proxy/v5/turn/stream — guest admission", () => {
 });
 
 describe("POST /proxy/v5/turn/stream — explicit AI comparison mode", () => {
-  it("conventional header forces the conventional buffered turn", async () => {
-    const app = await buildApp();
-    try {
-      await post(app, SAMPLE_PAYLOAD, { "x-olumi-ai-mode": "conventional" });
-      expect(streamCalls[0].internalTarget).toBe("/orchestrate/v2/turn");
-    } finally {
-      await app.close();
-    }
-  });
-
-  it("openai header forces the Agent buffered turn", async () => {
-    const app = await buildApp();
-    try {
-      await post(app, SAMPLE_PAYLOAD, { "x-olumi-ai-mode": "openai" });
-      expect(streamCalls[0].internalTarget).toBe("/agent/v1/turn");
-    } finally {
-      await app.close();
+  it("F1b (26 Oct): the legacy mode words, and none, stream the core route too: no browser turn reaches a legacy turn route", async () => {
+    for (const mode of ["conventional", "openai", "core", undefined]) {
+      const app = await buildApp();
+      try {
+        streamCalls.length = 0;
+        await post(app, SAMPLE_PAYLOAD, mode === undefined ? {} : { "x-olumi-ai-mode": mode });
+        expect(streamCalls[0].internalTarget, String(mode)).toBe("/agent/v1/core-turn");
+      } finally {
+        await app.close();
+      }
     }
   });
 

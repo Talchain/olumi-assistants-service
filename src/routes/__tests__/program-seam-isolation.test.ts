@@ -191,7 +191,7 @@ describe('item 3: a program write never enters the legacy kind repair or event_r
   });
 });
 
-describe('item 5: a browser turn on a program never reaches a legacy turn route', () => {
+describe('item 5: a browser turn never reaches a legacy turn route (inventory F1b: every mode is the core route\'s)', () => {
   async function proxied(graph: Rec | null, mode: string | undefined, url = '/proxy/v5/turn') {
     // A guest scenario (no owner), as a visitor with no sign-in uses it: the ownership hook admits the turn on this snapshot.
     store.readExistingScenario.mockResolvedValue(graph === null ? null : { userId: null, graph, briefText: BRIEF, analysisInvalidatedAt: null, revision: 1 });
@@ -211,26 +211,25 @@ describe('item 5: a browser turn on a program never reaches a legacy turn route'
     return { res, reached };
   }
 
-  it.each([['?ai=openai', '/agent/v1/turn', 'openai'], ['?ai=conventional', '/orchestrate/v2/turn', 'conventional'], ['no mode (the deployment default)', '/orchestrate/v2/turn', undefined]] as const)(
-    'a program on %s is refused with its typed error, and %s never runs', async (_label, _legacy, mode) => {
+  it.each([['?ai=openai', 'openai'], ['?ai=conventional', 'conventional'], ['?ai=core (PATH-B\'s old surface)', 'core'], ['no mode (the deployment default)', undefined]] as const)(
+    'F1b: a program on %s goes to the core route, and no legacy turn route runs', async (_label, mode) => {
       const { res, reached } = await proxied(await storedProgram(), mode);
-      expect(res.statusCode, res.body).toBe(409);
-      expect(res.json()).toMatchObject({ error: { code: 'MODEL_PROGRAM_LEGACY_ROUTE', retry_safe: false, nothing_saved: true } });
+      expect(res.statusCode, res.body).toBe(200);
+      expect(reached).toEqual(['/agent/v1/core-turn']);
+      expect(res.headers['x-olumi-ai-mode']).toBe('core-route');
       expect(res.headers['access-control-allow-origin']).toBe(ORIGIN);
-      expect(reached).toEqual([]);
     });
 
-  it('the streamed sibling (one rule, not two): a program on ?ai=openai is refused before its stream opens, and the legacy route never runs', async () => {
-    const { res, reached } = await proxied(await storedProgram(), 'openai', PROXY_STREAMED_TURN_ROUTE);
-    expect(res.statusCode, res.body).toBe(409);
-    expect(res.json()).toMatchObject({ error: { code: 'MODEL_PROGRAM_LEGACY_ROUTE' } });
-    expect(reached).toEqual([]);
+  it('the streamed sibling (one rule, not two): a program on ?ai=openai streams from the core route, and no legacy turn route runs', async () => {
+    const { reached } = await proxied(await storedProgram(), 'openai', PROXY_STREAMED_TURN_ROUTE);
+    expect(reached).toEqual(['/agent/v1/core-turn']);
   });
 
-  it('CONTRAST: a program on the core route, the same graph with no program on ?ai=openai, and a new scenario are each forwarded as before', async () => {
+  it('F1b: the same graph with no program, and a new scenario, go to the core route on every mode too (the route refuses the former): no legacy turn route runs', async () => {
     const stored = await storedProgram();
-    expect((await proxied(stored, 'core-route')).reached).toEqual(['/agent/v1/core-turn']);
-    expect((await proxied(withoutProgram(stored), 'openai')).reached).toEqual(['/agent/v1/turn']);
-    expect((await proxied(null, 'openai')).reached).toEqual(['/agent/v1/turn']);
+    for (const mode of ['openai', 'conventional', undefined]) {
+      expect((await proxied(withoutProgram(stored), mode)).reached, String(mode)).toEqual(['/agent/v1/core-turn']);
+      expect((await proxied(null, mode)).reached, String(mode)).toEqual(['/agent/v1/core-turn']);
+    }
   });
 });

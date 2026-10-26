@@ -51,15 +51,15 @@ const SAMPLE_PAYLOAD = {
 
 /** Build a Fastify app with the proxy route and a mock internal CEE route. */
 function buildApp(opts?: {
-  /** Override the internal /orchestrate/v2/turn handler. */
+  /** Override the internal /agent/v1/core-turn handler (the proxy's one target, inventory F1b). */
   internalHandler?: (req: any, reply: any) => void;
   /** Simulate slow internal response. */
   internalDelayMs?: number;
 }): FastifyInstance {
   const app = Fastify({ logger: false });
 
-  // Register a mock /orchestrate/v2/turn route that the proxy calls via inject
-  app.post("/orchestrate/v2/turn", async (request, reply) => {
+  // Register a mock /agent/v1/core-turn route that the proxy calls via inject
+  app.post("/agent/v1/core-turn", async (request, reply) => {
     if (opts?.internalDelayMs) {
       await new Promise((r) => setTimeout(r, opts.internalDelayMs));
     }
@@ -90,29 +90,18 @@ function buildApp(opts?: {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("explicit AI comparison target", () => {
-  it("forces conventional independently of deployment default", () => {
-    mockConfig.proxy.proxyV5Target = "agent";
-    try {
-      expect(resolveProxyInternalTarget("conventional")).toBe("/orchestrate/v2/turn");
-    } finally {
-      mockConfig.proxy.proxyV5Target = "orchestrator";
+describe("the proxy's one target (inventory F1b)", () => {
+  it("every mode, and none, on either deployment default, is the core route: no browser turn reaches a legacy turn route", () => {
+    for (const target of ["orchestrator", "agent"] as const) {
+      mockConfig.proxy.proxyV5Target = target;
+      try {
+        for (const mode of [undefined, "conventional", "openai", "core", "core-route", "Core ", "anything-else", "/orchestrate/v2/turn", ["openai"], 7]) {
+          expect(resolveProxyInternalTarget(mode), `${target} ${JSON.stringify(mode)}`).toBe("/agent/v1/core-turn");
+        }
+      } finally {
+        mockConfig.proxy.proxyV5Target = "orchestrator";
+      }
     }
-  });
-
-  it("forces OpenAI independently of deployment default", () => {
-    expect(resolveProxyInternalTarget("openai")).toBe("/agent/v1/turn");
-  });
-
-  it("PATH-B: `core` reaches the same Agent route (whose own mode drops Olumi's added prose), whatever the deployment default", () => {
-    expect(resolveProxyInternalTarget("core")).toBe("/agent/v1/turn");
-    // Contrast: a near-miss value is not a mode, so it keeps the deployment default (orchestrator here).
-    expect(resolveProxyInternalTarget("Core ")).toBe("/orchestrate/v2/turn");
-  });
-
-  it("keeps the deployment default for an absent or invalid mode", () => {
-    expect(resolveProxyInternalTarget(undefined)).toBe("/orchestrate/v2/turn");
-    expect(resolveProxyInternalTarget("anything-else")).toBe("/orchestrate/v2/turn");
   });
 });
 
@@ -194,7 +183,7 @@ describe("POST /proxy/v5/turn", () => {
       mockConfig.proxy.browserProxyAllowedOrigins = `${savedOrigins},${PREVIEW_ORIGIN}`;
 
       const previewApp = Fastify({ logger: false });
-      previewApp.post("/orchestrate/v2/turn", async (req, reply) =>
+      previewApp.post("/agent/v1/core-turn", async (req, reply) =>
         reply.code(200).send({ blocks: [] }),
       );
       await previewApp.register(proxyV5TurnRoute);
@@ -373,7 +362,7 @@ describe("POST /proxy/v5/turn", () => {
       // time. Since the mock config is a reference, the module closure sees the
       // updated value. We need to re-register.
       const freshApp = Fastify({ logger: false });
-      freshApp.post("/orchestrate/v2/turn", async (req, reply) => {
+      freshApp.post("/agent/v1/core-turn", async (req, reply) => {
         capturedHeaders = req.headers;
         return reply.code(200).send({ blocks: [] });
       });
@@ -817,7 +806,7 @@ describe("POST /proxy/v5/turn", () => {
   // ---- Timeout handling ----
 
   describe("proxy timeout", () => {
-    it("returns structured 504 when internal route is too slow", async () => {
+    it("returns a structured 504 in the core contract when the internal route is too slow, with no mode sent (inventory F1b)", async () => {
       // Proxy timeout is 5_000ms (from mockConfig), internal delay is 6_000ms
       app = buildApp({ internalDelayMs: 6_000 });
       await app.ready();
@@ -834,10 +823,7 @@ describe("POST /proxy/v5/turn", () => {
 
       expect(res.statusCode).toBe(504);
       const body = JSON.parse(res.body);
-      expect(body.error.code).toBe("PROXY_UPSTREAM_TIMEOUT");
-      expect(body.error.source).toBe("proxy");
-      expect(body.error.upstream_duration_ms).toBeGreaterThan(0);
-      expect(body.error.request_id).toBeDefined();
+      expect(body.error).toMatchObject({ code: "TURN_STILL_RUNNING", retry_safe: false, nothing_saved: false });
       // CORS headers still present on error
       expect(res.headers["access-control-allow-origin"]).toBe(STAGING_ORIGIN);
     }, 10_000);
