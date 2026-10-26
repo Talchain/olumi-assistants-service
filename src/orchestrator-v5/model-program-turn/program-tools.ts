@@ -14,7 +14,8 @@
  *    this operation's own earlier save is never repeated;
  *  · run_analysis: shows the stored Run when it is current; otherwise evaluates a NEW Run and stores it.
  * The canvas's figure edits (`applyCanvasFigure`) are the person's own hand: one figure, built exactly from its target and
- * value (no AI call), through the SAME validator, saved with its Run; the typed edit is its own approval, so no card.
+ * value (no AI call), through the SAME validator, saved with its Run; the typed edit is its own approval, so no card, and
+ * the editing person is that figure's approver (its author_id and its history entry's), as on an approved card.
  */
 import { z } from 'zod-v4';
 import type { InternalDispatch } from '../agent-lane/runtime/agent-capabilities.js';
@@ -310,11 +311,14 @@ export async function runProgram(deps: ProgramToolDeps, ctx: Ctx): Promise<ToolO
 /**
  * The canvas's own figure edits on a program scenario: the person's own hand on ONE figure, by the id it is drawn under
  * (a card's id is its quantity id; a link carries its coefficient's id; a goal's target edit names the goal). Saved at
- * once with a new Run, as the core canvas edit saves; the words the person typed are kept as theirs.
+ * once with a new Run, as the core canvas edit saves; the words the person typed are kept as theirs. `approver`: who typed
+ * it (the caller's user id; null for a guest, never guessed): the edited figure's author_id and its history entry's, exactly
+ * as `validatePostimage` records an approved card's. A record the edit does not change is as saved, its approval and
+ * author_id included.
  */
 export type CanvasFigure = { readonly quantity_id: string } | { readonly goal_id: string };
 export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch'>, scenarioId: string, edit: { readonly target: CanvasFigure; readonly value: number | null;
-  readonly low?: number | null; readonly high?: number | null; readonly operation_key: string }): Promise<{ readonly status: 'saved' | 'refused' | 'unknown'; readonly reason?: string; readonly receipt?: unknown;
+  readonly low?: number | null; readonly high?: number | null; readonly operation_key: string; readonly approver: string | null }): Promise<{ readonly status: 'saved' | 'refused' | 'unknown'; readonly reason?: string; readonly receipt?: unknown;
   readonly changes?: readonly ProposalChange[] }> {
   const saved = await readSaved(deps, scenarioId);
   if (!isSavedRead(saved)) return { status: 'refused', reason: 'Your model could not be read just now.' };
@@ -349,7 +353,7 @@ export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch'>,
   const filled: CanonicalQuantityT = { ...q, id, value: edit.value, low, high, range_kind: onRange ? q.range_kind : null, status: 'known', author: 'person', party: null,
     quote: words, question: null, basis: null, direction: null, approval: 'approved' };
   const canonical = figurePostimage(program.canonical, filled, shared ? goal!.id : undefined);
-  const v = validatePostimage(program.canonical, canonical, { removals: [], words: [...program.person_words, words], fresh: [words] });
+  const v = validatePostimage(program.canonical, canonical, { removals: [], words: [...program.person_words, words], fresh: [words], approver: edit.approver });
   if (!v.ok) return { status: 'refused', reason: v.reason };
   const next = withNewRun({ ...program, canonical: v.model, person_words: [...program.person_words, words] });
   if (next.evaluation.compiled.errors.length > 0) return { status: 'refused', reason: `That figure does not fit the model: ${next.evaluation.compiled.errors[0]!.message}` };

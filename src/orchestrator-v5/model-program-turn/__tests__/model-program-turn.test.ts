@@ -25,7 +25,7 @@ import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgra
 import { proposePostimage, withHostFields } from '../draft.js';
 import { applyCanvasFigure, applyProgramChange, holdProgramCard, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
 import { log as staticLog } from '../../../utils/telemetry.js';
-import { GROUPS, readingOf, validatePostimage } from '../postimage.js';
+import { GROUPS, readingOf, validatePostimage, withoutHost } from '../postimage.js';
 import { proposalPendingAction } from '../../agent-lane/durable-proposal.js';
 import { agentProposalOf, proposalFieldsWire, proposalRecord } from '../../agent-lane/proposal-object/record.js';
 import { ProposalChangeSchema, ProposalStore, type ProposalChange } from '../../agent-lane/proposal.js';
@@ -93,6 +93,10 @@ function graphRead(): Json {
 const sent: Json[] = [];
 /** Each call's answer: a model's JSON text (a completed stream), or the provider's own Response (a failure). */
 let replies: (string | (() => Response | Promise<Response>))[] = [];
+/** The header a row names its caller in (the harness's stand-in for the verified identity the ownership hook reads). */
+const CALLER_HEADER = 'x-test-caller';
+/** Every request forwarded to the existing core canvas-edit path (`/orchestrate/v2/turn`), headers and body. */
+const legacyForwards: { readonly headers: Json; readonly body: Json }[] = [];
 /** Pause either side of the fake store's atomic commit, without changing the production writer. */
 let registerPause: ((stage: 'before' | 'after') => Promise<void>) | undefined;
 /** Every POST /v1/conversations (a scenario's empty Conversation create), by its body. */
@@ -179,6 +183,12 @@ describe('the model-program turn on the real core route', () => {
     process.env.OPENAI_API_KEY ||= 'sk-test-not-sent';
     const route = await import('../../../routes/core-turn.js');
     app = Fastify({ logger: false });
+    // Who is calling, as the scenario-ownership hook sets it from the verified identity (`scenario-ownership.ts`): only on a
+    // request that names a caller; every other request is a guest's, as before.
+    app.addHook('preHandler', async (req) => {
+      const caller = req.headers[CALLER_HEADER];
+      if (typeof caller === 'string') req.scenarioAccess = { scenarioId: SCENARIO, ownerUserId: null, callerUserId: caller, caller: { userId: caller, verified: true }, memberRead: false };
+    });
     app.post('/assist/v1/scenarios/:id/graph', async () => graphRead());
     app.post('/assist/v1/scenarios/:id/graph/register', async (req, reply) => {
       const b = req.body as Json;
@@ -195,12 +205,12 @@ describe('the model-program turn on the real core route', () => {
           analysis_affecting_hash: computeAnalysisAffectingGraphHashSha256(persisted as never) } };
     });
     app.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: [] }));
-    app.post('/orchestrate/v2/turn', async (_req, reply) => reply.code(500).send({ error: 'no Run in this harness' }));
+    app.post('/orchestrate/v2/turn', async (req, reply) => { legacyForwards.push({ headers: req.headers as Json, body: req.body as Json }); return reply.code(500).send({ error: 'no Run in this harness' }); });
     await app.register(route.coreTurnRoute);
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); });
-  beforeEach(() => { SCENARIO = randomUUID(); persisted = null; registered.length = 0; turnRows.clear(); conversationIds.clear(); pausedRun = null; sent.length = 0; replies = []; registerPause = undefined; creates.length = 0; createAnswers = []; });
+  beforeEach(() => { SCENARIO = randomUUID(); persisted = null; registered.length = 0; turnRows.clear(); conversationIds.clear(); pausedRun = null; sent.length = 0; replies = []; registerPause = undefined; creates.length = 0; createAnswers = []; legacyForwards.length = 0; });
 
   it('T gap3: disconnect while drafting stops delivery, not the provider or the complete save; the same turn replays without another call or Run', async () => {
     const started = latch(); const finish = latch();
@@ -1123,7 +1133,7 @@ describe('the model-program turn on the real core route', () => {
     // A saved program's stray direction (on a figure no link has) is the host's to clear, on both sides: never on this card.
     setQ(persisted!.living_model.canonical as CanonicalModelT, 'oven_price', { direction: 'lowers' });
     // A range across zero with no most likely figure: the one figure a stated direction would still decide, so only the edit clears it.
-    const r = await applyCanvasFigure({ dispatch }, SCENARIO, { target: { quantity_id: 'lost_bake_time' }, value: null, low: -5, high: 10, operation_key: randomUUID() });
+    const r = await applyCanvasFigure({ dispatch }, SCENARIO, { target: { quantity_id: 'lost_bake_time' }, value: null, low: -5, high: 10, operation_key: randomUUID(), approver: null });
     expect(r.status, JSON.stringify(r)).toBe('saved');
     expect(r.changes!.map((c) => c.id)).toEqual(['lost_bake_time']);
     const change = r.changes!.find((c) => c.id === 'lost_bake_time')!;
@@ -1952,7 +1962,7 @@ describe('the model-program turn on the real core route', () => {
     await turn({ message: BRIEF });
     sent.length = 0;
     const before = persisted!.living_model.canonical as CanonicalModelT;
-    const r = await applyCanvasFigure({ dispatch }, SCENARIO, { target: { quantity_id: 'base_sales' }, value: 320, operation_key: randomUUID() });
+    const r = await applyCanvasFigure({ dispatch }, SCENARIO, { target: { quantity_id: 'base_sales' }, value: 320, operation_key: randomUUID(), approver: null });
     expect(r).toMatchObject({ status: 'saved' });
     expect(sent).toHaveLength(0);
     expect(r.changes).toEqual([{ id: 'base_sales', kind: 'quantity', action: 'change', label: 'base sales', before: '300 loaf/week, in your words "We bake 300 loaves a week"',
@@ -1965,6 +1975,133 @@ describe('the model-program turn on the real core route', () => {
     expect(t.statusCode, t.body).toBe(200);
     expect(sent).toHaveLength(0);
     expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'sales_target')).toMatchObject({ value: 400, author: 'person' });
+  });
+
+  // ── HC0 (spec §3, "Authorship and acceptance are separate"): the route passed no user, so a card edit saved author_id null and
+  // erased an earlier approver's id from the record. Every row on the REAL route, every record bound by its family and id. ──
+  describe('HC0: a canvas edit on a program changes only the edited record, and records who edited it', () => {
+    const EDITOR = 'user-hc0-editor';
+    const EARLIER = 'user-hc0-earlier-approver';
+    /** A canvas edit on the real route, from the caller the ownership hook admitted (none: a guest). */
+    const cardEdit = (event: Json, caller?: string) => turn({ kind: 'system_event', event }, caller === undefined ? {} : { [CALLER_HEADER]: caller });
+    /** Every record of a model by `family/id` (the families are the model's lists; its history is not a record). */
+    const recordsOf = (m: CanonicalModelT): Map<string, Json> => new Map(Object.entries(m).filter(([k, v]) => k !== 'history' && Array.isArray(v))
+      .flatMap(([f, rs]) => (rs as Json[]).map((r) => [`${f}/${String(r.id)}`, r] as const)));
+    /** A record's host fields, in order, at any depth: each approval, and who approved it. */
+    const hostOf = (r: unknown): string[] => JSON.stringify(r).match(/"(approval|author_id)":("[^"]*"|null)/g) ?? [];
+    /** The saved draft as a person approved part of it before: every attribution of theirs (a link inside a relation too) by EARLIER; Olumi's left proposed. */
+    const approvedEarlier = (): CanonicalModelT => {
+      const mark = (v: unknown): unknown => (Array.isArray(v) ? v.map(mark) : v !== null && typeof v === 'object'
+        ? Object.fromEntries(Object.entries(v as Json).map(([k, x]) => [k, (v as Json).author !== 'person' ? mark(x) : k === 'approval' ? 'approved' : k === 'author_id' ? EARLIER : mark(x)])) : v);
+      const m = persisted!.living_model.canonical as CanonicalModelT;
+      persisted!.living_model.canonical = { ...m, ...Object.fromEntries(Object.entries(m).filter(([k, v]) => k !== 'history' && Array.isArray(v)).map(([k, v]) => [k, mark(v)])) };
+      return persisted!.living_model.canonical as CanonicalModelT;
+    };
+    /** Every record but `edited`, by family and id, exactly as saved: the same ids, and each the same apart from its host fields AND in them. */
+    const othersAsSaved = (was: Map<string, Json>, now: Map<string, Json>, edited: string) => {
+      expect([...now.keys()]).toEqual([...was.keys()]);
+      for (const [key, r] of was) {
+        if (key === edited) continue;
+        expect(withoutHost(now.get(key)), key).toEqual(withoutHost(r));
+        expect(hostOf(now.get(key)), key).toEqual(hostOf(r));
+      }
+    };
+
+    it('the edited figure is approved by the person who typed it (its author_id and its history entry\'s), in their typed words; the earlier approver stays in history; every other record is exactly as saved', async () => {
+      replies = [JSON.stringify(bakery())];
+      await turn({ message: BRIEF });
+      sent.length = 0;
+      const before = approvedEarlier();
+      const was = recordsOf(before);
+      // Positive control: the host-field probe sees both states before the edit, an earlier approver's records and Olumi's proposed ones.
+      expect(new Set([...was.values()].flatMap(hostOf))).toEqual(new Set(['"approval":"approved"', `"author_id":"${EARLIER}"`, '"approval":"proposed"', '"author_id":null']));
+      expect(was.get('quantities/base_sales')).toMatchObject({ value: 300, approval: 'approved', author_id: EARLIER });
+      const edit = await cardEdit({ kind: 'factor_value_edit', target_id: 'base_sales', value: 320 }, EDITOR);
+      expect([edit.statusCode, edit.json().error, edit.json()._agent?.program], edit.body).toEqual([200, null, true]);
+      expect(sent).toHaveLength(0);
+      const after = persisted!.living_model.canonical as CanonicalModelT;
+      const now = recordsOf(after);
+      // The edited record: their typed figure, in the words they typed, approved by the editor (never by no one, never by the earlier approver).
+      expect(now.get('quantities/base_sales')).toEqual({ ...was.get('quantities/base_sales'), value: 320, quote: 'base sales: 320 loaf/week', approval: 'approved', author_id: EDITOR });
+      expect(after.history).toEqual([...before.history,
+        { id: 'base_sales', change: 'superseded', old: JSON.stringify(was.get('quantities/base_sales')), quote: 'base sales: 320 loaf/week', author_id: EDITOR }]);
+      // The earlier approver is never erased: the record they approved is kept whole in the edit's history entry.
+      expect(JSON.parse(after.history.at(-1)!.old)).toMatchObject({ value: 300, quote: 'We bake 300 loaves a week', approval: 'approved', author_id: EARLIER });
+      othersAsSaved(was, now, 'quantities/base_sales');
+      expect([after.version, after.question, after.period]).toEqual([before.version, before.question, before.period]);
+      // The editor is named on that record and its history entry, and nowhere else in the model.
+      expect(JSON.stringify(after).split(EDITOR).length - 1).toBe(2);
+    });
+
+    it('a goal\'s target typed on its card: the target figure is approved by the editor, and the goal and every other record are exactly as saved', async () => {
+      replies = [JSON.stringify(bakery())];
+      await turn({ message: BRIEF });
+      const before = approvedEarlier();
+      const was = recordsOf(before);
+      const edit = await cardEdit({ kind: 'goal_target_edit', goal_node_id: 'more_loaves', constraint_type: 'at_least', raw_value: 400, unit: 'loaf/week', base_graph_hash: hashOf(persisted) }, EDITOR);
+      expect([edit.statusCode, edit.json().error], edit.body).toEqual([200, null]);
+      const after = persisted!.living_model.canonical as CanonicalModelT;
+      const now = recordsOf(after);
+      expect(now.get('quantities/sales_target')).toEqual({ ...was.get('quantities/sales_target'), value: 400, quote: 'Reach 380 loaves a week target: 400 loaf/week', approval: 'approved', author_id: EDITOR });
+      expect(after.history.at(-1)).toEqual({ id: 'sales_target', change: 'superseded', old: JSON.stringify(was.get('quantities/sales_target')), quote: 'Reach 380 loaves a week target: 400 loaf/week', author_id: EDITOR });
+      othersAsSaved(was, now, 'quantities/sales_target');
+    });
+
+    it('a guest\'s edit (no caller id): approved by no one known (author_id null), never the earlier approver\'s id kept on a figure they did not approve, and every other record exactly as saved', async () => {
+      replies = [JSON.stringify(bakery())];
+      await turn({ message: BRIEF });
+      const before = approvedEarlier();
+      const was = recordsOf(before);
+      const edit = await cardEdit({ kind: 'factor_value_edit', target_id: 'base_sales', value: 320 });
+      expect([edit.statusCode, edit.json().error], edit.body).toEqual([200, null]);
+      const after = persisted!.living_model.canonical as CanonicalModelT;
+      const now = recordsOf(after);
+      expect(now.get('quantities/base_sales')).toEqual({ ...was.get('quantities/base_sales'), value: 320, quote: 'base sales: 320 loaf/week', approval: 'approved', author_id: null });
+      expect(after.history.at(-1)).toEqual({ id: 'base_sales', change: 'superseded', old: JSON.stringify(was.get('quantities/base_sales')), quote: 'base sales: 320 loaf/week', author_id: null });
+      othersAsSaved(was, now, 'quantities/base_sales');
+    });
+
+    it('a figure typed inside the person\'s own stated range keeps their range (its ends and its reading), approved by the editor; on Olumi\'s range the single figure they type is theirs, with no range', async () => {
+      const said = 'Most weeks we bake between 280 and 320 loaves.';
+      const m = bakery();
+      setQ(m, 'base_sales', { value: null, low: 280, high: 320, range_kind: 'bounds', quote: 'between 280 and 320 loaves' });
+      replies = [JSON.stringify(m)];
+      expect((await turn({ message: `${BRIEF} ${said}` })).json().model_program.saved).toBe(true);
+      const was = recordsOf(approvedEarlier());
+      expect(was.get('quantities/base_sales')).toMatchObject({ value: null, low: 280, high: 320, range_kind: 'bounds', author: 'person' });
+      const inside = await cardEdit({ kind: 'factor_value_edit', target_id: 'base_sales', value: 310 }, EDITOR);
+      expect([inside.statusCode, inside.json().error], inside.body).toEqual([200, null]);
+      const now = recordsOf(persisted!.living_model.canonical as CanonicalModelT);
+      expect(now.get('quantities/base_sales')).toEqual({ ...was.get('quantities/base_sales'), value: 310, low: 280, high: 320, range_kind: 'bounds',
+        quote: 'base sales: 310 loaf/week, within 280 to 320', approval: 'approved', author_id: EDITOR });
+      othersAsSaved(was, now, 'quantities/base_sales');
+      // Contrast: Olumi's estimate is a range of Olumi's; the person types one figure, so the figure is theirs and the range goes.
+      expect(now.get('quantities/sell_through')).toMatchObject({ value: 0.7, low: 0.5, high: 0.9, author: 'olumi', approval: 'proposed', author_id: null });
+      const single = await cardEdit({ kind: 'factor_value_edit', target_id: 'sell_through', value: 0.8 }, EDITOR);
+      expect([single.statusCode, single.json().error], single.body).toEqual([200, null]);
+      const last = recordsOf(persisted!.living_model.canonical as CanonicalModelT);
+      expect(last.get('quantities/sell_through')).toMatchObject({ value: 0.8, low: null, high: null, range_kind: null, status: 'known', author: 'person', approval: 'approved', author_id: EDITOR });
+      othersAsSaved(now, last, 'quantities/sell_through');
+    });
+
+    it('contrast: on a board that is not a program, the same edit from the same caller takes the existing canvas-edit path untouched, forwarded as sent, and the program writer never runs', async () => {
+      replies = [JSON.stringify(bakery())];
+      await turn({ message: BRIEF });
+      const { living_model: _program, ...plain } = persisted!;
+      persisted = JSON.parse(JSON.stringify(plain)) as Json;
+      expect(programReadOf(persisted).kind).toBe('none');
+      const saves = registered.length;
+      sent.length = 0;
+      const event = { kind: 'factor_value_edit', target_id: 'base_sales', value: 320 };
+      const edit = await turn({ kind: 'system_event', event }, { [CALLER_HEADER]: EDITOR, authorization: 'Bearer hc0-caller' });
+      expect(edit.json()._agent).toEqual({ forwarded_kind: 'system_event' });
+      expect(legacyForwards).toHaveLength(1);
+      expect(legacyForwards[0]!.body.event).toEqual(event);
+      expect(legacyForwards[0]!.headers.authorization).toBe('Bearer hc0-caller');
+      expect(JSON.stringify(legacyForwards[0]!.body)).not.toContain(EDITOR);
+      expect([registered.length, sent.length]).toEqual([saves, 0]);
+      expect(persisted).toEqual(plain);
+    });
   });
 
   it('an UNREADABLE program (it claims model_program but is not v1) is refused with its way on: never run as legacy or as no model', async () => {
