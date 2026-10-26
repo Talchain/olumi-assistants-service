@@ -19,7 +19,7 @@ import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-ident
 import { computeAnalysisAffectingGraphHash } from "../orchestrator-v5/context/graph-hash.js";
 import { proposalRecord, proposalFieldsWire, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalIssuingRow } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
-import { programReadOf, reopenProgram, unreadableWords } from "../orchestrator-v5/model-program-turn/program-store.js";
+import { isProgramGraph, programReadOf, reopenProgram, unreadableWords } from "../orchestrator-v5/model-program-turn/program-store.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
@@ -152,7 +152,9 @@ async function readConversationTurns(
   scenarioId: string,
   requestId: string,
   authority: { userId: string | null; graphHash: string | undefined; latest: readonly PendingAction[];
-    analysisState: unknown; analysisResult: unknown; analysisReady: unknown; graph: unknown; modelExists: boolean },
+    analysisState: unknown; analysisResult: unknown; analysisReady: unknown; graph: unknown; modelExists: boolean;
+    /** A model program: its stored words are restored as they were sent, and no legacy answer offer is re-derived (inventory F3). */
+    program: boolean },
 ): Promise<{ turns: ConversationTurnRead[]; heldOffers: HeldProposalOfferRead[]; proposalRows: readonly ProposalIssuingRow[] } | null> {
   try {
     const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
@@ -168,6 +170,8 @@ async function readConversationTurns(
     const egress = { analysisResult: authority.analysisResult, graph: authority.graph, current, userAuthoredTexts };
     // The ONE estimate point classifier on this read (one call site); `current` only where the text's own Run is current.
     const atEgress = (text: string, ownRunIsCurrent: boolean): string => {
+      // A program's words were said from its own stored Run; the legacy goal-chance gate never re-reads them.
+      if (authority.program) return text;
       return withEstimateGoalPointsAtEgress({ assistant_text: text }, { ...egress, current: current && ownRunIsCurrent }).assistant_text;
     };
     const turns: ConversationTurnRead[] = (await Promise.all([...answers].reverse()
@@ -189,7 +193,7 @@ async function readConversationTurns(
       .filter((t) => t.user_message !== null || t.assistant_message !== null)
       .slice(-CONVERSATION_TURNS_CAP); // the cap counts AFTER the drop (CURRENT-READ-v1 row 5)
     const heldOffers = await readExecutableHeldProposalOffers({ scenarioId, ...authority, rows: answers, store });
-    if (typeof store.readLatestAnswerOffers === 'function') {
+    if (!authority.program && typeof store.readLatestAnswerOffers === 'function') {
       // This optional leg must never change the graph, held cards or text if it fails.
       try {
         const stored = await store.readLatestAnswerOffers(scenarioId);
@@ -397,11 +401,14 @@ export default async function route(app: FastifyInstance) {
       }
 
       if (typeof store.readMostRecentPendingActions !== 'function') return unavailable();
+      // A MODEL PROGRAM (a readable one or not): none of the legacy producers below runs on it (inventory F3, PR-A). Its held
+      // cards still need the pending read; it holds no goal-scope issue (no program code makes one).
+      const programGraph = graph !== null && graph !== undefined && isProgramGraph(graph);
       let scopeInput: ReturnType<typeof goalScopeClaimInput>;
       let latestPending: readonly PendingAction[];
       try {
         latestPending = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' });
-        scopeInput = goalScopeClaimInput(latestPending, graph);
+        scopeInput = programGraph ? { status: 'clear', issues: [] } : goalScopeClaimInput(latestPending, graph);
       } catch { return unavailable(); }
       const scopeIssues = scopeInput.issues;
 
@@ -482,6 +489,7 @@ export default async function route(app: FastifyInstance) {
           modelExists: graphPresent && typeof graph === 'object'
             && ['nodes', 'edges'].some(key => Array.isArray((graph as Record<string, unknown>)[key])
               && ((graph as Record<string, unknown>)[key] as unknown[]).length > 0),
+          program: programGraph,
         }) : undefined;
       const conversationTurns = conversationRead === undefined ? undefined : conversationRead?.turns ?? null;
       const heldOffers = conversationRead?.heldOffers;
@@ -496,8 +504,9 @@ export default async function route(app: FastifyInstance) {
       // PATH-B core ranks its own bar (`core-route/action-bar.ts`) from the fields this read sends, as each core turn does from
       // the body of its own read: the graph, its hash, the state, the current read, the result and the option participation.
       // A program has no bar (spec §3: none of these actions is a program contract), so neither ranker runs on one.
-      const coreLane = laneModeFor('full', req.headers['x-olumi-ai-mode'], getRuntimeEnv(), graphPresent && isLegacyGraph(graph)) === 'core';
       const rankBar = conversationRequested && programRead.kind === 'none';
+      // The lane shapes a legacy result and ranks its bar; a program has neither (its analysis_result is null), so it is never read.
+      const coreLane = !programGraph && laneModeFor('full', req.headers['x-olumi-ai-mode'], getRuntimeEnv(), graphPresent && isLegacyGraph(graph)) === 'core';
       if (rankBar && coreLane) {
         actionBar = coreActionBarOf(scenarioId, { graph: graphPresent ? graph : null,
           graph_hash: graphPresent ? computeAnalysisAffectingGraphHash(graph as GraphStateIngress) : null,
@@ -541,7 +550,7 @@ export default async function route(app: FastifyInstance) {
         // The Run's own projection (CS-AN-2): the raw-bytes hash never equals `graph_hash_at_run` on a promoted graph.
         deriveDecisionContextGraphHash(graph)) : undefined;
 
-      const todayPartNotes = graphPresent ? deriveTodayParts(graph).notes : [];
+      const todayPartNotes = graphPresent && !programGraph ? deriveTodayParts(graph).notes : [];
       // identity.v1, from the single normaliser authority. Null when the graph is absent or identity-empty — there is no
       // identity to anchor to, and a hash of nothing would be a false anchor.
       const identity = graphPresent ? computeGraphIdentityHash(graph as GraphStateIngress) : null;
@@ -701,7 +710,7 @@ export default async function route(app: FastifyInstance) {
          * projection, because this route ships no enforceable prose. `null` when
          * there is no graph to judge: "this leg did not answer", never a state.
          */
-        analysis_admission: projectAnalysisAdmission(graph, graphPresent),
+        analysis_admission: programGraph ? null : projectAnalysisAdmission(graph, graphPresent),
         ...(conversationTurns !== undefined ? { conversation_turns: conversationTurns } : {}),
         ...(actionBar !== undefined ? { action_bar: actionBar } : {}),
         request_id: requestId,

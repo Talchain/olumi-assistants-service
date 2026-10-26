@@ -103,8 +103,8 @@ describe('the read route actually ships it', () => {
     expect(ROUTE).toContain('layout_present:');
   });
 
-  it('⭐ the response carries analysis_admission from the projection', () => {
-    expect(ROUTE).toContain('analysis_admission: projectAnalysisAdmission(graph, graphPresent)');
+  it('⭐ the response carries analysis_admission from the projection (a model program: null, its own guard\'s answer; inventory F3)', () => {
+    expect(ROUTE).toContain('analysis_admission: programGraph ? null : projectAnalysisAdmission(graph, graphPresent)');
   });
 
   it('⛔ the FORBIDDEN turn-shaped key is still not on this route', () => {

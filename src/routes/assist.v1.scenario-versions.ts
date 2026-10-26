@@ -53,6 +53,7 @@ import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
 import { log } from "../utils/telemetry.js";
 import { readScenarioAnalysis } from "./scenario-graph-analysis-read.js";
+import { isProgramGraph } from "../orchestrator-v5/model-program-turn/program-store.js";
 
 /** Wire schema discriminators. Frozen — the UI lane builds against these. */
 export const MODEL_VERSIONS_LIST_SCHEMA = "model_versions_list.v2" as const;
@@ -1025,7 +1026,8 @@ export default async function route(app: FastifyInstance) {
       }
 
       const replayed = restored.value.replayed;
-      const analysis = await readScenarioAnalysis({
+      // A restored model program has no legacy analysis state: its analysis is its own stored Run (inventory F3, PR-A).
+      const analysis = isProgramGraph(restored.value.graph) ? { analysis_state: null } : await readScenarioAnalysis({
         scenarioId: ctx.scenarioId,
         graph: restored.value.graph,
         requestId,
