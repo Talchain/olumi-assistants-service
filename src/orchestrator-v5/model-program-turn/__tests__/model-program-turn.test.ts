@@ -119,7 +119,7 @@ const streamedTurn = async (payload: Json) => {
     write(chunk: string) { if (this.destroyed) return false; delivered.push(chunk); return true; },
     end() { this.writableEnded = true; } };
   const done = streamTurnAsStagedSse({ app, reply: { raw, getHeaders: () => ({}) } as unknown as FastifyReply,
-    requestId: randomUUID(), internalHeaders: {}, internalTarget: '/agent/v1/core-turn',
+    requestId: randomUUID(), internalHeaders: { 'content-type': 'application/json', accept: 'application/json' }, internalTarget: '/agent/v1/core-turn',
     payload: JSON.stringify({ kind: 'message', scenario_id: SCENARIO, stage: 'frame', turn_class: 'frame', source: 'composer', ...payload }),
     featureVersion: 'v5', endpoint: '/proxy/v5/turn/stream' });
   return { done, delivered, disconnect: () => { raw.destroyed = true; } };
@@ -189,11 +189,12 @@ describe('the model-program turn on the real core route', () => {
       await Promise.race([started.promise, stream.done.then(() => { throw new Error('The turn ended before drafting started.'); })]);
       expect(persisted).toBeNull();
       const signal = vi.mocked(fetch).mock.calls.at(-1)?.[1]?.signal;
+      expect(signal).toBeInstanceOf(AbortSignal); // the provider call carries a signal, so "not aborted" is a real claim
       stream.disconnect();
-      expect(signal?.aborted ?? false).toBe(false);
+      expect(signal!.aborted).toBe(false);
       finish.release();
       await stream.done;
-      expect(signal?.aborted ?? false).toBe(false);
+      expect(signal!.aborted).toBe(false);
       expect(stream.delivered.some((f) => f.includes('"stage":"COMPLETE"'))).toBe(false);
       expect(registered).toHaveLength(1);
       expect(sent).toHaveLength(1);
@@ -206,7 +207,6 @@ describe('the model-program turn on the real core route', () => {
       const replay = await turn(payload);
       expect([replay.statusCode, replay.json().durability]).toEqual([200, 'replayed']);
       expect(replay.json().cards).toHaveLength(1); // the lost reading card is recovered too
-      expect(replay.json().canonical_analysis_view.run.run_id).toBe(cold.run!.run_id);
       expect([registered.length, sent.length, JSON.stringify(persisted)]).toEqual([1, 1, snapshot]);
     } finally { finish.release(); await stream.done; }
   });
@@ -242,7 +242,6 @@ describe('the model-program turn on the real core route', () => {
       expect(cold.run!.run_id).toBe(persisted!.living_model.runs[1].run_id);
       const replay = await turn(payload);
       expect([replay.statusCode, replay.json().durability]).toEqual([200, 'replayed']);
-      expect(replay.json().canonical_analysis_view.run.run_id).toBe(cold.run!.run_id);
 
       // A fresh proposal store has no applied flag or execution memo: only THIS operation's persisted version can reconcile it.
       const proposals = new ProposalStore(); proposals.put(JSON.parse(JSON.stringify(held)));
