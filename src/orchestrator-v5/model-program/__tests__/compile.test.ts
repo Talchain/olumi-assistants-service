@@ -12,6 +12,16 @@ import { project } from '../project.js';
 import { probeValue } from './probe.js';
 import { parseUnit, sameDims } from '../units.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
+
+type Edges = { readonly edges: readonly Record<string, unknown>[] };
+/** W3b: what a strict GraphV3 reader objects to, as [link id, field], sorted; anything not on a link keeps its full path. */
+const strictObjections = (graph: Edges): string[][] => {
+  const r = GraphV3.safeParse(graph);
+  return (r.success ? [] : r.error.issues.map((i) => (i.path[0] === 'edges' && i.path.length === 3 ? [String(graph.edges[i.path[1] as number]!['id']), String(i.path[2])] : [i.path.join('.'), i.message]))).sort();
+};
+/** A program link carries no strength (the model holds no β), and one with no sign in the model no direction: those fields, sorted. */
+const linkFieldsAbsent = (graph: Edges): string[][] => graph.edges.flatMap((e) => [[String(e['id']), 'strength'], ...('effect_direction' in e ? [] : [[String(e['id']), 'effect_direction']])]).sort();
 import { exactInitialValues, simulate } from '../simulate/simulate.js';
 import { isWithheld } from '../simulate/result.js';
 import { STARTS_AFTER_PERIODS, withDeclaredTiming } from '../canonical.js';
@@ -266,9 +276,11 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(m.dissent.find((d) => d.id === 'partner_doubts')).toMatchObject({ quote: 'my business partner thinks demand will not keep up' });
     const recordIds = [...m.quantities, ...m.relations, ...m.goals, ...m.options, ...m.assumptions, ...m.dissent].map((x) => x.id);
     for (const id of recordIds) expect(p.items.filter((i) => i.record_id === id)).toHaveLength(1);
-    const parsed = GraphV3.safeParse(p.graph);
-    expect(parsed.success).toBe(true);
-    expect(parsed.success && parsed.data.nodes.map((n) => n.id)).toEqual(p.graph.nodes.map((n) => n.id));
+    // Every node passes the strict reader whole; a strict reader's only objections are the links' absent strength (W3b).
+    const nodes = GraphV3.shape.nodes.safeParse(p.graph.nodes);
+    expect(nodes.success && nodes.data.map((n) => n.id)).toEqual(p.graph.nodes.map((n) => n.id));
+    expect(strictObjections(p.graph)).toEqual(linkFieldsAbsent(p.graph));
+    expect(GraphStateIngressSchema.safeParse(p.graph).success).toBe(true);
     expect(p.items.find((i) => i.record_id === 'extra_per_oven')!.shown_as).toEqual({ on_edge: 'ovens_added__sales' });
     expect(p.graph.edges.find((e) => e.id === 'ovens_added__sales')).toMatchObject({ provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 120, amount_unit: 'loaf/week', per_source_change_unit: 'oven' } } });
   });
@@ -286,7 +298,9 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(p.graph.nodes.filter((n) => /^(Claim|Condition): /.test(String(n.label)))).toEqual([]);
     expect(p.graph.nodes.filter((n) => n.kind === 'action').map((n) => [n.id, n.label])).toEqual([['mp:limit:keep_staff', 'Limit: Keep the staff we have']]);
     expect(p.graph.nodes.map((n) => n.id)).toEqual(expect.arrayContaining(['profit', 'sales', 'base_sales']));
-    expect(GraphV3.safeParse(p.graph).success).toBe(true);
+    expect(GraphV3.shape.nodes.safeParse(p.graph.nodes).success).toBe(true);
+    expect(strictObjections(p.graph)).toEqual(linkFieldsAbsent(p.graph));
+    expect(GraphStateIngressSchema.safeParse(p.graph).success).toBe(true);
     // The canonical record is the notes' home: untouched by the projection, every word kept, by the record's own id.
     expect(m).toEqual(before);
     expect(m.claims).toEqual([expect.objectContaining({ id: 'busy_saturdays', text: 'Saturdays are the busy day.', concerns: ['sales'], author: 'olumi' })]);
@@ -1467,34 +1481,34 @@ describe('issue 39: an unsized link is drawn with its stated direction, never a 
     goals: [goal('keep_sales', 'sales', '>=', 'sales_target', 'end', 'quarter', 'keep sales at 380 or more')],
     options: [option('raise', 'Raise the price by 50p', [set('price_rise', 'fifty_p', 'raise it by 50p')], 'raise it by 50p'), option('keep', 'Keep the price', [], 'keep the price')],
   });
-  /** The price link as drawn: its direction and the sign of its strength. */
+  /** The price link as drawn: its direction, and that it carries no strength (W3b: its sign is its direction alone). */
   const linkOf = (m: CanonicalModelT) => {
     const e = (project(m).graph.edges as Record<string, unknown>[]).find((x) => x.from === 'price_rise' && x.to === 'sales')!;
-    return { direction: e.effect_direction, mean: (e.strength as { mean: number }).mean };
+    return { direction: e.effect_direction, strength: 'strength' in e };
   };
   const UNKNOWN = { status: 'unknown' as const, basis: 'Last year\'s sales after a price change would size it.' };
   const STRADDLES = { status: 'estimated' as const, low: -60, high: 20, range_kind: 'plausible' as const, basis: 'It could go either way.' };
 
   it('an unknown size that lowers what it moves is drawn negative; one that raises it, positive', () => {
-    expect(linkOf(priced({ ...UNKNOWN, direction: 'lowers' }))).toEqual({ direction: 'negative', mean: -1 });
-    expect(linkOf(priced({ ...UNKNOWN, direction: 'raises' }))).toEqual({ direction: 'positive', mean: 1 });
+    expect(linkOf(priced({ ...UNKNOWN, direction: 'lowers' }))).toEqual({ direction: 'negative', strength: false });
+    expect(linkOf(priced({ ...UNKNOWN, direction: 'raises' }))).toEqual({ direction: 'positive', strength: false });
   });
 
   it('a range that spans zero takes its stated direction, not the sign of its centre', () => {
     // Contrast: with no stated direction the centre (-20) still decides, as before.
-    expect(linkOf(priced({ ...STRADDLES, direction: null }))).toEqual({ direction: 'negative', mean: -1 });
-    expect(linkOf(priced({ ...STRADDLES, direction: 'raises' }))).toEqual({ direction: 'positive', mean: 1 });
+    expect(linkOf(priced({ ...STRADDLES, direction: null }))).toEqual({ direction: 'negative', strength: false });
+    expect(linkOf(priced({ ...STRADDLES, direction: 'raises' }))).toEqual({ direction: 'positive', strength: false });
   });
 
   it('a range across zero with a most likely figure keeps that figure\'s sign, whatever the direction says (Codex r1 #3734)', () => {
     const across = { status: 'estimated' as const, low: -1, high: 1, range_kind: 'plausible' as const, basis: 'It could go either way, most likely a little down.' };
-    expect(linkOf(priced({ ...across, value: -0.2, direction: 'raises' }))).toEqual({ direction: 'negative', mean: -1 });
-    expect(linkOf(priced({ ...across, value: 0.2, direction: 'lowers' }))).toEqual({ direction: 'positive', mean: 1 });
+    expect(linkOf(priced({ ...across, value: -0.2, direction: 'raises' }))).toEqual({ direction: 'negative', strength: false });
+    expect(linkOf(priced({ ...across, value: 0.2, direction: 'lowers' }))).toEqual({ direction: 'positive', strength: false });
   });
 
   it('a figure keeps its own sign: a stated direction never overrides it', () => {
     expect(linkOf(priced({ status: 'estimated', low: -60, high: -10, value: -30, range_kind: 'plausible', basis: 'Fewer loaves sell at a higher price.', direction: 'raises' })))
-      .toEqual({ direction: 'negative', mean: -1 });
+      .toEqual({ direction: 'negative', strength: false });
   });
 
   it('an unknown size with no stated direction is not drawn: no link carries a sign no one can give, and its record stays accounted for', () => {

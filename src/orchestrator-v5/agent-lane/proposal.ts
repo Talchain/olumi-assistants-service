@@ -245,6 +245,14 @@ export const ProposalChangeSchema = z.object({
   author: z.enum(['person', 'olumi']),
   // A reading card's row only (alpha G13): which of the first reply's counts it is in (model-program-turn/reading-groups.ts).
   group: z.enum(['used', 'inferred', 'left_out', 'other']).optional(),
+  // W3b (26 Oct), a program row only, additive: which of the model's families the item is (an assumption, a disagreement, a
+  // condition and a limit are all kind `record`), in the projection's own vocabulary (`project.ts` ItemFamily).
+  family: z.enum(['quantity', 'relation', 'goal', 'limit', 'preference', 'option', 'risk', 'claims', 'evidence', 'assumptions', 'dissent', 'conditions', 'left_out']).optional(),
+  // A fixed part of the model's structure (a unit conversion, an on/off switch): nobody's figure, never Olumi's. `author`
+  // stays `olumi` beside it until the canvas reads `structure` (DGAI proposalFields.ts accepts only person | olumi).
+  structure: z.literal(true).optional(),
+  // A figure still to be given (its status is asked): the person's question, never one of Olumi's workings.
+  asked: z.literal(true).optional(),
 });
 export type ProposalChange = Readonly<z.infer<typeof ProposalChangeSchema>>;
 

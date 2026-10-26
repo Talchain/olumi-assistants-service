@@ -32,6 +32,12 @@ const FAMILIES: readonly (readonly [Family, ProposalChange['kind']])[] = [
   ['risks', 'risk'], ['claims', 'record'], ['evidence', 'record'], ['assumptions', 'record'], ['dissent', 'record'], ['conditions', 'record'], ['left_out', 'left_out'],
 ];
 
+/** A row's family in the projection's own vocabulary (`project.ts` ItemFamily): the record notes keep their family's name. */
+const ROW_FAMILY: Readonly<Record<Family, NonNullable<ProposalChange['family']>>> = {
+  quantities: 'quantity', relations: 'relation', goals: 'goal', limits: 'limit', preferences: 'preference', options: 'option', risks: 'risk',
+  claims: 'claims', evidence: 'evidence', assumptions: 'assumptions', dissent: 'dissent', conditions: 'conditions', left_out: 'left_out',
+};
+
 /** Set by the host, never taken from a proposed model. */
 const HOST_FIELDS: ReadonlySet<string> = new Set(HOST_OWNED_FIELDS);
 /**
@@ -240,9 +246,12 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
     const phrase = (fields: ReturnType<typeof said>, side: 'old' | 'now', r: Rec, whole: boolean) =>
       [...new Set([...(family === 'options' && whole && Array.isArray(r['sets']) && r['sets'].length === 0 ? ['carries on as now'] : []),
         ...fields.filter((x) => !(whole && onCard(x, r))).map((x) => x[side])].filter((x) => x !== ''))].join(', ');
+    // W3b: each row says its family, a fixed part of the structure as such, and a figure still to be given as asked.
     const entry = (id: string, action: ProposalChange['action'], fields: ReturnType<typeof said>, label: string, author: ProposalChange['author'], r: Rec): ProposalChange => ({ id, kind, action, label,
       before: action === 'add' ? null : phrase(fields, 'old', r, action === 'remove'),
-      after: action === 'remove' ? null : action === 'add' && family === 'left_out' ? leftOut(r) : phrase(fields, 'now', r, action === 'add'), author });
+      after: action === 'remove' ? null : action === 'add' && family === 'left_out' ? leftOut(r) : phrase(fields, 'now', r, action === 'add'), author,
+      family: ROW_FAMILY[family], ...(r['author'] === 'structure' ? { structure: true as const } : {}),
+      ...(family === 'quantities' && r['status'] === 'asked' ? { asked: true as const } : {}) });
     const records = (post[family] as readonly Rec[]).map((r) => {
       const old = before.get(String(r['id']));
       const fields = said(String(r['id']), old, r);
