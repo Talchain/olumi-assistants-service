@@ -30,6 +30,7 @@ import { isSaved, postimageOf, programOperationId, savePostimage, withNewRun } f
 import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, sourceTextOf, unreadableWords, type SavedProgram } from './program-store.js';
 import { shownRun, type StoredRun } from './run-receipt.js';
 import { log } from '../../utils/telemetry.js';
+import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 
 type Rec = Record<string, unknown>;
 type Ctx = Pick<AgentToolContext, 'scenario_id' | 'authenticated_user_id' | 'turn_id' | 'verified_user_messages' | 'user_turn_text'>;
@@ -167,9 +168,15 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   if (drafted.model === null) return refused('no_model_back', 'Olumi could not write the updated model just now; nothing changed.');
   // Their answers win on the drafter's model too, set again exactly (buddy 24 Oct); one it removed is refused by name, never dropped.
   // An answer in words on a figure stays theirs there (Codex r1 #3767): their status, party and words, the drafter's reading of
-  // them its figure; one it read no figure from is refused by name, never saved as Olumi's.
+  // them its figure; one it read no figure from is refused by name, never saved as Olumi's. Read means the drafter returned
+  // that record changed, as a known figure: one it left as saved (the merge keeps it) or read only as an estimate is not
+  // their answer, so it is never restamped as theirs (integrated review 26 Oct: Olumi's estimate saved as "known, yours").
   const worded = answers.filter((a) => toDrafter(a) && quantities.some((x) => x.id === a.id));
-  const unread = worded.filter((a) => { const x = drafted.model!.quantities.find((y) => y.id === a.id); return x === undefined || (x.value === null && x.low === null && x.high === null); }).map((a) => a.id);
+  const unread = worded.filter((a) => {
+    const x = drafted.model!.quantities.find((y) => y.id === a.id);
+    return x === undefined || (x.value === null && x.low === null && x.high === null) || x.status !== 'known'
+      || stableStringify(x) === stableStringify(set.model.quantities.find((y) => y.id === a.id));
+  }).map((a) => a.id);
   if (unread.length > 0) return refused('not_an_answer', `${unread.join(', ')}: the change read no figure from your answer, so nothing changed.`, { ids: unread });
   const postimage: CanonicalModelT = { ...drafted.model, quantities: drafted.model.quantities.map((x) => {
     const a = worded.find((w) => w.id === x.id);
