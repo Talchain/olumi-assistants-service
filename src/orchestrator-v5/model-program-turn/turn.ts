@@ -67,7 +67,7 @@ export const NO_AIM_NOTE = 'aim';
  * on, in the model's order (the drafter puts the most consequential first; no code ranking); then one line counting the rest. The code
  * writes no question: a blocker with no question of the AI's (a reading, a recount) is counted, never worded.
  */
-function replyOf(model: CanonicalModelT, run: StoredRun, kind: TurnKind, words: readonly string[]): string {
+function replyOf(model: CanonicalModelT, run: StoredRun, kind: TurnKind, words: readonly string[], readingHeld = false): string {
   const view = run.result.canonical_analysis_view as { options?: readonly { cell: { kind: string; face?: string; reasons?: readonly { code: string; message: string | null }[] } }[] };
   const options = view.options ?? [];
   // A Run refused for its size withholds every cell for that one reason: said once, in the view's own words, and a Run press
@@ -75,8 +75,8 @@ function replyOf(model: CanonicalModelT, run: StoredRun, kind: TurnKind, words: 
   const tooLarge = options.some((o) => o.cell.kind === 'figure') ? null : options.flatMap((o) => o.cell.reasons ?? []).find((r) => r.code === 'too_large')?.message ?? null;
   const lines: string[] = kind === 'run' && tooLarge !== null ? [] : [OPENING[kind](model)];
   // The first draft says, in one line, how much is theirs, how much is Olumi's to check and how much is left out (alpha G13);
-  // the reading card under it lists each, in the same groups.
-  const counted = kind === 'draft' ? readingLine(readingGroups(model, (quote) => verbatimIn(quote, words))) : null;
+  // the reading card under it lists each, in the same groups. Said only when that card is held: the line is its summary.
+  const counted = kind === 'draft' && readingHeld ? readingLine(readingGroups(model, (quote) => verbatimIn(quote, words))) : null;
   if (counted !== null) lines.push(counted);
   if (tooLarge !== null) lines.push(tooLarge);
   for (const o of options) if (o.cell.kind === 'figure' && typeof o.cell.face === 'string') lines.push(o.cell.face);
@@ -146,7 +146,7 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
     return { call: { name: CONFIRM_READING, ok: true, outcome: 'ok', mutated: false, proposal_id: p.proposal_id }, result: { ok: true, mutated: false, proposal_id: p.proposal_id, public_label: p.public_label } };
   })() : undefined;
   return {
-    assistantText: saved ? replyOf(next.program.canonical, next.run, kind, next.program.person_words)
+    assistantText: saved ? replyOf(next.program.canonical, next.run, kind, next.program.person_words, reading?.result.ok === true)
       // An unknown outcome may have been written: never say nothing changed (alpha review G4). Where no acknowledgement came,
       // the save has already looked for this operation's own version (`savePostimage`): unknown here means none was found, or
       // the model read back is not the one sent, so this model is never narrated as saved.
