@@ -636,8 +636,10 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             // the model and Run as saved, as it does on every typed turn; it may not draft, propose, apply or run. There is no
             // template fallback (Paul 26 Oct: "if the AI reply fails, show an error instead"; the host's reply words are kept in
             // turn.ts, unwired here): a failed reply is the turn's lost reply below, the save kept and said; an empty one is
-            // `reply_empty`. A draft the host could not make (no Run view) keeps its own refusal.
-            if (programPayload?.canonical_analysis_view != null) {
+            // `reply_empty`. A draft or Run the host could not save (no Run view, a refused or unconfirmed save) keeps its own
+            // words: they are that turn's error, not a reply about a model.
+            const kept = programPayload?.model_program;
+            if (programPayload?.canonical_analysis_view != null && (kept?.['saved'] === true || kept?.['stored'] === true)) {
               const fresh = await readProgramContext({ dispatch: readingDispatch, proposals }, { scenario_id: scenarioId, authenticated_user_id: userId });
               if (fresh.status !== 'ok') throw new ModelReadFailedError(fresh);
               const reply = await runCoreTurn({ ...agentTurn(),

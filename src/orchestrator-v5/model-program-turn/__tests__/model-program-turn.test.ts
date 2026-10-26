@@ -156,6 +156,21 @@ const asUpdate = (whole: string): string => JSON.stringify(updateOf(persisted!.l
 /** The drafter's update for a change: the saved model with `edit` applied, as an update returns it. */
 const savedWith = (edit: (m: CanonicalModelT) => void): string => asUpdate(wholeWith(edit));
 const setQ = (m: CanonicalModelT, id: string, f: Partial<CanonicalQuantityT>) => { m.quantities = m.quantities.map((x) => (x.id === id ? { ...x, ...f } : x)); };
+/** The drafter's own calls (no Conversation); T1's reply to a draft or a Run press is the agent's, in the Conversation. */
+const drafterCalls = (): Json[] => sent.filter((b) => b.conversation === undefined);
+/** Each call in order: the drafter's (false) or the agent's, in the Conversation (true). */
+const callKinds = (): boolean[] => sent.map((b) => b.conversation !== undefined);
+/** The saved scenario as the route reads it for a turn. */
+const savedNow = () => ({ graph: persisted, identity: computeGraphIdentityHash(persisted as never)!.value });
+/**
+ * T1 (Paul 26 Oct): the route's reply to a first draft or a Run press is the AI's, from the Run's own facts. The host's own
+ * words are kept in turn.ts, unwired ("don't delete it in case we need to implement it later"); these rows read them from the
+ * turn itself, called as the route calls it, with a card store.
+ */
+const hostTurn = async (message: string, saved: { graph: Json | null; identity: string | null } = { graph: null, identity: null }): Promise<Json> => {
+  const out = await runModelProgramTurn({ scenarioId: SCENARIO, turnId: randomUUID(), message, saved, dispatch, proposals: new ProposalStore() });
+  return { ...out.payload, assistant_text: out.assistantText };
+};
 const LOST_BASIS = 'Nobody has said how much baking time a new oven loses while the staff learn it.';
 /** Issue 40: the bakery with Olumi's link of unknown size, stated to lower sales, and any more of Olumi's links on the oven. */
 const withOlumiLinks = (m: CanonicalModelT, ...more: CanonicalQuantityT[]): CanonicalModelT => {
@@ -240,7 +255,7 @@ describe('the model-program turn on the real core route', () => {
       expect(signal!.aborted).toBe(false);
       expect(stream.delivered.some((f) => f.includes('"stage":"COMPLETE"'))).toBe(false);
       expect(registered).toHaveLength(1);
-      expect(sent).toHaveLength(1);
+      expect(callKinds()).toEqual([false, true]); // the drafter, then the AI's reply (T1)
       expect(persisted!.living_model.canonical).toEqual(bakery());
       const snapshot = JSON.stringify(persisted);
       const cold = reopenProgram(JSON.parse(snapshot))!;
@@ -250,7 +265,7 @@ describe('the model-program turn on the real core route', () => {
       const replay = await turn(payload);
       expect([replay.statusCode, replay.json().durability]).toEqual([200, 'replayed']);
       expect(replay.json().cards).toHaveLength(1); // the lost reading card is recovered too
-      expect([registered.length, sent.length, JSON.stringify(persisted)]).toEqual([1, 1, snapshot]);
+      expect([registered.length, sent.length, JSON.stringify(persisted)]).toEqual([1, 2, snapshot]);
     } finally { finish.release(); await stream.done; }
   });
 
@@ -274,8 +289,8 @@ describe('the model-program turn on the real core route', () => {
       await stream.done;
       registerPause = undefined;
       expect(stream.delivered.some((f) => f.includes('"stage":"COMPLETE"'))).toBe(false);
-      expect([registered.length, sent.length]).toEqual([2, 3]); // draft, native apply call, native reply
-      expect(sent[1]!.tool_choice).toMatchObject({ type: 'function', name: 'apply_change' });
+      expect([registered.length, sent.length]).toEqual([2, 4]); // draft, its AI reply (T1), native apply call, native reply
+      expect(sent[2]!.tool_choice).toMatchObject({ type: 'function', name: 'apply_change' });
       expect(stableStringify(persisted!.living_model)).toBe(stableStringify(held.living_model));
       expect(persisted!.living_model.runs).toHaveLength(2);
       expect(persisted!.living_model.runs[0]).toEqual(registered[0]!.graph.living_model.runs[0]);
@@ -296,7 +311,7 @@ describe('the model-program turn on the real core route', () => {
         : dispatch(path, body);
       expect(await applyProgramChange({ dispatch: historyDispatch, proposals }, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, held.proposal_id))
         .toMatchObject({ status: 'ok', data: { already_saved: true, receipt: ownReceipt } });
-      expect([registered.length, sent.length, JSON.stringify(persisted)]).toEqual([2, 3, snapshot]);
+      expect([registered.length, sent.length, JSON.stringify(persisted)]).toEqual([2, 4, snapshot]);
     } finally { finish.release(); await stream.done; registerPause = undefined; }
   });
 
@@ -343,11 +358,11 @@ describe('the model-program turn on the real core route', () => {
       replies = [JSON.stringify(bakery())];
       const draft = await turn({ message: BRIEF });
       expect(draft.statusCode, draft.body).toBe(200);
-      // T1 (Paul 26 Oct): the draft's reply is the AI's, so the draft turn tries to open the Conversation; this harness
-      // refuses that create, so no Conversation is saved, the host's reply stands, and the approval below is the first
-      // conversation turn. Its creates are counted from here.
-      expect([creates.length, conversationIds.has(SCENARIO), String(draft.json().assistant_text).trim() !== '']).toEqual([1, false, true]);
-      creates.length = 0;
+      // T1 (Paul 26 Oct): the draft's reply is the AI's, so the draft turn opens the scenario's Conversation for it. These rows
+      // are a scenario's FIRST conversation turn with no saved Conversation (one drafted before T1), so it is cleared here, and
+      // the approval's creates are counted from here.
+      expect([creates.length, conversationIds.has(SCENARIO), draft.json().assistant_text]).toEqual([1, true, DEFAULT_AGENT_REPLY]);
+      conversationIds.delete(SCENARIO); creates.length = 0;
       if (saved) conversationIds.set(SCENARIO, `conv_${SCENARIO}`);
       const card = draft.json().cards[0];
       const held = agentProposalOf([...turnRows.values()].find((r) => r.pending_actions?.length)?.pending_actions[0])!;
@@ -459,9 +474,9 @@ describe('the model-program turn on the real core route', () => {
       expect(r.statusCode, r.body).toBe(502);
       expect(r.json().error, 'the provider is busy; the change is kept').toEqual({ code: 'PROVIDER_CAPACITY', message: SAVED_KEPT, retry_safe: false, nothing_saved: false });
       expect(registered, 'the approval stays saved, written once').toHaveLength(2);
-      // The draft, the apply call and the overloaded reply: the reply is never asked for again.
-      expect([sent.length, replies.length]).toEqual([3, 1]);
-      expect(outputsSent(sent[2]!)).toEqual(['call_approve']);
+      // The draft, its AI reply (T1), the apply call and the overloaded reply: the reply is never asked for again.
+      expect([sent.length, replies.length]).toEqual([4, 1]);
+      expect(outputsSent(sent[3]!)).toEqual(['call_approve']);
     });
 
     it('change 2 (CONTRAST): a provider error that is not a server fault on the same reply is not asked for again, and stays an upstream error', async () => {
@@ -472,7 +487,7 @@ describe('the model-program turn on the real core route', () => {
       const r = await turn(payload);
       expect(r.statusCode, r.body).toBe(502);
       expect(r.json().error).toMatchObject({ code: 'UPSTREAM_ERROR', nothing_saved: false });
-      expect([sent.length, registered.length, replies.length]).toEqual([3, 2, 1]);
+      expect([sent.length, registered.length, replies.length]).toEqual([4, 2, 1]);
     });
 
     it('change 2 (CONTRAST): an overload before anything is saved is not asked for again here: nothing saved, the provider busy, and the same turn may be sent again', async () => {
@@ -484,7 +499,7 @@ describe('the model-program turn on the real core route', () => {
       const r = await turn(payload);
       expect(r.statusCode, r.body).toBe(502);
       expect(r.json().error).toMatchObject({ code: 'PROVIDER_CAPACITY', retry_safe: true, nothing_saved: true });
-      expect([sent.length, registered.length, replies.length]).toEqual([2, 1, 1]);
+      expect([sent.length, registered.length, replies.length]).toEqual([3, 1, 1]); // the draft, its AI reply (T1), the overloaded call
       expect([turnRows.has(`${payload.turn_id}:claim`), turnRows.has(payload.turn_id)], 'the claim is released, so a resend runs the turn').toEqual([false, false]);
     });
 
@@ -524,7 +539,7 @@ describe('the model-program turn on the real core route', () => {
     replies = [JSON.stringify(bakery())];
     const r = await turn({ message: BRIEF });
     expect(r.statusCode).toBe(200);
-    expect(sent).toHaveLength(1);
+    expect(callKinds()).toEqual([false, true]); // ONE drafter call, then the AI's reply in the Conversation (T1)
     const body = sent[0]!;
     expect(body.model).toBe('gpt-6.1-sol');
     expect(body.reasoning).toEqual({ effort: 'medium' });
@@ -545,7 +560,7 @@ describe('the model-program turn on the real core route', () => {
   it('no header, no flag: a scenario with no saved model is drafted by the canonical drafter and nothing else', async () => {
     replies = [JSON.stringify(bakery())];
     await turn({ message: BRIEF });
-    expect(sent.map((b) => b.text?.format?.name ?? b.model)).toEqual(['canonical_model']);
+    expect(sent.map((b) => (b.conversation !== undefined ? 'reply' : b.text?.format?.name ?? b.model))).toEqual(['canonical_model', 'reply']); // and the AI's reply (T1)
     expect(persisted!.living_model.model_program).toBe('v1');
   });
 
@@ -553,7 +568,7 @@ describe('the model-program turn on the real core route', () => {
     const bad = JSON.stringify(bakeryWithDefect());
     replies = [bad, JSON.stringify(bakery())];
     const r = await turn({ message: BRIEF });
-    expect(sent).toHaveLength(2);
+    expect(drafterCalls()).toHaveLength(2);
     const errors = compile(bakeryWithDefect(), { sourceText: BRIEF }).errors;
     expect(errors.map((e) => e.code)).toEqual(['range_order']);
     expect(sent[1]!.input).toEqual([{ role: 'user', content: BRIEF }, { role: 'assistant', content: bad },
@@ -753,7 +768,7 @@ describe('the model-program turn on the real core route', () => {
 
   it('W6 review B2 (Paul 6 and 14 Oct): with the £3,000 limit not yet checked, the first Run names no option as most likely, says why with each chance, in the view and in the reply', async () => {
     replies = [JSON.stringify(bakery())];
-    const r = (await turn({ message: BRIEF })).json();
+    const r = await hostTurn(BRIEF);
     const view = r.canonical_analysis_view;
     const oven = view.options.find((o: Json) => o.option_id === 'second_oven').cell, keep = view.options.find((o: Json) => o.option_id === 'keep_one').cell;
     // A second oven: about 26% (step 3; W10, before it 19%), on the sales target alone; our one oven: 0% in every draw. Spend
@@ -777,7 +792,7 @@ describe('the model-program turn on the real core route', () => {
 
   it('W6 (Paul 6 and 14 Oct; contrast to B2): with the oven price given the limit is checked, and the first Run says which option is most likely to achieve the goal, with both chances, in the view and in the reply', async () => {
     replies = [JSON.stringify(priced())];
-    const r = (await turn({ message: PRICED })).json();
+    const r = await hostTurn(PRICED);
     const view = r.canonical_analysis_view;
     const oven = view.options.find((o: Json) => o.option_id === 'second_oven'), keep = view.options.find((o: Json) => o.option_id === 'keep_one');
     expect(view.goal_chance.unchecked_limits).toBeUndefined();
@@ -1298,7 +1313,7 @@ describe('the model-program turn on the real core route', () => {
     expect(drafted.statusCode, drafted.body).toBe(200);
     const r = drafted.json();
     expect(r.model_program.saved).toBe(true);
-    expect(sent).toHaveLength(1); // the card is the host's: no further AI call
+    expect(callKinds()).toEqual([false, true]); // the drafter, then the AI's reply (T1): the card is the host's, with no call of its own
     expect(registered).toHaveLength(1); // the card saves nothing
     expect(r.cards).toHaveLength(1);
     const card = r.cards[0];
@@ -1320,7 +1335,7 @@ describe('the model-program turn on the real core route', () => {
       ['delivery_days', 'left_out'], ['sold_rel', 'other'], ['sales_rel', 'used'], ['spend_rel', 'other'], ['base_sales', 'used'], ['ovens_added', 'used'], ['one_oven', 'used'],
       ['extra_per_oven', 'used'], ['sell_through', 'inferred'], ['sold_per_oven', 'other'], ['sales', 'other'], ['sales_target', 'used'], ['budget', 'used'],
       ['oven_price', 'other'], ['spend', 'other']]);
-    expect(r.assistant_text.split('\n\n')[1]).toBe('I used 11 things from your brief, added 1 of my own for you to check, and left 3 out of the calculation.');
+    expect(r.assistant_text).toBe(DEFAULT_AGENT_REPLY); // the first reply is the AI's (T1); the host's count line is read at the end
     // (6) The kinds the card reads, spelled as DGAI's proposalChangeSchema has them at 128bd2db (left_out added there first).
     expect(ProposalChangeSchema.shape.kind.options).toEqual(['quantity', 'relation', 'goal', 'option', 'risk', 'record', 'left_out']);
     // (3) A left-out item: its words are the label, and `after` is its substance in plain words, its why first (the card
@@ -1348,16 +1363,20 @@ describe('the model-program turn on the real core route', () => {
     expect(confirmed.runs[1]!.receipt.revision_digest).not.toBe(confirmed.runs[0]!.receipt.revision_digest);
     expect(confirmed.runs[1]!.result.chances).toEqual(confirmed.runs[0]!.result.chances);
     expect(JSON.stringify(confirmed.runs[0]!.result.chances)).toMatch(/[0-9]/);
-    // Carried on reload: a later turn (a Run press, no AI call) still offers the same card, flagged.
+    // Carried on reload: a later turn (a Run press, no drafter call; its reply is the AI's, T1) still offers the same card, flagged.
     const later = (await turn({ message: 'Run the analysis', chip: { id: 'run', action_type: 'run_analysis', label: 'Run' } })).json();
     expect(later.cards.map((c: Json) => [c.proposal_id, c.reading, c.approve_action.label])).toEqual([[card.proposal_id, true, 'Yes, that’s what I meant']]);
     expect(later.cards[0].changes).toEqual(card.changes);
-    expect(sent).toHaveLength(1);
+    expect(callKinds()).toEqual([false, true, true]);
     // Its approve saves exactly that model and Run (the existing approve path), and the card is no longer waiting.
     const deps = { dispatch, proposals: new ProposalStore() };
     deps.proposals.put(held);
     expect(await applyProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, held.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     expect(stableStringify(persisted!.living_model)).toBe(stableStringify(held.living_model));
+    // (7) The host's own count line (kept in turn.ts, unwired since T1) counts the same rows, for the same draft.
+    beforeEachReset();
+    replies = [JSON.stringify(m)];
+    expect((await hostTurn(`${BRIEF} Our staff may not like longer shifts. Our supplier says deliveries only on weekdays.`)).assistant_text.split('\n\n')[1]).toBe('I used 11 things from your brief, added 1 of my own for you to check, and left 3 out of the calculation.');
   });
 
   // ── The card in plain words (DL 24 Oct, after the staging reading card): one phrase per item, no keys or codes ─────────
@@ -2274,7 +2293,7 @@ describe('the model-program turn on the real core route', () => {
     replies = [JSON.stringify(m)];
     const r = (await turn({ message: BRIEF })).json();
     expect(r.model_program.saved).toBe(true);
-    expect(sent).toHaveLength(1);
+    expect(drafterCalls()).toHaveLength(1);
     expect(r.model_program.draft.attempts.map((a: Json) => a.errors.length)).toEqual([0]);
     const asWritten = { author: 'structure', status: 'known', value: 12 };
     expect(persisted!.living_model.canonical.quantities.find((x: Json) => x.id === 'current_output')).toMatchObject(asWritten);
@@ -2293,7 +2312,7 @@ describe('the model-program turn on the real core route', () => {
     const r = (await turn({ message: BRIEF })).json();
     const attempts = (r.model_program.draft.attempts as Json[]).map((a) => (a.errors as Json[]).map((e) => [e.code, e.items]));
     expect(attempts).toEqual([[]]);
-    expect(sent).toHaveLength(1);
+    expect(drafterCalls()).toHaveLength(1);
     expect(r.model_program.saved).toBe(true);
     expect(persisted!.living_model.canonical.quantities.find((x: Json) => x.id === 'spend_floor')).toMatchObject({ author: 'structure', status: 'known', value: 0 });
   });
@@ -3861,13 +3880,12 @@ describe('the model-program turn on the real core route', () => {
     await turn({ message: BRIEF });
     const run = persisted!.living_model.runs[0].result.compile as Json;
     delete run.blockers; run.asks = [{ quantity_id: 'oven_price', question: 'What would the second oven cost?' }]; run.coaching = [];
-    const r = await turn({ message: 'Run the analysis', chip: { id: 'run', action_type: 'run_analysis', label: 'Run' } });
-    expect(r.statusCode, r.body).toBe(200);
-    expect(r.json().assistant_text).toContain('1. What would the second oven cost?');
-    expect(r.json().assistant_text).not.toContain('To work out what is still missing');
+    const r = await hostTurn('Run the analysis', savedNow());
+    expect(r.assistant_text).toContain('1. What would the second oven cost?');
+    expect(r.assistant_text).not.toContain('To work out what is still missing');
   });
 
-  it('a Run press on a program needs no model call: the stored Run when current; a NEW Run, stored, when the model moved since', async () => {
+  it('a Run press on a program needs no drafter call (its one call is the AI\'s reply, T1): the stored Run when current; a NEW Run, stored, when the model moved since', async () => {
     replies = [JSON.stringify(bakery())];
     await turn({ message: BRIEF });
     sent.length = 0;
@@ -3875,7 +3893,7 @@ describe('the model-program turn on the real core route', () => {
     const press = () => turn({ message: 'Run the analysis', chip: { id: 'run', action_type: 'run_analysis', label: 'Run' } });
     const r = await press();
     expect(r.statusCode, r.body).toBe(200);
-    expect([sent.length, registered.length]).toEqual([0, saves]);
+    expect([drafterCalls().length, sent.length, registered.length]).toEqual([0, 1, saves]);
     expect(r.json().model_program).toMatchObject({ turn: 'run', stored: true });
     expect(r.json().canonical_analysis_view.run.run_id).toBe(persisted!.living_model.runs[0].run_id);
     // The model moved (a word of the person's added) with no Run: the press evaluates a NEW Run and stores it.
@@ -3883,7 +3901,7 @@ describe('the model-program turn on the real core route', () => {
     persisted!.living_model.person_words.push('We open six days a week.');
     const moved = await press();
     expect(moved.statusCode, moved.body).toBe(200);
-    expect([sent.length, registered.length, persisted!.living_model.runs.length]).toEqual([0, saves + 1, 2]);
+    expect([drafterCalls().length, registered.length, persisted!.living_model.runs.length]).toEqual([0, saves + 1, 2]);
     expect(moved.json().canonical_analysis_view.run.run_id).toBe(persisted!.living_model.runs[1].run_id);
   });
 
@@ -3892,21 +3910,19 @@ describe('the model-program turn on the real core route', () => {
     const m = club();
     m.quantities = m.quantities.map((x) => (x.id === 'months' ? q('months', 'month', { value: 5000, quote: '5000 months ahead' }) : x));
     replies = [JSON.stringify(m)];
-    const draft = await turn({ message: `${CLUB_BRIEF} We look 5000 months ahead.` });
-    expect(draft.statusCode, draft.body).toBe(200);
-    expect(draft.json().canonical_analysis_view.options.map((o: Json) => o.cell.reasons)).toEqual([[{ code: 'too_large', message: why }], [{ code: 'too_large', message: why }]]);
-    const said = draft.json().assistant_text.split('\n\n') as string[];
+    const draft = await hostTurn(`${CLUB_BRIEF} We look 5000 months ahead.`);
+    expect(draft.canonical_analysis_view.options.map((o: Json) => o.cell.reasons)).toEqual([[{ code: 'too_large', message: why }], [{ code: 'too_large', message: why }]]);
+    const said = draft.assistant_text.split('\n\n') as string[];
     expect(said[0]).toBe('I\'ve drafted a first model of: Should the club run a promotion?');
     expect(said.filter((p) => p === why)).toHaveLength(1);
-    const press = () => turn({ message: 'Run the analysis', chip: { id: 'run', action_type: 'run_analysis', label: 'Run' } });
+    const press = () => hostTurn('Run the analysis', savedNow());
     const r = await press();
-    expect(r.statusCode, r.body).toBe(200);
-    expect(r.json().model_program).toMatchObject({ turn: 'run', stored: true });
-    expect(r.json().assistant_text).toBe(why);
+    expect(r.model_program).toMatchObject({ turn: 'run', stored: true });
+    expect(r.assistant_text).toBe(why);
     // Contrast: the model moved to three months ahead, so the press works out a NEW Run, which opens with the analysis.
     persisted = JSON.parse(JSON.stringify(persisted));
     persisted!.living_model.canonical.quantities = persisted!.living_model.canonical.quantities.map((x: Json) => (x.id === 'months' ? { ...x, value: 3, quote: 'within three months' } : x));
-    const moved = (await press()).json();
+    const moved = await press();
     expect(moved.canonical_analysis_view.options.map((o: Json) => o.cell.kind)).toEqual(['figure', 'figure']);
     expect(moved.assistant_text.split('\n\n')[0]).toBe('Here is the analysis of the model as it stands.');
     expect(moved.assistant_text).not.toContain('too large');
@@ -3922,7 +3938,7 @@ describe('the model-program turn on the real core route', () => {
     setQ(m, 'base_sales', { status: 'asked', value: null, quote: null, question: 'How many loaves do you sell a week now?' });
     setQ(m, 'extra_per_oven', { value: null, low: 80, high: 120 }); // their range, its kind unread: a blocker with no question
     replies = [JSON.stringify(m)];
-    const r = (await turn({ message: BRIEF })).json();
+    const r = await hostTurn(BRIEF);
     expect(r.model_program.saved).toBe(true);
     // Every one of the AI's questions, in the model's order (goals, limits, then quantities); the range_kind blocker has none, so
     // it is counted. Alpha G13's count line: 13 records theirs in their words (the asked base sales is in none), Olumi's sell-through estimate.
@@ -3956,7 +3972,7 @@ describe('the model-program turn on the real core route', () => {
     setQ(m, 'sell_through', { ...none, status: 'unknown', basis: 'Cannot yet be sized.' });
     m.quantities.push(q('weather', '1', { status: 'unknown', author: 'olumi', basis: 'Nothing here uses it.' })); // contrast: nothing rests on it
     replies = [JSON.stringify(m)];
-    const r = (await turn({ message: BRIEF })).json();
+    const r = await hostTurn(BRIEF);
     expect(r.model_program.saved).toBe(true);
     const waits = r.canonical_analysis_view.goal_chance.waits_on as Json[];
     expect(waits).toEqual([
@@ -4036,7 +4052,7 @@ describe('the model-program turn on the real core route', () => {
       { id: 'aim', text: 'What a good result would be is not stated.', why: 'No aim was given.', question: 'What result would make this worth it for you?',
         concerns: [], author: 'olumi', quote: null, ...at });
     replies = [JSON.stringify(m)];
-    const r = (await turn({ message: BRIEF })).json();
+    const r = await hostTurn(BRIEF);
     expect(r.model_program.saved).toBe(true);
     expect(r.assistant_text).toBe(['I\'ve drafted a first model of: Should the bakery buy a second oven?',
       'I used 10 things from your brief, added 1 of my own for you to check, and left 2 out of the calculation.',
@@ -4048,7 +4064,7 @@ describe('the model-program turn on the real core route', () => {
     const bare = bakery(); bare.goals = [];
     beforeEachReset();
     replies = [JSON.stringify(bare)];
-    const b = (await turn({ message: BRIEF })).json();
+    const b = await hostTurn(BRIEF);
     expect(b.assistant_text).toBe(['I\'ve drafted a first model of: Should the bakery buy a second oven?',
       'I used 10 things from your brief and added 1 of my own for you to check.', '1. What would the second oven cost?',
       'The chance also waits on 1 other thing, listed with the result.'].join('\n\n'));
