@@ -110,8 +110,9 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
         toolCalls: [{ name: 'draft_canonical_model', ok: false, outcome: 'refused', refusal: draft.model === null ? 'no_draft' : 'does_not_compile' }],
         toolResults: [{ ok: false, mutated: false, ...model_program, ...(provider_error !== undefined ? { provider_error } : {}) }], mutated: false, verifiedSave: false, payload: { canonical_analysis_view: null, model_program } };
     }
-    // Host-owned: a draft is Olumi's reading until the person confirms it, so nothing in it is approved yet (step 2).
-    program = { model_program: MODEL_PROGRAM, canonical: asDrafted(draft.model), seed: seedOf(input.scenarioId), person_words: [input.message], runs: [] };
+    // Host-owned: a draft is Olumi's reading until the person confirms it, so nothing in it is approved yet (step 2). The day
+    // the drafter was told is kept as the model's period 0, so a later update counts its dates from the same day (words#5).
+    program = { model_program: MODEL_PROGRAM, canonical: asDrafted(draft.model), seed: seedOf(input.scenarioId), person_words: [input.message], runs: [], drafted_on: draft.today };
   } else {
     // A Run press: the stored Run IS the analysis of this model on this engine, shown as stored, nothing written.
     const shown = reopenProgram(input.saved.graph);

@@ -21,7 +21,7 @@ import { simulate } from '../../model-program/simulate/simulate.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_JSON_SCHEMA, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX } from '../prompt.js';
 import { runModelProgramTurn } from '../turn.js';
 import { evaluateCanonical, seedOf, RUN_DRAWS } from '../evaluate.js';
-import { programReadOf, reopenProgram, savedProgramOf, sourceTextOf } from '../program-store.js';
+import { livingModelOf, programReadOf, reopenProgram, savedProgramOf, sourceTextOf } from '../program-store.js';
 import { applyCanvasFigure, applyProgramChange, holdProgramCard, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
 import { log as staticLog } from '../../../utils/telemetry.js';
 import { GROUPS, readingOf, validatePostimage } from '../postimage.js';
@@ -1985,6 +1985,61 @@ describe('the model-program turn on the real core route', () => {
     expect([p.data.changes[0].before, p.data.changes[0].after]).toEqual([
       'no figure yet (in week), still to be given, Olumi asks "When will the second oven arrive?", no basis given, not in your words',
       `2 week, known, no question, based on "Two whole weeks from today, 25 October 2026.", in your words "${words}"`]);
+  });
+
+  it('words#5, one model, one period 0: the first draft\'s day is kept with the saved program, and an update on a later day counts a stated date from THAT day, naming both; a program saved before it counts from today as before, and reopens and rewrites exactly as stored', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      // Drafted on Monday 26 October 2026 (GMT): the oven's arrival is asked, counted over eight weeks.
+      vi.setSystemTime(new Date('2026-10-26T10:00:00Z'));
+      const m = bakery();
+      m.quantities.push(q('oven_weeks', 'week', { status: 'asked', question: 'When will the second oven arrive?' }), q('weeks_counted', 'week', { value: 8, quote: 'We count eight weeks' }));
+      m.goals = m.goals.map((g) => ({ ...g, measure: { ...g.measure!, window: { origin_event: null, origin_offset: null, start: 0, periods: 'weeks_counted' } } }));
+      m.options = m.options.map((o) => (o.id === 'second_oven' ? { ...o, sets: o.sets.map((x) => ({ ...x, starts_after_periods: 'oven_weeks' })) } : o));
+      replies = [JSON.stringify(m)];
+      expect((await turn({ message: `${BRIEF} We count eight weeks.` })).json().model_program.saved).toBe(true);
+      expect(sent[0]!.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is 2026-10-26 (Europe/London). A date they state counts in whole periods from today, which is period 0.`);
+      expect(persisted!.living_model.drafted_on).toBe('2026-10-26');
+      const drafted = JSON.parse(JSON.stringify(persisted)) as Json;
+      // A program saved before the day was kept: the same stored JSON without it.
+      const { drafted_on: _day, ...oldLiving } = drafted.living_model as Json;
+      const old = { ...drafted, living_model: oldLiving };
+
+      // Two weeks later, on 9 November, they answer the asked date.
+      vi.setSystemTime(new Date('2026-11-09T10:00:00Z'));
+      const words = 'It arrives on 23 November 2026.';
+      const deps = { dispatch, proposals: new ProposalStore() };
+      const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words });
+      const ask = (c: Json) => { sent.length = 0; return proposeProgramChange(deps, c as never, ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request: '', remove: [],
+        answers: [{ id: 'oven_weeks', value: null, low: null, high: null, range_kind: null, party: null, quote: words, basis: null, status: 'known', author: 'person' }] })) as Promise<Json>; };
+
+      // Contrast first, the program saved before: it reopens exactly as stored (the same newest Run, current, its view byte for
+      // byte), is rewritten with no new key, and its update counts from the day it runs, the line as it always was.
+      persisted = JSON.parse(JSON.stringify(old)) as Json;
+      const reopened = reopenProgram(JSON.parse(JSON.stringify(old)))!;
+      expect([reopened.run!.run_id, reopened.current, reopened.engine_current]).toEqual([oldLiving.runs.at(-1).run_id, true, true]);
+      expect(stableStringify(reopened.view)).toBe(stableStringify(oldLiving.runs.at(-1).result.canonical_analysis_view));
+      expect(livingModelOf(savedProgramOf(old)!)).toEqual(oldLiving);
+      expect(Object.keys(withNewRun(savedProgramOf(old)!).graph.living_model as Json)).toEqual(['model_program', 'canonical', 'seed', 'person_words', 'runs']);
+      replies = [savedWith((d) => setQ(d, 'oven_weeks', { status: 'known', question: null, value: 2, author: 'olumi', quote: null, basis: 'Two whole weeks from today, 9 November 2026.' }))];
+      expect((await ask(ctx())).status).toBe('ok');
+      expect(sent).toHaveLength(1);
+      expect(sent[0]!.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is 2026-11-09 (Europe/London). A date they state counts in whole periods from today, which is period 0.`);
+
+      // The program with its day: the drafter is told both days, and counts their date from 26 October, the model's period 0.
+      persisted = JSON.parse(JSON.stringify(drafted)) as Json;
+      replies = [savedWith((d) => setQ(d, 'oven_weeks', { status: 'known', question: null, value: 4, author: 'olumi', quote: null, basis: 'Four whole weeks from 26 October 2026, period 0.' }))];
+      const c = ctx();
+      const p = await ask(c);
+      expect(p.status, JSON.stringify(p)).toBe('ok');
+      expect(sent).toHaveLength(1);
+      expect(sent[0]!.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is 2026-11-09 (Europe/London). This model's period 0 is 2026-10-26, the day it was first drafted: `
+        + 'a date they state, and anything they time from today, counts in whole periods from 2026-10-26.');
+      // Approved, the update is saved with the SAME period 0, and their answer is the drafter's four weeks, in their words.
+      expect(await applyProgramChange(deps, c as never, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+      expect(persisted!.living_model.drafted_on).toBe('2026-10-26');
+      expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'oven_weeks')).toMatchObject({ value: 4, status: 'known', author: 'person', quote: words });
+    } finally { vi.useRealTimers(); }
   });
 
   it('DL 23 Oct (batch 4 marketing-r2): what a measure leaves out is kept in their words and named; the chance says what it covers and what it leaves out, never that it covers everything', () => {

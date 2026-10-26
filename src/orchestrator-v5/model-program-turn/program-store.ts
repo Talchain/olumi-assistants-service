@@ -4,14 +4,19 @@
  *
  * ONE canonical authority (the PL's ruling, 23 Oct): the saved graph is S1's GraphV3 PROJECTION of the canonical model, never
  * a second model to edit. The program rides it in `living_model`, under ONE discriminator every writer, router and reader uses:
- *   { model_program: 'v1', canonical, seed, person_words, runs }
+ *   { model_program: 'v1', canonical, seed, person_words, runs, drafted_on? }
  *  · canonical: the CanonicalModel (its own `version`);
  *  · seed: fixed per scenario; person_words: every text of the person's the quotes are checked against (the brief, their
  *    later figures and answers);
- *  · runs: every Run with its receipt (`run-receipt.ts`), newest last. A reopen shows the newest stored Run, never a recompute.
+ *  · runs: every Run with its receipt (`run-receipt.ts`), newest last. A reopen shows the newest stored Run, never a recompute;
+ *  · drafted_on: the day (Europe/London) the first draft was told it is, which is the model's period 0, so a date read in a
+ *    later update counts from the same day as every date the first draft read (one model, one period 0). A program saved
+ *    before it has none, and an update on it counts from the day it runs, as before. It is outside the revision digest, so
+ *    an old program's stored Runs read exactly as they did.
  * A living model that CLAIMS a program (it carries `model_program`) but cannot be read as v1 is UNREADABLE: refused with a
  * way forward, never treated as a legacy model or as no model.
  */
+import { isCalendarDate } from '../goal-target/deadline-date.js';
 import { CanonicalModel, withDeclaredTiming, type CanonicalModelT } from '../model-program/canonical.js';
 import { ENGINE_VERSIONS, shownRun, shownView, type EngineVersions, type StoredRun } from './run-receipt.js';
 
@@ -26,6 +31,8 @@ export type SavedProgram = {
   readonly seed: number;
   readonly person_words: readonly string[];
   readonly runs: readonly StoredRun[];
+  /** The model's period 0, YYYY-MM-DD (Europe/London): the first draft's today. Absent on a program saved before it. */
+  readonly drafted_on?: string;
 };
 
 /** A stored Run as the store keeps it: its id, its receipt and its result (their insides are the engine's, read as stored). */
@@ -46,7 +53,10 @@ export function programReadOf(graph: unknown): ProgramRead {
   if (typeof lm['seed'] !== 'number' || !Array.isArray(words) || !words.every((w) => typeof w === 'string')) return { kind: 'unreadable', reason: 'its saved model is missing its seed or the person\'s words' };
   const runs: unknown = lm['runs'];
   if (!Array.isArray(runs) || !runs.every(isStoredRun)) return { kind: 'unreadable', reason: 'its stored Runs are not readable' };
-  return { kind: 'program', program: { model_program: MODEL_PROGRAM, canonical: parsed.data, seed: lm['seed'], person_words: words as string[], runs } };
+  // A period-0 date that is no calendar date reads as none, the behaviour before it was kept: never a refused model.
+  const day: unknown = lm['drafted_on'];
+  const drafted = isCalendarDate(day) ? { drafted_on: day } : {};
+  return { kind: 'program', program: { model_program: MODEL_PROGRAM, canonical: parsed.data, seed: lm['seed'], person_words: words as string[], runs, ...drafted } };
 }
 /** The saved program, or undefined when the graph holds none or an unreadable one (the caller tells those apart with `programReadOf`). */
 export function savedProgramOf(graph: unknown): SavedProgram | undefined {
@@ -58,8 +68,9 @@ export function savedProgramOf(graph: unknown): SavedProgram | undefined {
 export const unreadableWords = (reason: string): string =>
   `This scenario's model can't be opened here: ${reason}. Nothing was changed. You can start a new scenario from your brief, and this one stays as it was.`;
 
-/** The living model a write stores: exactly the program, nothing derived beyond its stored Runs. */
-export const livingModelOf = (p: SavedProgram): Rec => ({ model_program: p.model_program, canonical: p.canonical, seed: p.seed, person_words: p.person_words, runs: p.runs });
+/** The living model a write stores: exactly the program, nothing derived beyond its stored Runs (a program with no period-0 date is stored as before). */
+export const livingModelOf = (p: SavedProgram): Rec => ({ model_program: p.model_program, canonical: p.canonical, seed: p.seed, person_words: p.person_words, runs: p.runs,
+  ...(p.drafted_on !== undefined ? { drafted_on: p.drafted_on } : {}) });
 
 /** The person's words the compiler checks quotes against: the brief and every answer they gave, in order. */
 export const sourceTextOf = (words: readonly string[]): string => words.join('\n');

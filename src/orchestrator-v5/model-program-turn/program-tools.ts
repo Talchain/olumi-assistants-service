@@ -161,7 +161,8 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   const request = said.length === 0 ? args.request : [args.request.trim(), ...said].filter((x) => x !== '').join('\n');
   const set = answered(program.canonical, figures);
   if (typeof set === 'string') return refused('not_an_answer', set);
-  const drafted = request.trim() !== '' || args.remove.length > 0 ? await proposePostimage(set.model, words, request, args.remove, ledgeredResponsesCall()) : set;
+  // The drafter counts a date in the change from the model's own period 0, the first draft's day (words#5), never a second one.
+  const drafted = request.trim() !== '' || args.remove.length > 0 ? await proposePostimage(set.model, words, request, args.remove, ledgeredResponsesCall(), program.drafted_on) : set;
   // Why an update took more than one drafting call: each attempt's time and the compiler's error codes (never the person's words).
   if ('attempts' in drafted) log.info({ event: 'model_program.update_draft', scenario_id: ctx.scenario_id, attempts: drafted.attempts.map((a) => ({ ms: a.ms,
     codes: a.errors?.map((e) => e.code) ?? null, ...(a.failed !== undefined ? { failed: a.failed } : {}) })) }, 'model-program: update drafted');
