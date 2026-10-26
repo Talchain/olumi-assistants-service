@@ -3,10 +3,10 @@
  * whose saved model is a program, each tool works on the canonical model:
  *  · read_canonical_context: the program as the agent reads it (quantities with their status and who gave them, the
  *    questions still open, the stored Run's words);
- *  · propose_change: an ANSWER to a listed question is set on the item it answers, exactly (`answered`, the same builder as
- *    the canvas edit; no AI call); a structural change, in words with the ids to remove (or an answer with no figure on a
- *    goal, limit or left-out record), has Olumi's drafter return only the records it changes or adds, merged by id onto the
- *    saved model (`proposePostimage`). The one validator checks either exactly (`validatePostimage`), and it is compiled
+ *  · propose_change: an ANSWER to a listed question is set on the item it answers, exactly as the AI declared it (`answered`,
+ *    the same builder as the canvas edit; no AI call); a structural change or an answer in words, in request with the ids to
+ *    remove, has Olumi's drafter return only the records it changes or adds, merged by id onto the saved model
+ *    (`proposePostimage`), and the drafter's records pass as it wrote them. The one validator checks either exactly (`validatePostimage`), and it is compiled
  *    and evaluated now, so the card the person approves holds the exact model, EVERY change on it, and the Run it would
  *    store; nothing is saved;
  *  · apply_change: on the person's approval of THAT proposal, its model and Run (today's engine's, when the card's is from
@@ -27,7 +27,7 @@ import { ok, refused, unavailable, type ToolOutcome } from '../path-b/tools/outc
 import { CanonicalQuantity, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
 import { compile } from '../model-program/compile.js';
 import { ledgeredResponsesCall, proposePostimage } from './draft.js';
-import { validatePostimage, verbatimIn, withoutHost } from './postimage.js';
+import { validatePostimage } from './postimage.js';
 import { isSaved, postimageOf, programOperationId, savePostimage, withNewRun } from './program-save.js';
 import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, sourceTextOf, unreadableWords, type SavedProgram } from './program-store.js';
 import { shownRun, shownView, type StoredRun } from './run-receipt.js';
@@ -42,14 +42,14 @@ export interface ProgramToolDeps { readonly dispatch: InternalDispatch; readonly
 
 /** Said with the turn's state on a program scenario: how its tools work. The standing instructions stay byte for byte. */
 export const PROGRAM_TURN_GUIDANCE = 'This scenario\'s model is a model program: read_canonical_context gives its quantities (with who gave each figure), goals, limits, options, open questions and its stored Run. '
-  + 'Only when the person asks to change the model (an answer, a correction, a new item or a removal), call propose_change ONCE: an answer to a listed question goes in answers, on that item\'s id; '
-  + 'any other change goes in request, with their exact words for every figure of theirs, and in remove the ids (from read_canonical_context) of anything they asked to remove. Answers in the order of your questions answer them in that order, and "I don\'t know" is an answer: put each on the item of the question it answers, and never ask one again in the same words. '
+  + 'Only when the person asks to change the model (an answer, a correction, a new item or a removal), call propose_change ONCE: an answer to a listed question that gives a figure, or says they do not know, goes in answers, on that figure\'s id; '
+  + 'an answer in words with no figure (a measure, a deadline, a date, a definition) and any other change go in request, with their exact words for every figure of theirs, and in remove the ids (from read_canonical_context) of anything they asked to remove. Answers in the order of your questions answer them in that order, and "I don\'t know" is an answer: put each on the item of the question it answers, and never ask one again in the same words. '
   + 'Olumi\'s drafter writes a change in request, and the card shows every change. Explanations and questions need no proposal. '
   + 'A turn shows one card; the person approves it, and apply_change then saves the model with a new Run.';
 
 /**
  * AN ANSWER to a listed question (DL 24 Oct): the figure it answers, declared by the AI with the canonical model's own fields,
- * its status and whose it is, as the AI declares them and the host checks literally (it never assigns them): known, their
+ * its status and whose it is, as the AI declares them (the host never assigns them; strip, Paul 26 Oct): known, their
  * figure in their exact words; unknown, their "I don't know", quoted, the basis saying what would size it (never asked again);
  * estimated, Olumi's estimate with its range and basis, never their words.
  */
@@ -61,7 +61,7 @@ export const ProgramChangeParams = z.object({
   basis: z.string().describe('Why Olumi proposes it.'),
   request: z.string().describe('The change the person asked for, in plain words, with their exact words for every figure of theirs.'),
   remove: z.array(z.string()).describe('The ids of the items the person asked to remove, from read_canonical_context; [] for none.'),
-  answers: z.array(Answer).max(12).default([]).describe('Their answers to the listed questions, each on the figure it answers (its id from read_canonical_context); [] for none.'),
+  answers: z.array(Answer).default([]).describe('Their answers to the listed questions, each on the figure it answers (its id from read_canonical_context); [] for none.'),
 }).strict();
 export type ProgramChangeArgs = z.input<typeof ProgramChangeParams>;
 
@@ -147,64 +147,28 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   const words = [...program.person_words, ...new Set(turnWords)];
   // Their words THIS turn: what they typed, and nothing else (Codex r1–r2 #3727). A Challenge or chip turn has none.
   const fresh = ctx.user_turn_text?.trim() ? [ctx.user_turn_text] : [];
-  // What the AI declares: answers, set on their items exactly (no redraft), and any structural change, which Olumi's drafter
-  // writes on the model holding those answers, with their words: ONE card (DoD 24 Oct: refusing the pair dropped their goals).
+  // What the AI declares, exactly as it declares it (strip, Paul 26 Oct: authorship is the AI's alone): answers, set on their
+  // items (no redraft), and any change in request, an answer in words included, which Olumi's drafter writes on the model
+  // holding those answers: ONE card (DoD 24 Oct: refusing the pair dropped their goals).
   const answers = args.answers ?? [];
-  // Whose an answer is, as declared, checked literally (Codex r1 #3727): theirs only in their words THIS turn, whatever it
-  // changes (a basis-only answer too); Olumi's an estimate with its range and basis, never their words.
-  const stale = answers.filter((a) => a.author === 'person' && !verbatimIn(a.quote, fresh)).map((a) => a.id);
-  if (stale.length > 0) return refused('unverified_person_words', `${stale.join(', ')}: your words this turn don't contain it.`, { ids: stale, check: 'this_turn' });
-  const misowned = answers.filter((a) => (a.author === 'olumi') !== (a.status === 'estimated')
-    || (a.author === 'olumi' && (a.low === null || a.high === null || !a.basis?.trim() || a.quote !== null || a.party !== null))).map((a) => a.id);
-  if (misowned.length > 0) return refused('not_an_answer', `${misowned.join(', ')}: their answer is known or unknown, in their words; Olumi's is estimated, with low, high and a basis, never their words.`, { ids: misowned });
-  // An answer with no figure has nothing to set, so Olumi's drafter writes it, as any structural change: the answer to the
-  // question on a goal, limit or left-out record (a measure, a definition, a condition; REFUSED-CHANGE-CLASS 25 Oct, #11–12),
-  // or a known answer on a figure that gives words, not a figure (a date, "launch on 9 April 2027", #8–9: the drafter has
-  // today's date and counts the whole periods). Routed by the record's family, the empty figure and the status only, never by
-  // its words; "I don't know" (unknown) is set on its item as before.
-  const { quantities, goals, limits, left_out } = program.canonical;
-  const toDrafter = (a: AnswerT) => a.value === null && a.low === null && a.high === null && (quantities.some((x) => x.id === a.id)
-    ? a.status === 'known' : [goals, limits, left_out].some((f) => f.some((r) => r.id === a.id)));
-  const figures = answers.filter((a) => !toDrafter(a));
-  const said = answers.filter(toDrafter).map((a) => `The answer to the question on ${a.id}, in ${a.party === null ? 'their' : `${a.party}'s`} words: "${a.quote}"${a.basis?.trim() ? ` (basis: ${a.basis})` : ''}`);
-  const request = said.length === 0 ? args.request : [args.request.trim(), ...said].filter((x) => x !== '').join('\n');
-  const set = answered(program.canonical, figures);
+  const set = answered(program.canonical, answers);
   if (typeof set === 'string') return refused('not_an_answer', set);
   // The drafter counts a date in the change from the model's own period 0, the first draft's day (words#5), never a second one.
-  const drafted = request.trim() !== '' || args.remove.length > 0 ? await proposePostimage(set.model, words, request, args.remove, ledgeredResponsesCall(), program.drafted_on) : set;
+  const drafted = args.request.trim() !== '' || args.remove.length > 0 ? await proposePostimage(set.model, words, args.request, args.remove, ledgeredResponsesCall(), program.drafted_on) : set;
   // Why an update took more than one drafting call: each attempt's time and the compiler's error codes (never the person's words).
   if ('attempts' in drafted) log.info({ event: 'model_program.update_draft', scenario_id: ctx.scenario_id, attempts: drafted.attempts.map((a) => ({ ms: a.ms,
     codes: a.errors?.map((e) => e.code) ?? null, ...(a.failed !== undefined ? { failed: a.failed } : {}),
     // A call that threw: its typed fields only (status, type, code, request id), never its message (W9: the cause was lost).
     ...(a.provider_error !== undefined ? { provider_error: a.provider_error } : {}) })) }, 'model-program: update drafted');
   if (drafted.model === null) return refused('no_model_back', 'Olumi could not write the updated model just now; nothing changed.');
-  // Their answers win on the drafter's model too, set again exactly (buddy 24 Oct); one it removed is refused by name, never dropped.
-  // An answer in words on a figure stays theirs there (Codex r1 #3767): their status, party and words, the drafter's reading of
-  // them its figure; one it read no figure from is refused by name, never saved as Olumi's. Read means the drafter returned
-  // that record changed, as a known figure, apart from the host's own fields: one it left as saved (the merge keeps it) or read only as an estimate is not
-  // their answer, so it is never restamped as theirs (integrated review 26 Oct: Olumi's estimate saved as "known, yours").
-  const worded = answers.filter((a) => toDrafter(a) && quantities.some((x) => x.id === a.id));
-  // One the change removed, a figure or in words, is refused by its label as removed (writes#6), never as read no figure.
-  const gone = [...figures, ...worded].filter((a) => !drafted.model!.quantities.some((x) => x.id === a.id)).map((a) => a.id);
-  if (gone.length > 0) return refused('not_an_answer', `${gone.map((id) => `"${set.model.quantities.find((x) => x.id === id)!.label}" (${id})`).join(', ')}: the change removed what you answered, so nothing changed.`, { ids: gone });
-  const unread = worded.filter((a) => {
-    const x = drafted.model!.quantities.find((y) => y.id === a.id);
-    return x === undefined || (x.value === null && x.low === null && x.high === null) || x.status !== 'known'
-      || stableStringify(withoutHost(x)) === stableStringify(withoutHost(set.model.quantities.find((y) => y.id === a.id)));
-  }).map((a) => a.id);
-  if (unread.length > 0) return refused('not_an_answer', `${unread.join(', ')}: the change read no figure from your answer, so nothing changed.`, { ids: unread });
-  const postimage: CanonicalModelT = { ...drafted.model, quantities: drafted.model.quantities.map((x) => {
-    const a = worded.find((w) => w.id === x.id);
-    return a === undefined ? x : { ...x, status: 'known' as const, author: a.author, party: a.party, quote: a.quote, question: null };
-  }) };
-  const draft = answered(postimage, figures);
-  if (typeof draft === 'string') return refused('not_an_answer', draft);
-  const v = validatePostimage(program.canonical, draft.model, { removals: args.remove, words, fresh, approver: ctx.authenticated_user_id });
+  // The drafter's model passes as it wrote it: no answer is set again on it and no record re-stamped (strip, Paul 26 Oct).
+  const v = validatePostimage(program.canonical, drafted.model, { removals: args.remove, words, fresh, approver: ctx.authenticated_user_id });
   if (!v.ok) return refused(v.code, v.reason, { ids: v.ids, ...(v.check ? { check: v.check } : {}) });
   // The compiler's errors first (the same compile the Run makes), before anything is projected: the display drew a range
-  // with one end as a TypeError, which reached the person as a 502 (DoD-I qualitative-r5).
+  // with one end as a TypeError, which reached the person as a 502 (DoD-I qualitative-r5). Every sentence goes back, as the
+  // first draft's repair sends them.
   const errors = compile(v.model, { sourceText: sourceTextOf(words) }).errors;
-  if (errors.length > 0) return refused('does_not_compile', errors.slice(0, 3).map((e) => e.message).join(' '));
+  if (errors.length > 0) return refused('does_not_compile', errors.map((e) => e.message).join(' '));
   // The person's words this turn are kept with the model: what it was changed from, in their words.
   const next = withNewRun({ ...program, canonical: v.model, person_words: words });
   const p = holdProgramCard(deps.proposals, { scenarioId: ctx.scenario_id, userId: ctx.authenticated_user_id, graphHash: base.saved.graphHash, identity: base.saved.identity!, base: program },
@@ -221,15 +185,14 @@ export function figurePostimage(canonical: CanonicalModelT, filled: CanonicalQua
     : { ...canonical, quantities: [...canonical.quantities, filled], goals: canonical.goals.map((g) => (g.id === splitFor ? { ...g, measure: { ...g.measure!, target: filled.id } } : g)) };
 }
 /**
- * Answers on their items through the S2 builder: only an existing item (an answer never creates one; PB 24 Oct, 13 misbinds),
- * its status and whose it is as declared (checked before), the question cleared.
+ * Answers on their items through the S2 builder: only an existing figure (an answer never creates one, and one on no figure
+ * would be silently dropped; PB 24 Oct, 13 misbinds), its status and whose it is as declared, the question cleared.
  */
 function answered(canonical: CanonicalModelT, answers: readonly AnswerT[]): { readonly model: CanonicalModelT } | string {
   let model = canonical;
   for (const a of answers) {
     const q = model.quantities.find((x) => x.id === a.id);
     if (q === undefined) return `${a.id} is not a figure in this model; a new item is a structural change.`;
-    if (q.status === 'derived') return `"${q.label}" is worked out by its relation; answer one of its inputs.`;
     const none = a.status === 'unknown';
     model = figurePostimage(model, { ...q, status: a.status, author: a.author, value: none ? null : a.value, low: none ? null : a.low,
       high: none ? null : a.high, range_kind: none ? null : a.range_kind, party: a.party, quote: a.quote, basis: a.basis, question: null });
@@ -370,9 +333,9 @@ export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch'>,
   if (low !== null && high !== null && low > high) return { status: 'refused', reason: `The low end ${low} is above the high end ${high}.` };
   const shared = goal !== undefined && (program.canonical.goals.some((x) => x.id !== goal.id && x.measure?.target === q.id) || program.canonical.limits.some((l) => l.measure?.bound === q.id));
   const id = shared ? `${goal!.id}_target` : q.id;
-  // A typed figure is theirs: a direction stated for the figure it replaces is not kept (issue 40).
+  // A typed figure is theirs.
   const filled: CanonicalQuantityT = { ...q, id, value: edit.value, low, high, range_kind: onRange ? q.range_kind : null, status: 'known', author: 'person', party: null,
-    quote: words, question: null, basis: null, direction: null, approval: 'approved' };
+    quote: words, question: null, basis: null, approval: 'approved' };
   const canonical = figurePostimage(program.canonical, filled, shared ? goal!.id : undefined);
   const v = validatePostimage(program.canonical, canonical, { removals: [], words: [...program.person_words, words], fresh: [words], approver: edit.approver });
   if (!v.ok) return { status: 'refused', reason: v.reason };

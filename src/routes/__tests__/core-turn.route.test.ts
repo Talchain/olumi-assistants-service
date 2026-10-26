@@ -1037,7 +1037,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(j.notes).toEqual([]);
     });
 
-    it('a Challenge turn has no typed words, so no answer of theirs can pass (Codex r2 #3727): one quoting their brief is refused by id, and the saved model is unchanged', async () => {
+    // Strip (Paul 26 Oct; A5 removed): program-tools no longer refuses an answer whose quote is not this turn's words.
+    it('a Challenge turn (A5 removed): an answer quoting their brief is never refused by program-tools\' own this-turn quote check, and the saved model is unchanged', async () => {
       await savedProgram();
       const saved = JSON.stringify((persisted as Json).living_model);
       const item = (((persisted as Json).nodes ?? []) as Json[]).find((n) => n.kind === 'factor') ?? ((persisted as Json).nodes as Json[])[0]!;
@@ -1050,12 +1051,11 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect((await challengeOn(String(item.id))).statusCode).toBe(200);
       expect(calls).toHaveLength(2);
       const output = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'ans')!.output;
-      expect(JSON.parse(typeof output === 'string' ? output : JSON.stringify(output))).toMatchObject({ status: 'refused', reason: 'unverified_person_words',
-        detail: "oven_price: your words this turn don't contain it.", data: { ids: ['oven_price'], check: 'this_turn' } });
+      expect(JSON.stringify(output)).not.toContain('your words this turn don');
       expect(JSON.stringify((persisted as Json).living_model)).toBe(saved);
-      // The turn's one log line names the refused ids and which check refused them, codes only (issue 37).
+      // The turn's one log line never names an id or their words in the clear (issue 37).
       const line = info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : [])).at(-1)!;
-      expect(line.tool_calls).toEqual([{ name: 'propose_change', outcome: 'refused', refusal: 'unverified_person_words', words: { check: 'this_turn', ids: [hashed('oven_price')] } }]);
+      expect(line.tool_calls.map((c: Json) => c.name)).toEqual(['propose_change']);
       expect(JSON.stringify(line)).not.toContain('oven_price');
       info.mockRestore();
     });
@@ -1153,7 +1153,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // Targeted answers (DL 24 Oct): propose_change, as SENT, puts an answer in answers on its item's id and anything else in
       // request; its parameters carry answers, so the feature is not inert. Spelled here.
       const sentSha = (name: string) => createHash('sha256').update(String(sentTools[name]), 'utf8').digest('hex');
-      expect(String(sentTools.propose_change)).toContain('An answer to a listed question (a blocker, or an asked item\'s question) goes in answers, on that existing item\'s id from read_canonical_context, saying whose it is: author person, ');
+      // Strip (Paul 26 Oct; B5 removed): a figure answer goes in answers; a worded answer goes in request, as the AI writes it.
+      expect(String(sentTools.propose_change)).toContain('An answer to a listed question (a blocker, or an asked item\'s question) that gives a figure, or says they do not know, goes in answers, on that existing figure\'s id from read_canonical_context, saying whose it is: author person, ');
+      expect(String(sentTools.propose_change)).toContain('An answer in words with no figure (a measure, a deadline, a date, a definition) goes in request, in their exact words with the id it answers. ');
       expect(String(sentTools.propose_change)).toContain('Anything else (a new item or link, a rename, a removal) goes in request, in plain words with their exact words for every figure of theirs, '
         + 'with remove the ids of anything they asked to remove ([] for none); Olumi’s drafter writes it. ');
       // 26 Oct (W9, european 13:44Z): a second proposal is refused only once a card is prepared, and after any refusal, while no
@@ -1161,7 +1163,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // ok). Before it 2bb9c6c0… (ONE correction, after does_not_compile only); the text before W9, "a second proposal in the same
       // turn is refused", hashed to b5d5bc0e….
       // 26 Oct (W6 chat): RUN_WORDS_RULE gained one sentence, the leader's words as given (run.leader.words); before it 806a9ded….
-      expect(sentSha('propose_change')).toBe('6c4611c78b9c45bab08ef8a19a1f861dcdf6646141a25f9e79440f976f73efd1');
+      // Strip (Paul 26 Oct, B5): a worded answer goes in request; before it 6c4611c7….
+      expect(sentSha('propose_change')).toBe('9532ffa4afd08d6973490ba3c57e975ac6985c0bd14d48a348b69509e8643373');
       const sentParams = (calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.parameters as Json;
       expect(Object.keys(sentParams.properties)).toEqual(['public_label', 'basis', 'request', 'remove', 'answers']);
       expect(sentParams.required).toContain('answers');
@@ -1169,10 +1172,11 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // Whose an answer is, declared by the AI (Codex r1 #3727; the host checks it, never sets it).
       expect(sentParams.properties.answers.items.properties.author.enum).toEqual(['person', 'olumi']);
       expect(sentParams.properties.answers.items.required).toContain('author');
-      // The program turn's guidance as SENT (its pin in core-prompt-arm is this text's): answers go in answers, on the item's id.
+      // The program turn's guidance as SENT (its pin in core-prompt-arm is this text's): a figure answer goes in answers, on the
+      // figure's id; a worded answer in request (strip, Paul 26 Oct, B5; before it 4ccd4a59…).
       const guidance = ((calls[0]!.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content)).filter((c) => c.startsWith('This scenario\'s model is a model program'));
       expect(guidance).toHaveLength(1);
-      expect(createHash('sha256').update(guidance[0]!, 'utf8').digest('hex')).toBe('4ccd4a5913bfb242ca4f771b3349ed8a2872b6fc18b7632b8d38c15c92448542');
+      expect(createHash('sha256').update(guidance[0]!, 'utf8').digest('hex')).toBe('38f262c5fc61aff38bb7454774eb4b8e28114f6bdf1a92720ed0e609e7787664');
       // The read the agent got back: the Run's goal_chance exactly as stored (each goal's own line, the joint, the notes).
       const output = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'read')!.output;
       const read = JSON.parse(typeof output === 'string' ? output : JSON.stringify(output)) as Json;

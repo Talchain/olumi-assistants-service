@@ -59,15 +59,11 @@ const OPENING: Record<TurnKind, (m: CanonicalModelT) => string> = {
   draft: (m) => `I've drafted a first model of: ${m.question}`,
   run: () => 'Here is the analysis of the model as it stands.',
 };
-/** The most of the AI's own questions the first reply prints (simplify v1 A4); the rest are counted, and listed on the result. */
-export const REPLY_QUESTIONS = 3;
-/** The id of the drafter's left-out note on an aim not stated (the drafting prompt declares it): its question is the AI's. */
-export const NO_AIM_NOTE = 'aim';
 /**
  * The reply: what calculates (S2's own words per option, then which option is most likely to achieve the goal, or why none
- * is named, in the view's own words); then at most three of the AI's OWN questions on what the Run waits
- * on, in the model's order (the drafter puts the most consequential first; no code ranking); then one line counting the rest. The code
- * writes no question: a blocker with no question of the AI's (a reading, a recount) is counted, never worded.
+ * is named, in the view's own words); then every one of the AI's OWN questions on what the Run waits on, in the model's
+ * order (the drafter puts the most consequential first; no code ranking, no cap: strip, Paul 26 Oct); then one line counting
+ * the rest. The code writes no question: a blocker with no question of the AI's (a reading, a recount) is counted, never worded.
  */
 function replyOf(model: CanonicalModelT, run: StoredRun, kind: TurnKind, words: readonly string[], readingHeld = false): string {
   const view = run.result.canonical_analysis_view as { options?: readonly { cell: { kind: string; face?: string; reasons?: readonly { code: string; message: string | null }[] } }[];
@@ -89,12 +85,10 @@ function replyOf(model: CanonicalModelT, run: StoredRun, kind: TurnKind, words: 
   // A Run stored before blockers (reused while current) gets them from the model as it stands: the same compiler, typed.
   const blockers = compiled.blockers ?? compile(model).blockers;
   const m = normalise(model);
-  // The AI's own words on the record each blocker names; with no aim at all, its left-out note `aim` (the drafter's declared
-  // record for the aim not stated) carries its question on what result they want. Never a guess at which note it is.
+  // The AI's own words on the record each blocker names. Never a guess at which record it is.
   const own = (b: Blocker): string | null => (b.code === 'asked' ? m.quantities.find((q) => q.id === b.id)?.question
-    : b.code === 'measure' || b.code === 'deadline' ? [...m.goals, ...m.limits].find((r) => r.id === b.id)?.question
-      : b.code === 'no_goal' ? m.left_out.find((x) => x.id === NO_AIM_NOTE)?.question : null) ?? null;
-  const asked = [...new Set(blockers.map(own).filter((x): x is string => x !== null && x.trim() !== ''))].slice(0, REPLY_QUESTIONS);
+    : b.code === 'measure' || b.code === 'deadline' ? [...m.goals, ...m.limits].find((r) => r.id === b.id)?.question : null) ?? null;
+  const asked = [...new Set(blockers.map(own).filter((x): x is string => x !== null && x.trim() !== ''))];
   const rest = blockers.filter((b) => { const q = own(b); return q === null || !asked.includes(q); }).length;
   if (asked.length > 0) lines.push(asked.map((q, i) => `${i + 1}. ${q}`).join('\n'));
   if (rest > 0) lines.push(`The chance also waits on ${rest} other ${rest === 1 ? 'thing' : 'things'}, listed with the result.`);

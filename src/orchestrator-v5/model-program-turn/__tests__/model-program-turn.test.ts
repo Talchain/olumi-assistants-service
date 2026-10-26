@@ -347,90 +347,47 @@ describe('the model-program turn on the real core route', () => {
         writes: registered.length - before.registered, provider_rows: (j._provider_calls as Json[]).length, tools: j._agent?.tool_calls ?? null } };
     };
 
-    it('a 503, then the create: the approval runs as an unfailed one does (one apply_change, one CAS write, the same Responses calls, tool calls and provider rows); the second create\'s id is saved', async () => {
-      // The control: the same approval, its create answered at once. Its counts are measured here, never assumed.
-      const control = await draftThenApprove([201]);
-      expect(control.counts.status, control.r.body).toBe(200);
-      expect(stableStringify(persisted!.living_model)).toBe(stableStringify(control.held.living_model));
-      const controlId = conversationIds.get(SCENARIO);
-      beforeEachReset();
+    // Strip (Paul 26 Oct; T3 removed): the create is sent ONCE, whatever its failure; this code adds no retry of its own.
+    it.each([
+      ['a 503', 503],
+      ['no answer at all (fetch threw: connection refused)', new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED 10.0.0.1:443'), { code: 'ECONNREFUSED' }) })],
+      ['a 429', 429], ['a 400', 400],
+      ['the client\'s own timeout (its fetch aborted, the turn not cancelled)', new DOMException('This operation was aborted', 'AbortError')],
+      ['undici\'s headers timeout', new TypeError('fetch failed', { cause: Object.assign(new Error('Headers Timeout Error'), { name: 'HeadersTimeoutError', code: 'UND_ERR_HEADERS_TIMEOUT' }) })],
+      ['undici\'s connect timeout', new TypeError('fetch failed', { cause: Object.assign(new Error('Connect Timeout Error (attempted address: api.openai.com:443, timeout: 10000ms)'), { name: 'ConnectTimeoutError', code: 'UND_ERR_CONNECT_TIMEOUT' }) })],
+    ] as const)('%s: ONE create attempt, never repeated (T3 removed); the turn fails with no Responses call and no write', async (_name, answer) => {
       const lines = await watchCreateLines();
-      const failed = await draftThenApprove([503, 201]);
+      const x = await draftThenApprove([answer, 201]); // a second attempt would take the 201
+      expect({ status: x.counts.status, creates: x.counts.creates, responses: x.counts.responses, writes: x.counts.writes, left: createAnswers.length,
+        graph_unchanged: JSON.stringify(persisted) === x.before.graph, saved_id: conversationIds.get(SCENARIO) ?? null })
+        .toEqual({ status: 502, creates: 1, responses: 0, writes: 0, left: 1, graph_unchanged: true, saved_id: null });
+      // ONE line at this non-model boundary, with no attempt count and no retry flag: no body, no key, no provider prose.
       const logged = lines();
-      expect(failed.counts, failed.r.body).toEqual({ ...control.counts, creates: 2 });
-      expect([control.counts.creates, control.counts.writes, control.counts.tools.filter((t: Json) => t.name === 'apply_change').length]).toEqual([1, 1, 1]);
-      // The card's frozen model is what was written, once.
-      expect(stableStringify(persisted!.living_model)).toBe(stableStringify(failed.held.living_model));
-      expect([controlId, conversationIds.get(SCENARIO), failed.j._agent.sdk.conversation_id, failed.j._agent.sdk.conversation_created])
-        .toEqual(['conv_created_1', 'conv_created_2', 'conv_created_2', true]);
-      expect(creates.map((c) => c.body)).toEqual([{ items: [] }, { items: [] }]);
-      // ONE line per attempt at this non-model boundary: path, status, attempt, ms. No body, no key, no provider prose.
-      expect(logged).toEqual([
-        { event: 'core_turn.conversation_create', scenario_id: SCENARIO, path: '/v1/conversations', attempt: 1, status: 503, duration_ms: expect.any(Number), retry: true },
-        { event: 'core_turn.conversation_create', scenario_id: SCENARIO, path: '/v1/conversations', attempt: 2, status: 201, duration_ms: expect.any(Number) },
-      ]);
+      expect(logged).toHaveLength(1);
+      expect(Object.keys(logged[0]!)).not.toContain('retry');
+      expect(Object.keys(logged[0]!)).not.toContain('attempt');
       for (const words of ['upstream connect', 'sk-', 'items', 'conv_created']) expect(JSON.stringify(logged)).not.toContain(words);
     }, 30_000);
 
-    it('no answer at all (fetch threw: connection refused), then the create: tried once more, and the approval runs and writes once', async () => {
+    it('the create answered at once: the approval runs (one apply_change, one CAS write), one line with its status', async () => {
       const lines = await watchCreateLines();
-      const refused = new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED 10.0.0.1:443'), { code: 'ECONNREFUSED' }) });
-      const x = await draftThenApprove([refused, 201]);
-      expect([x.counts.status, x.counts.creates, x.counts.writes], x.r.body).toEqual([200, 2, 1]);
-      expect(lines().map(({ attempt, status, error, error_code, retry }) => ({ attempt, status, error, error_code, retry }))).toEqual([
-        { attempt: 1, status: undefined, error: 'TypeError', error_code: 'ECONNREFUSED', retry: true },
-        { attempt: 2, status: 201, error: undefined, error_code: undefined, retry: undefined }]);
+      const x = await draftThenApprove([201]);
+      expect([x.counts.status, x.counts.creates, x.counts.writes, x.counts.tools.filter((t: Json) => t.name === 'apply_change').length], x.r.body).toEqual([200, 1, 1, 1]);
+      expect(stableStringify(persisted!.living_model)).toBe(stableStringify(x.held.living_model));
+      expect(lines()).toEqual([{ event: 'core_turn.conversation_create', scenario_id: SCENARIO, path: '/v1/conversations', status: 201, duration_ms: expect.any(Number) }]);
     }, 30_000);
 
-    it('three 503s: the turn fails as one 503 failed it before (502, the same error), after 3 creates, with no Responses call, no write and the saved model unchanged', async () => {
-      const lines = await watchCreateLines();
-      const x = await draftThenApprove([503, 503, 503, 201]); // a fourth attempt would take the 201
-      expect({ ...x.counts, error: x.j.error, graph_unchanged: JSON.stringify(persisted) === x.before.graph, saved_id: conversationIds.get(SCENARIO) ?? null, left: createAnswers.length })
-        .toEqual({ status: 502, creates: 3, responses: 0, writes: 0, provider_rows: 0, tools: null, graph_unchanged: true, saved_id: null, left: 1,
-          error: { code: 'UPSTREAM_ERROR', message: 'The reply didn’t arrive. Any changes already saved are kept. Send a new message to continue.', retry_safe: true, nothing_saved: true } });
-      expect(lines().map((l) => [l.attempt, l.status, l.retry])).toEqual([[1, 503, true], [2, 503, true], [3, 503, false]]);
-    }, 30_000);
-
-    it.each([
-      ['a 429', 429], ['a 400', 400],
-      ['the client\'s own timeout (its fetch aborted, the turn not cancelled)', new DOMException('This operation was aborted', 'AbortError')],
-      // undici's own timeouts reach the client as fetch's TypeError; the client raises both as its timeout (Codex FAIL, r1).
-      ['undici\'s headers timeout', new TypeError('fetch failed', { cause: Object.assign(new Error('Headers Timeout Error'), { name: 'HeadersTimeoutError', code: 'UND_ERR_HEADERS_TIMEOUT' }) })],
-      ['undici\'s connect timeout', new TypeError('fetch failed', { cause: Object.assign(new Error('Connect Timeout Error (attempted address: api.openai.com:443, timeout: 10000ms)'), { name: 'ConnectTimeoutError', code: 'UND_ERR_CONNECT_TIMEOUT' }) })],
-    ] as const)('%s: ONE create attempt, never repeated; the turn fails with no Responses call and no write', async (_name, answer) => {
-      const lines = await watchCreateLines();
-      const x = await draftThenApprove([answer, 201]);
-      expect({ status: x.counts.status, creates: x.counts.creates, responses: x.counts.responses, writes: x.counts.writes, left: createAnswers.length,
-        graph_unchanged: JSON.stringify(persisted) === x.before.graph }).toEqual({ status: 502, creates: 1, responses: 0, writes: 0, left: 1, graph_unchanged: true });
-      expect(lines().map((l) => [l.attempt, l.retry])).toEqual([[1, false]]);
-    }, 30_000);
-
-    it('the classifier: every timeout the client raises is final, with or without a cause; no answer at all and a 5xx are tried again', async () => {
-      const { createFailureIsTransient } = await import('../../agent-lane/core/sdk-turn.js');
-      const { APIConnectionError, APIConnectionTimeoutError, APIError, APIUserAbortError } = await import('openai-v7');
-      const status = (s: number) => APIError.generate(s, undefined, undefined, new Headers());
-      expect([
-        new APIConnectionTimeoutError(), // the client's deadline while the body is read: no cause (unreachable here at its 600 s)
-        Object.assign(new APIConnectionTimeoutError(), { cause: new TypeError('fetch failed') }),
-        new APIUserAbortError(), status(429), status(400),
-        new APIConnectionError({ cause: new TypeError('fetch failed') }), status(500), status(503),
-      ].map(createFailureIsTransient)).toEqual([false, false, false, false, false, true, true, true]);
-    });
-
-    it.each(['create', 'backoff'] as const)('the turn\'s signal aborted during the %s: the turn stops at once, after ONE create attempt and no Responses call', async (during) => {
-      const { runCoreTurn, CONVERSATION_CREATE_BACKOFF_MS } = await import('../../agent-lane/core/sdk-turn.js');
+    it('the turn\'s signal aborted during the create: the turn stops at once, after ONE create attempt and no Responses call', async () => {
+      const { runCoreTurn } = await import('../../agent-lane/core/sdk-turn.js');
       const { OPENAI_ONLY, runWithProviderPolicy } = await import('../../../adapters/llm/provider-policy.js');
       const { budgetFor } = await import('../../agent-lane/model-budgets.js');
       const cancel = new AbortController();
-      createAnswers = [during === 'create'
-        // In flight when the turn is cancelled: fetch rejects as fetch does, on the signal it was given (never, after 3 s).
-        ? (init: any) => new Promise<Response>((_resolve, reject) => {
-          init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true });
-          setTimeout(() => cancel.abort(), 10);
-          setTimeout(() => reject(new TypeError('the create was never cancelled')), 3_000);
-        })
-        // A 503, then the turn cancelled 10 ms into the wait before the next attempt.
-        : () => { setTimeout(() => cancel.abort(), 10); return createAnswer(503); }, 201];
+      // In flight when the turn is cancelled: fetch rejects as fetch does, on the signal it was given (never, after 3 s).
+      createAnswers = [(init: any) => new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+        setTimeout(() => cancel.abort(), 10);
+        setTimeout(() => reject(new TypeError('the create was never cancelled')), 3_000);
+      }), 201];
       const claimed: string[] = [];
       const t0 = Date.now();
       const outcome = await runWithProviderPolicy(OPENAI_ONLY('agent_core_turn'), () => runCoreTurn({
@@ -439,13 +396,11 @@ describe('the model-program turn on the real core route', () => {
         conversationStore: { read: async () => null, claim: async (_s, id) => { claimed.push(id); return id; } }, signal: cancel.signal,
       })).then(() => 'answered', (err: unknown) => err);
       const ms = Date.now() - t0;
-      // The cancellation itself ends the turn: the client's abort in flight, or the wait's own; never a later failure.
       const { APIUserAbortError } = await import('openai-v7');
-      if (during === 'create') expect(outcome).toBeInstanceOf(APIUserAbortError);
-      else expect([outcome instanceof Error, (outcome as Error).name, outcome instanceof APIUserAbortError]).toEqual([true, 'AbortError', false]);
+      expect(outcome).toBeInstanceOf(APIUserAbortError);
       expect({ aborted: cancel.signal.aborted, creates: creates.length, left: createAnswers.length, responses: sent.length, claimed })
         .toEqual({ aborted: true, creates: 1, left: 1, responses: 0, claimed: [] });
-      expect(ms).toBeLessThan(CONVERSATION_CREATE_BACKOFF_MS[0]!); // at once: never after the wait, nor a second attempt
+      expect(ms).toBeLessThan(500); // at once
     }, 30_000);
 
     it('a scenario with a saved Conversation: its first approval makes 0 creates and continues that Conversation', async () => {
@@ -456,11 +411,9 @@ describe('the model-program turn on the real core route', () => {
   });
 
   /**
-   * ⭐ W9: THE ALPHA'S TURNS SURVIVE AN OPENAI OVERLOAD (served staging 26 Oct). 13:33Z, capacity: the approval SAVED, then the
-   * reply call was accepted and ended on OpenAI's own error event ("Our servers are currently overloaded"); the person got a
-   * 502 UPSTREAM_ERROR for a change that was kept. 13:44Z, european: the drafter's repair
-   * call ended the same way, the loop stopped on it, and the change was refused as does_not_compile, with no card. Each row
-   * drives the real core route or the real tool, with the provider's failure injected at fetch (synthetic bakery words).
+   * W9: AN OPENAI OVERLOAD (served staging 26 Oct). Strip (Paul 26 Oct): our own reply retry (W9a) and drafter resend (W9b) are
+   * removed; the error typing (W9d) stays, so an overload is reported as the provider being busy and a saved change is kept.
+   * Each row drives the real core route or the real tool, with the provider's failure injected at fetch (synthetic bakery words).
    */
   describe('W9: an OpenAI overload (served 26 Oct 13:33Z and 13:44Z)', () => {
     // The provider's error as its stream carries it (the captured shape of 19 Oct's streamed refusal, `{ error: {...} }`), after
@@ -483,32 +436,17 @@ describe('the model-program turn on the real core route', () => {
     };
     const outputsSent = (body: Json): string[] => (body.input as Json[]).filter((i) => i.type === 'function_call_output').map((i) => String(i.call_id));
 
-    it('change 2: an overload on the reply after the approval saved is asked for ONCE more, carrying the saved tool result; the reply arrives and the change is written once', async () => {
+    // Strip (Paul 26 Oct; W9a removed): the reply after a saved change is never asked for again by this code.
+    it('change 2 (W9a removed): an overload on the reply after the approval saved is not asked for again: the change is kept, written once, and the provider is reported busy', async () => {
       const { apply, payload } = await press();
-      replies = [apply, overloaded, 'Saved: the change is in your model.'];
-      const r = await turn(payload);
-      expect(r.statusCode, r.body).toBe(200);
-      const j = r.json();
-      expect([j.assistant_text, j.error, j.durability]).toEqual(['Saved: the change is in your model.', null, 'recorded']);
-      // ONE write (the draft, then the approval once), ONE apply_change, and its receipt the person's.
-      expect(registered).toHaveLength(2);
-      expect((j._agent.tool_calls as Json[]).filter((c) => c.name === 'apply_change').map((c) => c.outcome)).toEqual(['ok']);
-      expect((j.receipts as Json[]).map((x) => x.authorised_by)).toEqual(['person']);
-      // The draft, the apply call, the overloaded reply, and the reply asked for again: the same input, the tool's result in it.
-      expect(sent).toHaveLength(4);
-      expect([outputsSent(sent[2]!), outputsSent(sent[3]!)]).toEqual([['call_approve'], ['call_approve']]);
-      expect(stableStringify(sent[3]!.input)).toBe(stableStringify(sent[2]!.input));
-      expect(turnRows.get(payload.turn_id)?.assistant_message).toBe('Saved: the change is in your model.');
-    });
-
-    it('change 2: an overload twice is asked for once more, never twice: the change is kept and the provider is reported busy', async () => {
-      const { apply, payload } = await press();
-      replies = [apply, overloaded, overloaded, 'never sent'];
+      replies = [apply, overloaded, 'never sent'];
       const r = await turn(payload);
       expect(r.statusCode, r.body).toBe(502);
       expect(r.json().error, 'the provider is busy; the change is kept').toEqual({ code: 'PROVIDER_CAPACITY', message: SAVED_KEPT, retry_safe: false, nothing_saved: false });
       expect(registered, 'the approval stays saved, written once').toHaveLength(2);
-      expect([sent.length, replies.length], 'the reply was asked for once more, never twice').toEqual([4, 1]);
+      // The draft, the apply call and the overloaded reply: the reply is never asked for again.
+      expect([sent.length, replies.length]).toEqual([3, 1]);
+      expect(outputsSent(sent[2]!)).toEqual(['call_approve']);
     });
 
     it('change 2 (CONTRAST): a provider error that is not a server fault on the same reply is not asked for again, and stays an upstream error', async () => {
@@ -535,7 +473,7 @@ describe('the model-program turn on the real core route', () => {
       expect([turnRows.has(`${payload.turn_id}:claim`), turnRows.has(payload.turn_id)], 'the claim is released, so a resend runs the turn').toEqual([false, false]);
     });
 
-    it('change 3: a drafter repair call that ends on the overload is sent again, the same body, once; its update calculates, so the card is prepared', async () => {
+    it('change 3 (W9b removed): a drafter repair call that ends on the overload is never sent again: the loop stops on it, and no card is prepared', async () => {
       replies = [JSON.stringify(bakery())];
       expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
       const read = programReadOf(persisted!);
@@ -554,16 +492,14 @@ describe('the model-program turn on the real core route', () => {
         request: 'The landlord must agree first.', remove: [] })) as Json;
       const drafted = info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'model_program.update_draft' ? [o as Json] : []));
       info.mockRestore();
-      expect(out.status, JSON.stringify(out)).toBe('ok');
-      expect(out.data.changes.map((c: Json) => [c.id, c.action])).toEqual([['landlord_agrees', 'add']]);
-      // The update, its repair (overloaded), and that repair's body sent again, byte for byte: three calls, MAX_REPAIRS' budget.
-      expect(sent).toHaveLength(3);
-      expect(stableStringify(sent[2])).toBe(stableStringify(sent[1]));
+      expect(out.status, JSON.stringify(out)).toBe('refused');
+      // The update and its repair (overloaded): two calls; the repair's body is never sent again.
+      expect(sent).toHaveLength(2);
+      expect(replies).toHaveLength(1);
       // The failed attempt is logged with the provider's typed fields, never its words.
       expect(drafted.map((d) => d.attempts.map((a: Json) => [a.codes, a.failed ?? null, a.provider_error ?? null]))).toEqual([[
         [['undefined_ref'], null, null],
-        [null, 'call failed: Error', { status: null, type: 'service_unavailable_error', code: 'server_is_overloaded', request_id: null }],
-        [[], null, null]]]);
+        [null, 'call failed: Error', { status: null, type: 'service_unavailable_error', code: 'server_is_overloaded', request_id: null }]]]);
       expect(JSON.stringify(drafted)).not.toContain('overloaded. Please');
       expect(registered, 'proposing saves nothing').toHaveLength(1);
     });
@@ -650,9 +586,9 @@ describe('the model-program turn on the real core route', () => {
         call: async () => { throw thrown; } });
       expect(out.assistantText).toBe(`I couldn't build a model that calculates from this yet (call failed: ${name}). Nothing was saved.`);
       expect(out.toolCalls).toEqual([{ name: 'draft_canonical_model', ok: false, outcome: 'refused', refusal: 'no_draft' }]);
-      // W9: a failure with no typed reason is sent again once, the same body; a second failure in a row ends the loop.
+      // Strip (Paul 26 Oct; W9b removed): a failed call is never sent again by the loop; the first failure ends it.
       const failedAt = (attempt: number) => ({ attempt, errors: null, failed: `call failed: ${name}`, provider_error: none, status: null, usage: null, ms: expect.any(Number) });
-      expect((out.payload.model_program['draft'] as Json).attempts).toEqual([failedAt(0), failedAt(1)]);
+      expect((out.payload.model_program['draft'] as Json).attempts).toEqual([failedAt(0)]);
       expect(out.toolResults[0]!.provider_error).toEqual(none);
       expect(JSON.stringify(out.payload)).not.toContain('socket hang up');
     }
@@ -1266,7 +1202,8 @@ describe('the model-program turn on the real core route', () => {
     expect(dropped.data.changes).toEqual([SIZE_SIGN_GOES]);
   });
 
-  it('issue 40: a figure typed on the canvas is theirs: the direction stated for the size it replaces is not kept, and the card shows it go', async () => {
+  // Strip (Paul 26 Oct; B3c removed): the canvas edit no longer clears the direction the drafter stated; it passes as written.
+  it('issue 40 (B3c removed): a figure typed on the canvas is theirs, and the direction stated for the size it replaces is kept as the drafter wrote it', async () => {
     replies = [JSON.stringify(withOlumiLinks(bakery()))];
     expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
     // A saved program's stray direction (on a figure no link has) is the host's to clear, on both sides: never on this card.
@@ -1278,8 +1215,8 @@ describe('the model-program turn on the real core route', () => {
     const change = r.changes!.find((c) => c.id === 'lost_bake_time')!;
     expect(change.before).toContain('no figure yet (in loaf/week/oven), ↓ lowers sales');
     expect(change.after).toMatch(/^from -5 to 10 loaf\/week\/oven/);
-    expect(change.after).not.toMatch(/[↑↓]/u);
-    expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'lost_bake_time')).toMatchObject({ low: -5, high: 10, author: 'person', direction: null });
+    expect(change.after).toContain('↓ lowers sales');
+    expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'lost_bake_time')).toMatchObject({ low: -5, high: 10, author: 'person', direction: 'lowers' });
   });
 
   it('issue 40 (the system): every field of the model and of every canonical record family is said on the card, or is a named exemption; a new field with neither fails here', () => {
@@ -2785,7 +2722,9 @@ describe('the model-program turn on the real core route', () => {
     expect(compile(named, { sourceText: `${BRIEF}\nat least 50 repeat customers a week` }).perGoal[0]).toMatchObject({ status: 'withheld' });
   });
 
-  it('REFUSED-CHANGE-CLASS 25 Oct (#11–12): a measure given as the ANSWER to a goal\'s own question goes to Olumi\'s drafter as a structural change and reaches ONE card; a figure answer still sets its item with no drafter call; a figure on a goal, a non-figure answer on an option, and words not of this turn are still refused', async () => {
+  // Strip (Paul 26 Oct; B5 removed): an answer is never re-routed to the drafter by the host. A worded answer the AI puts in
+  // answers is refused as not a figure (B21's kept half); the AI sends it in request (the tool description says so), as it wrote it.
+  it('REFUSED-CHANGE-CLASS 25 Oct (#11–12), B5 removed: a measure given in answers on a goal is not re-routed to the drafter, but refused as not a figure; sent in request, the AI\'s own words reach ONE drafter call and ONE card; a figure answer still sets its item with no drafter call', async () => {
     const m = bakery();
     m.goals = [{ ...m.goals[0]!, measure: null, question: 'How would you know the bakery is doing well enough?' }];
     replies = [JSON.stringify(m)];
@@ -2794,32 +2733,31 @@ describe('the model-program turn on the real core route', () => {
     const deps = { dispatch, proposals: new ProposalStore() };
     const ctx = (w = words) => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [w], user_turn_text: w });
     const answer = (f: Json) => ({ value: null, low: null, high: null, range_kind: null, party: null, quote: words, basis: null, status: 'known', author: 'person', ...f });
-    const ask = (answers: Json[], c = ctx()) => { sent.length = 0; return proposeProgramChange(deps, c, ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request: '', remove: [], answers })) as Promise<Json>; };
-    // Negatives first, each with no drafter call. A figure answer on a figure: set on its item exactly, as before.
+    const ask = (answers: Json[], c = ctx(), request = '') => { sent.length = 0; return proposeProgramChange(deps, c, ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request, remove: [], answers })) as Promise<Json>; };
+    // A figure answer on a figure: set on its item exactly, as before.
     const price = await ask([answer({ id: 'oven_price', value: 2500, quote: 'The oven costs £2,500' })], ctx('The oven costs £2,500.'));
     expect(price.status, JSON.stringify(price)).toBe('ok');
     expect(price.data.changes.map((x: Json) => [x.id, x.action])).toEqual([['oven_price', 'change']]);
     expect(sent).toHaveLength(0);
-    // A figure on the goal itself: still not an answer (the routing is the empty figure AND the record's family).
+    // A figure on the goal itself, and a non-figure answer on an option: not a figure (B21's kept half).
     expect(await ask([answer({ id: 'more_loaves', value: 380 })])).toEqual({ status: 'refused', reason: 'not_an_answer', detail: 'more_loaves is not a figure in this model; a new item is a structural change.' });
-    expect(sent).toHaveLength(0);
-    // A non-figure answer on an option (no goal, limit or left-out record): still not an answer.
     expect(await ask([answer({ id: 'keep_one' })])).toEqual({ status: 'refused', reason: 'not_an_answer', detail: 'keep_one is not a figure in this model; a new item is a structural change.' });
     expect(sent).toHaveLength(0);
-    // Their words THIS turn, as for every answer: a measure quoting words they did not write now is refused before the drafter.
-    expect(await ask([answer({ id: 'more_loaves', quote: 'reach 380 loaves a week' })])).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['more_loaves'], check: 'this_turn' } });
+    // B5 removed: the worded answer on the goal, in answers, is never re-routed to the drafter.
+    expect(await ask([answer({ id: 'more_loaves' })])).toEqual({ status: 'refused', reason: 'not_an_answer', detail: 'more_loaves is not a figure in this model; a new item is a structural change.' });
     expect(sent).toHaveLength(0);
-    // The answer on the goal: ONE drafter call whose change is that answer in their words, and ONE card with every change.
+    // In request: ONE drafter call whose change is the AI's own request, exactly (no host-written wrapper), and ONE card.
     replies = [savedWith((d) => {
       d.quantities.push(q('more_loaves_target', 'loaf/week', { value: 380, quote: words }), q('more_loaves_window', 'week', { value: 4, quote: words }));
       d.goals = d.goals.map((g) => (g.id === 'more_loaves' ? { ...g, question: null, measure: { quantity: 'sales', per: null, cmp: '>=', target: 'more_loaves_target', frame: 'level', reference: null,
         aggregation: 'end', window: { origin_event: null, origin_offset: null, start: 0, periods: 'more_loaves_window' }, measure_by: 'person', assumptions: [], exclusions: [] } } : g));
     })];
     const c = ctx();
-    const p = await ask([answer({ id: 'more_loaves' })], c);
+    const request = `The answer to more_loaves, in their words: "${words}"`;
+    const p = await ask([], c, request);
     expect(p.status, JSON.stringify(p)).toBe('ok');
     expect(sent).toHaveLength(1);
-    expect((sent[0]!.input as Json[])[2]).toEqual({ role: 'user', content: `${UPDATE_PREFIX}\nThe change: The answer to the question on more_loaves, in their words: "${words}"\nRemove: nothing` });
+    expect((sent[0]!.input as Json[])[2]).toEqual({ role: 'user', content: `${UPDATE_PREFIX}\nThe change: ${request}\nRemove: nothing` });
     expect(p.data.changes.map((x: Json) => [x.id, x.kind, x.action, x.before, x.after, x.author])).toEqual([
       ['more_loaves_target', 'quantity', 'add', null, `380 loaf/week, a fact, known, in your words "${words}"`, 'person'],
       ['more_loaves_window', 'quantity', 'add', null, `4 week, a fact, known, in your words "${words}"`, 'person'],
@@ -2832,7 +2770,9 @@ describe('the model-program turn on the real core route', () => {
     expect(((persisted!.living_model.runs.at(-1).result.compile as Json).blockers as Json[]).filter((x) => x.id === 'more_loaves')).toEqual([]);
   });
 
-  it('REFUSED-CHANGE-CLASS 25 Oct (#8–9): a known answer that gives a date, not a figure, goes to Olumi\'s drafter (which has today\'s date) and reaches ONE card with its whole periods; "I don\'t know" still sets its item with no drafter call', async () => {
+  // Strip (Paul 26 Oct; B5, B4, B20 and B27 removed): a worded answer is never re-routed, re-stamped or refused as "read no
+  // figure" by the host; sent in request, the drafter's record passes exactly as it wrote it, its author included.
+  it('REFUSED-CHANGE-CLASS 25 Oct (#8–9), B5/B4/B20 removed: a date given in answers is not re-routed to the drafter; sent in request, the drafter\'s reading passes as it wrote it, never re-stamped as theirs; "I don\'t know" still sets its item with no drafter call', async () => {
     const m = bakery();
     // Counted over eight weeks, so a setting from week 2 is inside the model's horizon.
     m.quantities.push(q('oven_weeks', 'week', { status: 'asked', question: 'When will the second oven arrive?' }), q('weeks_counted', 'week', { value: 8, quote: 'We count eight weeks' }));
@@ -2844,74 +2784,46 @@ describe('the model-program turn on the real core route', () => {
     const deps = { dispatch, proposals: new ProposalStore() };
     const ctx = (w = words) => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [w], user_turn_text: w });
     const answer = (f: Json) => ({ id: 'oven_weeks', value: null, low: null, high: null, range_kind: null, party: null, quote: words, basis: null, status: 'known', author: 'person', ...f });
-    const ask = (answers: Json[], c = ctx()) => { sent.length = 0; return proposeProgramChange(deps, c, ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request: '', remove: [], answers })) as Promise<Json>; };
-    // Negative first: "I don't know" on the same figure is set on its item exactly, with no drafter call.
+    const ask = (answers: Json[], c = ctx(), request = '') => { sent.length = 0; return proposeProgramChange(deps, c, ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request, remove: [], answers })) as Promise<Json>; };
+    // "I don't know" on the same figure is set on its item exactly, with no drafter call.
     const dunno = "I don't know when it arrives.";
     const unknown = await ask([answer({ status: 'unknown', quote: dunno, basis: 'The supplier has not given a date.' })], ctx(dunno));
     expect(unknown.status, JSON.stringify(unknown)).toBe('ok');
     expect(sent).toHaveLength(0);
     expect(unknown.data.changes.map((x: Json) => [x.id, x.action, x.author])).toEqual([['oven_weeks', 'change', 'person']]);
-    // Codex r1 #3767: the drafter reads no figure from it: refused by name, nothing held.
-    replies = [savedWith((d) => setQ(d, 'oven_weeks', { basis: 'No date given.' }))];
-    expect(await ask([answer({})])).toEqual({ status: 'refused', reason: 'not_an_answer', detail: 'oven_weeks: the change read no figure from your answer, so nothing changed.', data: { ids: ['oven_weeks'] } });
-    // The date: ONE drafter call whose change is that answer in their words, and ONE card with the drafter's whole periods.
-    // The drafter writes its reading as Olumi's, with no quote: the answer stays theirs, in their words (Codex r1 #3767).
+    // B5 removed: the date in answers, with no figure, is never sent to the drafter.
+    const inAnswers = await ask([answer({})]);
+    expect(sent).toHaveLength(0);
+    expect(inAnswers.status, JSON.stringify(inAnswers)).toBe('refused');
+    // In request: ONE drafter call whose change is the AI's own request. The drafter writes its reading as Olumi's, with no
+    // quote, and it passes exactly so (B4 removed: never re-stamped as theirs).
     replies = [savedWith((d) => setQ(d, 'oven_weeks', { status: 'known', question: null, value: 2, author: 'olumi', quote: null, basis: 'Two whole weeks from today, 25 October 2026.' }))];
-    const c = ctx();
-    const p = await ask([answer({})], c);
+    const request = `The answer to oven_weeks, in their words: "${words}"`;
+    const p = await ask([], ctx(), request);
     expect(p.status, JSON.stringify(p)).toBe('ok');
     expect(sent).toHaveLength(1);
-    expect((sent[0]!.input as Json[])[2]).toEqual({ role: 'user', content: `${UPDATE_PREFIX}\nThe change: The answer to the question on oven_weeks, in their words: "${words}"\nRemove: nothing` });
-    expect(p.data.changes.map((x: Json) => [x.id, x.kind, x.action, x.author])).toEqual([['oven_weeks', 'quantity', 'change', 'person']]);
-    // The card shows the drafter's reading of their date, with its basis, beside their words.
-    expect([p.data.changes[0].before, p.data.changes[0].after]).toEqual([
-      'no figure yet (in week), still to be given, Olumi asks "When will the second oven arrive?", no basis given, not in your words',
-      `2 week, known, no question, based on "Two whole weeks from today, 25 October 2026.", in your words "${words}"`]);
-
-    // Integrated review 26 Oct: read means the drafter returned that record changed, as a known figure. One it leaves as saved
-    // (the merge keeps it) or reads only as an estimate is refused by name, never restamped as theirs.
-    const unread = (id: string) => ({ status: 'refused', reason: 'not_an_answer', detail: `${id}: the change read no figure from your answer, so nothing changed.`, data: { ids: [id] } });
-    const same = 'About the same as last year.';
-    replies = [savedWith(() => {})]; // Olumi's 0.5–0.9 estimate, not returned: never "known, yours"
-    expect(await ask([answer({ id: 'sell_through', quote: same })], ctx(same))).toEqual(unread('sell_through'));
-    const until = 'We count until the oven is paid for.';
-    replies = [savedWith(() => {})]; // their 8 weeks, not returned: never their new words on the old figure
-    expect(await ask([answer({ id: 'weeks_counted', quote: until })], ctx(until))).toEqual(unread('weeks_counted'));
-    // #3790 review: the same once their record is approved. The drafter no longer writes approval, so a record it returns
-    // unchanged comes back 'proposed' from the host; it is still the saved record, never their new words on the old figure.
-    const canon = persisted!.living_model.canonical as CanonicalModelT;
-    canon.quantities = canon.quantities.map((x) => (x.id === 'weeks_counted' ? { ...x, approval: 'approved' as const, author_id: 'person-1' } : x));
-    const returned = JSON.parse(savedWith(() => {})) as Json; // the drafter returns that record, unchanged
-    returned.quantities = [...((returned.quantities as Json[] | undefined) ?? []), canon.quantities.find((x) => x.id === 'weeks_counted')];
-    replies = [JSON.stringify(returned)];
-    expect(await ask([answer({ id: 'weeks_counted', quote: until })], ctx(until))).toEqual(unread('weeks_counted'));
-    replies = [savedWith((d) => setQ(d, 'sell_through', { low: 0.6, high: 0.8, basis: 'Read as about last year.' }))]; // Olumi's estimate, and it compiles
-    expect(await ask([answer({ id: 'sell_through', quote: same })], ctx(same))).toEqual(unread('sell_through'));
-    const vague = 'Sometime in the next month or so.';
-    for (const status of ['estimated', 'unsupported'] as const) {
-      replies = Array.from({ length: 3 }, () => savedWith((d) => setQ(d, 'oven_weeks', { status, author: 'olumi', question: null, low: 2, high: 6, range_kind: 'plausible', basis: 'Vague words read as two to six weeks.' })));
-      expect(await ask([answer({ quote: vague })], ctx(vague))).toEqual(unread('oven_weeks'));
-    }
+    expect((sent[0]!.input as Json[])[2]).toEqual({ role: 'user', content: `${UPDATE_PREFIX}\nThe change: ${request}\nRemove: nothing` });
+    expect(p.data.changes.map((x: Json) => [x.id, x.kind, x.action, x.author])).toEqual([['oven_weeks', 'quantity', 'change', 'olumi']]);
+    // B20 removed: a drafter update that leaves the item as saved is no "read no figure" refusal of the host's.
+    replies = [savedWith((d) => setQ(d, 'oven_weeks', { basis: 'No date given.' }))];
+    const unread = await ask([], ctx(), request);
+    expect(JSON.stringify(unread)).not.toContain('read no figure');
   });
 
-  it('writes#6: an answer in words whose item the change removes is refused by its label as removed, in the words a figure answer the change removes gets; one kept but read as no figure is still "read no figure"', async () => {
-    const m = bakery();
-    m.quantities.push(q('oven_weeks', 'week', { status: 'asked', question: 'When will the second oven arrive?' }), q('weeks_counted', 'week', { value: 8, quote: 'We count eight weeks' }));
-    m.goals = m.goals.map((g) => ({ ...g, measure: { ...g.measure!, window: { origin_event: null, origin_offset: null, start: 0, periods: 'weeks_counted' } } }));
-    m.options = m.options.map((o) => (o.id === 'second_oven' ? { ...o, sets: o.sets.map((x) => ({ ...x, starts_after_periods: 'oven_weeks' })) } : o));
-    replies = [JSON.stringify(m)];
-    expect((await turn({ message: `${BRIEF} We count eight weeks.` })).json().model_program.saved).toBe(true);
-    const words = 'It arrives on 9 November 2026.';
+  // Strip (Paul 26 Oct; B19 removed): the host no longer names an answered item the change removed; the validator's own
+  // consent check (a removal only when listed) is what refuses it.
+  it('writes#6 (B19 removed): a figure answer whose item the drafted change removes is refused by the validator\'s removal check, never by B19\'s "removed what you answered"', async () => {
+    replies = [JSON.stringify(bakery())];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const words = 'The oven costs £2,500, and add a delivery van.';
     const deps = { dispatch, proposals: new ProposalStore() };
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
-    const answer = { id: 'oven_weeks', value: null, low: null, high: null, range_kind: null, party: null, quote: words, basis: null, status: 'known', author: 'person' };
-    const ask = () => proposeProgramChange(deps, { ...ctx, turn_id: randomUUID() }, ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request: '', remove: [], answers: [answer] }));
-    // The drafter's update removes the item they answered in words (its repairs the same): refused by its label, as removed.
-    replies = Array.from({ length: 3 }, () => savedWith((d) => { d.quantities = d.quantities.filter((x) => x.id !== 'oven_weeks'); }));
-    expect(await ask()).toEqual({ status: 'refused', reason: 'not_an_answer', detail: '"oven weeks" (oven_weeks): the change removed what you answered, so nothing changed.', data: { ids: ['oven_weeks'] } });
-    // Contrast: the update keeps the item but reads no figure from their words: still refused as read no figure.
-    replies = [savedWith((d) => setQ(d, 'oven_weeks', { basis: 'No date given.' }))];
-    expect(await ask()).toEqual({ status: 'refused', reason: 'not_an_answer', detail: 'oven_weeks: the change read no figure from your answer, so nothing changed.', data: { ids: ['oven_weeks'] } });
+    const answer = { id: 'oven_price', value: 2500, low: null, high: null, range_kind: null, party: null, quote: 'The oven costs £2,500', basis: null, status: 'known', author: 'person' };
+    // The drafter's update removes the item they answered (its repairs the same).
+    replies = Array.from({ length: 3 }, () => savedWith((d) => { d.quantities = d.quantities.filter((x) => x.id !== 'oven_price'); }));
+    const out = await proposeProgramChange(deps, ctx, ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request: 'Add a delivery van.', remove: [], answers: [answer] })) as Json;
+    expect(out.status, JSON.stringify(out)).toBe('refused');
+    expect(JSON.stringify(out)).not.toContain('the change removed what you answered');
     expect(registered).toHaveLength(1);
   });
 
@@ -2938,8 +2850,9 @@ describe('the model-program turn on the real core route', () => {
       const words = 'It arrives on 23 November 2026.';
       const deps = { dispatch, proposals: new ProposalStore() };
       const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words });
-      const ask = (c: Json) => { sent.length = 0; return proposeProgramChange(deps, c as never, ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request: '', remove: [],
-        answers: [{ id: 'oven_weeks', value: null, low: null, high: null, range_kind: null, party: null, quote: words, basis: null, status: 'known', author: 'person' }] })) as Promise<Json>; };
+      // Strip (Paul 26 Oct; B5 removed): the AI sends the worded answer in request, as the tool description says.
+      const ask = (c: Json) => { sent.length = 0; return proposeProgramChange(deps, c as never, ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer',
+        request: `The answer to oven_weeks, in their words: "${words}"`, remove: [], answers: [] })) as Promise<Json>; };
 
       // Contrast first, the program saved before: it reopens exactly as stored (the same newest Run, current, its view byte for
       // byte), is rewritten with no new key, and its update counts from the day it runs, the line as it always was.
@@ -2963,10 +2876,11 @@ describe('the model-program turn on the real core route', () => {
       expect(sent).toHaveLength(1);
       expect(sent[0]!.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is 2026-11-09 (Europe/London). This model's period 0 is 2026-10-26, the day it was first drafted: `
         + 'a date they state, and anything they time from today, counts in whole periods from 2026-10-26.');
-      // Approved, the update is saved with the SAME period 0, and their answer is the drafter's four weeks, in their words.
+      // Approved, the update is saved with the SAME period 0, and the drafter's four weeks exactly as it wrote them (B4 removed:
+      // never re-stamped as theirs).
       expect(await applyProgramChange(deps, c as never, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
       expect(persisted!.living_model.drafted_on).toBe('2026-10-26');
-      expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'oven_weeks')).toMatchObject({ value: 4, status: 'known', author: 'person', quote: words });
+      expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'oven_weeks')).toMatchObject({ value: 4, status: 'known', author: 'olumi', quote: null });
     } finally { vi.useRealTimers(); }
   });
 
@@ -3057,8 +2971,10 @@ describe('the model-program turn on the real core route', () => {
     // Basis-only: their "I don't know" saved first, so the next answer changes nothing but its basis (and quotes their brief).
     expect(await applyProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, dunno.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'tech_lead_hiring_cost')).toMatchObject({ status: 'unknown', value: null, low: null, high: null });
+    // Strip (Paul 26 Oct; A5 removed): the host no longer checks an answer's quote against this turn's words; a basis-only
+    // answer passes as the AI declared it.
     expect(await ask('Still no idea.', [answer({ id: 'tech_lead_hiring_cost', status: 'unknown', quote: saved.brief.slice(0, 40), basis: 'Another basis.' })]))
-      .toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['tech_lead_hiring_cost'] } });
+      .toMatchObject({ status: 'ok' });
     // Refused, by construction: an answer to an item the model does not hold (it never creates one); no drafter call.
     expect(await ask('Unassigned costs are £10,000.', [answer({ id: 'unassigned_first_year_cost', status: 'known', value: 10000, quote: 'Unassigned costs are £10,000.' })]))
       .toMatchObject({ status: 'refused', reason: 'not_an_answer' });
@@ -3115,15 +3031,16 @@ describe('the model-program turn on the real core route', () => {
     const held = (deps.proposals.get(p.data.proposal_id)!.living_model as { canonical: CanonicalModelT }).canonical;
     expect(held.quantities.find((x) => x.id === 'oven_price')).toMatchObject(price);
     expect(held.goals.map((g) => g.id)).toEqual(['more_loaves', 'stretch']);
-    // The answers win by construction, not by the drafter keeping them (buddy 24 Oct). A drafter that writes another figure on
-    // the item they answered: the card holds THEIR figure, words and authorship.
+    // Strip (Paul 26 Oct; B27 and B19 removed): the answers are not set again on the drafter's model; its records pass as it
+    // wrote them, and a removal it makes is refused only by the validator's own removal check.
+    const savedOven = (programReadOf(persisted!) as { program: { canonical: CanonicalModelT } }).program.canonical.quantities.find((x) => x.id === 'oven_price')!;
     const mixed = (reply: string) => {
       replies = [reply]; sent.length = 0;
       return proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words },
         ProgramChangeParams.parse({ public_label: 'Oven price and a second goal', basis: 'their answer and their goal', request: 'Add a second goal: reach 400 loaves a week.', remove: [],
           answers: [{ id: 'oven_price', status: 'known', author: 'person', value: 2500, low: null, high: null, range_kind: null, party: null, quote: 'The oven costs £2,500', basis: null }] })) as Promise<Json>;
     };
-    // Codex r1 #3729, the adverse drafter: it returns the saved (unanswered) oven figure plus the new goal.
+    // Codex r1 #3729: an update that leaves the oven figure out (the saved one unchanged) plus the new goal.
     const dropped = await mixed(savedWith((d) => {
       d.quantities.push(q('stretch_target', 'loaf/week', { value: 400, quote: 'reach 400 loaves a week' }));
       d.goals.push({ ...d.goals[0]!, id: 'stretch', label: 'Reach 400 loaves a week', measure: { ...d.goals[0]!.measure!, target: 'stretch_target' }, quote: 'reach 400 loaves a week' });
@@ -3132,6 +3049,8 @@ describe('the model-program turn on the real core route', () => {
     expect(sent).toHaveLength(1);
     expect((deps.proposals.get(dropped.data.proposal_id)!.living_model as { canonical: CanonicalModelT }).canonical.quantities.find((x) => x.id === 'oven_price'))
       .toMatchObject({ ...price, low: null, high: null, range_kind: null });
+    // The drafter's update did not return that record, so the merge keeps the one it was given: the answer, set once.
+    expect(savedOven.value).not.toBe(2500);
     expect(dropped.data.changes.map((c: Json) => [c.id, c.action, c.author]).sort()).toEqual([['oven_price', 'change', 'person'], ['stretch', 'add', 'person'], ['stretch_target', 'add', 'person']]);
     // And one that writes another figure on the item they answered.
     const overwritten = await mixed(savedWith((d) => {
@@ -3142,14 +3061,15 @@ describe('the model-program turn on the real core route', () => {
     expect(overwritten.status, JSON.stringify(overwritten)).toBe('ok');
     expect(sent).toHaveLength(1);
     expect((deps.proposals.get(overwritten.data.proposal_id)!.living_model as { canonical: CanonicalModelT }).canonical.quantities.find((x) => x.id === 'oven_price'))
-      .toMatchObject({ ...price, low: null, high: null, range_kind: null });
+      .toMatchObject({ ...price, value: 3000 });
     expect(overwritten.data.changes.find((c: Json) => c.id === 'oven_price')).toMatchObject({ action: 'change', author: 'person' });
-    // A drafter that removes the item they answered: refused, the item named; their answer is never dropped silently.
+    // A drafter that removes the item they answered: refused by the validator's removal check, never by B19's sentence.
     const removed = await mixed(savedWith((d) => {
       d.quantities = d.quantities.filter((x) => x.id !== 'oven_price');
       d.relations = d.relations.filter((r) => r.id !== 'spend_rel');
     }));
-    expect(removed).toMatchObject({ status: 'refused', reason: 'not_an_answer', detail: '"oven price" (oven_price): the change removed what you answered, so nothing changed.', data: { ids: ['oven_price'] } });
+    expect(removed.status, JSON.stringify(removed)).toBe('refused');
+    expect(JSON.stringify(removed)).not.toContain('the change removed what you answered');
   });
 
   it('European fix request (CEE bb11fd62, scenario 7a46b31e, turn 31fc7c00): Olumi\'s own figures for an option\'s setting, and the structure\'s figure, withdrawn into questions of theirs need no words this turn; a new figure of theirs, or a figure kept under the question, still does', async () => {
@@ -3253,7 +3173,9 @@ describe('the model-program turn on the real core route', () => {
     }
   });
 
-  it('targeted answers: whose an answer is comes from what the AI declares, checked literally (Codex r1 #3727): Olumi\'s estimate stays Olumi\'s, ranged, never in their words; a mismatch is refused, never re-authored', async () => {
+  // Strip (Paul 26 Oct; B22 removed): authorship is the AI's alone. The host no longer refuses an answer whose owner and status
+  // do not match; whatever the engine's maths needs (an estimate's range) is the compiler's to refuse.
+  it('targeted answers (B22 removed): whose an answer is comes from what the AI declares, never checked or re-authored by the host: Olumi\'s estimate stays Olumi\'s, and a mismatch is never refused as not_an_answer', async () => {
     replies = [JSON.stringify(bakery())];
     expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
     const deps = { dispatch, proposals: new ProposalStore() };
@@ -3267,11 +3189,12 @@ describe('the model-program turn on the real core route', () => {
     expect(p.data.changes.map((c: Json) => [c.id, c.author])).toEqual([['sell_through', 'olumi']]);
     expect((deps.proposals.get(p.data.proposal_id)!.living_model as { canonical: CanonicalModelT }).canonical.quantities.find((x) => x.id === 'sell_through')).toMatchObject({ status: 'estimated', author: 'olumi',
       low: 0.6, high: 0.95, range_kind: 'plausible', quote: null, party: null, basis: 'A busy high street sells most of what is baked.' });
-    // Refused, by id, and never re-authored: Olumi's estimate in their words, or without its range or basis; their answer
-    // declared as an estimate; Olumi's declared as known.
+    // Never refused by the host's ownership check, and never re-authored: Olumi's estimate in their words, or without its range
+    // or basis; their answer declared as an estimate; Olumi's declared as known.
     for (const bad of [{ ...estimate, quote: 'Could you estimate' }, { ...estimate, high: null }, { ...estimate, basis: ' ' },
       { ...estimate, author: 'person', quote: 'Could you estimate' }, { ...estimate, status: 'known' }]) {
-      expect(await ask('Could you estimate how much of it would sell?', bad), JSON.stringify(bad)).toMatchObject({ status: 'refused', reason: 'not_an_answer', data: { ids: ['sell_through'] } });
+      const out = await ask('Could you estimate how much of it would sell?', bad);
+      expect((out as Json).reason, JSON.stringify(bad)).not.toBe('not_an_answer');
     }
     expect(sent).toHaveLength(0);
   });
@@ -3988,7 +3911,8 @@ describe('the model-program turn on the real core route', () => {
     expect(moved.assistant_text).not.toContain('too large');
   });
 
-  it('S1 one question channel (A4): the first reply prints at most three of the AI\'s OWN questions, in the model\'s order, then counts the rest; the result lists every blocker by label with its answer box', async () => {
+  // Strip (Paul 26 Oct; M4 removed): the reply has no cap on the AI's own questions; it lists every one, in the model's order.
+  it('S1 one question channel (A4), M4 removed: the first reply prints EVERY one of the AI\'s OWN questions, in the model\'s order, then counts the blockers with none; the result lists every blocker by label with its answer box', async () => {
     const m = bakery();
     m.goals.push({ id: 'regulars', label: 'Keep the regulars happy', measure: null, question: 'How would you tell the regulars are happy?', author: 'person', quote: 'want to reach 380 loaves a week', ...at },
       { id: 'staff_happy', label: 'Keep the staff happy', measure: null, question: 'How would you tell the staff are happy?', author: 'person', quote: 'want to reach 380 loaves a week', ...at });
@@ -3999,12 +3923,12 @@ describe('the model-program turn on the real core route', () => {
     replies = [JSON.stringify(m)];
     const r = (await turn({ message: BRIEF })).json();
     expect(r.model_program.saved).toBe(true);
-    // The AI's three, in the model's order (goals, limits, then quantities): the oven price's question is the fourth, counted.
-    // Alpha G13's count line: 13 records theirs in their words (the asked base sales is in none), Olumi's sell-through estimate.
+    // Every one of the AI's questions, in the model's order (goals, limits, then quantities); the range_kind blocker has none, so
+    // it is counted. Alpha G13's count line: 13 records theirs in their words (the asked base sales is in none), Olumi's sell-through estimate.
     expect(r.assistant_text).toBe(['I\'ve drafted a first model of: Should the bakery buy a second oven?',
       'I used 13 things from your brief and added 1 of my own for you to check.',
-      '1. How would you tell the regulars are happy?\n2. How would you tell the staff are happy?\n3. How would you tell it stays friendly?',
-      'The chance also waits on 3 other things, listed with the result.'].join('\n\n'));
+      '1. How would you tell the regulars are happy?\n2. How would you tell the staff are happy?\n3. How would you tell it stays friendly?\n4. How many loaves do you sell a week now?\n5. What would the second oven cost?',
+      'The chance also waits on 1 other thing, listed with the result.'].join('\n\n'));
     // The result lists every one of them, by label, with the figure its answer box fills; no question of the code's anywhere.
     const waits = r.canonical_analysis_view.goal_chance.waits_on as Json[];
     expect(waits).toEqual([
@@ -4019,7 +3943,7 @@ describe('the model-program turn on the real core route', () => {
     const view = JSON.stringify(r.canonical_analysis_view);
     expect(view).not.toContain('?');
     expect(JSON.stringify((persisted!.living_model.runs.at(-1).result as Json).compile)).not.toContain('?');
-    // Contrast: the AI's own question for the fourth is on its record, so the probe sees questions where they are.
+    // The AI's own question for the fifth is on its record, so the probe sees questions where they are.
     expect(JSON.stringify(persisted!.living_model.canonical)).toContain('What would the second oven cost?');
   });
 
@@ -4101,7 +4025,9 @@ describe('the model-program turn on the real core route', () => {
     expect(r.model_program.blockers).toEqual([{ id: 'months', code: 'unknown', scope: ['reach_340', 'within_budget'] }]);
   });
 
-  it('S1 (A4): with no aim at all, the first reply asks the AI\'s own question from its note on the situation, and no code question', async () => {
+  // Strip (Paul 26 Oct; M6 removed): the orphaned lookup of a left-out note `aim` is retired (the drafting prompt now writes a
+  // working aim instead); a no_goal blocker has no record's question, so it is counted, never worded by the code.
+  it('S1 (A4), M6 removed: with no aim at all, a left-out note named `aim` is not read for the reply; the no-goal blocker is counted, and no code question', async () => {
     const m = bakery();
     m.goals = [];
     // Codex r1 #3716: another note on the situation as a whole, with a question, is never taken for it; only the declared `aim`.
@@ -4113,10 +4039,11 @@ describe('the model-program turn on the real core route', () => {
     expect(r.model_program.saved).toBe(true);
     expect(r.assistant_text).toBe(['I\'ve drafted a first model of: Should the bakery buy a second oven?',
       'I used 10 things from your brief, added 1 of my own for you to check, and left 2 out of the calculation.',
-      '1. What result would make this worth it for you?\n2. What would the second oven cost?'].join('\n\n'));
+      '1. What would the second oven cost?', 'The chance also waits on 1 other thing, listed with the result.'].join('\n\n'));
+    expect(r.assistant_text).not.toContain('What result would make this worth it for you?');
     expect(r.model_program.blockers.map((b: Json) => [b.id, b.code])).toEqual([['(model)', 'no_goal'], ['oven_price', 'asked']]);
     expect(r.assistant_text).not.toContain('Who is your supplier?');
-    // Contrast: without the AI's note the no-goal blocker has no words of anyone's, so it is counted, never worded by the code.
+    // The same without the note: the no-goal blocker has no words of anyone's, so it is counted, never worded by the code.
     const bare = bakery(); bare.goals = [];
     beforeEachReset();
     replies = [JSON.stringify(bare)];
