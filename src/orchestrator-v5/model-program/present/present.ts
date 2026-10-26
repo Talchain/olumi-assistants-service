@@ -7,8 +7,8 @@
  *     simulator's `joint_within_limits`), shown with the screen's existing rounding (`displayRoundingFor`, `displayedPctAt`,
  *     `sayDisplayedPct`) at the simulation's own precision. The precision is said in `detail`, labelled as precision: how
  *     exactly the simulation measured the chance, never a range for the chance. No win share is computed or said.
- *   - Every chance's words restate its question: the quantity, the target with its unit, the horizon counted from now, the
- *     aggregation, and what is left out. They end with the BASIS: "on your figures" only when every input the chance rests on
+ *   - Every chance's words restate its question: the quantity, the target with its unit, the horizon counted from the model's
+ *     start, the aggregation, and what is left out. They end with the BASIS: "on your figures" only when every input the chance rests on
  *     is the person's and confirmed, no law was assumed and no premise applies (R8); otherwise "on Olumi's reading of …",
  *     and/or conditional, "if <the premises it rests on and Olumi's assumptions, listed>". Never a forecast.
  *   - Several goals: each goal's own chance per option (`per_target`), and the joint. A goal the compiler withheld (an ask
@@ -233,19 +233,20 @@ const say = (value: number, unit: string): string => (unit.trim() === '' || unit
 const plural = (unit: string, n: number): string => `${n} ${unit}${n === 1 ? '' : 's'}`;
 
 /**
- * The horizon, counted from now, with the aggregation (DL ruling 1). Interval k is "month k+1"; boundary k is "the end of
- * month k". So a flow over {start, periods} reads months start+1 … start+periods, and a state reads their ends.
+ * The horizon counts from the model's period 0, not the day it is read, with the aggregation (DL ruling 1). Interval k is
+ * "month k+1"; boundary k is "the end of month k". A flow reads months start+1 … start+periods, and a state reads their ends.
  */
 function horizonWords(aggregation: Aggregation, w: Window, unit: string, reading: 'state' | 'flow'): string {
   const first = w.start_period + 1, last = w.start_period + w.periods;
   const state = reading === 'state';
-  if (aggregation === 'end' || first === last) return state ? `at ${plural(unit, last)} from now` : `in ${unit} ${last} from now`;
-  const months = `${unit}s ${first} to ${last} from now`;
+  const origin = 'from the start of this model';
+  if (aggregation === 'end' || first === last) return state ? `at ${plural(unit, last)} ${origin}` : `in ${unit} ${last} ${origin}`;
+  const months = `${unit}s ${first} to ${last} ${origin}`;
   if (aggregation === 'sum') return state ? `added up over ${months}, taking its level at the start of each ${unit}` : `in total over ${months}`;
   if (aggregation === 'mean') return state ? `on average at the ends of ${months}` : `on average per ${unit} over ${months}`;
   if (aggregation === 'max') return state ? `at its highest at the ends of ${months}` : `in its highest ${unit} of ${months}`;
   if (aggregation === 'min') return state ? `at its lowest at the ends of ${months}` : `in its lowest ${unit} of ${months}`;
-  return state ? `at the end of every ${unit} from ${unit} ${first} to ${unit} ${last} from now` : `in every ${unit} from ${unit} ${first} to ${unit} ${last} from now`;
+  return state ? `at the end of every ${unit} from ${unit} ${first} to ${unit} ${last} ${origin}` : `in every ${unit} from ${unit} ${first} to ${unit} ${last} ${origin}`;
 }
 
 /** The labelled result for an option's chance: display at the simulation's own precision, and the precision's words. */
@@ -435,7 +436,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     return `${q(l.label)} — ${waits.length > 0 ? `waits on ${listWords(waits.map(q))}` : l.reasons.join(' ')}`;
   });
   const uncheckedLine = uncheckedWords.length > 0 ? `Not yet checked: ${uncheckedWords.join('; ')}` : undefined;
-  /** "‘Customer cost’ is at most £1,100 at 1 month from now: about 81%", one per limit, for one option. */
+  /** "‘Customer cost’ is at most £1,100 at 1 month from the start of this model: about 81%", one per limit, for one option. */
   const limitShown = (o: OptionResult, l: Limit): string => {
     const pl = o.per_limit.find((x) => x.limit_id === l.id)!;
     return shown(pl, result.draws)?.display ?? `not shown, as ${isWithheld(pl) ? pl.withheld.count.toLocaleString('en-GB') : 0} simulated draws could not be worked out`;
@@ -471,7 +472,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   /**
    * WHY AN EXACT CHANCE IS EXACT (Lenses fit 2, DL 23 Oct): 0% or 100% is said only where the outcome is FIXED in the model
    * (every draw reads the same value against the same target, no risk in play: simulate's `exact`), and then with the value
-   * that fixes it: "in every simulated draw ‘Weekly capacity’ is 80 ticket / week at 1 week from now, below 100 ticket / week".
+   * that fixes it: "in every simulated draw ‘Weekly capacity’ is 80 ticket / week at 1 week from the start of this model, below 100 ticket / week".
    * A sampled 0 of N stays "less than 1%" (`shown`). Each goal or limit that decides it is named: the ones missed for 0%,
    * every one for 100%.
    */

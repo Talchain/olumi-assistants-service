@@ -48,16 +48,39 @@ function present(m: ExecutableModel, labels: Record<string, PresentQuantity>, mo
 }
 
 // Hand-written words (the level template of goal-target-basis.ts `targetChanceWords`, the end of month 1 for a state):
-const MRR_WORDS = '‘Monthly recurring revenue’ being at least £4,800 at 1 month from now';
-const CUST_WORDS = '‘Customers’ being at least 90 customers at 1 month from now';
+const MRR_WORDS = '‘Monthly recurring revenue’ being at least £4,800 at 1 month from the start of this model';
+const CUST_WORDS = '‘Customers’ being at least 90 customers at 1 month from the start of this model';
 const EXACT = 'Simulation precision: exact. Every simulated draw gives the same result for this option, so no sampling is involved.';
 // Lenses fit 2 (DL 23 Oct): an exact chance says the fixed value that makes it exact. Hold: £49 × 100 = £4,900 ≥ £4,800 and
 // 100 ≥ 90 (both met, both named); Raise: 100 − 1.8 × 10 = 82 < 90 (the missed one is named; £59 × 82 = £4,838 is met).
-const HOLD_WHY = 'in every simulated draw ‘Monthly recurring revenue’ is £4,900 at 1 month from now, at least £4,800 and ‘Customers’ is 100 customers at 1 month from now, at least 90 customers';
-const RAISE_WHY = 'in every simulated draw ‘Customers’ is 82 customers at 1 month from now, below 90 customers';
+const HOLD_WHY = 'in every simulated draw ‘Monthly recurring revenue’ is £4,900 at 1 month from the start of this model, at least £4,800 and ‘Customers’ is 100 customers at 1 month from the start of this model, at least 90 customers';
+const RAISE_WHY = 'in every simulated draw ‘Customers’ is 82 customers at 1 month from the start of this model, below 90 customers';
 const FORECAST_OR_VERDICT = /\b(will|win|wins|winner|best|recommend|recommended|should)\b|comes out on top/i;
 
 describe('present: the canonical analysis view from a simulated model', () => {
+  it('a later observation window counts from the model start for every state and flow reading, retaining each event and chance', () => {
+    const horizons: { aggregation: Goal['aggregation']; state: string; flow: string; display: string }[] = [
+      { aggregation: 'end', state: 'at 5 months', flow: 'in month 5', display: '0%' },
+      { aggregation: 'sum', state: 'added up over months 3 to 5', flow: 'in total over months 3 to 5', display: '100%' },
+      { aggregation: 'mean', state: 'on average at the ends of months 3 to 5', flow: 'on average per month over months 3 to 5', display: '0%' },
+      { aggregation: 'max', state: 'at its highest at the ends of months 3 to 5', flow: 'in its highest month of months 3 to 5', display: '0%' },
+      { aggregation: 'min', state: 'at its lowest at the ends of months 3 to 5', flow: 'in its lowest month of months 3 to 5', display: '0%' },
+      { aggregation: 'every', state: 'at the end of every month from month 3 to month 5', flow: 'in every month from month 3 to month 5', display: '0%' },
+    ];
+    for (const row of horizons) for (const reading of ['state', 'flow'] as const) {
+      // Period 0 stays the start: this window is months 3–5, never months 1–3 from the day it is read.
+      // A fixed £2 meets £4 only when added across the three periods (£6); the other events remain below it.
+      const m = model([fixed('x', 2, '£', reading), fixed('four', 4, '£')],
+        [{ ...goal('g', 'x', '>=', 'four'), aggregation: row.aggregation, window: { start_period: 2, periods: 3 } }], [option('hold', 'Hold')]);
+      m.periods = 5;
+      const v = present(m, confirmedFigures(m));
+      const horizon = `${row[reading]} from the start of this model${row.aggregation === 'sum' && reading === 'state' ? ', taking its level at the start of each month' : ''}`;
+      expect(v.goal_chance.targets.per_target[0].words).toBe(`‘x’ being at least £4 ${horizon}, in this model, on your figures`);
+      expect(cell(v, 'hold').display).toBe(row.display);
+      expect(JSON.stringify(v)).not.toContain('from now');
+    }
+  });
+
   it('a 2-target model renders a per-target line for each, and the joint, each restating its question and its basis', () => {
     // Hold: MRR 49 × 100 = 4,900 ≥ 4,800 ✓; customers 100 ≥ 90 ✓ → joint 1, from fixed inputs only → exactly "100%".
     // Raise: customers 100 − 1.8 × 10 = 82; MRR 59 × 82 = 4,838 ≥ 4,800 ✓; 82 ≥ 90 ✗ → joint 0 → exactly "0%".
@@ -134,7 +157,7 @@ describe('present: the canonical analysis view from a simulated model', () => {
     expect(v.goal_chance.targets.joint).toEqual({ status: 'withheld',
       line: 'The chance of meeting all 2 goals together waits for ‘Reach 100 cases’; each goal that can be worked out is shown on its own.' });
     expect(v.goal_chance.targets.per_target).toEqual([{ constraint_id: 'g_cost',
-      words: '‘Specialist cost’ being at most £50,000 at 1 month from now, in this model, on your figures',
+      words: '‘Specialist cost’ being at most £50,000 at 1 month from the start of this model, in this model, on your figures',
       options: [{ option_id: 'hold', display: '100%' }, { option_id: 'add', display: '100%' }] }]);
     expect(v.goal_chance).not.toHaveProperty('thresholds');
     expect(JSON.stringify(v)).not.toMatch(/Threshold|at least 20/);
@@ -217,7 +240,7 @@ describe('present: the canonical analysis view from a simulated model', () => {
     const plain = present(bakery(), confirmedFigures(bakery()));
     expect(cell(plain, 'hold').display).toBe('100%');
     // (£3.50 × 40 + 0) × 12 = £1,680 in every draw, at most £2,400.
-    expect(cell(plain, 'hold').face.endsWith(', in this model, on your figures: in every simulated draw ‘year_total’ is £1,680 at 1 month from now, at most £2,400.')).toBe(true);
+    expect(cell(plain, 'hold').face.endsWith(', in this model, on your figures: in every simulated draw ‘year_total’ is £1,680 at 1 month from the start of this model, at most £2,400.')).toBe(true);
     // An effect whose size is Olumi's figure, and whose relation is Olumi's: both are listed, and nothing else.
     const withEffect = (relation_author?: 'person' | 'olumi') => {
       const m = bakery([fixed('base', 10, '£'), fixed('per_degree', -2, '£', 'state', 'olumi'),
@@ -225,7 +248,7 @@ describe('present: the canonical analysis view from a simulated model', () => {
       return present(m, { ...confirmedFigures(m), ...(relation_author === undefined ? {} : { weather: { label: 'weather', author: 'person', relation_author, confirmed: relation_author === 'person' } }) });
     };
     // Weather = 10 − 2 × 1 = £8, so (£140 + 0 + £8) × 12 = £1,776 in every draw: the basis, then why it is exact.
-    const WHY = ': in every simulated draw ‘year_total’ is £1,776 at 1 month from now, at most £2,400.';
+    const WHY = ': in every simulated draw ‘year_total’ is £1,776 at 1 month from the start of this model, at most £2,400.';
     const basis = (v: Rec): string => { const after = cell(v, 'hold').face.split(', in this model, ')[1] as string; expect(after.endsWith(WHY)).toBe(true); return after.slice(0, -WHY.length); };
     expect(basis(withEffect('olumi'))).toBe('if ‘per_degree’ is -£2, Olumi’s figure and ‘weather’ follows Olumi’s assumed relationship');
     expect(basis(withEffect('person'))).toBe('if ‘per_degree’ is -£2, Olumi’s figure');
@@ -245,12 +268,12 @@ describe('present: the canonical analysis view from a simulated model', () => {
     [{ ...goal('g', 'weather', '>=', 'floor'), label: 'Weather takings' }], [option('hold', 'Hold')]);
     const v = present(m(unrecorded(fixed('per_degree', 2, '£'))), confirmedFigures(m(unrecorded(fixed('per_degree', 2, '£')))));
     expect(cell(v, 'hold').display).toBe('100%');
-    expect(cell(v, 'hold').face).toBe('‘Hold’: 100% chance of ‘weather’ being at least £5 at 1 month from now, in this model, '
-      + 'if ‘per_degree’ is £2 (author not recorded) and ‘weather’ follows a relationship (author not recorded): in every simulated draw ‘weather’ is £12 at 1 month from now, at least £5.');
+    expect(cell(v, 'hold').face).toBe('‘Hold’: 100% chance of ‘weather’ being at least £5 at 1 month from the start of this model, in this model, '
+      + 'if ‘per_degree’ is £2 (author not recorded) and ‘weather’ follows a relationship (author not recorded): in every simulated draw ‘weather’ is £12 at 1 month from the start of this model, at least £5.');
     expect(JSON.stringify(v)).not.toContain('on your figures');
     // Contrast: the same model with both authors recorded as the person's reads "on your figures".
     const own = present(m(fixed('per_degree', 2, '£')), { ...confirmedFigures(m(fixed('per_degree', 2, '£'))), weather: { label: 'weather', author: 'person', relation_author: 'person', confirmed: true } });
-    expect(cell(own, 'hold').face.endsWith(', in this model, on your figures: in every simulated draw ‘weather’ is £12 at 1 month from now, at least £5.')).toBe(true);
+    expect(cell(own, 'hold').face.endsWith(', in this model, on your figures: in every simulated draw ‘weather’ is £12 at 1 month from the start of this model, at least £5.')).toBe(true);
   });
 
   it('S3 fix 3: every limit\u2019s own outcome is in the words, and a limit waiting on an ask is named with what it waits on', () => {
@@ -267,12 +290,12 @@ describe('present: the canonical analysis view from a simulated model', () => {
         { limit_id: 'l_desks', label: 'Desk space', status: 'asks', reasons: [], asks: ['desks'] }],
       asks: [{ quantity_id: 'desks', label: 'Desks free', unit: 'desks' }],
     });
-    const l50 = '‘Specialist cost’ is at most £50,000 at 1 month from now', l30 = '‘Specialist cost’ is at most £30,000 at 1 month from now';
+    const l50 = '‘Specialist cost’ is at most £50,000 at 1 month from the start of this model', l30 = '‘Specialist cost’ is at most £30,000 at 1 month from the start of this model';
     const unchecked = 'Not yet checked: ‘Desk space’ — waits on ‘Desks free’';
     expect(cell(v, 'hold').face).toContain(` Each limit on its own: ${l50}: 100%; ${l30}: 100%. ${unchecked}`);
     expect(cell(v, 'add').face).toContain(` Each limit on its own: ${l50}: 100%; ${l30}: 0%. ${unchecked}`);
     // Add's 0% is exact, and the limit that fixes it is named with its value: 1 × £40,000 = £40,000 > £30,000.
-    expect(cell(v, 'add').face).toContain(': in every simulated draw ‘Specialist cost’ is £40,000 at 1 month from now, above £30,000. Each limit on its own:');
+    expect(cell(v, 'add').face).toContain(': in every simulated draw ‘Specialist cost’ is £40,000 at 1 month from the start of this model, above £30,000. Each limit on its own:');
     expect(v.goal_chance.limits).toEqual([
       { constraint_id: 'l50', words: l50, options: [{ option_id: 'hold', display: '100%' }, { option_id: 'add', display: '100%' }] },
       { constraint_id: 'l30', words: l30, options: [{ option_id: 'hold', display: '100%' }, { option_id: 'add', display: '0%' }] }]);
@@ -287,8 +310,8 @@ describe('present: the canonical analysis view from a simulated model', () => {
     [{ ...goal('g', 'weather', '>=', 'floor'), label: 'Weather takings' }], [option('hold', 'Hold')]);
     const relation = { ...confirmedFigures(m), weather: { label: 'weather', author: 'person' as const, relation_author: 'person' as const, confirmed: true } };
     const v = present(m, { ...relation, per_degree: { label: 'per_degree', author: 'unverified' as const } });
-    expect(cell(v, 'hold').face).toBe('‘Hold’: 100% chance of ‘weather’ being at least £5 at 1 month from now, in this model, '
-      + 'if ‘per_degree’ is £2 (not found in your words): in every simulated draw ‘weather’ is £12 at 1 month from now, at least £5.');
+    expect(cell(v, 'hold').face).toBe('‘Hold’: 100% chance of ‘weather’ being at least £5 at 1 month from the start of this model, in this model, '
+      + 'if ‘per_degree’ is £2 (not found in your words): in every simulated draw ‘weather’ is £12 at 1 month from the start of this model, at least £5.');
     // Contrast: the same figure, its words found, is theirs.
     expect(cell(present(m, { ...relation, per_degree: person('per_degree') }), 'hold').face).toContain(', in this model, on your figures:');
   });
@@ -308,7 +331,7 @@ describe('present: the canonical analysis view from a simulated model', () => {
     const v = present(capacity(100), labels);
     expect(cell(v, 'keep').display).toBe('0%');
     expect(cell(v, 'keep').detail.precision_words).toBe(EXACT);
-    expect(cell(v, 'keep').face.endsWith(': in every simulated draw ‘Weekly support capacity’ is 80 ticket / week at 1 month from now, below 100 ticket / week.')).toBe(true);
+    expect(cell(v, 'keep').face.endsWith(': in every simulated draw ‘Weekly support capacity’ is 80 ticket / week at 1 month from the start of this model, below 100 ticket / week.')).toBe(true);
     const far = present(capacity(200), labels);
     expect(cell(far, 'add').display).toBe('less than 1%');
     expect(cell(far, 'add').detail.precision_95[0]).toBeCloseTo(0, 12);
