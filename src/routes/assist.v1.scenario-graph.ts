@@ -18,7 +18,7 @@ import { deriveNotModelledManifest } from "../cee/context-integrity/not-modelled
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeAnalysisAffectingGraphHash } from "../orchestrator-v5/context/graph-hash.js";
 import { proposalRecord, proposalFieldsWire, heldProposalId, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalIssuingRow } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
-import { programHoldApplies } from "../orchestrator-v5/model-program-turn/program-card.js";
+import { programHoldApplies, programRevisionOf } from "../orchestrator-v5/model-program-turn/program-card.js";
 import { readProgramHeldOffers } from "../orchestrator-v5/model-program-turn/program-card-turn.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { isProgramGraph, programReadOf, reopenProgram, unreadableWords } from "../orchestrator-v5/model-program-turn/program-store.js";
@@ -479,6 +479,9 @@ export default async function route(app: FastifyInstance) {
       // Compatibility projection reads the common canonical claim, never the
       // issue count. The pending actions remain explanatory data only.
       const scopePermissions = programGraph ? undefined : claimPermissionsFrom(analysis.analysis_state, undefined);
+      // A model program's revision is its canonical digest (DL ruling 26 Oct, inventory F7): the `graph_hash` this read serves, its
+      // cards' pin and the digest its Run receipts bind. Any other graph keeps the analysis hash of its bytes.
+      const servedGraphHash = graphPresent ? programRevisionOf(graph) ?? computeAnalysisAffectingGraphHash(graph as GraphStateIngress) : null;
 
       // ── 6. THE CONVERSATION, OPT-IN (DL lease #75 5907582591; Canvas 5907308286) ──
       //
@@ -504,7 +507,7 @@ export default async function route(app: FastifyInstance) {
         ? await readConversationTurns(store, scenarioId, requestId, {
           userId: req.scenarioAccess?.callerUserId ?? null,
           // EXACTLY the graph_hash the Agent turn reads from this route, not identity.v1's different projection.
-          graphHash: (graphPresent ? computeAnalysisAffectingGraphHash(graph as GraphStateIngress) : null) ?? undefined,
+          graphHash: servedGraphHash ?? undefined,
           latest: latestPending,
           analysisState: analysis.analysis_state,
           analysisResult: analysis.analysis_result,
@@ -564,7 +567,7 @@ export default async function route(app: FastifyInstance) {
         ? ((hash) => proposalFieldsWire(heldProposalRecords, hash, issuedTurnIds, programGraph
           ? (r) => latestPending.some((h) => h.id === r.revision && heldProposalId(h) === r.proposal_id && programHoldApplies(h, graph, hash))
           : heldRecordsApplyAt(latestPending, graph, hash)))(
-          computeAnalysisAffectingGraphHash(graph as GraphStateIngress) ?? undefined)
+          servedGraphHash ?? undefined)
         : undefined;
 
       /**
@@ -645,9 +648,7 @@ export default async function route(app: FastifyInstance) {
         //
         // `null` when the graph is absent — there is nothing to write against,
         // and a hash of nothing would be a base that matches nothing.
-        graph_hash: graphPresent
-          ? computeAnalysisAffectingGraphHash(graph as GraphStateIngress)
-          : null,
+        graph_hash: servedGraphHash,
         layout_present: detectLayout(graphPresent ? graph : null),
         // ROADMAP 2.973 — what of the brief did NOT reach the model.
         //

@@ -55,7 +55,9 @@ describe('declared physical bounds on saved models', () => {
     expect(revisionDigest(opened.program.canonical, words)).toBe(legacyDigest(saved.living_model.canonical));
     expect([opened.current, opened.engine_current]).toEqual([true, true]);
     expect(opened.run).toEqual(saved.living_model.runs[0]);
-    expect(opened.view).toEqual(saved.living_model.runs[0]!.result.canonical_analysis_view);
+    // The stored result as stored, its Run named by the revision its receipt binds (inventory F7), not the old stamp.
+    const stored = saved.living_model.runs[0]!.result.canonical_analysis_view as { run: object };
+    expect(opened.view).toEqual({ ...stored, run: { ...stored.run, graph_hash_at_run: legacyDigest(saved.living_model.canonical) } });
     expect(JSON.stringify(cold)).toBe(before);
   });
 
@@ -122,7 +124,8 @@ describe('declared physical bounds on saved models', () => {
     expect(opened.program.canonical.quantities.find((q) => q.id === 'members')).toMatchObject({ floor: 0, ceiling: null });
     expect([opened.current, opened.engine_current]).toEqual([true, true]);
     expect(opened.run).toEqual(run);
-    expect(opened.view).toEqual(run.result.canonical_analysis_view);
+    const stored = run.result.canonical_analysis_view as { run: object };
+    expect(opened.view).toEqual({ ...stored, run: { ...stored.run, graph_hash_at_run: digest } });
     expect(JSON.stringify(cold)).toBe(before);
     // On today's engine the same stored Run is read unchanged, marked as from before an update; nothing is recomputed.
     const now = reopenProgram(JSON.parse(before))!;

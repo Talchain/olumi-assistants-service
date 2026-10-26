@@ -24,6 +24,16 @@ export function programDigestOf(program: SavedProgram): string {
   return revisionDigest(read.canonical, read.person_words);
 }
 
+/**
+ * A saved model program's revision, read off its saved graph: the digest its Run receipts bind (`receipt.revision_digest`), and the
+ * `graph_hash` every read and save of a program serves (DL ruling 26 Oct, inventory F7). Undefined when the graph holds no readable
+ * program: its readers keep the graph's own hash.
+ */
+export function programRevisionOf(graph: unknown): string | undefined {
+  const program = savedProgramOf(graph);
+  return program === undefined ? undefined : programDigestOf(program);
+}
+
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 

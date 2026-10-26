@@ -8,8 +8,6 @@ import type { InternalDispatch } from '../core-route/internal-dispatch.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { findOperationVersion, unknownWrite, writeCorePostimage, type CoreWrite } from '../path-b/tools/core-write.js';
 import { approvedGraphHeld, isSavedRead, readSaved } from './saved-read.js';
-import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { compile } from '../model-program/compile.js';
 import { project } from '../model-program/project.js';
 import { chancesOf, evaluateCanonical, type Evaluation } from './evaluate.js';
@@ -28,23 +26,17 @@ export const compileBlock = (e: Evaluation) => ({
 
 /**
  * Evaluate the program as it now stands and append that evaluation as a NEW Run; earlier Runs are kept as they were. The
- * Run names the display graph it was computed with (`graph_hash_at_run`: the same analysis hash the scenario read serves).
+ * Run names the revision it was computed against (`graph_hash_at_run`: its receipt's digest, the `graph_hash` the scenario read serves).
  * `graph` is the complete postimage that stores it.
  */
 export function withNewRun(program: SavedProgram): { readonly program: SavedProgram; readonly evaluation: Evaluation; readonly run: StoredRun; readonly graph: Rec } {
   const evaluation = evaluateCanonical(program.canonical, { sourceText: sourceTextOf(program.person_words), seed: program.seed, ...briefOf(program) });
   const run = newRun({ canonical: program.canonical, personWords: program.person_words, seed: program.seed, draws: evaluation.sim?.draws ?? null,
-    index: program.runs.length, graphHash: analysisHashOf(evaluation.projection.graph),
+    index: program.runs.length,
     result: { canonical_analysis_view: evaluation.view, chances: chancesOf(evaluation.sim), compile: compileBlock(evaluation) } });
   const next = { ...program, runs: [...program.runs, run] };
   return { program: next, evaluation, run, graph: { ...evaluation.projection.graph, living_model: livingModelOf(next) } };
 }
-
-/** The analysis hash the scenario read serves for this display graph (its ingress shape, checked, never cast). */
-const analysisHashOf = (graph: unknown): string | null => {
-  const parsed = GraphStateIngressSchema.safeParse(graph);
-  return parsed.success ? computeAnalysisAffectingGraphHash(parsed.data) : null;
-};
 
 const briefOf = (p: SavedProgram) => (p.person_words[0] !== undefined ? { brief: p.person_words[0] } : {});
 
