@@ -569,10 +569,10 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
       [goal('gb', 'big', '>=', 'zero')]), { seed: 1, draws: 50 }));
     expect(g.per_goal[0]).toEqual({ goal_id: 'gb', withheld: { reason: 'invalid_domain', count: 50, quantities: ['big'] } });
     // Codex r1 #3709: a derived OCCURRENCE that overflows (1e200 × 1e200) is outside the domain, never clipped to a certain
-    // event: what it affects is withheld, with its count.
+    // event: what it affects is withheld, with its count, and the chance is named as outside its 0 to 1 (spec §3.7).
     const occ = first(simulate(model(1, [fixed('a', 10), fixed('zero', 0), fixed('e200', 1e200), def('occ', 'product', ['e200', 'e200']), fixed('sev', -20)],
       [goal('ga', 'a', '>=', 'zero')], [HOLD], { risks: [{ id: 'r', occurrence: 'occ', severity: 'sev', effect_on: 'a', mode: 'add', from_period: 0 }] }),
     { seed: 1, draws: 50 }));
-    expect(occ.per_goal[0]).toEqual({ goal_id: 'ga', withheld: { reason: 'invalid_domain', count: 50, quantities: ['a'] } });
+    expect(occ.per_goal[0]).toEqual({ goal_id: 'ga', withheld: { reason: 'invalid_domain', count: 50, quantities: ['a', 'occ'] } });
   });
 });

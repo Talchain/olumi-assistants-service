@@ -38,8 +38,11 @@ export type Stock = { start: string; inflows: string[]; outflows: string[] };   
  * to fit a reading.
  */
 export type Reading = 'state' | 'flow';
-export type Quantity = { id: string; label: string; unit: string; reading: Reading; dist?: Dist; equation?: Equation; stock?: Stock };
+export type Quantity = { id: string; label: string; unit: string; reading: Reading; dist?: Dist; equation?: Equation; stock?: Stock; domain?: Domain };
 // Exactly one of dist / equation / stock. An ASKED or UNKNOWN quantity never reaches the executable model: the compiler withholds the goals it feeds.
+// domain (spec §3.7): what the value can be, given or worked out: its declared floor and ceiling, within a chance's [0, 1] or a
+//   timing's 0 or more. A draw in which its value (after the options and risks act) leaves it is outside the model's domain
+//   (invalid_domain) for everything resting on it, never clamped. A range's conditioning stays on its dist.
 export type Cmp = '>=' | '<=' | '>' | '<';
 export type Window = { start_period: number; periods: number };                                  // 0-based; window measured from the model's period 0
 export type Aggregation = 'end' | 'sum' | 'mean' | 'every' | 'max' | 'min';

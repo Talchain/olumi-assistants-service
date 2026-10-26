@@ -771,6 +771,28 @@ describe('the model-program turn on the real core route', () => {
     expect(face).toContain('‘promo effect’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 3 member / month / promotion to 7 member / month / promotion, into a bell-shaped spread, kept to Olumi’s reading of what it can be (never below 0 member / month / promotion)');
   });
 
+  it('numbers#2 (spec §3.7): Olumi\'s floor on a worked-out stock is said, saved and applied; a path that keeps to it gives its chance', async () => {
+    // A first draft declaring floor 0 on the members stock (worked out) and on members today (given). The club grows (300,
+    // 10 more a month), so no draw leaves the floor and the chances stand.
+    const m = club();
+    setQ(m, 'members', { floor: 0 });
+    setQ(m, 'members_now', { floor: 0 });
+    replies = [JSON.stringify(m)];
+    const r = (await turn({ message: CLUB_BRIEF })).json();
+    expect(r.model_program.saved).toBe(true);
+    const after = (id: string): string => r.cards[0].changes.find((c: Json) => c.id === id).after;
+    expect(after('members')).toBe('in member (never below 0: Olumi’s reading), a result, worked out from the model');
+    expect(after('members_now')).toBe('300 member (never below 0: Olumi’s reading), a fact, known, in your words "300 members today"');
+    // Saved as drafted, and read so by the agent.
+    const read = await readProgramContext({ dispatch, proposals: new ProposalStore() }, { scenario_id: SCENARIO, authenticated_user_id: null }) as Json;
+    expect((read.data.model.quantities as Json[]).find((x) => x.id === 'members')).toMatchObject({ floor: 0 });
+    // The Run carries the floor on the stock, and every chance of the stored Run is worked out (contrast to a falling path).
+    const saved = persisted!.living_model.canonical as CanonicalModelT;
+    expect(compile(saved, { sourceText: CLUB_BRIEF }).executable!.quantities.find((x) => x.id === 'members')).toMatchObject({ domain: { min: 0 } });
+    const stored = persisted!.living_model.runs.at(-1).result.chances as Json[];
+    expect(stored.map((o) => [o.option_id, typeof o.per_goal[0].chance])).toEqual([['promotion', 'number'], ['carry_on', 'number']]);
+  });
+
   it('issue 40: a first draft with an Olumi link of unknown size and a stated direction shows its reading card, the direction said as an arrow and words on what it moves', async () => {
     const m = withOlumiLinks(bakery());
     replies = [JSON.stringify(m)];
@@ -1579,8 +1601,8 @@ describe('the model-program turn on the real core route', () => {
     // (b) Every changed field is on the card: the event's timing, moved between two figures already in the model, shows both.
     const shown = await propose(timing('opening_later'));
     expect(shown.status, JSON.stringify(shown)).toBe('ok');
-    expect(shown.data.changes).toEqual([{ id: 'more_loaves', kind: 'goal', action: 'change', label: 'Reach 380 loaves a week', before: 'by the end of "four weeks" 4 week, counted from "the opening", which is "opening in" 2 week from now',
-      after: 'by the end of "four weeks" 4 week, counted from "the opening", which is "opening later" 3 week from now', author: 'person' }]);
+    expect(shown.data.changes).toEqual([{ id: 'more_loaves', kind: 'goal', action: 'change', label: 'Reach 380 loaves a week', before: 'by the end of "four weeks" 4 week, counted from "the opening", which is "opening in" 2 week from the start of this model',
+      after: 'by the end of "four weeks" 4 week, counted from "the opening", which is "opening later" 3 week from the start of this model', author: 'person' }]);
     // Words that would read the same on both sides (two timings named and sized alike): not proposed.
     expect(await propose(timing('opening_twin'))).toMatchObject({ status: 'refused', reason: 'unshown_change', data: { ids: ['more_loaves (measure.window.origin_offset)'] } });
     // (c) The drafter's approval and author_id are never taken: on an untouched item they change nothing; a changed item is
@@ -1889,6 +1911,26 @@ describe('the model-program turn on the real core route', () => {
     expect(persisted!.living_model.person_words.at(-1)).toBe(words);
     const blockers = (persisted!.living_model.runs.at(-1).result.compile as Json).blockers as Json[];
     expect(blockers.some((x) => x.id === 'extra_per_oven')).toBe(false);
+  });
+
+  it('words#4 + Codex B1: a recount the agent reads carries the compiler\'s reason, naming their figure and Olumi\'s bound; an asked figure carries none; a Run stored before reasons is read as stored, no bound filled in', async () => {
+    // Olumi's reading of what the bakery sells today (synthetic): never above 250 loaves a week, so their 300 is outside it.
+    const m = bakery();
+    m.quantities = m.quantities.map((x) => (x.id === 'base_sales' ? { ...x, ceiling: 250 } : x));
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null };
+    const read = await readProgramContext(deps, ctx) as Json;
+    expect(read.data.blockers).toEqual([
+      { id: 'base_sales', code: 'recount', scope: ['more_loaves'], reason: '"base sales" is given as 300 loaf/week, but Olumi reads it as never above 250 loaf/week' },
+      // Contrast: an asked figure's blocker has no reason; what to ask is the AI's.
+      { id: 'oven_price', code: 'asked', scope: ['within_budget'] },
+    ]);
+    // A Run stored before blockers carried reasons: read as it was stored, with no bound filled in (the agent is told to name none).
+    for (const b of (persisted!.living_model.runs.at(-1).result.compile as Json).blockers as Json[]) delete b.reason;
+    const old = await readProgramContext(deps, ctx) as Json;
+    expect(old.data.blockers).toEqual([{ id: 'base_sales', code: 'recount', scope: ['more_loaves'] }, { id: 'oven_price', code: 'asked', scope: ['within_budget'] }]);
   });
 
   it('Codex r1 #3709 (2): the PRESENTED Run never says "on your figures" for a figure said to be theirs whose words were not found', () => {

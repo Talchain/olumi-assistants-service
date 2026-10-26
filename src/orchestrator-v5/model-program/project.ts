@@ -154,17 +154,21 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   for (const k of model.risks) { use(k.effect_on, 'node'); for (const t of [k.occurrence, k.severity]) { use(t, 'on_risk'); hostOf.set(t, { node: k.id }); } }
   const folded = (id: string) => { const u = uses.get(id); return u !== undefined && u.size === 1 && !u.has('node') && hostOf.has(id); };
 
-  const chances = new Set(model.risks.map((k) => k.occurrence));
-  /** The shared law's reading: the compiler's disclosure (with the domain) when the quantity is in the run, else the same law. */
+  /** The shared law's reading: the compiler's disclosure (with the domain) when the quantity is in the run, else the same law
+   *  within the same domain (a chance's, a timing's or what the model declares), so a card's spread and centre never change
+   *  only because the goal became calculable (numbers#4). */
   const lawFor = (q: CanonicalQuantityT): LawReading => {
     const c = compiled.conversions.find((x) => x.kind === 'range_law' && x.quantity === q.id);
+    // The compiler reads a % range as a fraction (20–40 % is 0.2–0.4); the card says it in the unit it labels (Codex r1 #3709).
+    const u = parseUnit(q.unit), k = u.ok ? u.unit.scale : 1;
     if (c && c.kind === 'range_law') {
-      // The compiler reads a % range as a fraction (20–40 % is 0.2–0.4); the card says it in the unit it labels (Codex r1 #3709).
-      const u = parseUnit(q.unit), k = u.ok ? u.unit.scale : 1, r = c.reading;
+      const r = c.reading;
       return k === 1 ? r : { ...r, centre: r.centre / k, sd: r.sd / k, lower: r.lower / k, upper: r.upper / k, mean: r.mean / k, sd_conditioned: r.sd_conditioned / k };
     }
     const inside = !has(q.value) || (q.low! < q.value && q.value < q.high!);
-    return inside ? readRange(rangeDistOf(q, 1, chances.has(q.id) ? { min: 0, max: 1 } : undefined)) : { kind: 'held', reason: 'its most likely figure is not inside its range' };
+    const d = compiled.domains[q.id];
+    const domain = d === undefined ? undefined : { ...(d.min === undefined ? {} : { min: d.min / k }), ...(d.max === undefined ? {} : { max: d.max / k }) };
+    return inside ? readRange(rangeDistOf(q, 1, domain)) : { kind: 'held', reason: 'its most likely figure is not inside its range' };
   };
   const lawOf = (q: CanonicalQuantityT) => (has(q.low) && has(q.high) && q.low < q.high && (q.status === 'known' || q.status === 'estimated')
     ? { law: { author: 'olumi' as const, provisional: true as const, range_kind: q.range_kind, reading: lawFor(q) } } : {});
