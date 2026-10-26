@@ -3477,6 +3477,61 @@ describe('the model-program turn on the real core route', () => {
       'I used 10 things from your brief and added 1 of my own for you to check.', '1. What would the second oven cost?',
       'The chance also waits on 1 other thing, listed with the result.'].join('\n\n'));
   });
+
+  /**
+   * ⭐ THE FIRST REPLY'S COUNT LINE SPEAKS FOR A CARD THAT IS HELD (spec §3 C2, C7; DL ui-w1 27 Oct). The line ("I used N things
+   * from your brief …") is the reading card's summary. It was sent whenever the draft saved, while the card was held only on an
+   * acknowledged save: a reading `readingOf` refuses held no card under a line pointing at one, and a recovered draft (writes#4's
+   * `already_saved`, its own receipt, held to its read) never got its card. Both now follow ONE decision: the card is held, or
+   * the reply says no count.
+   */
+  describe('the first reply\'s count line and its reading card are one decision', () => {
+    const COUNT_LINE = 'I used 11 things from your brief and added 1 of my own for you to check.';
+    const countLines = (text: string) => text.split('\n\n').filter((p) => /^I (used|added|left) /.test(p));
+
+    it('a reading readingOf refuses holds no card, and the reply has no count line', async () => {
+      const m = bakery();
+      setQ(m, 'base_sales', { quote: 'We bake about 300 loaves' }); // not the brief's words: readingOf refuses unverified_person_words
+      replies = [JSON.stringify(m)];
+      const proposals = new ProposalStore();
+      const out = await runModelProgramTurn({ scenarioId: SCENARIO, turnId: randomUUID(), message: BRIEF, saved: { graph: null, identity: null }, dispatch, proposals });
+      expect(out.payload.model_program).toMatchObject({ turn: 'draft', saved: true, write: 'saved' });
+      expect(out.toolCalls[1]).toEqual({ name: 'confirm_reading', ok: false, outcome: 'refused', refusal: 'unverified_person_words', mutated: false });
+      expect(countLines(out.assistantText)).toEqual([]);
+      expect(out.assistantText.split('\n\n')[0]).toBe('I\'ve drafted a first model of: Should the bakery buy a second oven?');
+    });
+
+    it('a recovered draft (already_saved, its own receipt, held to its read) holds its card on the saved graph, and says the count line', async () => {
+      const landsThenThrows: typeof dispatch = async (path, body) => {
+        if (path.endsWith('/graph/register')) { await dispatch(path, body); throw new Error('socket hang up'); }
+        if (path.endsWith('/versions')) {
+          return { status: 200, json: { versions: [{ version_id: 'v_1', sequence: 1, creation: { kind: 'initial', mutation_id: 'm_1', source_turn_id: registrationTurnId(SCENARIO, registered[0]!.operation_id) } }] } };
+        }
+        return dispatch(path, body);
+      };
+      replies = [JSON.stringify(bakery())];
+      const proposals = new ProposalStore();
+      const out = await runModelProgramTurn({ scenarioId: SCENARIO, turnId: randomUUID(), message: BRIEF, saved: { graph: null, identity: null }, dispatch: landsThenThrows, proposals });
+      expect(out.payload.model_program).toMatchObject({ turn: 'draft', saved: true, write: 'already_saved' });
+      expect(out.toolCalls[1]).toMatchObject({ name: 'confirm_reading', ok: true, outcome: 'ok', mutated: false });
+      // Bound to the saved graph by identity: the hash and identity the read holds, never a guess.
+      const card = proposals.get(out.toolCalls[1]!.proposal_id!)!;
+      expect([card.base_graph_identity_hash, card.base_model_identity, card.reading]).toEqual([hashOf(persisted), computeGraphIdentityHash(persisted as never)!.value, true]);
+      expect(countLines(out.assistantText)).toEqual([COUNT_LINE]);
+      expect(registered).toHaveLength(1); // the card saves nothing
+    });
+
+    it('CONTRAST: an acknowledged first draft holds its card and says the same count line, as before', async () => {
+      replies = [JSON.stringify(bakery())];
+      const proposals = new ProposalStore();
+      const out = await runModelProgramTurn({ scenarioId: SCENARIO, turnId: randomUUID(), message: BRIEF, saved: { graph: null, identity: null }, dispatch, proposals });
+      expect(out.payload.model_program).toMatchObject({ turn: 'draft', saved: true, write: 'saved' });
+      expect(out.toolCalls[1]).toMatchObject({ name: 'confirm_reading', ok: true, outcome: 'ok' });
+      const card = proposals.get(out.toolCalls[1]!.proposal_id!)!;
+      expect([card.base_graph_identity_hash, card.base_model_identity]).toEqual([hashOf(persisted), computeGraphIdentityHash(persisted as never)!.value]);
+      expect(countLines(out.assistantText)).toEqual([COUNT_LINE]);
+    });
+  });
 });
 
 function beforeEachReset() { SCENARIO = randomUUID(); persisted = null; registered.length = 0; turnRows.clear(); conversationIds.clear(); pausedRun = null; sent.length = 0; replies = []; creates.length = 0; createAnswers = []; }
