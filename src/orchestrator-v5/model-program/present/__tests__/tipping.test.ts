@@ -165,6 +165,20 @@ describe('tipping point: a sampled crossing on common draws, stated as an interv
     expect(r.kind).toBe('unresolved');
   });
 
+  it('Codex r2: an exact tie at the crossing is the change itself, one crossing, never two', () => {
+    // Nothing sampled: A meets the goal while 10 − x ≥ 0, B while x − 10 ≥ 0, C never (−1). So A alone up to 9, both at 10
+    // (a tie, 100% each), B alone from 11.
+    const m: ExecutableModel = { periods: 1, period_unit: 'month', quantities: [X, fixed('x0', 10), def('dx', 'difference', ['x', 'x0']),
+      fixed('b0', 0, 'structure'), fixed('s', -1), fixed('plus', 1), fixed('nought', 0, 'structure'), fixed('minus', -1),
+      effect('score', 'b0', [{ coefficient: 's', driver: 'dx' }]), fixed('zero', 0)],
+    goals: [{ id: 'g', label: 'g', quantity: 'score', cmp: '>=', target: 'zero', aggregation: 'end', window: ONE }], limits: [],
+    options: [{ id: 'a', label: 'A', sets: [] }, { id: 'b', label: 'B', sets: [{ quantity: 's', to: 'plus', from_period: 0 }] },
+      { id: 'c', label: 'C', sets: [{ quantity: 's', to: 'nought', from_period: 0 }, { quantity: 'b0', to: 'minus', from_period: 0 }] }], risks: [], withheld: [] };
+    const r = search(m);
+    expect(r.probes.map((p: Rec) => p.state)).toEqual(runs([{ kind: 'leader', option_id: 'a' }, 10], [{ kind: 'tie' }, 1], [{ kind: 'leader', option_id: 'b' }, 10]));
+    expect(r).toMatchObject({ kind: 'crossing', from: { kind: 'leader', option_id: 'a' }, to: { kind: 'leader', option_id: 'b' }, between: [9, 11] });
+  });
+
   it('the work bound is refused by name before anything is simulated, and admitted at exactly the bound', () => {
     // costOf by hand for the model with x fixed: 2 times, 2 options, 1 goal, 1 ranged input (Z), 1 set, no risks.
     // Reads: z 1, x 1, x0 1, dx 1 + 2, s 1, slope 1, score 1 + (1 + 2 × 1), zero 1 = 13. Windows: 2 × (1 + 1) = 4.

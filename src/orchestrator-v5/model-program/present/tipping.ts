@@ -15,7 +15,8 @@
  *     never evidence of a change or of none. A chance not worked out at any probe (a nonfinite draw) refuses the search.
  *   - DEFINITE STATES ONLY: 'none' when every probe is the same definite state; 'crossing' when one definite state gives way
  *     to another once, stated as the interval from the last probe of the one to the first of the other; 'non_monotone' when
- *     the definite states change more than once. A too-close probe anywhere but between two different definite states, or
+ *     the definite states change more than once. A too-close probe, or an exact tie inside the run of probes, is the zone of
+ *     a change. One anywhere but between two different definite states, or
  *     an option whose count of met draws rises and then falls across the probes (on common draws, some draws then do not
  *     move one way as the figure rises, so a single change cannot be established), is 'unresolved'.
  *   - WORK BOUND (alpha G11): TIPPING_PROBES × `costOf` (the model with the figure fixed, at the probes' draws) must fit
@@ -121,15 +122,21 @@ export function tippingPoint(input: TippingInput): TippingResult {
     return acc;
   }, []);
   const searched: Searched = { quantity, probes, spacing, draws, confidence: TIPPING_CONFIDENCE };
-  const definite = spans.filter((s) => s.state.kind !== 'too_close');
+  // A ZONE: too close anywhere, or an exact tie between two other states (Codex r2: the probe where A and B are exactly
+  // equal is the change itself, never two). A tie at either end is a state of its own ("neither is more likely").
+  const zone = spans.map((s, i) => s.state.kind === 'too_close' || (s.state.kind === 'tie' && i > 0 && i < spans.length - 1));
+  const definite = spans.filter((_, i) => !zone[i]);
   const changes: TippingChange[] = definite.slice(1).flatMap((b, i) => {
     const a = definite[i]!;
     return key(a.state) === key(b.state) ? [] : [{ from: a.state, to: b.state, between: [values[a.last]!, values[b.first]!] as const }];
   });
   if (changes.length >= 2) return { ...searched, kind: 'non_monotone', changes };
-  // Too close is never a state of its own: only between two different definite states is it the zone of one change.
-  const unclear = spans.filter((s, i) => s.state.kind === 'too_close'
-    && (i === 0 || i === spans.length - 1 || key(spans[i - 1]!.state) === key(spans[i + 1]!.state)));
+  // A zone is never a state of its own: only between two different definite states is it the zone of one change.
+  const before = (i: number) => spans.slice(0, i).filter((_, j) => !zone[j]).pop(), after = (i: number) => spans.slice(i + 1).find((_, j) => !zone[i + 1 + j]);
+  const unclear = spans.filter((_, i) => {
+    const a = before(i), b = after(i);
+    return zone[i] && (a === undefined || b === undefined || key(a.state) === key(b.state));
+  });
   if (unclear.length > 0) return { ...searched, kind: 'unresolved', reason: 'too_close', values: unclear.flatMap((s) => values.slice(s.first, s.last + 1)) };
   const turnsBack = probes[0]!.chances.map((o) => o.option_id).filter((id) => {
     let direction = 0;
