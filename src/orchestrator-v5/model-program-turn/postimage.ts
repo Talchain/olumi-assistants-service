@@ -19,6 +19,7 @@
  * the history (each change and removal appended).
  */
 import { ProposalChangeSchema, type ProposalChange } from '../agent-lane/proposal.js';
+import { readingGroups } from './reading-groups.js';
 import { CanonicalModel, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
 import { norm } from '../model-program/compile.js';
 import { linkTargets, withUsedDirections } from '../model-program/links.js';
@@ -293,7 +294,9 @@ export function readingOf(model: CanonicalModelT, opts: { readonly words: readon
   if (!v.ok) return v;
   const rank = new Map(READING_ORDER.flatMap((f, i) => idsOf(model, f).map((id) => [id, i] as const)));
   const at = (id: string) => rank.get(id) ?? READING_ORDER.length;
-  return { ...v, changes: [...v.changes].sort((a, b) => at(a.id) - at(b.id)) };
+  // Each row carries its group: the same map the first reply counts (alpha G13), so the two can never disagree.
+  const groups = readingGroups(model);
+  return { ...v, changes: [...v.changes].sort((a, b) => at(a.id) - at(b.id)).map((c) => ({ ...c, group: groups.get(c.id) ?? 'other' })) };
 }
 
 // ── The card's words, rendered from the data (no wording invented) ────────────────────────────────────────────────────

@@ -19,6 +19,7 @@ import { holdProgramCard } from './program-tools.js';
 import { isSaved, programOperationId, savePostimage, withNewRun } from './program-save.js';
 import { MODEL_PROGRAM, reopenProgram, savedProgramOf, type SavedProgram } from './program-store.js';
 import { CANONICAL_SCHEMA_SHA256, DRAFTING_PROMPT_SHA256 } from './prompt.js';
+import { readingGroups, readingLine } from './reading-groups.js';
 import type { StoredRun } from './run-receipt.js';
 
 type Rec = Record<string, unknown>;
@@ -68,6 +69,10 @@ export const NO_AIM_NOTE = 'aim';
  */
 function replyOf(model: CanonicalModelT, run: StoredRun, kind: TurnKind): string {
   const lines: string[] = [OPENING[kind](model)];
+  // The first draft says, in one line, how much is theirs, how much is Olumi's to check and how much is left out (alpha G13);
+  // the reading card under it lists each, in the same groups.
+  const counted = kind === 'draft' ? readingLine(readingGroups(model)) : null;
+  if (counted !== null) lines.push(counted);
   const view = run.result.canonical_analysis_view as { options?: readonly { cell: { kind: string; face?: string } }[] };
   for (const o of view.options ?? []) if (o.cell.kind === 'figure' && typeof o.cell.face === 'string') lines.push(o.cell.face);
   const compiled = run.result.compile as { blockers?: readonly Blocker[] };
