@@ -2055,6 +2055,20 @@ describe('the model-program turn on the real core route', () => {
     /** Their prerequisite, accepted. */
     const hall = { id: 'hall', text: 'The council must let us use the hall.', kind: 'prerequisite' as const, concerns: ['reach_340'], author: 'person' as const, quote: 'The council must let us use the hall', ...at, approval: 'approved' as const };
 
+    it('a confirmed reported assumption or condition keeps its named speaker in the real result, never becoming yours', () => {
+      for (const kind of ['assumption', 'condition'] as const) {
+        const m = approved(allTheirs()), party = 'Our treasurer';
+        const text = kind === 'assumption' ? 'Membership fees stay the same.' : hall.text;
+        const quote = text.slice(0, -1), source = `${OWN} ${party} says: ${text}`;
+        if (kind === 'assumption') m.assumptions.push({ id: 'fees', text, applied: true, concerns: ['reach_340'], author: 'person', quote, ...at, party, approval: 'approved' });
+        else m.conditions.push({ ...hall, party });
+        const face = faceOf(m, source);
+        expect(face).toContain(`${party}’s ${kind} ‘${quote}’ ${kind === 'assumption' ? 'holds' : 'is met'}`);
+        expect(face).not.toContain(`your ${kind}`);
+        expect(face).not.toContain('(not yet confirmed)');
+      }
+    });
+
     it('a stated condition and an Olumi estimate: the basis names both, never "on your figures"', () => {
       const m = approved(club());
       m.conditions.push(hall);
