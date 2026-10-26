@@ -185,8 +185,10 @@ describe('integrated review 26 Oct: “today” only beside a goal measured from
 });
 
 describe('the goal’s horizon comes from its own stated window', () => {
+  /** The aim reached by the end of its stated window (max): the only goal the legacy “within N months” reader can describe. */
+  const reached = () => { const model = scenario(); model.goals[0]!.measure!.aggregation = 'max'; return model; };
   it('carries the stated 3 months, and exactly converts a stated year to 12 months', () => {
-    const model = scenario();
+    const model = reached();
     expect(node(projected(model).graph, 'goal')).toMatchObject({ goal_horizon: { months: 3 }, goal_horizon_months: 3 });
     model.period = 'year';
     Object.assign(model.quantities.find((q) => q.id === 'window')!, { unit: 'year', value: 1 });
@@ -194,7 +196,7 @@ describe('the goal’s horizon comes from its own stated window', () => {
   });
 
   it.each(['asked', 'unknown', 'unsupported'] as const)('does not default a %s window, even if its old figure remains', (status) => {
-    const model = scenario();
+    const model = reached();
     Object.assign(model.quantities.find((q) => q.id === 'window')!, { status, question: status === 'asked' ? 'By when?' : null, basis: 'Not known.' });
     const graph = project(model).graph;
     expect(node(graph, 'goal').goal_horizon).toBeUndefined();
@@ -202,7 +204,7 @@ describe('the goal’s horizon comes from its own stated window', () => {
   });
 
   it('does not turn a range or weeks into an exact month count', () => {
-    const model = scenario();
+    const model = reached();
     Object.assign(model.quantities.find((q) => q.id === 'window')!, { low: 2, high: 4, range_kind: 'bounds' });
     expect(node(project(model).graph, 'goal').goal_horizon).toBeUndefined();
     model.period = 'week';
@@ -210,28 +212,29 @@ describe('the goal’s horizon comes from its own stated window', () => {
     expect(node(projected(model).graph, 'goal').goal_horizon).toBeUndefined();
   });
 
-  it('integrated review 26 Oct: “within N months” only for a goal reached or ended by then, on a window the person stated', () => {
+  it('integrated review 26 Oct: “within N months” only for a goal reached by then (max), on a window the person stated', () => {
     const measured = (aggregation: 'end' | 'max' | 'min' | 'every' | 'mean') => {
-      const model = scenario();
+      const model = reached();
       model.goals[0]!.measure!.aggregation = aggregation;
       return node(projected(model).graph, 'goal');
     };
-    // Contrast: reached by the end of the window, or ended at it.
-    for (const aggregation of ['end', 'max'] as const) expect(measured(aggregation)).toMatchObject({ goal_horizon: { months: 3 }, goal_horizon_months: 3 });
-    // Held at its lowest, in every month, or on average over the window: never a deadline.
-    for (const aggregation of ['min', 'every', 'mean'] as const) {
+    // Contrast: reached by the end of the window.
+    expect(measured('max')).toMatchObject({ goal_horizon: { months: 3 }, goal_horizon_months: 3 });
+    // Its level AT the window's end (buddy BLOCK 26 Oct: a level reached at month 2 and lost by month 3 is "within 3 months" but
+    // fails the goal), held at its lowest, in every month, or on average: never a deadline.
+    for (const aggregation of ['end', 'min', 'every', 'mean'] as const) {
       const goal = measured(aggregation);
       expect([aggregation, goal.goal_horizon, goal.goal_horizon_months]).toEqual([aggregation, undefined, undefined]);
     }
     // Olumi's reading of a date they gave ("by the end of March") is never shown as their own stated window.
-    const read = scenario();
+    const read = reached();
     Object.assign(read.quantities.find((q) => q.id === 'window')!, { author: 'olumi', quote: null, basis: 'The end of March is 3 whole months from today.' });
     const goal = node(projected(read).graph, 'goal');
     expect([goal.goal_horizon, goal.goal_horizon_months]).toEqual([undefined, undefined]);
   });
 
   it('never calls an event-relative or later observation window “within 3 months” from now', () => {
-    const model = scenario(), window = model.goals[0]!.measure!.window!;
+    const model = reached(), window = model.goals[0]!.measure!.window!;
     window.start = 2;
     expect(node(projected(model).graph, 'goal').goal_horizon).toBeUndefined();
     window.start = 0; window.origin_event = 'Opening'; window.origin_offset = 'opening';
