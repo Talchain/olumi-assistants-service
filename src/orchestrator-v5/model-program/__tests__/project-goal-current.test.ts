@@ -165,6 +165,25 @@ describe('exact current levels on the canonical projection', () => {
   });
 });
 
+describe('integrated review 26 Oct: “today” only beside a goal measured from today', () => {
+  /** "Grow orders by 20 %" from `reference`, the target in %. */
+  const growth = (reference: NonNullable<CanonicalModelT['goals'][number]['measure']>['reference']) => {
+    const model = scenario();
+    Object.assign(model.quantities.find((q) => q.id === 'target')!, { unit: '%', value: 20, quote: 'target: 20 %' });
+    model.quantities.push(quantity('last_year', 'order/week', 120));
+    model.options.push({ id: 'carry_on', label: 'Carry on as now', status: 'live', developed_from: null, ...record, author: 'person', quote: 'Carry on as now.', sets: [] });
+    Object.assign(model.goals[0]!.measure!, { frame: 'change_rel', reference });
+    return node(projected(model).graph, 'goal');
+  };
+  it('a change from today carries today’s 125; a change from a stated value or from an option carries no “today”', () => {
+    expect(growth({ kind: 'now', option: null, quantity: null })).toMatchObject({ observed_state: { value: 125, raw_value: 125, unit: 'order/week' }, value_basis: { kind: 'worked_out' } });
+    for (const reference of [{ kind: 'value' as const, option: null, quantity: 'last_year' }, { kind: 'option' as const, option: 'carry_on', quantity: null }]) {
+      const goal = growth(reference);
+      expect([reference.kind, goal.observed_state, goal.value_basis]).toEqual([reference.kind, undefined, undefined]);
+    }
+  });
+});
+
 describe('the goal’s horizon comes from its own stated window', () => {
   it('carries the stated 3 months, and exactly converts a stated year to 12 months', () => {
     const model = scenario();
@@ -189,6 +208,26 @@ describe('the goal’s horizon comes from its own stated window', () => {
     model.period = 'week';
     Object.assign(model.quantities.find((q) => q.id === 'window')!, { value: 13, low: null, high: null, range_kind: null, unit: 'week' });
     expect(node(projected(model).graph, 'goal').goal_horizon).toBeUndefined();
+  });
+
+  it('integrated review 26 Oct: “within N months” only for a goal reached or ended by then, on a window the person stated', () => {
+    const measured = (aggregation: 'end' | 'max' | 'min' | 'every' | 'mean') => {
+      const model = scenario();
+      model.goals[0]!.measure!.aggregation = aggregation;
+      return node(projected(model).graph, 'goal');
+    };
+    // Contrast: reached by the end of the window, or ended at it.
+    for (const aggregation of ['end', 'max'] as const) expect(measured(aggregation)).toMatchObject({ goal_horizon: { months: 3 }, goal_horizon_months: 3 });
+    // Held at its lowest, in every month, or on average over the window: never a deadline.
+    for (const aggregation of ['min', 'every', 'mean'] as const) {
+      const goal = measured(aggregation);
+      expect([aggregation, goal.goal_horizon, goal.goal_horizon_months]).toEqual([aggregation, undefined, undefined]);
+    }
+    // Olumi's reading of a date they gave ("by the end of March") is never shown as their own stated window.
+    const read = scenario();
+    Object.assign(read.quantities.find((q) => q.id === 'window')!, { author: 'olumi', quote: null, basis: 'The end of March is 3 whole months from today.' });
+    const goal = node(projected(read).graph, 'goal');
+    expect([goal.goal_horizon, goal.goal_horizon_months]).toEqual([undefined, undefined]);
   });
 
   it('never calls an event-relative or later observation window “within 3 months” from now', () => {
