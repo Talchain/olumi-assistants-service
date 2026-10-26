@@ -11,6 +11,14 @@ export const CURRENT_MODEL_STATE_PREFIX = 'CURRENT MODEL STATE \u2014 exactly wh
   + 'If a tool result later in this turn APPLIED a change (mutated: true, the new entities, a new graph_revision, readiness_after), that result is '
   + 'newer and supersedes this for what it covers: describe the model from the latest applied result. A proposal\u2019s '
   + 'readiness_if_approved describes the model only IF the user approves, and never supersedes this. As the turn began: ';
+/**
+ * A MODEL PROGRAM's state block (alpha): the same rule in the program tools' own words, so the agent never looks for a Living
+ * Model field (`get_canonical_state`, `graph_revision`, `readiness_after`) that no program tool returns.
+ */
+export const PROGRAM_MODEL_STATE_PREFIX = 'CURRENT MODEL STATE — exactly what read_canonical_context returns, read by Olumi at the START of this turn. '
+  + 'If a tool result later in this turn SAVED a change (apply_change with saved: true, its revision and its run) or stored a new Run '
+  + '(run_analysis with stored: false), that result is newer and supersedes this for what it covers: describe the model and its Run from the latest saved result. '
+  + 'A proposal’s changes and would_show describe the model only IF the person approves, and never supersede this. As the turn began: ';
 
 /**
  * ⭐ TODAY, FROM THE SERVER CLOCK (DL 15 Oct 23:08Z; HIRING's legacy capture turn 02 served "Six months from today, 9 March
@@ -48,6 +56,8 @@ export const OBJECTIONS_CONTEXT_LEAD = 'Objections the user recorded to earlier 
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+/** A program's state carries its discriminator (`read_canonical_context`'s `model_program`). */
+const isProgramState = (state: unknown): boolean => typeof record(state)?.model_program === 'string';
 export const turnContextText = (item: unknown): string => {
   const content = record(item)?.content;
   if (typeof content === 'string') return content;
@@ -139,7 +149,8 @@ export function turnContextItems(args: {
     if (request !== undefined) items.push({ role: 'user', content: [{ type: 'input_text', text: JSON.stringify({ request,
       model_origin: MODEL_RECORD_LABEL, canonical_state: args.canonicalState }) }] });
   } else if (args.canonicalState !== undefined) {
-    items.push({ role: 'developer', content: [{ type: 'input_text', text: `${CURRENT_MODEL_STATE_PREFIX}${JSON.stringify(args.canonicalState)}` }] });
+    const prefix = isProgramState(args.canonicalState) ? PROGRAM_MODEL_STATE_PREFIX : CURRENT_MODEL_STATE_PREFIX;
+    items.push({ role: 'developer', content: [{ type: 'input_text', text: `${prefix}${JSON.stringify(args.canonicalState)}` }] });
   }
   if (args.construction !== undefined) {
     const context = args.construction;

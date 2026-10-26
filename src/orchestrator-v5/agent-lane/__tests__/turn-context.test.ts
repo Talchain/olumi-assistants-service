@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { turnContextItems, runFactsContext, REASONING_CONTEXT_LABEL } from '../turn-context.js';
+import { turnContextItems, runFactsContext, REASONING_CONTEXT_LABEL, CURRENT_MODEL_STATE_PREFIX, PROGRAM_MODEL_STATE_PREFIX } from '../turn-context.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
 import { answeredEarlierItem, ANSWERED_EARLIER_LABEL } from '../history-store.js';
 
@@ -135,5 +135,14 @@ describe('construction uses the shared source-labelled context', () => {
     expect(wholeStatementIn(brief, quote), 'the unrelated equal amount cannot supply this statement').toBe(false);
     expect(wholeStatementIn(`${brief}\n${quote}`, quote), 'the identical statement is readable when actually typed').toBe(true);
     expect(reference).toContain(`${JSON.stringify({ speaker: 'unknown', source: 'stored, origin not verified' })}\n${JSON.stringify(referenceText)}`);
+  });
+
+  it('a model program\'s state block is in the program tools\' words; any other state keeps the Living Model\'s', () => {
+    const block = (canonicalState: unknown) => (turnContextItems({ now: new Date('2026-10-26T12:00:00Z'), briefText: '', conversation: [], canonicalState })
+      .map((i) => (i as { content: { text: string }[] }).content[0]!.text).find((t) => t.startsWith('CURRENT MODEL STATE'))!);
+    const program = block({ model_program: 'v1', revision: { graph_hash: 'h' }, model: {} });
+    expect(program.startsWith(PROGRAM_MODEL_STATE_PREFIX)).toBe(true);
+    expect(program).not.toContain('get_canonical_state');
+    expect(block({ ok: true, graph_revision: 'r1' }).startsWith(CURRENT_MODEL_STATE_PREFIX)).toBe(true);
   });
 });

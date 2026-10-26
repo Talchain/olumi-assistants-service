@@ -18,6 +18,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { ModelBehaviorError, tool, type FunctionTool, type Tool } from '@openai/agents';
+import { z } from 'zod-v4';
 import { toolArgumentsAsSent } from '../../agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode, AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import { READ_CANONICAL_CONTEXT, ReadCanonicalContextParams, readCanonicalContext } from './context-tool.js';
@@ -285,6 +286,12 @@ const schemaErrorToModel = (name: string, schema: typeof ProgramChangeParams) =>
 };
 
 /**
+ * A program's Run takes no timing reading: the model's own windows and timings decide it (`runProgram` reads nothing sent),
+ * so the AI is never asked for the Living Model's `effects_timing`.
+ */
+export const ProgramRunParams = z.object({ reason: z.string().describe('Why the person asked for this Run, in a few words.') }).strict();
+
+/**
  * A PROGRAM scenario's tools (alpha): the same names and approval contract, on the canonical model
  * (`model-program-turn/program-tools.ts`). Its model exists from the first turn, so there is no build; a change carries its
  * own Run, so apply_change reports that Run instead of starting the automatic one.
@@ -314,7 +321,7 @@ function programTools(deps: PathBToolDeps, ctx: PathBContext, read: Tool, record
     tool({
       name: RUN_ANALYSIS,
       description: PROGRAM_TOOL_DESCRIPTIONS.run_analysis,
-      parameters: RunAnalysisParams,
+      parameters: ProgramRunParams,
       execute: async (args) => record(RUN_ANALYSIS, args, await runProgram(deps, ctx)),
       errorFunction: null,
     }),

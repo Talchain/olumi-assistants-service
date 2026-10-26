@@ -34,6 +34,7 @@ import { projectCorePostimageForPersistence } from '../../persisted-graph-projec
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { ENGINE_VERSIONS, revisionDigest, RUN_AGAIN_AFTER_UPDATE, RUN_AGAIN_FOR_CHANCE } from '../run-receipt.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
+import { PROGRAM_MODEL_STATE_PREFIX } from '../../agent-lane/turn-context.js';
 import { responsesSse } from '../../agent-lane/__tests__/stream-when-asked.js';
 import { at, bakery, bakeryWithDefect, BRIEF, club, CLUB_BRIEF, q, updateOf } from './bakery.fixture.js';
 
@@ -287,6 +288,21 @@ describe('the model-program turn on the real core route', () => {
         .toMatchObject({ status: 'ok', data: { already_saved: true, receipt: ownReceipt } });
       expect([registered.length, sent.length, JSON.stringify(persisted)]).toEqual([2, 3, snapshot]);
     } finally { finish.release(); await stream.done; registerPause = undefined; }
+  });
+
+  it('inventory §0 item 6: a typed program turn gives the agent its state in the program tools\' own words, and its Run tool asks for no timing reading', async () => {
+    replies = [JSON.stringify(bakery())];
+    expect((await turn({ message: BRIEF })).statusCode).toBe(200);
+    conversationIds.set(SCENARIO, `conv_${SCENARIO}`);
+    replies = ['The model holds what you described.'];
+    expect((await turn({ message: 'What does the model hold?' })).statusCode).toBe(200);
+    // The request the agent's call actually sent: its state block, and its Run tool's parameters.
+    const agent = sent[1]!;
+    const block = (agent.input as Json[]).map((i) => (typeof i.content === 'string' ? i.content : JSON.stringify(i.content))).find((t) => t.includes('OLUMI STATE BLOCK'))!;
+    expect(block).toContain(PROGRAM_MODEL_STATE_PREFIX);
+    for (const legacy of ['get_canonical_state', 'graph_revision', 'readiness_after', 'readiness_if_approved']) expect(block).not.toContain(legacy);
+    const run = (agent.tools as Json[]).find((t) => t.name === 'run_analysis')!;
+    expect(Object.keys(run.parameters.properties)).toEqual(['reason']);
   });
 
   /**
