@@ -1440,13 +1440,203 @@ describe('the model-program turn on the real core route', () => {
     // words that are not in what they wrote it is listed as not found, in the Run's own sentence, never "on your figures".
     const m = club();
     m.quantities = m.quantities.map((x) => (x.id === 'promo_effect' ? { ...x, status: 'known', author: 'person', low: null, high: null, range_kind: null, basis: null, quote: 'five extra joins a month' } : x));
-    // The joins relation and its term are the person's too, so every other input is theirs.
-    m.relations = m.relations.map((r) => (r.form === 'effect' ? { ...r, author: 'person', quote: '20 join each month', terms: r.terms.map((t) => ({ ...t, author: 'person', quote: 'Run a promotion' })) } : r));
-    const face = (sourceText: string) => ((evaluateCanonical(m, { sourceText, seed: 7 }).view as Json).options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
+    // Both relations and the term are the person's too, so every other input is theirs.
+    m.relations = m.relations.map((r) => (r.form === 'effect' ? { ...r, author: 'person', quote: '20 join each month', terms: r.terms.map((t) => ({ ...t, author: 'person', quote: 'Run a promotion' })) }
+      : { ...r, author: 'person', quote: '20 join each month and 10 leave each month' }));
+    // R8: "on your figures" needs their reading confirmed too, so the contrast is the model as accepted.
+    const confirmed = JSON.parse(JSON.stringify(m).replaceAll('"approval":"proposed"', '"approval":"approved"')) as CanonicalModelT;
+    const face = (sourceText: string) => ((evaluateCanonical(confirmed, { sourceText, seed: 7 }).view as Json).options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
     expect(face(`${CLUB_BRIEF} The promotion brings five extra joins a month.`)).toContain(', in this model, on your figures');
     const unverified = face(CLUB_BRIEF);
     expect(unverified).not.toContain('on your figures');
     expect(unverified).toContain('‘promo effect’ is 5 member / month / promotion (not found in your words)');
+  });
+
+  describe('R8: a result\'s basis names the premises and Olumi\'s figures it rests on (real path: compile → simulate → present)', () => {
+    const HALL = `${CLUB_BRIEF} The council must let us use the hall.`;
+    const OWN = `${CLUB_BRIEF} The promotion brings five extra joins a month.`;
+    const faceOf = (m: CanonicalModelT, sourceText: string, option = 'promotion') =>
+      ((evaluateCanonical(m, { sourceText, seed: 7 }).view as Json).options as Json[]).find((o) => o.option_id === option)!.cell.face as string;
+    const approved = (m: CanonicalModelT) => JSON.parse(JSON.stringify(m).replaceAll('"approval":"proposed"', '"approval":"approved"')) as CanonicalModelT;
+    /** The club with every figure, relation and link the person's own (the promotion's effect given in their words). */
+    const allTheirs = () => {
+      const m = club();
+      m.quantities = m.quantities.map((x) => (x.id === 'promo_effect' ? { ...x, status: 'known', author: 'person', low: null, high: null, range_kind: null, basis: null, quote: 'five extra joins a month' } : x));
+      m.relations = m.relations.map((r) => (r.form === 'effect' ? { ...r, author: 'person', quote: '20 join each month', terms: r.terms.map((t) => ({ ...t, author: 'person', quote: 'Run a promotion' })) }
+        : { ...r, author: 'person', quote: '20 join each month and 10 leave each month' }));
+      return m;
+    };
+    /** Their prerequisite, accepted. */
+    const hall = { id: 'hall', text: 'The council must let us use the hall.', kind: 'prerequisite' as const, concerns: ['reach_340'], author: 'person' as const, quote: 'The council must let us use the hall', ...at, approval: 'approved' as const };
+
+    it('a stated condition and an Olumi estimate: the basis names both, never "on your figures"', () => {
+      const m = approved(club());
+      m.conditions.push(hall);
+      const face = faceOf(m, HALL);
+      // The club's members stock is Olumi's (accepted, but never theirs): Olumi's reading, named, with no "(not yet confirmed)".
+      expect(face).toContain(', in this model, on Olumi’s reading of ‘members’, if your condition ‘The council must let us use the hall’ is met, ‘promo effect’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 3 member / month / promotion to 7 member / month / promotion, into a bell-shaped spread and ‘joins’ follows Olumi’s assumed relationship.');
+      expect(face).not.toContain('on your figures');
+      // The exact 0% names it too, before what fixes it.
+      expect(faceOf(m, HALL, 'carry_on')).toContain(', in this model, on Olumi’s reading of ‘members’, if your condition ‘The council must let us use the hall’ is met, ‘promo effect’');
+    });
+
+    it('a situation-wide assumption (concerns []) is named: it bears on every goal', () => {
+      const m = approved(allTheirs());
+      m.assumptions.push({ id: 'fees', text: 'Membership fees stay the same.', applied: true, concerns: [], author: 'olumi', quote: null, ...at });
+      const face = faceOf(m, OWN);
+      expect(face).toContain(', in this model, if Olumi’s assumption ‘Membership fees stay the same’ holds: in every simulated draw ‘members’ is 345 member');
+      expect(face).not.toContain('on your figures');
+    });
+
+    it('contrast: every input theirs and confirmed, no premise → "on your figures"; a noted assumption and a challenge are never premises', () => {
+      expect(faceOf(approved(allTheirs()), OWN)).toContain(', in this model, on your figures: in every simulated draw ‘members’ is 345 member');
+      const noted = approved(allTheirs());
+      noted.assumptions.push({ id: 'word', text: 'Word of mouth may help.', applied: false, concerns: ['reach_340'], author: 'olumi', quote: null, ...at });
+      noted.conditions.push({ id: 'winter', text: 'Leavers may rise in winter.', kind: 'challenge', concerns: [], author: 'olumi', quote: null, ...at });
+      // Even named by the goal itself, a noted assumption is no premise: the record says the calculation is not worked out under it.
+      noted.goals = noted.goals.map((g) => ({ ...g, measure: { ...g.measure!, assumptions: ['word'] } }));
+      const face = faceOf(noted, OWN);
+      expect(face).toContain(', in this model, on your figures: in every simulated draw ‘members’ is 345 member');
+      expect(face).not.toMatch(/Word of mouth|Leavers may rise/);
+    });
+
+    it('their figures not yet confirmed (a first draft) are said as Olumi\'s reading of them, all or by name', () => {
+      expect(faceOf(allTheirs(), OWN)).toContain(', in this model, on Olumi’s reading of your figures (not yet confirmed): in every simulated draw');
+      const one = approved(allTheirs());
+      one.quantities = one.quantities.map((x) => (x.id === 'members_now' ? { ...x, approval: 'proposed' } : x));
+      const face = faceOf(one, OWN);
+      expect(face).toContain(', in this model, on Olumi’s reading of ‘members now’ (not yet confirmed): in every simulated draw');
+      expect(face).not.toContain('on your figures');
+      // With a condition too: the reading leads, then what the chance is conditional on.
+      const both = allTheirs();
+      both.conditions.push(hall);
+      expect(faceOf(both, `${OWN} The council must let us use the hall.`)).toContain(', in this model, on Olumi’s reading of your figures (not yet confirmed), if your condition ‘The council must let us use the hall’ is met: in every simulated draw');
+    });
+
+    it('Codex #3738: their relation not yet accepted, a link of Olumi\'s in it, and their link not yet accepted are each Olumi\'s reading', () => {
+      const joins = (f: (r: CanonicalModelT['relations'][number]) => CanonicalModelT['relations'][number]) => {
+        const m = approved(allTheirs());
+        m.relations = m.relations.map((r) => (r.id === 'joins_rel' ? f(r) : r));
+        return faceOf(m, OWN);
+      };
+      const terms = (t: { author?: 'person' | 'olumi'; quote?: string | null; approval?: 'proposed' | 'approved' }) =>
+        (r: CanonicalModelT['relations'][number]) => (r.form === 'effect' ? { ...r, terms: r.terms.map((x) => ({ ...x, ...t })) } : r);
+      for (const face of [joins((r) => ({ ...r, approval: 'proposed' })), joins(terms({ approval: 'proposed' }))]) {
+        expect(face).toContain(', in this model, on Olumi’s reading of ‘joins’ (not yet confirmed): in every simulated draw');
+        expect(face).not.toContain('on your figures');
+      }
+      // Olumi's link, accepted: Olumi's reading, never theirs, and not "not yet confirmed".
+      expect(joins(terms({ author: 'olumi', quote: null }))).toContain(', in this model, on Olumi’s reading of ‘joins’: in every simulated draw');
+    });
+
+    it('DL #3738: an accepted Olumi stock is Olumi\'s reading with no "(not yet confirmed)"; unaccepted, it keeps it; mixed, each says its own', () => {
+      const stock = (approval: 'proposed' | 'approved', also: (m: CanonicalModelT) => void = () => {}) => {
+        const m = approved(allTheirs());
+        m.relations = m.relations.map((r) => (r.id === 'members_rel' ? { ...r, author: 'olumi', quote: null, approval } : r));
+        also(m);
+        return faceOf(m, OWN);
+      };
+      const accepted = stock('approved');
+      expect(accepted).toContain(', in this model, on Olumi’s reading of ‘members’: in every simulated draw');
+      expect(accepted).not.toMatch(/not yet confirmed|on your figures/);
+      expect(stock('proposed')).toContain(', in this model, on Olumi’s reading of ‘members’ (not yet confirmed): in every simulated draw');
+      const mixed = stock('approved', (m) => { m.quantities = m.quantities.map((x) => (x.id === 'members_now' ? { ...x, approval: 'proposed' } : x)); });
+      expect(mixed).toContain(', in this model, on Olumi’s reading of ‘members now’ (not yet confirmed) and ‘members’: in every simulated draw');
+    });
+
+    // Codex r3 #3738: the goal is read with its own record (and its measure's author and its window's figure), and so is a limit.
+    const GOAL = '‘Reach 340 members within three months’';
+    type Goal = CanonicalModelT['goals'][number];
+    const aimCases: readonly (readonly [string, (g: Goal) => Goal, (m: CanonicalModelT) => void, string])[] = [
+      ['the goal proposed', (g) => ({ ...g, approval: 'proposed' }), () => {}, `on Olumi’s reading of ${GOAL} (not yet confirmed)`],
+      ['the goal Olumi-authored (accepted)', (g) => ({ ...g, author: 'olumi', quote: null }), () => {}, `on Olumi’s reading of ${GOAL}`],
+      ['the goal not found in their words', (g) => ({ ...g, quote: 'grow to 340 members by spring' }), () => {}, `on Olumi’s reading of ${GOAL} (not yet confirmed)`],
+      ['the goal measured by Olumi\'s suggestion', (g) => ({ ...g, measure: { ...g.measure!, measure_by: 'olumi' } }), () => {}, `on Olumi’s reading of ${GOAL}`],
+      ['the goal\'s window figure proposed', (g) => g, (m) => { m.quantities = m.quantities.map((x) => (x.id === 'months' ? { ...x, approval: 'proposed' } : x)); }, `on Olumi’s reading of ${GOAL} (not yet confirmed)`],
+      ['a limit proposed', (g) => g, (m) => { m.limits = m.limits.map((l) => ({ ...l, approval: 'proposed' })); }, 'on Olumi’s reading of ‘Within the £800’ (not yet confirmed)'],
+    ];
+    for (const [name, goal, also, lead] of aimCases) {
+      it(`Codex r3 #3738: ${name} is Olumi's reading, never "on your figures"`, () => {
+        const m = approved(allTheirs());
+        m.goals = m.goals.map((g) => (g.id === 'reach_340' ? goal(g) : g));
+        also(m);
+        const face = faceOf(m, OWN);
+        expect(face).toContain(`, in this model, ${lead}: in every simulated draw`);
+        expect(face).not.toContain('on your figures');
+      });
+    }
+
+    it('buddy #3738: their premise not found in their words, or not yet accepted, is never "your" and never Olumi\'s', () => {
+      for (const [m, words] of [[approved(allTheirs()), OWN], [approved(allTheirs()), `${OWN} The council must let us use the hall.`]] as const) {
+        m.conditions.push(words === OWN ? hall : { ...hall, approval: 'proposed' });
+        const face = faceOf(m, words);
+        expect(face).toContain(', in this model, if the condition ‘The council must let us use the hall’ is met (not yet confirmed): in every simulated draw');
+        expect(face).not.toMatch(/your condition|Olumi’s condition|on your figures/);
+      }
+    });
+
+    it('Codex #3738: the same premise reaching the chance twice (both goals rest on it, one also names it) is named once', () => {
+      const m = approved(allTheirs());
+      m.quantities.push(q('floor', 'member', { value: 320, quote: 'at least 320 members', approval: 'approved' }));
+      m.goals.push({ ...m.goals[0]!, id: 'keep_320', label: 'Keep at least 320 members', measure: { ...m.goals[0]!.measure!, target: 'floor' }, quote: 'keep at least 320 members' });
+      m.assumptions.push({ id: 'fees', text: 'Membership fees stay the same.', applied: true, concerns: [], author: 'olumi', quote: null, ...at });
+      m.goals = m.goals.map((g) => (g.id === 'reach_340' ? { ...g, measure: { ...g.measure!, assumptions: ['fees'] } } : g));
+      const v = evaluateCanonical(m, { sourceText: `${OWN} And keep at least 320 members.`, seed: 7 }).view as Json;
+      const face = (v.options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
+      const FEES = 'Olumi’s assumption ‘Membership fees stay the same’ holds';
+      expect(face.split(FEES).length - 1).toBe(1);
+      expect(face).toContain(`, in this model, if ${FEES}: in every simulated draw`);
+      expect((v.goal_chance.targets.per_target as Json[]).map((t) => t.words)).toEqual([
+        `‘members’ being at least 340 member at 3 months from now, in this model, if ${FEES}`,
+        `‘members’ being at least 320 member at 3 months from now, in this model, if ${FEES}`]);
+    });
+
+    const HALL_WORDS = `${OWN} The council must let us use the hall. And keep at least 320 members.`;
+    /** Two goals, so the view has a line per target. */
+    const viewOf = (m: CanonicalModelT) => {
+      m.quantities.push(q('floor', 'member', { value: 320, quote: 'at least 320 members', approval: 'approved' }));
+      m.goals.push({ ...m.goals[0]!, id: 'keep_320', label: 'Keep at least 320 members', measure: { ...m.goals[0]!.measure!, target: 'floor' }, quote: 'keep at least 320 members' });
+      return evaluateCanonical(m, { sourceText: HALL_WORDS, seed: 7 }).view as Json;
+    };
+    const optionFace = (v: Json, id: string) => (v.options as Json[]).find((o) => o.option_id === id)!.cell.face as string;
+    const HALL_MET = 'if your condition ‘The council must let us use the hall’ is met';
+    const REACH = '‘members’ being at least 340 member at 3 months from now, in this model,';
+
+    it('Codex #3769: a prerequisite on a limit is named in every option\'s chance (each is within the limit), never in the goal\'s own line', () => {
+      const m = approved(allTheirs());
+      m.conditions.push({ ...hall, concerns: ['within_budget'] });
+      const v = viewOf(m);
+      for (const id of ['promotion', 'carry_on']) {
+        expect(optionFace(v, id)).toContain(`, in this model, ${HALL_MET}`);
+        expect(optionFace(v, id)).not.toContain('on your figures');
+      }
+      expect((v.goal_chance.targets.per_target as Json[])[0]!.words).toBe(`${REACH} on your figures`);
+    });
+
+    it('Codex #3769: a prerequisite on one option, or on a figure only its settings use, is named for that option only; the target line names the option, with no bare "on your figures"', () => {
+      for (const concerns of [['promotion'], ['promo_cost']]) {
+        const m = approved(allTheirs());
+        m.conditions.push({ ...hall, concerns });
+        const v = viewOf(m);
+        expect(optionFace(v, 'promotion')).toContain(`, in this model, ${HALL_MET}`);
+        expect(optionFace(v, 'promotion')).not.toContain('on your figures');
+        expect(optionFace(v, 'carry_on')).toContain(', in this model, on your figures');
+        expect(optionFace(v, 'carry_on')).not.toContain('council');
+        expect((v.goal_chance.targets.per_target as Json[])[0]!.words).toBe(`${REACH} with ‘Run a promotion’, ${HALL_MET}`);
+      }
+    });
+
+    it('several goals: each goal\'s own basis names only its own premises; the joint names every one', () => {
+      const m = approved(allTheirs());
+      m.quantities.push(q('floor', 'member', { value: 320, quote: 'at least 320 members', approval: 'approved' }));
+      m.goals.push({ ...m.goals[0]!, id: 'keep_320', label: 'Keep at least 320 members', measure: { ...m.goals[0]!.measure!, target: 'floor' }, quote: 'keep at least 320 members' });
+      m.conditions.push({ ...hall, concerns: ['keep_320'] });
+      const v = evaluateCanonical(m, { sourceText: `${OWN} The council must let us use the hall. And keep at least 320 members.`, seed: 7 }).view as Json;
+      const words = (id: string) => (v.goal_chance.targets.per_target as Json[]).find((t) => t.constraint_id === id)!.words as string;
+      expect(words('keep_320')).toBe('‘members’ being at least 320 member at 3 months from now, in this model, if your condition ‘The council must let us use the hall’ is met');
+      expect(words('reach_340')).toBe('‘members’ being at least 340 member at 3 months from now, in this model, on your figures');
+      expect(((v.options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string)).toContain(', in this model, if your condition ‘The council must let us use the hall’ is met: in every simulated draw');
+    });
   });
 
   it('DL 23 Oct (batch 1 + batch 4) + S4 class 5: an aim with no window says how it is read (with each option in effect), never a missing deadline the compiler does not list; a % target is said in %', () => {
@@ -2440,7 +2630,8 @@ describe('the model-program turn on the real core route', () => {
     const today = rel('sales relative to today');
     expect(today.e.compiled.executable!.quantities.find((x) => x.id === 'sales__today')!.label).toBe('sales relative to today');
     expect(today.face).toBe('‘A second oven’: more than 99% chance of ‘Relative change in sales relative to today’ being at least 10% with each option in effect, in this model, '
-      + 'if ‘sell through’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 0.5 to 0.9, into a bell-shaped spread and ‘sales relative to today’ follows Olumi’s assumed relationship. '
+      // G9 (#3738): a first draft is Olumi's reading until the person confirms it, and its basis says so.
+      + 'on Olumi’s reading of your figures (not yet confirmed), if ‘sell through’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 0.5 to 0.9, into a bell-shaped spread and ‘sales relative to today’ follows Olumi’s assumed relationship. '
       + 'Not yet checked: ‘Within the £3,000’ — needs "oven price".');
     expect(JSON.stringify(today.e.view)).not.toContain('today today');
     // Contrast: a quantity not already said "today" keeps its shadow's "today", listed as before.
