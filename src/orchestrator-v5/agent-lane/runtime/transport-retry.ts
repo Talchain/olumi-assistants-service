@@ -29,16 +29,32 @@ export async function onceMoreOnTransportFailure<T>(
 }
 
 
+/**
+ * ⭐ THE PROVIDER'S OWN SERVER FAULT, read from its typed fields only, never its prose (W9; served 26 Oct 13:33Z: OpenAI
+ * reported itself overloaded mid-stream after an approval had saved, and the turn answered a generic upstream error).
+ * `overloaded`: the provider is busy (an overload code or type, or its service-unavailable type); `server_error`: its
+ * generic server fault, or an HTTP 5xx. A streamed `error` event's own `type: 'error'` names the event, not the fault.
+ */
+export function providerServerFault(err: unknown): 'overloaded' | 'server_error' | undefined {
+  const e = err as { code?: unknown; type?: unknown; status?: unknown } | null | undefined;
+  const typed = [e?.code, e?.type].filter((x): x is string => typeof x === 'string');
+  if (typed.some((x) => x.includes('overloaded') || x === 'service_unavailable_error')) return 'overloaded';
+  if (typed.includes('server_error') || (typeof e?.status === 'number' && e.status >= 500 && e.status <= 599)) return 'server_error';
+  return undefined;
+}
+
 /** Read the provider's typed reason, never infer billing from HTTP 429 or its prose. */
 export function providerFailureOf(err: unknown): Record<string, unknown> {
   const e = err as { code?: unknown; type?: unknown; status?: unknown; headers?: Headers } | null | undefined;
   const capacity = [e?.code, e?.type].some(x => x === 'insufficient_quota' || x === 'credit_balance_exhausted');
   const limited = [e?.code, e?.type].some(x => x === 'rate_limit_exceeded');
+  // A busy provider is capacity too, but passing: worth sending again later (a credit refusal is not).
+  const busy = !capacity && providerServerFault(err) === 'overloaded';
   const retryAfter = e?.headers?.get('retry-after');
   const retryAfterMs = e?.headers?.get('retry-after-ms');
   return {
-    error: capacity ? 'PROVIDER_CAPACITY' : 'UPSTREAM_ERROR',
-    ...(capacity ? { retryable: false } : limited ? { retryable: true } : {}),
+    error: capacity || busy ? 'PROVIDER_CAPACITY' : 'UPSTREAM_ERROR',
+    ...(capacity ? { retryable: false } : limited || busy ? { retryable: true } : {}),
     ...(e?.code !== undefined || e?.type !== undefined || e?.status !== undefined ? {
       provider_error: { code: e.code ?? null, type: e.type ?? null, status: e.status ?? null },
     } : {}),

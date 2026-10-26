@@ -412,7 +412,12 @@ export async function appendCheckedGraphWrite(
           ...(params.write.expectedRevision !== undefined ? { expectedRevision: params.write.expectedRevision } : {}),
         },
     );
-    if (expectedLatestRowId === undefined || attempt >= 3 || typeof store.appendIfLatest !== 'function') return await store.append(storedWrite);
+    // ⭐ W9 (served 26 Oct 13:33Z): the conditional append takes ONLY a final answer (the store's guard and its RPC refuse any
+    // other, by contract). A turn's record that is not one (a failed turn's typed outcome, `response_emitted: false`) is
+    // appended plainly, after the same reconciliation, so it is saved and a resend replays it (it was refused every time).
+    if (expectedLatestRowId === undefined || attempt >= 3 || typeof store.appendIfLatest !== 'function' || storedWrite.response_emitted !== true) {
+      return await store.append(storedWrite);
+    }
     const outcome = await store.appendIfLatest(storedWrite, { expectedLatestRowId });
     if (!('status' in outcome)) return outcome;
     if (attempt === 2) {
