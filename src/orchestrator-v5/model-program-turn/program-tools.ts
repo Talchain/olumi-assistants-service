@@ -174,6 +174,9 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   // that record changed, as a known figure: one it left as saved (the merge keeps it) or read only as an estimate is not
   // their answer, so it is never restamped as theirs (integrated review 26 Oct: Olumi's estimate saved as "known, yours").
   const worded = answers.filter((a) => toDrafter(a) && quantities.some((x) => x.id === a.id));
+  // One the change removed, a figure or in words, is refused by its label as removed (writes#6), never as read no figure.
+  const gone = [...figures, ...worded].filter((a) => !drafted.model!.quantities.some((x) => x.id === a.id)).map((a) => a.id);
+  if (gone.length > 0) return refused('not_an_answer', `${gone.map((id) => `"${set.model.quantities.find((x) => x.id === id)!.label}" (${id})`).join(', ')}: the change removed what you answered, so nothing changed.`, { ids: gone });
   const unread = worded.filter((a) => {
     const x = drafted.model!.quantities.find((y) => y.id === a.id);
     return x === undefined || (x.value === null && x.low === null && x.high === null) || x.status !== 'known'
@@ -184,8 +187,6 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
     const a = worded.find((w) => w.id === x.id);
     return a === undefined ? x : { ...x, status: 'known' as const, author: a.author, party: a.party, quote: a.quote, question: null };
   }) };
-  const gone = figures.filter((a) => !postimage.quantities.some((x) => x.id === a.id)).map((a) => a.id);
-  if (gone.length > 0) return refused('not_an_answer', `${gone.map((id) => `"${set.model.quantities.find((x) => x.id === id)!.label}" (${id})`).join(', ')}: the change removed what you answered, so nothing changed.`, { ids: gone });
   const draft = answered(postimage, figures);
   if (typeof draft === 'string') return refused('not_an_answer', draft);
   const v = validatePostimage(program.canonical, draft.model, { removals: args.remove, words, fresh, approver: ctx.authenticated_user_id });

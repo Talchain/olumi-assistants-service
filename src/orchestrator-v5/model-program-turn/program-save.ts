@@ -6,8 +6,9 @@
 import { createHash } from 'node:crypto';
 import type { InternalDispatch } from '../agent-lane/runtime/agent-capabilities.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
-import { writeCorePostimage, type CoreWrite } from '../path-b/tools/core-write.js';
+import { findOperationVersion, writeCorePostimage, type CoreWrite } from '../path-b/tools/core-write.js';
 import { isSavedRead, readSaved } from '../path-b/tools/context-tool.js';
+import { approvedGraphHeld } from '../agent-lane/runtime/draft-replacement.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { compile } from '../model-program/compile.js';
@@ -68,14 +69,22 @@ export type ProgramSave = { readonly write: CoreWrite; readonly readback: Rec };
 /**
  * ONE core write of a postimage, then an independent read: the saved program and its Runs must come back equal. Compared
  * key-order-free (a JSONB column reorders keys; every digest here is over `stableStringify`, so order never moves a result).
+ * A write whose acknowledgement never came (the register threw, or answered 5xx or 409 reused) may have landed: this
+ * operation's own version is looked up once more, by its own id (writes#4). A hit proves this operation committed, never
+ * what (a resend's other bytes, or a save after it), so it IS this save, never a second revision, only while the read holds
+ * the complete postimage sent; otherwise, as when none is found, it stays unknown. An acknowledged write whose read does not
+ * match is never settled by the lookup: its content is in doubt.
  */
 export async function savePostimage(dispatch: InternalDispatch, w: { readonly scenarioId: string; readonly operationId: string; readonly expectedIdentity: string | null;
   readonly briefText?: string; readonly ownVersion?: () => Promise<unknown | null> }, graph: Rec): Promise<ProgramSave> {
-  const write = await writeCorePostimage({ dispatch }, { scenarioId: w.scenarioId, graph, operationId: w.operationId, expectedIdentity: w.expectedIdentity,
+  const sentWrite = await writeCorePostimage({ dispatch }, { scenarioId: w.scenarioId, graph, operationId: w.operationId, expectedIdentity: w.expectedIdentity,
     ...(w.briefText !== undefined ? { briefText: w.briefText } : {}), ownVersion: w.ownVersion ?? (async () => null) });
+  const own = sentWrite.status === 'unknown' && sentWrite.outcome.status === 'unavailable' && sentWrite.outcome.reason === 'not_confirmed'
+    ? await (w.ownVersion ?? (() => findOperationVersion(dispatch, w.scenarioId, w.operationId)))().catch(() => null) : null;
   const sent = savedProgramOf(graph);
   const read = await readSaved({ dispatch }, w.scenarioId);
   const back = isSavedRead(read) ? savedProgramOf(read.graph) : undefined;
+  const write: CoreWrite = own !== null && isSavedRead(read) && approvedGraphHeld(graph, read.graph) ? { status: 'already_saved', receipt: own } : sentWrite;
   return { write, readback: { read: isSavedRead(read), version: back?.canonical.version ?? null, model_program: back?.model_program ?? null,
     seed_identical: back !== undefined && back.seed === sent?.seed,
     canonical_identical: back !== undefined && stableStringify(back.canonical) === stableStringify(sent?.canonical),

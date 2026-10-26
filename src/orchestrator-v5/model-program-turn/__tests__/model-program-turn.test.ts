@@ -524,6 +524,76 @@ describe('the model-program turn on the real core route', () => {
     expect(out.toolCalls[0]).toMatchObject({ name: 'draft_canonical_model', ok: false, outcome: 'unknown', refusal: 'save_unknown' });
   });
 
+  it('writes#4: a draft whose register lands and then throws is looked up ONCE by its own operation id and, found, is that save (its receipt, the draft reply, one revision); not found, it stays unknown and says so', async () => {
+    let lookups = 0;
+    let servedTurnId = '';
+    // The store's history keys a version by its registration turn id; `mine` says whether this operation's version is in it.
+    const landsThenThrows = (mine: boolean): typeof dispatch => async (path, body) => {
+      if (path.endsWith('/graph/register')) { await dispatch(path, body); throw new Error('socket hang up'); }
+      if (path.endsWith('/versions')) {
+        lookups += 1;
+        servedTurnId = mine ? registrationTurnId(SCENARIO, registered[0]!.operation_id) : 'another_operation';
+        return { status: 200, json: { versions: [{ version_id: 'v_1', sequence: 1, creation: { kind: 'initial', mutation_id: 'm_1', source_turn_id: servedTurnId } }] } };
+      }
+      return dispatch(path, body);
+    };
+    replies = [JSON.stringify(bakery())];
+    const out = await runModelProgramTurn({ scenarioId: SCENARIO, turnId: randomUUID(), message: BRIEF, saved: { graph: null, identity: null }, dispatch: landsThenThrows(true) });
+    expect([registered.length, lookups]).toEqual([1, 1]);
+    expect(out.payload.model_program).toMatchObject({ turn: 'draft', saved: true, write: 'already_saved', readback: { read: true, canonical_identical: true, runs_identical: true } });
+    expect(out.toolCalls[0]).toEqual({ name: 'draft_canonical_model', ok: true, outcome: 'ok', mutated: true });
+    expect(out.toolResults[0]).toEqual({ ok: true, mutated: true, model_version: { version_id: 'v_1', version_number: 1, mutation_id: 'm_1', source_turn_id: servedTurnId } });
+    expect(out.assistantText.split('\n\n')[0]).toBe('I\'ve drafted a first model of: Should the bakery buy a second oven?');
+    expect(out.mutated).toBe(true);
+
+    // Contrast, a true miss: the same landed write, with only another operation's version in the history, stays unknown.
+    SCENARIO = randomUUID(); persisted = null; registered.length = 0; lookups = 0;
+    replies = [JSON.stringify(bakery())];
+    const miss = await runModelProgramTurn({ scenarioId: SCENARIO, turnId: randomUUID(), message: BRIEF, saved: { graph: null, identity: null }, dispatch: landsThenThrows(false) });
+    expect([registered.length, lookups, servedTurnId]).toEqual([1, 1, 'another_operation']);
+    expect(miss.payload.model_program).toMatchObject({ turn: 'draft', saved: false, write: 'unknown' });
+    expect(miss.toolCalls[0]).toEqual({ name: 'draft_canonical_model', ok: false, outcome: 'unknown', mutated: false, refusal: 'save_unknown' });
+    expect(miss.assistantText).toBe('The save could not be confirmed, so the model may or may not have changed. Reload to see the current model before changing it again.');
+  });
+
+  it('writes#4 recovery: a draft whose register lands, then another save lands before its acknowledgement is lost, is found by its own id yet never narrated as saved: the model read back is not the one sent, so it stays unknown; with nothing saved after it, the same lookup is that save', async () => {
+    let lookups = 0;
+    // The history, newest first, keys each version by its registration turn id.
+    const versionOf = (i: number) => ({ version_id: `v_${i + 1}`, sequence: i + 1,
+      creation: { kind: i === 0 ? 'initial' : 'committed_mutation', mutation_id: `m_${i + 1}`, source_turn_id: registrationTurnId(SCENARIO, registered[i]!.operation_id) } });
+    const lostAck = (another: boolean): typeof dispatch => async (path, body) => {
+      if (path.endsWith('/graph/register')) {
+        await dispatch(path, body);
+        // Another save (the person's figure edit in a second tab) lands on top before this one's acknowledgement is lost.
+        if (another) {
+          const other = JSON.parse(JSON.stringify((body as Json).graph)) as Json;
+          other.living_model.canonical.quantities = other.living_model.canonical.quantities.map((x: Json) => (x.id === 'base_sales' ? { ...x, value: 320, quote: 'We bake 320 loaves a week' } : x));
+          await dispatch(path, { graph: other, thin_core: true, operation_id: randomUUID(), expected_graph_identity_hash: computeGraphIdentityHash(persisted as never)!.value });
+        }
+        throw new Error('socket hang up');
+      }
+      if (path.endsWith('/versions')) { lookups += 1; return { status: 200, json: { versions: registered.map((_, i) => versionOf(i)).reverse() } }; }
+      return dispatch(path, body);
+    };
+    replies = [JSON.stringify(bakery())];
+    const out = await runModelProgramTurn({ scenarioId: SCENARIO, turnId: randomUUID(), message: BRIEF, saved: { graph: null, identity: null }, dispatch: lostAck(true) });
+    expect([registered.length, lookups, persisted!.living_model.canonical.quantities.find((x: Json) => x.id === 'base_sales').value]).toEqual([2, 1, 320]);
+    expect(out.payload.model_program).toMatchObject({ turn: 'draft', saved: false, write: 'unknown', readback: { read: true, canonical_identical: false } });
+    expect(out.toolCalls[0]).toEqual({ name: 'draft_canonical_model', ok: false, outcome: 'unknown', mutated: false, refusal: 'save_unknown' });
+    expect(out.toolResults[0]).toEqual({ ok: false, mutated: false });
+    expect(out.assistantText).toBe('The save could not be confirmed, so the model may or may not have changed. Reload to see the current model before changing it again.');
+    expect(out.mutated).toBe(false);
+
+    // Contrast: the same lost acknowledgement with nothing saved after it is found and held, so it is that save.
+    SCENARIO = randomUUID(); persisted = null; registered.length = 0; lookups = 0;
+    replies = [JSON.stringify(bakery())];
+    const held = await runModelProgramTurn({ scenarioId: SCENARIO, turnId: randomUUID(), message: BRIEF, saved: { graph: null, identity: null }, dispatch: lostAck(false) });
+    expect([registered.length, lookups]).toEqual([1, 1]);
+    expect(held.payload.model_program).toMatchObject({ turn: 'draft', saved: true, write: 'already_saved', readback: { read: true, canonical_identical: true, runs_identical: true } });
+    expect(held.toolCalls[0]).toEqual({ name: 'draft_canonical_model', ok: true, outcome: 'ok', mutated: true });
+    expect(held.assistantText.split('\n\n')[0]).toBe('I\'ve drafted a first model of: Should the bakery buy a second oven?');
+  });
+
   it('step 3, simulate + present: the view is the simulator\'s result on the scenario\'s seed; the display graph is S1\'s projection', async () => {
     replies = [JSON.stringify(bakery())];
     const r = (await turn({ message: BRIEF })).json();
@@ -2188,6 +2258,27 @@ describe('the model-program turn on the real core route', () => {
     }
   });
 
+  it('writes#6: an answer in words whose item the change removes is refused by its label as removed, in the words a figure answer the change removes gets; one kept but read as no figure is still "read no figure"', async () => {
+    const m = bakery();
+    m.quantities.push(q('oven_weeks', 'week', { status: 'asked', question: 'When will the second oven arrive?' }), q('weeks_counted', 'week', { value: 8, quote: 'We count eight weeks' }));
+    m.goals = m.goals.map((g) => ({ ...g, measure: { ...g.measure!, window: { origin_event: null, origin_offset: null, start: 0, periods: 'weeks_counted' } } }));
+    m.options = m.options.map((o) => (o.id === 'second_oven' ? { ...o, sets: o.sets.map((x) => ({ ...x, starts_after_periods: 'oven_weeks' })) } : o));
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: `${BRIEF} We count eight weeks.` })).json().model_program.saved).toBe(true);
+    const words = 'It arrives on 9 November 2026.';
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
+    const answer = { id: 'oven_weeks', value: null, low: null, high: null, range_kind: null, party: null, quote: words, basis: null, status: 'known', author: 'person' };
+    const ask = () => proposeProgramChange(deps, { ...ctx, turn_id: randomUUID() }, ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request: '', remove: [], answers: [answer] }));
+    // The drafter's update removes the item they answered in words (its repairs the same): refused by its label, as removed.
+    replies = Array.from({ length: 3 }, () => savedWith((d) => { d.quantities = d.quantities.filter((x) => x.id !== 'oven_weeks'); }));
+    expect(await ask()).toEqual({ status: 'refused', reason: 'not_an_answer', detail: '"oven weeks" (oven_weeks): the change removed what you answered, so nothing changed.', data: { ids: ['oven_weeks'] } });
+    // Contrast: the update keeps the item but reads no figure from their words: still refused as read no figure.
+    replies = [savedWith((d) => setQ(d, 'oven_weeks', { basis: 'No date given.' }))];
+    expect(await ask()).toEqual({ status: 'refused', reason: 'not_an_answer', detail: 'oven_weeks: the change read no figure from your answer, so nothing changed.', data: { ids: ['oven_weeks'] } });
+    expect(registered).toHaveLength(1);
+  });
+
   it('words#5, one model, one period 0: the first draft\'s day is kept with the saved program, and an update on a later day counts a stated date from THAT day, naming both; a program saved before it counts from today as before, and reopens and rewrites exactly as stored', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
@@ -3199,6 +3290,31 @@ describe('the model-program turn on the real core route', () => {
     expect(moved.statusCode, moved.body).toBe(200);
     expect([sent.length, registered.length, persisted!.living_model.runs.length]).toEqual([0, saves + 1, 2]);
     expect(moved.json().canonical_analysis_view.run.run_id).toBe(persisted!.living_model.runs[1].run_id);
+  });
+
+  it('words#11: a Run refused for its size says so once, in the view\'s own words: the first draft says it, and a Run press never says it is an analysis; once the model computes, the press opens with the analysis', async () => {
+    const why = 'This model is too large to work out in one run: 5000 months ahead for 2 options. Counting in longer periods, looking less far ahead or comparing fewer options reduces the work.';
+    const m = club();
+    m.quantities = m.quantities.map((x) => (x.id === 'months' ? q('months', 'month', { value: 5000, quote: '5000 months ahead' }) : x));
+    replies = [JSON.stringify(m)];
+    const draft = await turn({ message: `${CLUB_BRIEF} We look 5000 months ahead.` });
+    expect(draft.statusCode, draft.body).toBe(200);
+    expect(draft.json().canonical_analysis_view.options.map((o: Json) => o.cell.reasons)).toEqual([[{ code: 'too_large', message: why }], [{ code: 'too_large', message: why }]]);
+    const said = draft.json().assistant_text.split('\n\n') as string[];
+    expect(said[0]).toBe('I\'ve drafted a first model of: Should the club run a promotion?');
+    expect(said.filter((p) => p === why)).toHaveLength(1);
+    const press = () => turn({ message: 'Run the analysis', chip: { id: 'run', action_type: 'run_analysis', label: 'Run' } });
+    const r = await press();
+    expect(r.statusCode, r.body).toBe(200);
+    expect(r.json().model_program).toMatchObject({ turn: 'run', stored: true });
+    expect(r.json().assistant_text).toBe(why);
+    // Contrast: the model moved to three months ahead, so the press works out a NEW Run, which opens with the analysis.
+    persisted = JSON.parse(JSON.stringify(persisted));
+    persisted!.living_model.canonical.quantities = persisted!.living_model.canonical.quantities.map((x: Json) => (x.id === 'months' ? { ...x, value: 3, quote: 'within three months' } : x));
+    const moved = (await press()).json();
+    expect(moved.canonical_analysis_view.options.map((o: Json) => o.cell.kind)).toEqual(['figure', 'figure']);
+    expect(moved.assistant_text.split('\n\n')[0]).toBe('Here is the analysis of the model as it stands.');
+    expect(moved.assistant_text).not.toContain('too large');
   });
 
   it('S1 one question channel (A4): the first reply prints at most three of the AI\'s OWN questions, in the model\'s order, then counts the rest; the result lists every blocker by label with its answer box', async () => {
