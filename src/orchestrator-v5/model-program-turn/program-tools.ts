@@ -29,7 +29,7 @@ import { ledgeredResponsesCall, proposePostimage } from './draft.js';
 import { validatePostimage, verbatimIn, withoutHost } from './postimage.js';
 import { isSaved, postimageOf, programOperationId, savePostimage, withNewRun } from './program-save.js';
 import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, sourceTextOf, unreadableWords, type SavedProgram } from './program-store.js';
-import { shownRun, type StoredRun } from './run-receipt.js';
+import { shownRun, shownView, type StoredRun } from './run-receipt.js';
 import { log } from '../../utils/telemetry.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 
@@ -63,14 +63,19 @@ export const ProgramChangeParams = z.object({
 export type ProgramChangeArgs = z.input<typeof ProgramChangeParams>;
 
 /**
- * What the agent may report of a Run: each option's own sentence, and the Run's `goal_chance` block UNCHANGED (its notes,
- * each limit, the unchecked limits, and with several goals each goal's own chance and the joint).
+ * What the agent may report of a Run: each option's own sentence, the Run's `goal_chance` block UNCHANGED (its notes,
+ * each limit, the unchecked limits, and with several goals each goal's own chance and the joint), and which option is most
+ * likely to achieve the goal, or why none is named, in the view's own words (`leader`, W6). A Run shown as not current
+ * (`current` false) is read as the reopen shows it, so it names no leader (W6 review B3).
  */
-function runWords(run: StoredRun | null): Rec | null {
+function runWords(run: StoredRun | null, shown: { readonly current: boolean; readonly updated: boolean } = { current: true, updated: false }): Rec | null {
   if (run === null) return null;
-  const v = run.result.canonical_analysis_view as { options?: { option_id: string; cell: { kind: string; face?: string; why?: string } }[]; goal_chance?: unknown } | null;
+  const v = (shown.current ? run.result.canonical_analysis_view : shownView(run, false, shown.updated)) as { options?: { option_id: string; cell: { kind: string; face?: string; why?: string } }[];
+    goal_chance?: unknown; leader?: { licence?: unknown; words?: unknown } } | null;
+  const leader = v?.leader;
   return { run_id: run.run_id, options: (v?.options ?? []).map((o) => ({ option_id: o.option_id, shown: o.cell.kind === 'figure', words: o.cell.face ?? o.cell.why ?? null })),
-    ...(v?.goal_chance !== undefined ? { goal_chance: v.goal_chance } : {}) };
+    ...(v?.goal_chance !== undefined ? { goal_chance: v.goal_chance } : {}),
+    ...(typeof leader?.words === 'string' && leader.words.trim() !== '' ? { leader: { licence: leader.licence, words: leader.words } } : {}) };
 }
 
 /** The saved program and the read it came from, or the outcome that says why there is none. */
@@ -101,7 +106,7 @@ export async function readProgramContext(deps: ProgramToolDeps, ctx: Ctx): Promi
     // What the stored Run waits on, typed (A4): the AI asks in its own words. A Run stored before blockers keeps its own lists.
     ...(Array.isArray(compile['blockers']) ? { blockers: compile['blockers'] }
       : { open_questions: Array.isArray(compile['asks']) ? compile['asks'] : [], coaching: Array.isArray(compile['coaching']) ? compile['coaching'] : [] }),
-    run: shown === undefined ? null : { ...runWords(shown.run), current: shown.current, engine_current: shown.engine_current },
+    run: shown === undefined ? null : { ...runWords(shown.run, { current: shown.current && shown.engine_current, updated: shown.updated }), current: shown.current, engine_current: shown.engine_current },
   });
 }
 

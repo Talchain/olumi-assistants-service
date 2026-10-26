@@ -184,7 +184,8 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
     const ids = goals.length > 0 ? new Set([...goals.map((g) => g.goal_id), optionId])
       : new Set(blockers.flatMap((b) => b.scope).filter((id) => !limitIds.has(id)));
     const waits = waitsOnWords(blockers, ids);
-    const withheldWhy = [...goals.filter((g) => g.status === 'withheld').flatMap((g) => g.reasons), ...(own?.reasons ?? [])].join(' ');
+    // #3789 review: the compiler's reasons quote labels and bases as written; display words stay on one line.
+    const withheldWhy = inlineWords([...goals.filter((g) => g.status === 'withheld').flatMap((g) => g.reasons), ...(own?.reasons ?? [])].join(' '));
     const why = refused !== undefined ? refused : failing ? 'The model does not compile yet, so no chance can be worked out.'
       : waits !== undefined ? `The chance ${waits}.` : withheldWhy || 'The chance cannot be worked out yet.';
     return { kind: 'withheld' as const, face: refused === undefined && waits !== undefined && !failing && needsAnswer(blockers, ids) ? 'Not shown yet: needs your answer' : 'Chance not shown yet', why,
@@ -197,7 +198,7 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
     staleness: { stale: null, revision: null, run_revision: null, basis: 'analysis_graph_hash_interim', reason: null, limitation: 'Currentness is unknown because an analysis hash is unavailable.' },
     leader_licence: 'withheld',
     options: ids.map((option_id) => ({ option_id, cell: cellOf(option_id), main_driver: { kind: 'not_recorded' as const } })),
-    goal_chance: { notes: [...(refused !== undefined ? [refused] : []), ...goals.filter((g) => g.status !== 'calculable').map((g) => sentence(`‘${inlineWords(g.label)}’ ${waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${g.reasons.join(' ')}`}`)),
+    goal_chance: { notes: [...(refused !== undefined ? [refused] : []), ...goals.filter((g) => g.status !== 'calculable').map((g) => sentence(`‘${inlineWords(g.label)}’ ${waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${inlineWords(g.reasons.join(' '))}`}`)),
     ], ...(blockers.length > 0 ? { waits_on: blockers.map((b) => ({ ...b, label: inlineWords(b.label) })) } : {}) },
   };
 }

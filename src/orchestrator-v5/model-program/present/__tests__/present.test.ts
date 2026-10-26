@@ -613,6 +613,68 @@ describe('present: which option is most likely to achieve the goal, in this mode
         + '‘Total’ being at least 5 tickets at 1 month from the start of this model, if ‘Tickets’ follows Olumi’s provisional conversion of your range, 0 tickets to 10 tickets, into a bell-shaped spread.' });
   });
 
+  // ── W6 review B1: the estate's three science conditions (goal-chance-licence.ts:891), all on the DISPLAYED chances ──────
+  /** Total = x + extra, x the person's 0 to 10 (a bell spread, mean 5, sd 2.89); Nudge adds `by`. */
+  const NUDGE = (by: number, target = 5) => model([range('x', 0, 10, undefined, 'tickets', 'person_range'), fixed('extra', 0, 'tickets', 'state', 'structure'), fixed('tiny', by, 'tickets'),
+    def('total', 'sum', ['x', 'extra'], 'tickets'), fixed('t', target, 'tickets')], [goal('g', 'total', '>=', 't')],
+  [option('hold', 'Hold'), option('nudge', 'Nudge', [{ quantity: 'extra', to: 'tiny', from_period: 0 }])]);
+  const NUDGE_LABELS = { x: person('Tickets'), extra: { label: 'Extra', author: 'structure' as const }, tiny: person('Nudge size'), total: person('Total', true), t: person('Target') };
+  const NUDGE_BASIS = 'if ‘Tickets’ follows Olumi’s provisional conversion of your range, 0 tickets to 10 tickets, into a bell-shaped spread';
+  const pctOf = (display: string): number => (display === 'less than 1%' ? 0 : display === 'more than 99%' ? 100 : Number(display.replace(/^about /, '').replace('%', '')));
+
+  it('B1: a leading chance displayed under 1% names no option, though its precision interval is apart from the next (the probe "less than 1% against less than 1%")', () => {
+    // Target 115: Add needs c ≥ 35 − d, c a bell spread on 10 to 30 (mean 20, sd 5.77): 1 − Φ(2.6) ≈ 0.5%, shown "less than 1%";
+    // Keep (80 + d) never reaches it. On 10,000 draws Add's interval sits above Keep's, so only the 1% condition withholds it.
+    const v = present(HIRE(115), SPEC_LABELS, {}, 10_000);
+    const add = cell(v, 'add'), keep = cell(v, 'keep');
+    expect([add.display, keep.display]).toEqual(['less than 1%', 'less than 1%']);
+    expect(add.detail.precision_95[0]).toBeGreaterThan(keep.detail.precision_95[1]);
+    expect(v.leader_licence).toBe('withheld');
+    expect(v.leader).toEqual({ licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: [],
+      words: 'In this model, no option is likely to achieve the goal: the chance of ‘Weekly capacity’ being at least 115 tickets at 1 month from the start of this model '
+        + `is less than 1% for ‘Keep’ and less than 1% for ‘Add one specialist’, ${HIRE_BASIS}.` });
+  });
+
+  it('B1: a displayed gap under 10 points is too close to call, though the precision intervals are apart (the probe "about 54% against about 50%")', () => {
+    // Nudge adds 0.5: P(x ≥ 4.5) = Φ(0.5 / 2.89) ≈ 57% against P(x ≥ 5) = 50%; on 10,000 draws each interval is about ±1 point.
+    const v = present(NUDGE(0.5), NUDGE_LABELS, {}, 10_000);
+    const hold = cell(v, 'hold'), nudge = cell(v, 'nudge');
+    expect(nudge.detail.precision_95[0]).toBeGreaterThan(hold.detail.precision_95[1]);
+    expect(pctOf(nudge.display) - pctOf(hold.display)).toBeGreaterThan(0);
+    expect(pctOf(nudge.display) - pctOf(hold.display)).toBeLessThan(10);
+    expect(v.leader_licence).toBe('withheld');
+    expect(v.leader).toEqual({ licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: ['hold', 'nudge'],
+      words: `In this model, ‘Hold’ (${hold.display}) and ‘Nudge’ (${nudge.display}) are too close to call: their chances of `
+        + `‘Total’ being at least 5 tickets at 1 month from the start of this model are less than 10 points apart, ${NUDGE_BASIS}.` });
+    // Contrast: Nudge adds 3, P(x ≥ 2) ≈ 85% against 50%: more than 10 points apart and distinct, so it is named.
+    const apart = present(NUDGE(3), NUDGE_LABELS, {}, 10_000);
+    expect(apart.leader_licence).toBe('permitted');
+    expect(apart.leader.goal_chance_leader).toBe('nudge');
+    expect(apart.leader.words.startsWith(`In this model, ‘Nudge’ is the option most likely to achieve the goal: ${cell(apart, 'nudge').display} chance of `)).toBe(true);
+  });
+
+  it('B2: while a limit is not yet checked no option is named; the words say why, with each chance', () => {
+    // The same clear leader as above (81% against less than 1%), with a budget limit waiting on the specialist's cost.
+    const limits = [{ limit_id: 'cost', label: 'Within budget', status: 'asks' as const, reasons: ['It needs the cost.'], asks: ['price'] }];
+    const v = present(HIRE(95), SPEC_LABELS, { limits, asks: [{ quantity_id: 'price', label: 'Specialist cost', unit: '£' }] }, 2000);
+    const add = cell(v, 'add');
+    expect(add.face).toContain(' Not yet checked: ‘Within budget’ — waits on ‘Specialist cost’.');
+    expect(v.leader_licence).toBe('withheld');
+    expect(v.leader).toEqual({ licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: [],
+      words: 'In this model, which option is most likely to achieve the goal is not said yet, as a limit is not yet checked and these chances leave it out: '
+        + `the chance of ‘Weekly capacity’ being at least 95 tickets at 1 month from the start of this model is less than 1% for ‘Keep’ and ${add.display} for ‘Add one specialist’, `
+        + `${HIRE_BASIS}. Not yet checked: ‘Within budget’ — waits on ‘Specialist cost’.` });
+    // Contrast: the same model with every limit checked names ‘Add one specialist’.
+    expect(present(HIRE(95), SPEC_LABELS, {}, 2000).leader.goal_chance_leader).toBe('add');
+  });
+
+  it('B3: a Run known not to be current names no leader; the same Run, current, does', () => {
+    const run = { run_id: 'r1', graph_hash_at_run: 'h1', computed_at: '2026-10-23T12:00:00Z' };
+    const stale = present(HIRE(95), SPEC_LABELS, { run, current: false }, 2000), current = present(HIRE(95), SPEC_LABELS, { run, current: true }, 2000);
+    expect([stale.staleness.stale, Object.hasOwn(stale, 'leader'), stale.leader_licence]).toEqual([true, false, 'withheld']);
+    expect([current.staleness.stale, current.leader.goal_chance_leader, current.leader_licence]).toEqual([false, 'add', 'permitted']);
+  });
+
   it('one option, or a chance not shown: no leader at all', () => {
     const both = present(HIRE(95), SPEC_LABELS, {}, 2000);
     const single = present({ ...HIRE(95), options: [option('add', 'Add one specialist', [{ quantity: 'added', to: 'one', from_period: 0 }])] }, SPEC_LABELS, {}, 2000);
@@ -630,7 +692,11 @@ describe('present: which option is most likely to achieve the goal, in this mode
     const views = [present(HIRE(95), SPEC_LABELS, {}, 2000), present(HIRE(105), SPEC_LABELS, {}, 2000),
       present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')), MRR_GOALS, MRR_OPTIONS), MRR_LABELS),
       present(model(MRR_QUANTITIES(range('per_pound', -2.2, -1.4, -1.8, 'customers', 'olumi_estimate')), MRR_GOALS, MRR_OPTIONS),
-        { ...MRR_LABELS, per_pound: { label: 'Customers lost per £1 of price rise', author: 'olumi' } })];
+        { ...MRR_LABELS, per_pound: { label: 'Customers lost per £1 of price rise', author: 'olumi' } }),
+      // W6 review: each withheld form (under 1%, too close to call, a limit not yet checked) is held to the same negative.
+      present(HIRE(115), SPEC_LABELS, {}, 10_000), present(NUDGE(0.5), NUDGE_LABELS, {}, 10_000),
+      present(HIRE(95), SPEC_LABELS, { limits: [{ limit_id: 'cost', label: 'Within budget', status: 'asks', reasons: ['It needs the cost.'], asks: ['price'] }],
+        asks: [{ quantity_id: 'price', label: 'Specialist cost', unit: '£' }] }, 2000)];
     expect(views.filter((v) => v.leader !== undefined)).toHaveLength(views.length);
     for (const v of views) {
       expect(v.leader.words).not.toMatch(FORBIDDEN);

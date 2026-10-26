@@ -24,11 +24,13 @@
  *     and quantities, never a figure and never a failure.
  *   - WHICH OPTION IS MOST LIKELY TO ACHIEVE THE GOAL (Paul 6 and 14 Oct; W6): with every option's chance worked out and at
  *     least two options, `leader` names the option with the highest chance (`goal_chance_leader`, `leader_licence: 'permitted'`)
- *     only when its simulation precision overlaps no other option's; otherwise it lists the options it overlaps as too close to
- *     call (`similar_option_ids`, withheld). Its `words` say both chances, the basis and what the leading chance is most
+ *     only under the estate's three science conditions (`LEADER_MIN_PCT`, `SUPERLATIVE_GAP_POINTS`, distinct precision) and
+ *     only when every limit is checked. Otherwise it is withheld, its words naming each option's chance and why: no option is
+ *     likely to achieve it (under 1%), the options are too close to call (`similar_option_ids`), or a limit is not yet checked
+ *     (a target-only chance is not the whole goal). Its `words` say both chances, the basis and what the leading chance is most
  *     sensitive to. A model-relative finding: never "best", a winner, a recommendation or a win share (`option_id` is null).
- *   - Fields with nothing true to say are absent: no `leader` with one option or a chance not shown, no `status_quo`, no
- *     `historical_figures`. `run` is null and currentness unknown unless the caller passes the Run's facts.
+ *   - Fields with nothing true to say are absent: no `leader` with one option, a chance not shown or a Run known not to be
+ *     current, no `status_quo`, no `historical_figures`. `run` is null and currentness unknown unless the caller passes the Run's facts.
  */
 import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
 import { comparatorWords } from '../../goal-target/goal-target-basis.js';
@@ -236,6 +238,17 @@ export const NO_DRIVER_REASON = 'Tested one at a time at each figure’s low end
 export const NO_RANGE_REASON = 'No figure this chance rests on has a range to test.';
 export const NOT_SWEPT_REASON = 'This model is too large to test each figure one at a time in one run, so what the chance rests on most is not measured.';
 const whoseRange = (author: 'person' | 'olumi' | 'unverified'): string => (author === 'unverified' ? NOT_IN_THEIR_WORDS : author === 'person' ? '(your range)' : '(Olumi’s estimate)');
+/**
+ * WHEN AN OPTION IS NAMED AS MOST LIKELY TO ACHIEVE THE GOAL (W6 review B1): the estate's existing science conditions, the
+ * same three as the legacy licence's superlative (`goal-target/goal-chance-licence.ts:891`), copied here and never imported
+ * (the program path does not load that layer). All three must hold:
+ *   - the leading option's DISPLAYED chance is at least LEADER_MIN_PCT (whole percentage points);
+ *   - its displayed gap to the next option is at least SUPERLATIVE_GAP_POINTS: "Science's interim superlative gap, in
+ *     displayed whole percentage points (d5 6005279728)" (`goal-chance-licence.ts:87-88`);
+ *   - its 95% simulation-precision interval is distinct from every other option's (ruling 6, `intervalsDistinct`).
+ */
+export const LEADER_MIN_PCT = 1;
+export const SUPERLATIVE_GAP_POINTS = 10;
 /** A setting tried: its value, and the chance there as displayed; null where it could not be worked out (a nonfinite draw). */
 type End = { readonly value: number; readonly display: string | null };
 export type PresentMainDriver =
@@ -274,13 +287,16 @@ function horizonWords(aggregation: Aggregation, w: Window, unit: string, reading
   return state ? `at the end of every ${unit} from ${unit} ${first} to ${unit} ${last} ${origin}` : `in every ${unit} from ${unit} ${first} to ${unit} ${last} ${origin}`;
 }
 
+/** A chance from fixed inputs only (exact: no interval), 100% or 0%. */
+const isExact = (c: Chance): boolean => c.precision_95[0] === c.precision_95[1] && (c.chance === 1 || c.chance === 0);
+/** The chance as displayed, in whole percentage points at the simulation's own precision (exact: 0 or 100). */
+const displayedPct = (c: Chance): number => (isExact(c) ? c.chance * 100 : displayedPctAt(c.chance, displayRoundingFor(((c.precision_95[1] - c.precision_95[0]) / 2) * 100)));
 /** The labelled result for an option's chance: display at the simulation's own precision, and the precision's words. */
 function shown(c: ChanceOrWithheld, draws: number): { display: string; precision_words: string } | undefined {
   if (isWithheld(c)) return undefined;
   const [lo, hi] = c.precision_95;
   // S3 smoke fix 2: a chance from fixed inputs only (exact: no interval) is said exactly, 100% or 0%, never "more than 99%".
-  const display = lo === hi && (c.chance === 1 || c.chance === 0) ? `${c.chance * 100}%`
-    : sayDisplayedPct(displayedPctAt(c.chance, displayRoundingFor(((hi - lo) / 2) * 100)));
+  const display = isExact(c) ? `${displayedPct(c)}%` : sayDisplayedPct(displayedPct(c));
   const pct = (x: number): string => `${Number((x * 100).toFixed(1))}%`;
   const precision_words = lo === hi
     ? 'Simulation precision: exact. Every simulated draw gives the same result for this option, so no sampling is involved.'
@@ -463,7 +479,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       .map((w) => ({ limit_id: w.id, label: w.label, status: 'withheld' as const, reasons: [w.reason], asks: [] }))];
   const uncheckedWords = unchecked.map((l) => {
     const waits = l.asks.map((id) => askOf.get(id)?.label).filter((x): x is string => x !== undefined);
-    return `${q(l.label)} — ${waits.length > 0 ? `waits on ${listWords(waits.map(q))}` : l.reasons.join(' ')}`;
+    // #3789 review: the compiler's reasons quote labels and bases as written; display words stay on one line.
+    return `${q(l.label)} — ${waits.length > 0 ? `waits on ${listWords(waits.map(q))}` : inlineWords(l.reasons.join(' '))}`;
   });
   const uncheckedLine = uncheckedWords.length > 0 ? `Not yet checked: ${uncheckedWords.join('; ')}` : undefined;
   /** "‘Customer cost’ is at most £1,100 at 1 month from the start of this model: about 81%", one per limit, for one option. */
@@ -482,7 +499,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const blockers = input.blockers ?? [];
   const limitIds = new Set([...model.limits.map((l) => l.id), ...givenLimits.map((l) => l.limit_id), ...unchecked.map((l) => l.limit_id)]);
   /** A goal's own reason, from the blockers; for a figure no one can give (no blocker), the compiler's own words for it. */
-  const goalWaits = (g: PresentGoal): string => waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${g.reasons.join(' ')}`;
+  const goalWaits = (g: PresentGoal): string => waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${inlineWords(g.reasons.join(' '))}`;
   const waitingWords = waitsOnWords(blockers, new Set(waiting.map((g) => g.goal_id)));
   const withheldCell = (): Extract<PresentCell, { kind: 'withheld' }> => ({
     kind: 'withheld', face: waitingWords !== undefined && needsAnswer(blockers, new Set(waiting.map((g) => g.goal_id))) ? NEEDS_ANSWER_FACE : NOT_SHOWN_FACE,
@@ -614,7 +631,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     // The 11 Oct decision (:74): what the chance covers (the measured aims it uses) and what it leaves out (aims with no
     // measure, the model's left-out records); never a claim that it covers everything.
     ...(covered.length > 0 && notCovered.length > 0 ? [`Covers: ${listWords(covered)} · Leaves out: ${listWords(notCovered.map(q))}`] : []),
-    ...notInRun.map((w) => `The ${w.kind} ${q(w.label)} is not in this run: ${w.reason}`),
+    ...notInRun.map((w) => `The ${w.kind} ${q(w.label)} is not in this run: ${inlineWords(w.reason)}`),
     ...(uncheckedLine !== undefined ? [stop(uncheckedLine)] : []),
   ];
   const several = allGoals.length >= 2;
@@ -646,33 +663,48 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   };
   // ── Which option is most likely to achieve the goal, in this model (Paul 6 and 14 Oct: say it; never choose for them) ──
   const leader = ((): PresentedLeader | undefined => {
-    if (waiting.length > 0 || jointWords === undefined || options.length < 2) return undefined;
+    // W6 review B3: a Run known not to be current names no leader (run-facts.ts: "a Run that is not current names no leader").
+    if (input.current === false || waiting.length > 0 || jointWords === undefined || options.length < 2) return undefined;
     const said = options.flatMap((o, at) => {
       const c = result.options[at]!.joint_within_limits;
-      return o.cell.kind === 'figure' && !isWithheld(c) ? [{ id: o.option_id, at, c: c as Chance, display: o.cell.display, driver: o.main_driver }] : [];
+      return o.cell.kind === 'figure' && !isWithheld(c) ? [{ id: o.option_id, at, c: c as Chance, pct: displayedPct(c as Chance), display: o.cell.display, driver: o.main_driver }] : [];
     });
     if (said.length < options.length) return undefined;
     const ranked = [...said].sort((a, b) => b.c.chance - a.c.chance || a.at - b.at), top = ranked[0]!, rest = ranked.slice(1);
     const name = (id: string): string => q(optionLabel.get(id) ?? id);
     const basis = sharedBasisWords(roots, [...new Map([...premisesOf(model.goals.map((g) => g.id)), ...model.limits.flatMap((l) => input.limit_premises?.[l.id] ?? [])]
       .map((p) => [p.id, p] as const)).values()], [...model.goals, ...model.limits].map((c) => c.id));
-    // A limit the Run could not check stays beside the finding, as it does beside each chance.
-    const unsaid = uncheckedLine !== undefined ? ` ${stop(uncheckedLine)}` : '';
-    // Too close to call: an option whose simulation precision reaches the highest chance's (every chance is on the same draws).
-    const close = new Set(rest.filter((x) => top.c.precision_95[0] <= x.c.precision_95[1]).map((x) => x.id));
-    if (close.size > 0) {
-      const tied = said.filter((x) => x.id === top.id || close.has(x.id));
-      return { licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: tied.map((x) => x.id),
-        words: `In this model, ${listWords(tied.map((x) => `${name(x.id)} (${x.display})`))} are too close to call: the simulation cannot tell apart their chances of ${jointWords}, ${basis}.${unsaid}` };
+    const aim = model.goals.length === 1 ? 'the goal' : 'every goal together';
+    /** Each option's chance, in the model's order (a withheld finding ranks nothing). */
+    const each = listWords(said.map((x) => `${x.display} for ${name(x.id)}`));
+    const withheld = (similar: readonly string[], words: string): PresentedLeader => ({ licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: similar, words });
+    // W6 review B2: a limit this Run could not check is left out of every chance, and a target-only chance is not the whole
+    // goal (run-facts.ts RUN_FACTS_USE; the legacy rule 3 withholds the leader on an unscored limit): no option is named.
+    if (unchecked.length > 0) {
+      const them = unchecked.length === 1 ? 'a limit is not yet checked and these chances leave it out' : 'limits are not yet checked and these chances leave them out';
+      return withheld([], `In this model, which option is most likely to achieve ${aim} is not said yet, as ${them}: the chance of ${jointWords} is ${each}, ${basis}. ${stop(uncheckedLine!)}`);
     }
-    const next = rest[0]!, aim = model.goals.length === 1 ? 'the goal' : 'every goal together', d = top.driver;
+    // W6 review B1, the three science conditions (LEADER_MIN_PCT, SUPERLATIVE_GAP_POINTS, distinct precision intervals).
+    if (top.pct < LEADER_MIN_PCT) return withheld([], `In this model, no option is likely to achieve ${aim}: the chance of ${jointWords} is ${each}, ${basis}.`);
+    const distinct = (a: Chance, b: Chance): boolean => a.precision_95[0] > b.precision_95[1] || b.precision_95[0] > a.precision_95[1];
+    const near = (x: typeof top): boolean => top.pct - x.pct < SUPERLATIVE_GAP_POINTS;
+    const close = rest.filter((x) => near(x) || !distinct(top.c, x.c));
+    if (close.length > 0) {
+      const tied = said.filter((x) => x.id === top.id || close.includes(x));
+      // Each reason said only where it is true of every option named (every chance is on the same draws).
+      const why = close.every((x) => !distinct(top.c, x.c)) ? `the simulation cannot tell apart their chances of ${jointWords}`
+        : close.every(near) ? `their chances of ${jointWords} are less than ${SUPERLATIVE_GAP_POINTS} points apart`
+          : `their chances of ${jointWords} are less than ${SUPERLATIVE_GAP_POINTS} points apart or the simulation cannot tell them apart`;
+      return withheld(tied.map((x) => x.id), `In this model, ${listWords(tied.map((x) => `${name(x.id)} (${x.display})`))} are too close to call: ${why}, ${basis}.`);
+    }
+    const next = rest[0]!, d = top.driver;
     const there = (e: End): string => e.display ?? 'could not be tested';
     const rests = d.kind === 'available'
       ? ` Its chance is most sensitive to ${q(label(d.driver.quantity) ?? d.driver.quantity)} ${whoseRange(d.driver.author)}: ${there(d.driver.low)} at its low end, ${there(d.driver.middle)} at its middle and ${there(d.driver.high)} at its high end.`
       : d.kind === 'none_licensed' ? ` ${d.reason}` : '';
     return { licence: 'permitted', option_id: null, goal_chance_leader: top.id, similar_option_ids: [],
       words: `In this model, ${name(top.id)} is the option most likely to achieve ${aim}: ${top.display} chance of ${jointWords}, against ${next.display} for ${name(next.id)}, the next most likely, ${basis}.`
-        + (top.c.precision_95[1] < 0.5 ? ` Even so, in this model it is more likely to miss ${aim} than to meet it.` : '') + rests + unsaid };
+        + (top.c.precision_95[1] < 0.5 ? ` Even so, in this model it is more likely to miss ${aim} than to meet it.` : '') + rests };
   })();
   const known = input.current !== undefined && input.run !== undefined;
   return {
