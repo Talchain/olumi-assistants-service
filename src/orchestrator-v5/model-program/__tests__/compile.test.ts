@@ -232,6 +232,18 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(r2.coverage.leaves_out.map((w) => w.id)).toEqual(['regulars_happy']);
   });
 
+  it('integrated review 26 Oct: an applied assumption on a risk is a premise of the result the risk reaches, so the basis names it', () => {
+    const m = bakery();
+    m.quantities.push(olumi('breakdown_chance', '1', 0.05, 0.2), olumi('lost_loaves', 'loaf/week', -150, -50, -100));
+    m.risks.push({ id: 'breakdown', label: 'The oven breaks down', occurrence: 'breakdown_chance', severity: 'lost_loaves', effect_on: 'sales', mode: 'add', starts_after_periods: 4, author: 'olumi', quote: null, ...base });
+    m.assumptions.push({ id: 'repaired_in_a_week', text: 'A breakdown is repaired within a week.', applied: true, concerns: ['breakdown'], author: 'olumi', quote: null, ...base },
+      // Contrast: a noted assumption on the same risk is never a premise.
+      { id: 'parts_in_stock', text: 'Spare parts are usually in stock.', applied: false, concerns: ['breakdown'], author: 'olumi', quote: null, ...base });
+    const r = compile(m);
+    expect(r.errors).toEqual([]);
+    expect(r.perGoal[0].rests_on).toEqual(['repaired_in_a_week']);
+  });
+
   it('row 6: qualitative records are drawn as display-only cards, never in the executable model', () => {
     const m = bakery();
     m.assumptions.push({ id: 'oven_full_speed', text: 'The new oven runs at full capacity from the first week.', applied: true, concerns: ['extra_per_oven'], author: 'olumi', quote: null, ...base });

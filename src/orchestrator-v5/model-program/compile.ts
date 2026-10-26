@@ -753,8 +753,13 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   /** R8: a premise is an applied assumption or a prerequisite, on what is read or the whole situation (concerns []); a noted
    * assumption or a challenge never is. */
   const premise = (a: CanonicalModelT['assumptions'][number] | CanonicalModelT['conditions'][number]) => ('applied' in a ? a.applied : a.kind === 'prerequisite');
-  const restsOn = (touched: Set<string>, own: string[] = []) => [...new Set([...own.filter((id) => model.assumptions.some((a) => a.id === id && premise(a))),
-    ...[...model.assumptions, ...model.conditions].filter((a) => premise(a) && (a.concerns.length === 0 || a.concerns.some((c) => touched.has(c)))).map((a) => a.id)])];
+  // A premise may concern a risk: the risks whose effect is in what is read are touched too, as `upstream` follows them
+  // (integrated review 26 Oct: an applied assumption on a risk was left out, so the basis said "on your figures").
+  const restsOn = (touched: Set<string>, own: string[] = []) => {
+    const on = new Set([...touched, ...model.risks.filter((k) => touched.has(k.effect_on)).map((k) => k.id)]);
+    return [...new Set([...own.filter((id) => model.assumptions.some((a) => a.id === id && premise(a))),
+      ...[...model.assumptions, ...model.conditions].filter((a) => premise(a) && (a.concerns.length === 0 || a.concerns.some((c) => on.has(c)))).map((a) => a.id)])];
+  };
 
   /** A window's own figures that are unknown (no figure, no question): what the goal or limit rests on, so it is listed (#3723). */
   const unknownWindowRefs = (w: CanonicalWindowT | null | undefined) => [w?.periods, w?.origin_offset].filter((x): x is string => has(x) && Q.get(x)?.status === 'unknown');
