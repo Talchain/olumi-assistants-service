@@ -385,6 +385,26 @@ describe('the model-program turn on the real core route', () => {
     expect(after('budget')).toContain('3,000 GBP');
   });
 
+  it('alpha G2: a declared bound is said as Olumi\'s reading on the card and in the chance\'s basis; a change to it alone shows as a change', () => {
+    const d = bakery();
+    setQ(d, 'base_sales', { floor: 0 });
+    const v = readingOf(d, { words: [BRIEF], approver: null }) as Json;
+    expect(v.ok).toBe(true);
+    expect(v.changes.find((c: Json) => c.id === 'base_sales').after).toBe('300 loaf/week (never below 0: Olumi’s reading), a fact, known, in your words "We bake 300 loaves a week"');
+    // Only Olumi's reading of it changes: the card shows that figure's change alone, never refused for want of their words.
+    const post = JSON.parse(JSON.stringify(d)) as CanonicalModelT;
+    setQ(post, 'base_sales', { floor: null, ceiling: 1000 });
+    const u = validatePostimage(d, post, { removals: [], words: [BRIEF], fresh: [] }) as Json;
+    expect(u.ok, JSON.stringify(u)).toBe(true);
+    expect(u.changes.filter((c: Json) => c.id === 'base_sales').map((c: Json) => [c.before, c.after])).toEqual([[
+      '300 loaf/week (never below 0: Olumi’s reading)', '300 loaf/week (never above 1,000: Olumi’s reading)']]);
+    // The chance's basis: Olumi's range for the promotion's effect, drawn within its declared floor, says so with the floor.
+    const m = club();
+    m.quantities = m.quantities.map((x) => (x.id === 'promo_effect' ? { ...x, floor: 0 } : x));
+    const face = ((evaluateCanonical(m, { sourceText: CLUB_BRIEF, seed: 7 }).view as Json).options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
+    expect(face).toContain('‘promo effect’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 3 member / month / promotion to 7 member / month / promotion, into a bell-shaped spread, kept to Olumi’s reading of what it can be (never below 0 member / month / promotion)');
+  });
+
   it('issue 40: a first draft with an Olumi link of unknown size and a stated direction shows its reading card, the direction said as an arrow and words on what it moves', async () => {
     const m = withOlumiLinks(bakery());
     replies = [JSON.stringify(m)];
