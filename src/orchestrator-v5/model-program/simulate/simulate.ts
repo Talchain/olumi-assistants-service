@@ -57,11 +57,15 @@
  *   - Drivers: each uncertain quantity the option's goals and limits depend on, in model order, except any quantity an option
  *     sets (a switch is a choice, never an uncertainty: gold-model ruling 5). joint_if_low / joint_if_high are
  *     joint_within_limits over the bottom and top third of that quantity's draws.
+ *   - Per-draw results (SC0), only when `perDraw` asks: every draw's own value, target and met for each goal and limit, the
+ *     headline per draw, which risks fired, and each ranged input's draws, all on the same draw indices (`result.ts` PerDraw).
+ *     They are what the paired comparison, value of information, uncertainty share, failure summaries and a tipping point
+ *     read; they never change a result and are never stored with a Run.
  */
 import type { Aggregation, Cmp, ExecutableModel, Goal, Limit, Option, OptionSet, Quantity, Reading, Risk, Window } from '../executable.js';
 import { standardNormals, uniforms } from './prng.js';
 import { fromStandardNormal, fromUniform, rangeLaw, truncatedStandardNormal, type RangeDist, type SpreadReading } from './range-law.js';
-import type { Chance, ChanceOrWithheld, OptionResult, RecordedDraw, SimResult, WithheldChance, WithheldChanceEntry } from './result.js';
+import type { Chance, ChanceOrWithheld, OptionResult, PerDraw, PerDrawCondition, PerDrawOption, RecordedDraw, SimResult, WithheldChance, WithheldChanceEntry } from './result.js';
 
 /** A range's law as range-law.ts reads it; `lower` and `upper` are where its draws are conditioned (±Infinity: not). */
 type NormalLaw = SpreadReading;
@@ -76,6 +80,8 @@ export interface SimulateOptions {
   seed: number;
   /** Draw indices whose per-period values are returned in `SimResult.recorded` (evidence only; never changes a result). */
   record?: readonly number[];
+  /** SC0: return every draw's own results in `SimResult.per_draw` (in memory only; never changes a result). */
+  perDraw?: boolean;
 }
 
 const Z95 = 1.959963984540054;
@@ -545,11 +551,17 @@ function terciles(inputs: Inputs, draws: number): { low: Int32Array; high: Int32
 /** One condition's tally over the draws: met per draw, its aggregated values, nonfinite draws, and whether it is exact. */
 class Tally {
   readonly met: Uint8Array;
+  /** Each draw's aggregated value; NaN in a draw outside the domain. */
   readonly agg: Float64Array;
+  /** SC0, only when per-draw results are asked for: each draw's target or bound where the window ends. */
+  readonly target?: Float64Array;
   bad = 0;
   readonly badIds = new Set<string>();
   private lo = Infinity; private hi = -Infinity; private tLo = Infinity; private tHi = -Infinity;
-  constructor(draws: number) { this.met = new Uint8Array(draws); this.agg = new Float64Array(draws); }
+  constructor(draws: number, keepTarget = false) {
+    this.met = new Uint8Array(draws); this.agg = new Float64Array(draws);
+    if (keepTarget) this.target = new Float64Array(draws);
+  }
   /** Records draw d; returns 1 met, 0 not met, -1 outside the domain. `left`: the values that left their domain at any time in
    *  this draw; one the condition rests on (`reach`) makes the whole draw outside the domain for it, however the value
    *  later recovers (spec §3.7), and is named. */
@@ -557,8 +569,10 @@ class Tally {
     const top = aggregate(k, vals, n), bottom = k.per === undefined ? 1 : aggregate(k, vals, n, k.per);
     const ratio = top === null || bottom === null || bottom === 0 ? null : top / bottom;
     const a = ratio !== null && Number.isFinite(ratio) ? ratio : null, target = vals[k.last * n + k.ref]!;
+    if (this.target !== undefined) this.target[d] = target;
     if (a === null || !Number.isFinite(target) || left.some((q) => reach.has(q))) {
       this.bad++;
+      this.agg[d] = NaN;
       if (top === null || (a === null && bottom !== null && bottom !== 0)) this.badIds.add(ids[k.q]!);
       if (k.per !== undefined && (bottom === null || bottom === 0)) this.badIds.add(ids[k.per.q]!);
       if (!Number.isFinite(target)) this.badIds.add(ids[k.ref]!);
@@ -576,7 +590,7 @@ class Tally {
 }
 
 function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: { low: Int32Array; high: Int32Array }[],
-  record: ReadonlySet<number>, recorded: RecordedDraw[]): OptionResult {
+  record: ReadonlySet<number>, recorded: RecordedDraw[], perDraw?: PerDrawOption[]): OptionResult {
   const n = c.nodes.length, N = c.periods;
   /** Every quantity at each time k = 0..N, evaluated from the stocks' boundary levels S[k]: boundaries for a state, intervals for a flow. */
   const vals = new Float64Array((N + 1) * n);
@@ -592,8 +606,12 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
   let nSets = 0;
   for (let q = 0; q < n; q++) { setBase[q] = nSets; nSets += p.sets[q]!.length; }
   const setFrom = new Float64Array(nSets);
-  const goals = c.goals.map(() => new Tally(draws)), limits = c.limits.map(() => new Tally(draws));
+  const keep = perDraw !== undefined;
+  const goals = c.goals.map(() => new Tally(draws, keep)), limits = c.limits.map(() => new Tally(draws, keep));
   const joint = new Uint8Array(draws), within = new Uint8Array(draws), both = new Uint8Array(draws);
+  /** SC0: the headline per draw (1, 0, −1 outside the domain) and each risk's firing per draw, only when asked for. */
+  const headline = keep ? new Int8Array(draws) : undefined;
+  const firedIn = keep ? c.risks.map(() => new Int8Array(draws)) : undefined;
   /** The values that left their domain in this draw, once each (`off` marks them). */
   const off = new Uint8Array(n), left: number[] = [];
   let jointBad = 0, withinBad = 0, bothBad = 0;
@@ -671,6 +689,9 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
     joint[d] = allGoals;
     within[d] = allLimits;
     both[d] = allGoals & allLimits;
+    if (headline !== undefined) headline[d] = badGoal || badLimit ? -1 : both[d]!;
+    // fired: 1 fired, 0 not, −1 never read (beyond the horizon), 2 its chance outside its domain (said as −2).
+    if (firedIn !== undefined) c.risks.forEach((_, i) => { firedIn[i]![d] = fired[i] === 2 ? -2 : fired[i]!; });
 
     if (record.has(d)) {
       const values: Record<string, number[]> = {};
@@ -696,6 +717,14 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
   const summary = (t: Tally) => (t.bad > 0 ? invalid(t.bad, t.badIds) : quantiles(t.agg));
   const meanOver = (a: Uint8Array, idx: Int32Array): number => idx.reduce((s, i) => s + a[i]!, 0) / idx.length;
   const allExactGoals = exactGoal.every(Boolean), allExactLimits = exactLimit.every(Boolean);
+  if (perDraw !== undefined) {
+    // The tallies' own arrays, handed over: a draw outside the domain has a NaN value and met −1.
+    const conditionOf = (t: Tally, id: string): PerDrawCondition => ({ id, value: t.agg, against: t.target!,
+      met: Int8Array.from(t.met, (m, d) => (Number.isNaN(t.agg[d]!) ? -1 : m)) });
+    perDraw.push({ option_id: p.option_id, goals: c.goals.map((g, i) => conditionOf(goals[i]!, g.id)),
+      limits: c.limits.map((l, i) => conditionOf(limits[i]!, l.id)), joint_within_limits: headline!,
+      risks: c.risks.map((r, i) => ({ risk_id: r.id, fired: firedIn![i]! })) });
+  }
   return {
     option_id: p.option_id,
     per_goal: c.goals.map((g, i) => ({ goal_id: g.id, ...condition(goals[i]!, exactGoal[i]!) })),
@@ -762,8 +791,12 @@ export function simulate(model: ExecutableModel, opts: SimulateOptions): SimResu
   const thirds = terciles(inputs, draws);
   const record = new Set(opts.record ?? []);
   const recorded: RecordedDraw[] = [];
-  const options = plans.map((p) => runOption(c, p, inputs, draws, thirds, record, recorded));
+  const perDraw: PerDrawOption[] | undefined = opts.perDraw === true ? [] : undefined;
+  const options = plans.map((p) => runOption(c, p, inputs, draws, thirds, record, recorded, perDraw));
   // The compiler's withheld[] is echoed unchanged (executable.ts r3); an older model without it echoes none.
   const echoed = (model.withheld ?? []).map((x) => ({ ...x }));
-  return { draws, seed: opts.seed, options, withheld: echoed, withheld_chances: withheldList(options), ...(opts.record !== undefined ? { recorded } : {}) };
+  const per_draw: PerDraw | undefined = perDraw === undefined ? undefined
+    : { inputs: Object.fromEntries(c.ranged.map((r, slot) => [c.ids[r.q]!, inputs.drawn[slot]!] as const)), options: perDraw };
+  return { draws, seed: opts.seed, options, withheld: echoed, withheld_chances: withheldList(options), ...(opts.record !== undefined ? { recorded } : {}),
+    ...(per_draw !== undefined ? { per_draw } : {}) };
 }
