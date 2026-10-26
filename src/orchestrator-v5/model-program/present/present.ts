@@ -515,7 +515,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     if (!atEnds.has(x.id)) {
       // Test the stated ends within the Run's domain, and the middle of that interval. The simulator has already refused
       // an occurrence range outside [0, 1]. Cache settings with results so the words name exactly what was tested.
-      const reading = rangeLaw(x.dist);
+      const reading = lawOf(x.id, x.dist).reading;
       const within = (value: number) => reading.kind === 'point' ? reading.value : Math.min(reading.upper, Math.max(reading.lower, value));
       const low = within(x.dist.low), high = within(x.dist.high);
       const values = [low, (low + high) / 2, high];
