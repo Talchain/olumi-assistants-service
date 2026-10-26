@@ -44,13 +44,14 @@ const tiny = (extra = 0, ranged = 1): ExecutableModel => ({
 describe('the Run admission limit (alpha G11)', () => {
   it('costOf, by hand: every read a visit makes, the windows, the sorts and what the run holds', () => {
     // 10 draws × [1 option × (2 times × 6 reads (a 1, b 1, s 1 + 2 parts, t 1) + window 2 × 2) + sorts ⌈log2 11⌉ = 4 × (1 ranged + 1 condition)] = 10 × 24.
-    // Bytes: 10 × (16 × 1 ranged + 1 option × (9 × 1 condition + 3) + 8 quantile copy) + 8 × 2 times × 4 quantities = 360 + 64.
-    expect(costOf(tiny(), 10)).toEqual({ operations: 240, bytes: 424 });
+    // Bytes: 10 × (16 × 1 ranged + 1 option × (9 × 1 condition + 4: joint, within, both and the kept headline, SC2) + 8 quantile
+    // copy) + 8 × 2 times × 4 quantities = 370 + 64.
+    expect(costOf(tiny(), 10)).toEqual({ operations: 240, bytes: 434 });
     // A sum's parts are work, however few quantities hold them (Codex r1): 1,000 more parts, 2 times × 1,000 more reads a draw.
     expect(costOf(tiny(1000), 10).operations).toBe(240 + 10 * 2 * 1000);
     // A risk on s (Codex r2–r3): 8 at each of 2 times and 8 a draw, so 10 × 24 more operations, and its uniforms, 8 bytes a draw.
     const risky: ExecutableModel = { ...tiny(), risks: [{ id: 'k', occurrence: 'a', severity: 'a', effect_on: 's', mode: 'add', from_period: 0 }] };
-    expect(costOf(risky, 10)).toEqual({ operations: 240 + 240, bytes: 424 + 80 });
+    expect(costOf(risky, 10)).toEqual({ operations: 240 + 240, bytes: 434 + 80 });
   });
 
   it('the limits by name: 450 ranged inputs pass MAX_BYTES while their work fits; 1,000,000 parts pass MAX_OPERATIONS', () => {
