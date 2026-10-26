@@ -633,24 +633,20 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           if (modelProgram) {
             result = await programTurn();
             // T1 (Paul 26 Oct): once the host has drafted and run the model, or run it on a press, the AI writes the reply from
-            // the model and Run as saved, as it does on every typed turn; it may not draft, propose, apply or run. The host's own
-            // words stay only if that reply cannot be written.
-            const fresh = programPayload?.canonical_analysis_view == null ? null
-              : await readProgramContext({ dispatch: readingDispatch, proposals }, { scenario_id: scenarioId, authenticated_user_id: userId });
-            if (fresh?.status === 'ok') {
-              try {
-                const reply = await runCoreTurn({ ...agentTurn(),
-                  turnGuidance: [PROGRAM_TURN_GUIDANCE, runPress ? RUN_REPLY_GUIDANCE : DRAFT_REPLY_GUIDANCE],
-                  briefText: saved.graph === null ? undefined : saved.briefText,
-                  canonicalState: fresh.data, withheldTools: [...HOST_REPLY_WITHHELD_TOOLS] });
-                if (reply.assistant_text.trim() !== '') {
-                  result = { ...result, assistant_text: reply.assistant_text, sdk: reply.sdk, hops: result.hops + reply.hops,
-                    timing: { ...result.timing, provider_calls: providerCallsMade() ?? result.timing.provider_calls + reply.timing.provider_calls } };
-                  aiReplied = true;
-                }
-              } catch (err) {
-                log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: the AI reply after the host turn failed; the host reply stands');
-              }
+            // the model and Run as saved, as it does on every typed turn; it may not draft, propose, apply or run. There is no
+            // template fallback (Paul 26 Oct: "if the AI reply fails, show an error instead"; the host's reply words are kept in
+            // turn.ts, unwired here): a failed reply is the turn's lost reply below, the save kept and said; an empty one is
+            // `reply_empty`. A draft the host could not make (no Run view) keeps its own refusal.
+            if (programPayload?.canonical_analysis_view != null) {
+              const fresh = await readProgramContext({ dispatch: readingDispatch, proposals }, { scenario_id: scenarioId, authenticated_user_id: userId });
+              if (fresh.status !== 'ok') throw new ModelReadFailedError(fresh);
+              const reply = await runCoreTurn({ ...agentTurn(),
+                turnGuidance: [PROGRAM_TURN_GUIDANCE, runPress ? RUN_REPLY_GUIDANCE : DRAFT_REPLY_GUIDANCE],
+                briefText: saved.graph === null ? undefined : saved.briefText,
+                canonicalState: fresh.data, withheldTools: [...HOST_REPLY_WITHHELD_TOOLS] });
+              result = { ...result, assistant_text: reply.assistant_text, sdk: reply.sdk, hops: result.hops + reply.hops,
+                timing: { ...result.timing, provider_calls: providerCallsMade() ?? result.timing.provider_calls + reply.timing.provider_calls } };
+              aiReplied = true;
             }
           } else {
             result = await runCoreTurn({ ...agentTurn(),
