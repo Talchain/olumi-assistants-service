@@ -1214,13 +1214,13 @@ function valueAuthorshipNote(ops: readonly ProposalOperation[], proposal: Struct
   return [own, adopted, unverified].filter((x) => x !== '').join(' ');
 }
 
-/** One internal dispatch, so every path is the product's own. */
 import { reconcileGoalScope } from '../reconcile-goal-scope.js';
 import { noSuchLinkUserWords } from '../no-direct-link.js';
 import { goalScopeCheck, scopeIssueBlocks, scopeOf, scopeReconciliationKey, scopeWithdrawalWords } from '../goal-scope.js';
 import type { GoalScopeReconciliation } from '../../../schemas/goal-scope.js';
 import { approveHeldProposal } from '../../handlers/approve-held-proposal.js';
-export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
+import type { InternalDispatch } from '../../core-route/internal-dispatch.js';
+export type { InternalDispatch };
 
 const deadlineRefusalDetail = {
   reference_missing: `${ZERO_SPREAD_NEEDS_MONTHLY_CHANGES}. The recorded reference date is missing.`,

@@ -10,7 +10,6 @@ import { resolveMagnitudeFrame } from '../../../cee/magnitude/link-effect.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from '../model-primitives.js';
 import { isDeepStrictEqual } from 'node:util';
-import { normaliseGraphForIdentity } from '../../context/graph-identity.js';
 import { sameUnitAsEarlier } from '../same-unit.js';
 import { userStatementFor, userStatementsOn } from '../../statement-door/statements.js';
 import { factorUnitOf } from '../unit-conflict.js';
@@ -508,53 +507,7 @@ export function targetsHeldBy(candidate: unknown): { node_id: string; quantity: 
     .map((c) => ({ node_id: String(c.node_id), quantity: quantityOf(candidate, c), comparator: String(c.operator_as_stated ?? c.operator), value: c.value as number, unit: unitOf(c) }));
 }
 
-/**
- * ⛔ THE STORED GRAPH HOLDS THE WHOLE APPROVED CANDIDATE (AIE B34 6119577581: the read-back matching the registration's
- * acknowledgement proves only that the acknowledged graph was read back). Through the canonical identity normaliser
- * (`normaliseGraphForIdentity`), every component the candidate carries — each node, link, option, limit and target, and
- * each of their fields — is held UNCHANGED in the stored graph, and no node, link or row is added beside them. The register
- * route may only ADD fields of its own (its stable `ref` on each node: measured on the REAL route for Paul's L20 candidate,
- * `assist.v1.scenario-graph-register.revised-draft-held.test.ts`). A component omitted or changed BEFORE the
- * acknowledgement fails here even when the read-back agrees with that acknowledgement.
- *
- * ⛔ A NODE'S DISPLAY `ref` IS THE ROUTE'S OWN, ADDED OR RE-ASSIGNED, NEVER THE APPROVED MEANING (P11, proof 2, 18 Oct,
- * scenario 75bc9a57: the reframe landed — revision 2→3, a new hash — and the receipt said "could not be confirmed"; the only
- * difference was the demoted goal's "G1", re-assigned to the new aim). Compared without it; every other field still counts.
- */
-export function approvedGraphHeld(candidate: unknown, stored: unknown): boolean {
-  const a = withoutDisplayRefs(normaliseGraphForIdentity(candidate as never)?.graph);
-  const b = withoutDisplayRefs(normaliseGraphForIdentity(stored as never)?.graph);
-  return a !== undefined && b !== undefined && heldUnchanged(a, b);
-}
-
-function withoutDisplayRefs<G>(graph: G | undefined): G | undefined {
-  const nodes = (graph as { nodes?: unknown } | undefined)?.nodes;
-  if (graph === undefined || !Array.isArray(nodes)) return graph;
-  return { ...graph, nodes: nodes.map((n) => { if (rec(n) === undefined) return n; const { ref: _ref, ...rest } = n as Record<string, unknown>; return rest; }) };
-}
-
-const entityKey = (x: unknown): string | undefined => {
-  const k = rec(x)?.id ?? rec(x)?.constraint_id;
-  return typeof k === 'string' ? k : undefined;
-};
-/** `a` held in `b`: the same members (by id where every member has one), each field of `a` equal in `b`; `b` may add fields only. */
-function heldUnchanged(a: unknown, b: unknown): boolean {
-  if (Array.isArray(a)) {
-    if (!Array.isArray(b) || a.length !== b.length) return false;
-    const keys = a.map(entityKey);
-    if (keys.every((k) => k !== undefined) && new Set(keys).size === keys.length) {
-      const byKey = new Map(b.map((x) => [entityKey(x), x] as const));
-      return a.every((x, i) => byKey.has(keys[i]) && heldUnchanged(x, byKey.get(keys[i])));
-    }
-    return a.every((x, i) => heldUnchanged(x, b[i]));
-  }
-  if (a !== null && typeof a === 'object') {
-    if (b === null || typeof b !== 'object' || Array.isArray(b)) return false;
-    return Object.entries(a as Record<string, unknown>)
-      .every(([k, v]) => Object.prototype.hasOwnProperty.call(b, k) && heldUnchanged(v, (b as Record<string, unknown>)[k]));
-  }
-  return a === b;
-}
+export { approvedGraphHeld } from '../../model-program-turn/saved-read.js';
 
 export type RebuildMissingKind = 'saved_option' | 'option_setting' | 'recorded_reasoning' | 'goal_target' | 'goal_frame' | 'limit' | 'human_item' | 'goal_contract';
 

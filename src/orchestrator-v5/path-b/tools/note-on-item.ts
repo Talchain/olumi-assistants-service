@@ -20,6 +20,7 @@ import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import { isSavedRead, readSaved } from './context-tool.js';
 import { ok, refused, type ToolOutcome } from './outcome.js';
 import type { RunDeps } from './run-tool.js';
+import { NOTE_NODE_KINDS } from '../../core-route/turn-request.js';
 
 export const NOTE_ON_ITEM = 'note_on_item';
 export const NOTE_MAX = 140;
@@ -34,8 +35,6 @@ export type NoteOnItemArgs = z.infer<typeof NoteOnItemParams>;
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const recs = (v: unknown): Rec[] => (Array.isArray(v) ? v.filter(isRec) : []);
-/** The card kinds a note can sit beside (the decision is the question itself, never a card to note). */
-export const NOTE_NODE_KINDS: ReadonlySet<string> = new Set(['factor', 'option', 'goal', 'risk', 'constraint', 'outcome']);
 const NODE_KINDS = NOTE_NODE_KINDS;
 const RANKS_OPTIONS = /\b(best|recommend\w*|winner|go with|should (?:choose|pick))\b/i;
 const escape = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
