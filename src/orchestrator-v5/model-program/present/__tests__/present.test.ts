@@ -214,11 +214,15 @@ describe('present: the canonical analysis view from a simulated model', () => {
     expect(JSON.stringify(v)).not.toMatch(FORECAST_OR_VERDICT);
   });
 
-  it('a chance on fixed figures only names no driver (no range to test); no leader and no Run: currentness unknown', () => {
+  it('a chance on fixed figures only names no driver (no range to test); no Run: currentness unknown', () => {
     const v = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')), MRR_GOALS, MRR_OPTIONS), MRR_LABELS);
     expect(v.options.map((o: Rec) => o.main_driver)).toEqual([{ kind: 'none_licensed', reason: NO_RANGE_REASON }, { kind: 'none_licensed', reason: NO_RANGE_REASON }]);
-    expect(Object.hasOwn(v, 'leader')).toBe(false);
-    expect(v.leader_licence).toBe('withheld');
+    // W6: Hold meets both goals in every draw (100%, exact) and Raise misses one in every draw (0%, exact): no overlap, so the
+    // words say which is most likely to achieve every goal together, both chances, the basis and that no figure has a range.
+    expect(v.leader_licence).toBe('permitted');
+    expect(v.leader).toEqual({ licence: 'permitted', option_id: null, goal_chance_leader: 'hold', similar_option_ids: [],
+      words: `In this model, ‘Hold’ is the option most likely to achieve every goal together: 100% chance of ${MRR_WORDS} and ${CUST_WORDS}, `
+        + `against 0% for ‘Raise to £59’, the next most likely, on your figures. ${NO_RANGE_REASON}` });
     expect(v.run).toBeNull();
     expect(v.staleness).toEqual({ stale: null, revision: null, run_revision: null, basis: 'analysis_graph_hash_interim', reason: null,
       limitation: 'Currentness is unknown because an analysis hash is unavailable.' });
@@ -552,5 +556,86 @@ describe('present: what each computed chance rests on most (one figure at a time
     const m = model([fixed('revenue', 10, '£'), fixed('seats', 0, 'seats'), def('per_seat', 'ratio', ['revenue', 'seats'], '£/seat'), fixed('zero', 0, '£/seat')],
       [goal('g', 'per_seat', '>=', 'zero')], [option('hold', 'Hold')]);
     expect(driver(present(m, { revenue: person('Revenue'), seats: person('Seats'), per_seat: person('Revenue per seat', true), zero: person('Zero') }), 'hold')).toEqual({ kind: 'not_recorded' });
+  });
+});
+
+describe('present: which option is most likely to achieve the goal, in this model (W6, Paul 6 and 14 Oct)', () => {
+  // Never a choice made for the person, a superlative or a win share; "too close to call" is a finding, not a refusal.
+  const FORBIDDEN = /\b(best|winner|wins?|recommend\w*|should|go with)\b|comes out on top/i;
+  /** SPEC with its capacity target moved: Add one specialist meets it when 80 + d + c reaches the target, Keep never does. */
+  const HIRE = (target: number) => {
+    const m = SPEC(range('c', 10, 30, undefined, 'tickets', 'olumi_estimate'));
+    return { ...m, quantities: m.quantities.map((x) => (x.id === 'target' ? fixed('target', target, 'tickets') : x)) };
+  };
+  /** The basis both chances rest on: the person's day-to-day range and Olumi's own range for the capacity per specialist. */
+  const HIRE_BASIS = 'if ‘Day-to-day variation’ follows Olumi’s provisional conversion of your range, -0.1 tickets to 0.1 tickets, into a bell-shaped spread '
+    + 'and ‘Capacity per specialist’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 10 tickets to 30 tickets, into a bell-shaped spread';
+  const DRIVER_C = (low: string, middle: string, high: string) =>
+    `Its chance is most sensitive to ‘Capacity per specialist’ (Olumi’s estimate): ${low} at its low end, ${middle} at its middle and ${high} at its high end.`;
+
+  it('a clear leader: the highest chance, apart from the next by more than the simulation precision, is named with both chances, the basis and its driver', () => {
+    // Target 95: Add meets it when c ≥ 15 − d; c is a bell spread on 10 to 30 (mean 20, sd 5.77), so about 1 − Φ(−0.87) ≈ 81%.
+    // Keep is 80 + d (d within ±0.1): below 95 in every draw, sampled (d is drawn), so "less than 1%". The intervals are far apart.
+    const v = present(HIRE(95), SPEC_LABELS, {}, 2000);
+    const add = cell(v, 'add'), keep = cell(v, 'keep');
+    expect(add.display).toMatch(/^about (7[6-9]|8[0-6])%$/);
+    expect(keep.display).toBe('less than 1%');
+    expect(v.leader_licence).toBe('permitted');
+    expect(v.leader).toEqual({ licence: 'permitted', option_id: null, goal_chance_leader: 'add', similar_option_ids: [], words: expect.any(String) });
+    // At c = 10, 20, 30 the chance is P(d ≥ 5) = 0, P(d ≥ −5) = 1, 1: the driver's own three settings, as the cell's detail says them.
+    expect(v.leader.words).toBe(`In this model, ‘Add one specialist’ is the option most likely to achieve the goal: ${add.display} chance of `
+      + '‘Weekly capacity’ being at least 95 tickets at 1 month from the start of this model, against less than 1% for ‘Keep’, the next most likely, '
+      + `${HIRE_BASIS}. ${DRIVER_C('less than 1%', 'more than 99%', 'more than 99%')}`);
+    expect(v.leader.words).not.toContain('more likely to miss');
+  });
+
+  it('a clear leader that is still more likely to miss the goal says so', () => {
+    // Target 105: Add needs c ≥ 25 − d, about 1 − Φ(0.87) ≈ 19%, its interval wholly below 50%; Keep is still less than 1%.
+    const v = present(HIRE(105), SPEC_LABELS, {}, 2000);
+    expect(cell(v, 'add').display).toMatch(/^about (1[4-9]|2[0-4])%$/);
+    expect(v.leader.goal_chance_leader).toBe('add');
+    expect(v.leader.words).toContain(`against less than 1% for ‘Keep’, the next most likely, `);
+    expect(v.leader.words).toContain('. Even so, in this model it is more likely to miss the goal than to meet it. Its chance is most sensitive to');
+  });
+
+  it('overlapping precision: the options are too close to call, each chance said, no option named', () => {
+    // Total = x + extra, x the person's 0 to 10 (a bell spread, mean 5, sd 2.89); Nudge adds 0.2. P(x ≥ 5) = 50% against
+    // P(x ≥ 4.8) ≈ 53%: on 200 draws each interval is about ±7 points, so they overlap.
+    const m = model([range('x', 0, 10, undefined, 'tickets', 'person_range'), fixed('extra', 0, 'tickets', 'state', 'structure'), fixed('tiny', 0.2, 'tickets'),
+      def('total', 'sum', ['x', 'extra'], 'tickets'), fixed('t', 5, 'tickets')], [goal('g', 'total', '>=', 't')],
+    [option('hold', 'Hold'), option('nudge', 'Nudge', [{ quantity: 'extra', to: 'tiny', from_period: 0 }])]);
+    const v = present(m, { x: person('Tickets'), extra: { label: 'Extra', author: 'structure' }, tiny: person('Nudge size'), total: person('Total', true), t: person('Target') });
+    const hold = cell(v, 'hold'), nudge = cell(v, 'nudge');
+    expect(hold.detail.precision_95[0]).toBeLessThanOrEqual(nudge.detail.precision_95[1]);
+    expect(v.leader_licence).toBe('withheld');
+    expect(v.leader).toEqual({ licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: ['hold', 'nudge'],
+      words: `In this model, ‘Hold’ (${hold.display}) and ‘Nudge’ (${nudge.display}) are too close to call: the simulation cannot tell apart their chances of `
+        + '‘Total’ being at least 5 tickets at 1 month from the start of this model, if ‘Tickets’ follows Olumi’s provisional conversion of your range, 0 tickets to 10 tickets, into a bell-shaped spread.' });
+  });
+
+  it('one option, or a chance not shown: no leader at all', () => {
+    const both = present(HIRE(95), SPEC_LABELS, {}, 2000);
+    const single = present({ ...HIRE(95), options: [option('add', 'Add one specialist', [{ quantity: 'added', to: 'one', from_period: 0 }])] }, SPEC_LABELS, {}, 2000);
+    expect(Object.hasOwn(both, 'leader')).toBe(true); // contrast: the same model with both options names one
+    expect(Object.hasOwn(single, 'leader')).toBe(false);
+    expect(single.leader_licence).toBe('withheld');
+    // A goal waiting on an answer withholds every chance: nothing to compare.
+    const waiting = present(HIRE(95), SPEC_LABELS, { goals: [{ goal_id: 'g', label: 'Capacity', status: 'asks', reasons: ['It needs your answer.'], asks: ['c'] }] }, 2000);
+    expect(cell(waiting, 'add').kind).toBe('withheld');
+    expect(Object.hasOwn(waiting, 'leader')).toBe(false);
+    expect(waiting.leader_licence).toBe('withheld');
+  });
+
+  it('the negative: no words anywhere choose for the person, use a superlative or call a share a chance', () => {
+    const views = [present(HIRE(95), SPEC_LABELS, {}, 2000), present(HIRE(105), SPEC_LABELS, {}, 2000),
+      present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')), MRR_GOALS, MRR_OPTIONS), MRR_LABELS),
+      present(model(MRR_QUANTITIES(range('per_pound', -2.2, -1.4, -1.8, 'customers', 'olumi_estimate')), MRR_GOALS, MRR_OPTIONS),
+        { ...MRR_LABELS, per_pound: { label: 'Customers lost per £1 of price rise', author: 'olumi' } })];
+    expect(views.filter((v) => v.leader !== undefined)).toHaveLength(views.length);
+    for (const v of views) {
+      expect(v.leader.words).not.toMatch(FORBIDDEN);
+      expect(v.leader.words).not.toMatch(/\bwin share\b|\bon top\b|\bof runs\b/i);
+      expect(JSON.stringify(v)).not.toMatch(FORBIDDEN);
+    }
   });
 });

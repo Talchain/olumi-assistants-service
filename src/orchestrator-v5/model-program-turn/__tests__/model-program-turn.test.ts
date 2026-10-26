@@ -642,6 +642,33 @@ describe('the model-program turn on the real core route', () => {
     expect(display).toEqual(JSON.parse(JSON.stringify(project(bakery(), compile(bakery(), { sourceText: BRIEF })).graph)));
   });
 
+  it('W6 (Paul 6 and 14 Oct): the first Run says which option is most likely to achieve the goal, in this model, in the view and in the reply', async () => {
+    replies = [JSON.stringify(bakery())];
+    const r = (await turn({ message: BRIEF })).json();
+    const view = r.canonical_analysis_view;
+    const oven = view.options.find((o: Json) => o.option_id === 'second_oven').cell, keep = view.options.find((o: Json) => o.option_id === 'keep_one').cell;
+    // A second oven: about 19% (step 3); our one oven: 0% in every draw. The oven's precision is far above 0, and below 50%.
+    expect(oven.detail.precision_95[0]).toBeGreaterThan(keep.detail.precision_95[1]);
+    expect(oven.detail.precision_95[1]).toBeLessThan(0.5);
+    expect(view.leader_licence).toBe('permitted');
+    expect(view.leader).toEqual({ licence: 'permitted', option_id: null, goal_chance_leader: 'second_oven', similar_option_ids: [], words: expect.any(String) });
+    const words: string = view.leader.words;
+    expect(words.startsWith(`In this model, ‘A second oven’ is the option most likely to achieve the goal: ${oven.display} ${view.goal_chance.chance_words}, `
+      + `against ${keep.display} for ‘Keep our one oven’, the next most likely, on Olumi’s reading of your figures (not yet confirmed)`)).toBe(true);
+    expect(words).toContain('. Even so, in this model it is more likely to miss the goal than to meet it.');
+    // The limit this Run could not check stays beside the finding, as beside each chance.
+    const unchecked = (keep.face as string).slice((keep.face as string).indexOf(' Not yet checked: ‘Within the £3,000’'));
+    expect(unchecked.length).toBeGreaterThan(' Not yet checked: '.length);
+    expect(words.endsWith(unchecked)).toBe(true);
+    // The reply says the view's own words, once, after the options' chances; the stored Run holds the same view.
+    const paragraphs = (r.assistant_text as string).split('\n\n');
+    expect(paragraphs.filter((x) => x === words)).toHaveLength(1);
+    expect(paragraphs.indexOf(words)).toBe(paragraphs.indexOf(keep.face) + 1);
+    expect(persisted!.living_model.runs[0].result.canonical_analysis_view.leader).toEqual(view.leader);
+    // Olumi's own words (every paragraph after the one quoting the person's question) never choose for them.
+    for (const said of [words, ...paragraphs.slice(1)]) expect(said).not.toMatch(/\b(best|winner|wins?|recommend\w*|should|go with)\b|comes out on top/i);
+  });
+
   it('step 4, save → readback → cold reopen: the canonical model and its stored Run come back byte-identical; the reopen SHOWS that Run', async () => {
     replies = [JSON.stringify(bakery())];
     const r = (await turn({ message: BRIEF })).json();

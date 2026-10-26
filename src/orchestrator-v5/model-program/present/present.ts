@@ -22,8 +22,13 @@
  *     Olumi's own: the person's bounds stay theirs and are never called their probability law (DL ruling 4).
  *   - A chance the simulator withheld for a nonfinite draw (`invalid_domain`, DL ruling 3) is a withheld cell with its count
  *     and quantities, never a figure and never a failure.
- *   - Fields with nothing true to say are absent: no `leader` (no leader licence here; `leader_licence: 'withheld'`), no
- *     `status_quo`, no `historical_figures`. `run` is null and currentness unknown unless the caller passes the Run's facts.
+ *   - WHICH OPTION IS MOST LIKELY TO ACHIEVE THE GOAL (Paul 6 and 14 Oct; W6): with every option's chance worked out and at
+ *     least two options, `leader` names the option with the highest chance (`goal_chance_leader`, `leader_licence: 'permitted'`)
+ *     only when its simulation precision overlaps no other option's; otherwise it lists the options it overlaps as too close to
+ *     call (`similar_option_ids`, withheld). Its `words` say both chances, the basis and what the leading chance is most
+ *     sensitive to. A model-relative finding: never "best", a winner, a recommendation or a win share (`option_id` is null).
+ *   - Fields with nothing true to say are absent: no `leader` with one option or a chance not shown, no `status_quo`, no
+ *     `historical_figures`. `run` is null and currentness unknown unless the caller passes the Run's facts.
  */
 import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
 import { comparatorWords } from '../../goal-target/goal-target-basis.js';
@@ -32,7 +37,7 @@ import { displayedPctAt } from '../../goal-target/goal-chance-display.js';
 import { sayDisplayedPct } from '../../goal-target/goal-targets-joint.js';
 import type { Aggregation, Cmp, Domain, ExecutableModel, FixedAuthor, Goal, Limit, Quantity, Window } from '../executable.js';
 import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
-import { isWithheld, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
+import { isWithheld, type Chance, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
 import { costOf, readingOf, restsOn, simulate } from '../simulate/simulate.js';
 
 /** Whose a figure is: unverified is said to be the person's but their words were not found (compile's `unverified`). */
@@ -151,7 +156,9 @@ export interface PresentedAnalysisView {
     readonly reason: null;
     readonly limitation: 'Hash equality cannot detect brief, framing or stage changes.' | 'Currentness is unknown because an analysis hash is unavailable.';
   };
-  readonly leader_licence: 'withheld';
+  readonly leader_licence: 'permitted' | 'withheld';
+  /** Which option is most likely to achieve the goal in this model, or which are too close to call (see the header). */
+  readonly leader?: PresentedLeader;
   readonly options: readonly { readonly option_id: string; readonly cell: PresentCell; readonly main_driver: PresentMainDriver }[];
   readonly goal_chance?: {
     readonly chance_words?: string;
@@ -167,6 +174,19 @@ export interface PresentedAnalysisView {
     /** Everything the result waits on, by label, with the figure its answer box fills where there is one. */
     readonly waits_on?: readonly PresentBlocker[];
   };
+}
+
+/**
+ * The DGAI's `CanonicalRunLeader` shape (`canonicalAnalysisView.ts`), plus CEE's `words`. `option_id` is the comparative (win
+ * share) leader, which this presenter never computes, so it is always null; `goal_chance_leader` is the option most likely to
+ * achieve the goal, only where licensed.
+ */
+export interface PresentedLeader {
+  readonly licence: 'permitted' | 'withheld';
+  readonly option_id: null;
+  readonly goal_chance_leader: string | null;
+  readonly similar_option_ids: readonly string[];
+  readonly words: string;
 }
 
 /**
@@ -215,6 +235,7 @@ export function driverSweepOperations(model: ExecutableModel, draws: number): nu
 export const NO_DRIVER_REASON = 'Tested one at a time at each figure’s low end, middle and high end, no figure moved this chance by more than 5 points.';
 export const NO_RANGE_REASON = 'No figure this chance rests on has a range to test.';
 export const NOT_SWEPT_REASON = 'This model is too large to test each figure one at a time in one run, so what the chance rests on most is not measured.';
+const whoseRange = (author: 'person' | 'olumi' | 'unverified'): string => (author === 'unverified' ? NOT_IN_THEIR_WORDS : author === 'person' ? '(your range)' : '(Olumi’s estimate)');
 /** A setting tried: its value, and the chance there as displayed; null where it could not be worked out (a nonfinite draw). */
 type End = { readonly value: number; readonly display: string | null };
 export type PresentMainDriver =
@@ -547,7 +568,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     }
     const { x, at } = best;
     const author = meta(x.id)?.author === 'unverified' ? 'unverified' as const : x.dist.basis === 'person_range' ? 'person' as const : 'olumi' as const;
-    const whose = author === 'unverified' ? NOT_IN_THEIR_WORDS : author === 'person' ? '(your range)' : '(Olumi’s estimate)';
+    const whose = whoseRange(author);
     const [low, middle, high] = endsOf(x).values.map((value, i) => ({ value, display: shown(at[i]!, sweepDraws)?.display ?? null }));
     const said = (e: End) => `(${sayOf(x.id, e.value, x.unit)}) ${e.display ?? 'could not be tested'}`;
     const others = untested.filter((t) => t.x.id !== x.id);
@@ -623,6 +644,36 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     ...(unchecked.length > 0 ? { unchecked_limits: unchecked.map((l, i) => ({ limit_id: l.limit_id, words: uncheckedWords[i]! })) } : {}),
     ...((input.blockers ?? []).length > 0 ? { waits_on: input.blockers!.map((b) => ({ ...b, label: inlineWords(b.label) })) } : {}),
   };
+  // ── Which option is most likely to achieve the goal, in this model (Paul 6 and 14 Oct: say it; never choose for them) ──
+  const leader = ((): PresentedLeader | undefined => {
+    if (waiting.length > 0 || jointWords === undefined || options.length < 2) return undefined;
+    const said = options.flatMap((o, at) => {
+      const c = result.options[at]!.joint_within_limits;
+      return o.cell.kind === 'figure' && !isWithheld(c) ? [{ id: o.option_id, at, c: c as Chance, display: o.cell.display, driver: o.main_driver }] : [];
+    });
+    if (said.length < options.length) return undefined;
+    const ranked = [...said].sort((a, b) => b.c.chance - a.c.chance || a.at - b.at), top = ranked[0]!, rest = ranked.slice(1);
+    const name = (id: string): string => q(optionLabel.get(id) ?? id);
+    const basis = sharedBasisWords(roots, [...new Map([...premisesOf(model.goals.map((g) => g.id)), ...model.limits.flatMap((l) => input.limit_premises?.[l.id] ?? [])]
+      .map((p) => [p.id, p] as const)).values()], [...model.goals, ...model.limits].map((c) => c.id));
+    // A limit the Run could not check stays beside the finding, as it does beside each chance.
+    const unsaid = uncheckedLine !== undefined ? ` ${stop(uncheckedLine)}` : '';
+    // Too close to call: an option whose simulation precision reaches the highest chance's (every chance is on the same draws).
+    const close = new Set(rest.filter((x) => top.c.precision_95[0] <= x.c.precision_95[1]).map((x) => x.id));
+    if (close.size > 0) {
+      const tied = said.filter((x) => x.id === top.id || close.has(x.id));
+      return { licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: tied.map((x) => x.id),
+        words: `In this model, ${listWords(tied.map((x) => `${name(x.id)} (${x.display})`))} are too close to call: the simulation cannot tell apart their chances of ${jointWords}, ${basis}.${unsaid}` };
+    }
+    const next = rest[0]!, aim = model.goals.length === 1 ? 'the goal' : 'every goal together', d = top.driver;
+    const there = (e: End): string => e.display ?? 'could not be tested';
+    const rests = d.kind === 'available'
+      ? ` Its chance is most sensitive to ${q(label(d.driver.quantity) ?? d.driver.quantity)} ${whoseRange(d.driver.author)}: ${there(d.driver.low)} at its low end, ${there(d.driver.middle)} at its middle and ${there(d.driver.high)} at its high end.`
+      : d.kind === 'none_licensed' ? ` ${d.reason}` : '';
+    return { licence: 'permitted', option_id: null, goal_chance_leader: top.id, similar_option_ids: [],
+      words: `In this model, ${name(top.id)} is the option most likely to achieve ${aim}: ${top.display} chance of ${jointWords}, against ${next.display} for ${name(next.id)}, the next most likely, ${basis}.`
+        + (top.c.precision_95[1] < 0.5 ? ` Even so, in this model it is more likely to miss ${aim} than to meet it.` : '') + rests + unsaid };
+  })();
   const known = input.current !== undefined && input.run !== undefined;
   return {
     schema: 'canonical_analysis_view.v1', source: 'stored_run_facts',
@@ -633,7 +684,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       run_revision: null, basis: 'analysis_graph_hash_interim', reason: null,
       limitation: known ? 'Hash equality cannot detect brief, framing or stage changes.' : 'Currentness is unknown because an analysis hash is unavailable.',
     },
-    leader_licence: 'withheld',
+    leader_licence: leader?.licence ?? 'withheld',
+    ...(leader !== undefined ? { leader } : {}),
     options,
     ...(Object.keys(goal_chance).length > 0 ? { goal_chance } : {}),
   };
