@@ -14,6 +14,7 @@ import { injectAsCeeWriter } from '../../../tests/utils/inject-as-cee-writer.js'
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 
 const SCENARIO = 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e';
+const analysisHashOf = (g: unknown) => computeAnalysisAffectingGraphHash(g as never);
 
 vi.mock('../../config/index.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../config/index.js')>();
@@ -51,6 +52,7 @@ import { isSavedRead, readSaved } from '../../orchestrator-v5/path-b/tools/conte
 import { pathBTools } from '../../orchestrator-v5/path-b/tools/index.js';
 import type { CanonicalModelT } from '../../orchestrator-v5/model-program/canonical.js';
 import type { PendingAction } from '../../orchestrator-v5/session/pending-action.js';
+import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
 
 type Rec = Record<string, unknown>;
 beforeEach(() => {
@@ -170,8 +172,9 @@ describe('a model program card is judged by its own revision', () => {
     await resave(withNewRun({ ...first.program, canonical: approved }).graph);
     const moved = await readSaved({ dispatch }, SCENARIO);
     if (!isSavedRead(moved)) throw new Error('no read');
-    // The case itself: the analysis hash is unchanged, the program's revision is not.
-    expect(moved.graphHash).toBe(base.graphHash);
+    // The case itself: the analysis hash is unchanged, the program's revision is not; the read serves the revision (inventory F7).
+    expect(analysisHashOf(moved.graph)).toBe(analysisHashOf(base.graph));
+    expect(moved.graphHash).not.toBe(base.graphHash);
     expect(programCardApplies(card, moved.graph)).toBe(false);
     // The register's own row carries the card kept for review, and no reader serves it as approvable.
     const row = append.mock.calls.at(-1)![0] as { pending_actions?: PendingAction[] };
@@ -192,10 +195,11 @@ describe('a model program card is judged by its own revision', () => {
     const told = await press();
     expect(told).toMatchObject({ status: 'ok', data: { saved: true } });
     const row = append.mock.calls.at(-1)![0] as { pending_actions?: PendingAction[] };
-    // The case itself: this write moved the program's revision and not the analysis hash.
+    // The case itself: this write moved the program's revision and not the analysis hash; the read serves the revision (inventory F7).
     const after = await readSaved({ dispatch }, SCENARIO);
     if (!isSavedRead(after)) throw new Error('no readback');
-    expect(after.graphHash).toBe(base.graphHash);
+    expect(analysisHashOf(after.graph)).toBe(analysisHashOf(base.graph));
+    expect(after.graphHash).not.toBe(base.graphHash);
     expect(programCardApplies(card, after.graph)).toBe(false);
     const carried = (row.pending_actions ?? []).filter((pa) => pa.action.kind === 'apply_proposed_change'
       && (pa.action.inline_patch['agent_proposal'] as Rec | undefined)?.['proposal_id'] === card.proposal_id);

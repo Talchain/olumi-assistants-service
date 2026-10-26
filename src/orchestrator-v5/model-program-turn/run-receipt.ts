@@ -80,14 +80,12 @@ export function revisionDigest(canonical: CanonicalModelT, personWords: readonly
 
 export function newRun(args: { canonical: CanonicalModelT; personWords: readonly string[]; seed: number; draws: number | null; result: StoredRun['result'];
   /** How many Runs the scenario already holds: part of the id, so a re-evaluation of the same digest is still a new Run. */
-  index: number; versions?: EngineVersions; now?: Date;
-  /** The analysis hash of the display graph the Run was computed with (what the scenario read serves as `graph_hash`). */
-  graphHash?: string | null }): StoredRun {
+  index: number; versions?: EngineVersions; now?: Date }): StoredRun {
   const receipt: RunReceipt = { revision_digest: revisionDigest(args.canonical, args.personWords), versions: { ...(args.versions ?? ENGINE_VERSIONS) }, seed: args.seed, draws: args.draws };
   const run_id = `mp_run_${args.index + 1}_${createHash('sha256').update(stableStringify(receipt), 'utf8').digest('hex').slice(0, 12)}`;
   const computed_at = (args.now ?? new Date()).toISOString();
   const result = JSON.parse(JSON.stringify(args.result)) as StoredRun['result'];
-  return { run_id, computed_at, receipt, result: { ...result, canonical_analysis_view: viewOf(result.canonical_analysis_view, { run_id, graph_hash_at_run: args.graphHash ?? receipt.revision_digest.slice(0, 16), computed_at }, true) } };
+  return { run_id, computed_at, receipt, result: { ...result, canonical_analysis_view: viewOf(result.canonical_analysis_view, { run_id, graph_hash_at_run: receipt.revision_digest, computed_at }, true) } };
 }
 
 type Rec = Record<string, unknown>;
@@ -97,7 +95,7 @@ export const RUN_AGAIN_FOR_CHANCE = 'Run the analysis again to see the chance.';
 /** For a Run the person's model has NOT moved on from, made stale by an update (the engine, or how the model is read): S4. */
 export const RUN_AGAIN_AFTER_UPDATE = 'This result is from before an update. Run again to see the chance.';
 /**
- * A Run's view bound to its own record (run id, the analysis hash of its graph, its time) and to whether the saved model is
+ * A Run's view bound to its own record (run id, the revision it was computed against, its time) and to whether the saved model is
  * still the one it was computed from, in the core view's freshness words; the result itself is untouched.
  */
 function viewOf(view: unknown, run: { readonly run_id: string; readonly graph_hash_at_run: string; readonly computed_at: string }, current: boolean, updated = false): unknown {
@@ -117,7 +115,11 @@ function viewOf(view: unknown, run: { readonly run_id: string; readonly graph_ha
  */
 export function shownView(run: StoredRun, current: boolean, updated = false): unknown {
   const view = run.result.canonical_analysis_view;
-  return current || !isRec(view) || !isRec(view['run']) ? view : viewOf(view, view['run'] as { run_id: string; graph_hash_at_run: string; computed_at: string }, false, updated);
+  if (!isRec(view) || !isRec(view['run'])) return view;
+  // A Run is computed against its receipt's revision (DL ruling 26 Oct, inventory F7), the `graph_hash` a program's read serves; a Run
+  // stored before that named the display graph's analysis hash, and is bound to its receipt here, so it opens as it did.
+  const bound = { ...(view['run'] as { run_id: string; graph_hash_at_run: string; computed_at: string }), graph_hash_at_run: run.receipt.revision_digest };
+  return current ? { ...view, run: bound } : viewOf(view, bound, false, updated);
 }
 
 /** The Run a reopen shows: the newest stored one, with whether it is the saved model's and today's engine's. */

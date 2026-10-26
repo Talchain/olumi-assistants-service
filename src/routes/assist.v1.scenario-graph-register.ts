@@ -56,7 +56,7 @@ import {
 import { withTodayPartsAtGoalLevel } from "../orchestrator-v5/agent-lane/goal-definition-sum.js";
 import type { PendingAction } from "../orchestrator-v5/session/pending-action.js";
 import { isProgramGraph } from "../orchestrator-v5/model-program-turn/program-store.js";
-import { heldCardForReview, heldProgramCardMoved, isHeldCardBeingApplied } from "../orchestrator-v5/model-program-turn/program-card.js";
+import { heldCardForReview, heldProgramCardMoved, isHeldCardBeingApplied, programRevisionOf } from "../orchestrator-v5/model-program-turn/program-card.js";
 
 /** Create-only construction may retain a count range the brief itself states. Proposed ranges still need approval. */
 function onlyBriefStatedCountRanges(graph: GraphStateIngress, brief: string | undefined): boolean {
@@ -1481,7 +1481,8 @@ export default async function route(app: FastifyInstance) {
         // A caller chaining a further CAS-gated edit on its OWN write needs
         // exactly this, and re-reading to obtain it would absorb any foreign
         // change made in between.
-        graph_hash: computeExpectedGraphCasHashes(graphForStore).expectedGraphAnalysisHash,
+        // A model program's is its revision (DL ruling 26 Oct, inventory F7), exactly as the read serves it.
+        graph_hash: programRevisionOf(graphForStore) ?? computeExpectedGraphCasHashes(graphForStore).expectedGraphAnalysisHash,
         // ADDITIVE and optional: present only when this registration actually
         // wrote a version. The skip arm omits the KEY rather than sending null,
         // so a client never has to tell "no version written" apart from

@@ -135,6 +135,33 @@ describe('a model program\'s postimage through the real /graph/register', () => 
     expect(JSON.stringify({ ...body, graph: null, canonical_analysis_view: null })).not.toMatch(/FACTOR_LEVEL_SCALE_UNRESOLVED|MODEL_HAS_BLOCKERS|ORPHAN_NODE/);
   });
 
+  it('DL 26 Oct (inventory F7, compatibility): a program saved BEFORE the switch, its Run stamped with the old analysis hash, still opens as current; the read serves its revision, the receipt\'s digest', async () => {
+    const program = { model_program: MODEL_PROGRAM, canonical: bakery(), seed: seedOf(SCENARIO), person_words: [BRIEF], runs: [] };
+    const { graph, run } = withNewRun(program);
+    // As stored before the switch: the Run's view names the analysis hash of the graph it was saved with.
+    const before = JSON.parse(JSON.stringify(graph)) as Rec;
+    const oldStamp = computeAnalysisAffectingGraphHash(graph as never)!;
+    ((before.living_model as { runs: { result: { canonical_analysis_view: { run: Rec } } }[] }).runs[0]!.result.canonical_analysis_view.run).graph_hash_at_run = oldStamp;
+    expect(oldStamp).not.toBe(run.receipt.revision_digest);
+    expect((await register({ graph: before, thin_core: true, brief_text: BRIEF }, true)).statusCode).toBe(200);
+    const written = (append.mock.calls[0]![0] as Rec).graph as Rec;
+    store.readExistingScenario.mockResolvedValue({ userId: null, graph: JSON.parse(JSON.stringify(written)), briefText: BRIEF, analysisInvalidatedAt: null, revision: 1 });
+    const app = Fastify();
+    await scenarioGraphRoute(app);
+    await app.ready();
+    const res = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
+    await app.close();
+    expect(res.statusCode, res.body).toBe(200);
+    const body = res.json() as Rec;
+    const view = body.canonical_analysis_view as Rec;
+    // The read's revision, the Run it shows and the receipt that Run carries are one digest; the result is current.
+    expect([body.graph_hash, (view.run as Rec).graph_hash_at_run]).toEqual([run.receipt.revision_digest, run.receipt.revision_digest]);
+    expect([(view.staleness as Rec).stale, view.face_when_stale]).toEqual([false, undefined]);
+    expect(stableStringify(view.options)).toBe(stableStringify((run.result.canonical_analysis_view as Rec).options));
+    // Nothing is rewritten: the stored Run keeps the stamp it was saved with.
+    expect(JSON.stringify(written)).toContain(oldStamp);
+  });
+
   it('DL 23 Oct (UI witness on alpha3): a program capacity graph with the person\'s 10–30 range gets NO legacy readiness asks; the same graph as a Living Model still does', async () => {
     const brief = 'Our support team handles 80 tickets a week. We need at least 100 tickets a week. Each specialist would add between 10 and 30 tickets a week. Add one specialist or keep the team as it is.';
     const capacity: CanonicalModelT = { version: 'canonical.v1', question: 'Add a specialist?', period: 'week',
@@ -240,9 +267,12 @@ describe('a model program\'s postimage through the real /graph/register', () => 
     const applied = await applyProgramChange({ dispatch, proposals }, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: 'press-1' }, card.proposal_id) as Rec;
     expect(applied, JSON.stringify(applied)).toMatchObject({ status: 'ok', data: { saved: true } });
     expect(append).toHaveBeenCalledTimes(2);
-    // The commit's own CAS is on the base the card was made on (the read route's identity and hash, the store's revision).
+    // The commit's own CAS is on the base the card was made on (the read route's identity, the stored bytes' analysis hash, the store's
+    // revision). The read serves the program's revision as its graph_hash (inventory F7); the store's CAS is unchanged.
     const written = append.mock.calls[1]![0] as Rec;
-    expect([written.expectedGraphIdentityHash, written.expectedGraphAnalysisHash, written.expectedRevision]).toEqual([base.identity, base.graphHash, 7]);
+    expect([written.expectedGraphIdentityHash, written.expectedGraphAnalysisHash, written.expectedRevision])
+      .toEqual([base.identity, computeAnalysisAffectingGraphHash(base.graph as never), 7]);
+    expect(base.graphHash).toBe(first.run.receipt.revision_digest);
     // Unknown figures are valid program state: the same transaction carries its version, without inventing a value.
     expect(written.modelVersion).toMatchObject({ creation_kind: 'committed_mutation' });
     // Its receipt names the model a fresh read serves, and that read is the approved card's program, byte for byte.

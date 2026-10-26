@@ -147,8 +147,8 @@ export function programRunOf(graph: unknown, before: string | null): CoreTurnRun
   const shown = reopenProgram(graph);
   const run = shown?.run ?? null;
   if (run === null || run.run_id === before) return null;
-  const at = (run.result.canonical_analysis_view as { run?: { graph_hash_at_run?: unknown } } | undefined)?.run?.graph_hash_at_run;
-  return { run_key: run.run_id, run_id: run.run_id, computed_against: typeof at === 'string' ? at : null,
+  // Computed against its receipt's revision: the `graph_hash` a program's read serves (DL ruling 26 Oct, inventory F7).
+  return { run_key: run.run_id, run_id: run.run_id, computed_against: run.receipt.revision_digest,
     state: { kind: shown!.current && shown!.engine_current ? 'complete_current' : 'complete_stale', computed_at: run.computed_at } };
 }
 const newestRunId = (read: ReturnType<typeof programReadOf>): string | null => (read.kind === 'program' ? read.program.runs.at(-1)?.run_id ?? null : null);

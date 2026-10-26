@@ -30,6 +30,7 @@ import { proposalPendingAction } from '../../agent-lane/durable-proposal.js';
 import { agentProposalOf, proposalFieldsWire, proposalRecord } from '../../agent-lane/proposal-object/record.js';
 import { ProposalChangeSchema, ProposalStore, type ProposalChange } from '../../agent-lane/proposal.js';
 import { savePostimage, withNewRun } from '../program-save.js';
+import { programRevisionOf } from '../program-card.js';
 import { projectCorePostimageForPersistence } from '../../persisted-graph-projection.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { ENGINE_VERSIONS, revisionDigest, RUN_AGAIN_AFTER_UPDATE, RUN_AGAIN_FOR_CHANCE } from '../run-receipt.js';
@@ -3534,12 +3535,13 @@ describe('the model-program turn on the real core route', () => {
     expect(saved.quantities.find((x) => x.id === 'spend')!.label).toBe('spend');
   });
 
-  it('the stored Run names itself: run id, the analysis hash of the graph it was computed with, its time; stale once the model moves', async () => {
+  it('the stored Run names itself: run id, the revision it was computed against (its receipt digest), its time; stale once the model moves', async () => {
     replies = [JSON.stringify(bakery())];
     const r = (await turn({ message: BRIEF })).json();
     const run = persisted!.living_model.runs[0] as Json;
     const view = r.canonical_analysis_view;
-    expect(view.run).toEqual({ run_id: run.run_id, graph_hash_at_run: hashOf(persisted), computed_at: run.computed_at });
+    expect(view.run).toEqual({ run_id: run.run_id, graph_hash_at_run: run.receipt.revision_digest, computed_at: run.computed_at });
+    expect(run.receipt.revision_digest).toBe(programRevisionOf(persisted));
     expect([view.staleness.stale, view.staleness.reason, view.face_when_stale]).toEqual([false, 'graph_hash_match', undefined]);
     expect(stableStringify(reopenProgram(persisted)!.view)).toBe(stableStringify(view));
     // Contrast: the model moved with no new Run (a word of the person's added): the SAME stored result, now said stale.
