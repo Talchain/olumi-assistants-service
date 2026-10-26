@@ -70,8 +70,18 @@ const model = (over: Partial<CanonicalModelT>): CanonicalModelT => ({
   claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [], ...over,
 });
 const codes = (r: ReturnType<typeof compile>) => r.errors.map((e) => e.code);
-/** The shared law's reading of an unbounded range: its conditioned moments equal rangeSpread's centre and sd. */
-const unbounded = (centre: number, sd: number) => ({ kind: 'normal', centre, sd, lower: -Infinity, upper: Infinity, mean: centre, sd_conditioned: sd });
+/**
+ * The shared law's reading of an unbounded plausible range (W10, interim, adopted behaviour; before it, rangeSpread's Normal
+ * with sd (high − low)/√12): halves σL = (m − low)/Φ⁻¹(0.9) and σH = (high − m)/Φ⁻¹(0.9), Φ⁻¹(0.9) = 1.2815516, each half
+ * ½ of the draws; mean m + (σH − σL)/√(2π) and sd √(½(σL² + σH²) − (σH − σL)²/2π), equal to the conditioned moments
+ * (unbounded). Each row's figures are worked out by hand beside it.
+ */
+const unbounded = (centre: number, below: number, above: number, mean: number, sd: number) => ({ kind: 'normal', ends: 'p10_p90', centre,
+  sd_below: expect.closeTo(below, 4), sd_above: expect.closeTo(above, 4), edge_below: false, edge_above: false, share_below: 0.5,
+  sd: expect.closeTo(sd, 4), lower: -Infinity, upper: Infinity, mean: expect.closeTo(mean, 4), sd_conditioned: expect.closeTo(sd, 4) });
+/** Olumi's extra loaves per oven, 80 to 150 around 120: σL = 40/1.2815516 = 31.21217, σH = 30/1.2815516 = 23.40912; mean =
+ *  120 − 7.80304/2.50663 = 116.88704; sd = √(½ × (974.1990 + 547.9871) − 60.8875/6.28319) = √751.4025 = 27.41172. */
+const EXTRA_PER_OVEN = unbounded(120, 31.21217, 23.40912, 116.88704, 27.41172);
 const xq = (r: ReturnType<typeof compile>) => new Map(r.executable!.quantities.map((q) => [q.id, q]));
 /** The range-law disclosure for one quantity (a typed find: a % conversion has no reading). */
 const lawIn = (r: ReturnType<typeof compile>, id: string) => {
@@ -156,7 +166,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(q.get('cash')).toEqual({ id: 'cash', label: 'cash', unit: 'GBP', reading: 'state', stock: { start: 'cash_now', inflows: ['profit'], outflows: [] } });
     expect(q.get('extra_per_oven')!.dist).toEqual({ kind: 'range', low: 80, high: 150, mode: 120, basis: 'olumi_estimate', range_kind: 'plausible' });
     expect(q.get('price')!.dist).toEqual({ kind: 'fixed', value: 3, author: 'person' });
-    expect(r.conversions).toEqual([{ kind: 'range_law', quantity: 'extra_per_oven', low: 80, high: 150, range_kind: 'plausible', domain: null, reading: unbounded(120, 70 / Math.sqrt(12)), author: 'olumi', provisional: true }]);
+    expect(r.conversions).toEqual([{ kind: 'range_law', quantity: 'extra_per_oven', low: 80, high: 150, range_kind: 'plausible', domain: null, reading: EXTRA_PER_OVEN, author: 'olumi', provisional: true }]);
     expect(q.has('quarter')).toBe(false); // a window's length is consumed into the window
     expect(x.goals).toEqual([
       { id: 'weekly_profit', label: 'weekly profit', quantity: 'profit', cmp: '>', target: 'profit_target', aggregation: 'end', window: { start_period: 0, periods: 13 } },
@@ -929,15 +939,23 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const waiting = nodes(gymWith(0));
     expect(compile(gymWith(0)).conversions.some((c) => c.quantity === 'joins' || c.quantity === 'rival_chance')).toBe(false); // precondition: not in the Run
     const joins = waiting.find((n) => n.id === 'joins')!;
-    expect(joins.display_value).toBe('0–30 member/month; Olumi reads it as a spread around 15.8 (sd 7.892), never below 0, provisionally');
-    expect((joins.observed_state as { value: number }).value).toBeCloseTo(15.804, 2);
-    expect(waiting.find((n) => n.id === 'rival')!.description).toContain('Chance: 10–30 %, Olumi\'s estimate; Olumi reads it as a spread around 20.01 (sd 5.764), kept between 0 and 100, provisionally.');
+    // W10 (adopted; before it, 15.8 (sd 7.892) and 20.01 (sd 5.764)). Joins 0 to 30 with a floor of 0: its low end sits on the
+    // floor (rule 2), m = 15, σ = 15/1.2815516 = 11.70456 each side, the lower half truncated at 0 keeping its ½: mean 15 +
+    // 11.70456 × ½ × (0.79788 − 0.55861) = 16.400, sd 11.70456 × 0.83937 = 9.8245 (the row 2b (e) factors of the numerical check).
+    // The rival's 10 to 30 % chance, within 0 to 100 %, strictly inside it: m = 20 %, σ = 10/1.2815516 = 7.80304 %; its
+    // lower half within [−2.5631, 0] (mass 0.5 − 0.005187 = 0.494813; φ(2.5631) = 0.014940; mean (0.014940 − 0.398942)/0.494813
+    // = −0.776055; variance 1 − 2.5631 × 0.014940/0.494813 − 0.776055² = 0.320349), its upper half a half-Normal (0.797885,
+    // 0.363380, 100 % is 10.25 σ away): mean 20 + 7.80304 × ½ × (0.797885 − 0.776055) = 20.085, sd 7.80304 ×
+    // √(½ × (0.320349 + 0.363380) + ¼ × 1.573940²) = 7.80304 × 0.980401 = 7.650.
+    expect(joins.display_value).toBe('0–30 member/month; Olumi reads it as a spread around 16.4 (sd 9.825), never below 0, provisionally');
+    expect((joins.observed_state as { value: number }).value).toBeCloseTo(16.400, 2);
+    expect(waiting.find((n) => n.id === 'rival')!.description).toContain('Chance: 10–30 %, Olumi\'s estimate; Olumi reads it as a spread around 20.09 (sd 7.65), kept between 0 and 100, provisionally.');
     // Once the goal is calculable (leavers answered) the same unchanged figures read the same.
     const answeredNodes = nodes(answered(gymWith(0), 'leavers', { value: 20, quote: 'about 20 leave a month', basis: APPROXIMATE_FIGURE }));
-    expect(answeredNodes.find((n) => n.id === 'joins')!.display_value).toBe('0–30 member/month; Olumi reads it as a spread around 15.8 (sd 7.892), never below 0, provisionally');
-    expect(answeredNodes.find((n) => n.id === 'rival')!.description).toContain('Chance: 10–30 %, Olumi\'s estimate; Olumi reads it as a spread around 20.01 (sd 5.764), kept between 0 and 100, provisionally.');
-    // Contrast: with no floor declared, the waiting card's spread is unbounded.
-    expect(nodes(gymWith(null)).find((n) => n.id === 'joins')!.display_value).toBe('0–30 member/month; Olumi reads it as a spread around 15 (sd 8.66), provisionally');
+    expect(answeredNodes.find((n) => n.id === 'joins')!.display_value).toBe('0–30 member/month; Olumi reads it as a spread around 16.4 (sd 9.825), never below 0, provisionally');
+    expect(answeredNodes.find((n) => n.id === 'rival')!.description).toContain('Chance: 10–30 %, Olumi\'s estimate; Olumi reads it as a spread around 20.09 (sd 7.65), kept between 0 and 100, provisionally.');
+    // Contrast: with no floor declared, the waiting card's spread is unbounded: the Normal on 15, σ = 11.70456 (W10; before, 8.66).
+    expect(nodes(gymWith(null)).find((n) => n.id === 'joins')!.display_value).toBe('0–30 member/month; Olumi reads it as a spread around 15 (sd 11.7), provisionally');
   });
 
   it('numbers#2 (a), spec §3.7: a worked-out stock below Olumi\'s floor in a draw withholds every chance resting on it, with that draw counted and the stock named; never clamped, never dropped', () => {
@@ -987,8 +1005,10 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
   });
 
   it('numbers#2 (b), spec §3.7: a chance is drawn within 0 to 100 % AND within the floor Olumi declares on it; the card reads the same law', () => {
-    // Olumi's 10–30 % chance of a rival opening (a rough estimate: centre 20 %, sd 20/√12 = 5.774 %) with its floor at 20 %:
-    // conditioned on [20 %, 100 %], a half-Normal above 20 %: mean 20 + 5.774 × 0.7979 = 24.61, sd 5.774 × 0.6028 = 3.480.
+    // Olumi's 10–30 % chance of a rival opening (a rough estimate) with its floor at 20 %. W10 (adopted; before it, the √12
+    // Normal gave 24.61 and 3.480): its low end, 10 %, is past the floor and its middle, 20 %, sits on it, so its lower half has
+    // no room and its upper half is all of it: a half-Normal above 20 %, σ = 10/1.2815516 = 7.80304 %, within 100 % (10.25 σ
+    // away): mean 20 + 7.80304 × 0.797885 = 26.226, sd 7.80304 × 0.602810 = 4.7038.
     const rival = (f: Partial<CanonicalQuantityT>) => {
       const g = gymFilled();
       g.quantities.push(qty('rival_chance', '%', { kind: 'coefficient', status: 'estimated', author: 'olumi', low: 10, high: 30, range_kind: 'plausible', basis: 'A rival opens nearby in some summers.', ...f }),
@@ -1004,11 +1024,11 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const floored = drawn(rival({ floor: 20 }));
     expect(floored.r.errors).toEqual([]);
     expect(lawIn(floored.r, 'rival_chance')).toMatchObject({ domain: { min: 0.2, max: 1 }, reading: { lower: 0.2, upper: 1 } });
-    expect(lawIn(floored.r, 'rival_chance').reading.mean).toBeCloseTo(0.2461, 3);
+    expect(lawIn(floored.r, 'rival_chance').reading.mean).toBeCloseTo(0.26226, 3);
     expect(Math.min(...floored.chances)).toBeGreaterThanOrEqual(0.2);
     expect(Math.max(...floored.chances)).toBeLessThanOrEqual(1);
     const node = (m: CanonicalModelT) => evaluateCanonical(m, { sourceText: 'about 20 leave a month', seed: 7, draws: 200 }).projection.graph.nodes.find((n) => n.id === 'rival')!.description;
-    expect(node(rival({ floor: 20 }))).toContain('Chance: 10–30 %, Olumi\'s estimate; Olumi reads it as a spread around 24.61 (sd 3.48), kept between 20 and 100, provisionally.');
+    expect(node(rival({ floor: 20 }))).toContain('Chance: 10–30 %, Olumi\'s estimate; Olumi reads it as a spread around 26.23 (sd 4.704), kept between 20 and 100, provisionally.');
     // Contrast: with no floor it is drawn within 0 to 100 % only, about half the draws below 20 %.
     const free = drawn(rival({}));
     expect(lawIn(free.r, 'rival_chance')).toMatchObject({ domain: { min: 0, max: 1 }, reading: { lower: 0, upper: 1 } });
@@ -1278,7 +1298,8 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     // A wide money range with no most likely figure: read unbounded (money carries no invented domain), so it calculates.
     const wide = withCosts({ low: 0, high: 1200, range_kind: 'plausible' });
     expect(wide.perGoal.map((p) => p.status)).toEqual(['calculable', 'calculable']);
-    expect(wide.conversions.find((c) => c.quantity === 'costs')).toMatchObject({ reading: unbounded(600, 1200 / Math.sqrt(12)) });
+    // W10: 0 to 1,200 around its middle, 600: σ = 600/1.2815516 = 468.18249 each side, the Normal on 600.
+    expect(wide.conversions.find((c) => c.quantity === 'costs')).toMatchObject({ reading: unbounded(600, 468.18249, 468.18249, 600, 468.18249) });
     // A count whose WHOLE range is below 0 contradicts what it can be (the PL's ruling, 23 Oct): never pinned near 0, never
     // read as a spread. The person's is ASKED again with its words kept; Olumi's is HELD as unsupported.
     const g = gymFilled();
@@ -1300,13 +1321,13 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(loss.conversions.find((c) => c.quantity === 'costs')).toMatchObject({ kind: 'range_law', domain: null });
     const usable = withCosts({ low: 500, high: 700, range_kind: 'plausible' });
     expect(usable.perGoal.map((p) => p.status)).toEqual(['calculable', 'calculable']);
-    expect(usable.conversions).toContainEqual({ kind: 'range_law', quantity: 'costs', low: 500, high: 700, range_kind: 'plausible', domain: null, reading: unbounded(600, 200 / Math.sqrt(12)), author: 'olumi', provisional: true });
+    expect(usable.conversions).toContainEqual({ kind: 'range_law', quantity: 'costs', low: 500, high: 700, range_kind: 'plausible', domain: null, reading: unbounded(600, 78.03041, 78.03041, 600, 78.03041), author: 'olumi', provisional: true }); // W10: σ = 100/1.2815516
     expect(xq(usable).get('costs')!.dist).toEqual({ kind: 'range', low: 500, high: 700, basis: 'person_range', range_kind: 'plausible' });
     const atEnd = withCosts({ value: 500, low: 500, high: 700, range_kind: 'plausible' });
     expect(atEnd.errors.map((e) => [e.code, e.items])).toEqual([['range_order', ['costs']]]);
     expect(atEnd.errors[0].message).toContain('at an end of its range');
     const m = bakery(); m.quantities = m.quantities.map((q) => (q.id === 'costs' ? { ...q, value: null, low: 500, high: 700, range_kind: 'plausible' as const } : q));
-    expect(project(m).graph.nodes.find((n) => n.id === 'costs')!.display_value).toBe('500–700 GBP/week; Olumi reads it as a spread around 600 (sd 57.74), provisionally');
+    expect(project(m).graph.nodes.find((n) => n.id === 'costs')!.display_value).toBe('500–700 GBP/week; Olumi reads it as a spread around 600 (sd 78.03), provisionally');
   });
 
   it('PL ruling B: a person\'s range carries its kind from their words; an unclear one is ASKED; domains truncate only by meaning; never a point', () => {
@@ -1358,7 +1379,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(x.goals.find((g) => g.id === 'summer_classes')!.window).toEqual({ start_period: 6, periods: 3 });
     expect(x.periods).toBe(9);
     expect(x.quantities.find((q) => q.id === 'members')!.reading).toBe('state');
-    expect(project(bakery()).items.find((i) => i.record_id === 'extra_per_oven')!.law).toEqual({ author: 'olumi', provisional: true, range_kind: 'plausible', reading: unbounded(120, 70 / Math.sqrt(12)) });
+    expect(project(bakery()).items.find((i) => i.record_id === 'extra_per_oven')!.law).toEqual({ author: 'olumi', provisional: true, range_kind: 'plausible', reading: EXTRA_PER_OVEN });
   });
 
   it('issue map class 13: a start is the DECLARED count starts_after_periods, one meaning in the schema the AI writes and in the compiler: a weekly van from week 1 makes all 4 deliveries in 4 weeks (100 %); one starting after 1 week, 3 (0 %)', () => {

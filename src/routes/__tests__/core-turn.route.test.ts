@@ -1495,6 +1495,19 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(((approved.json() as Json).canonical_analysis_view as Json).run.run_id).toBe(runs[1]!.run_id);
     });
 
+    it('Codex B2 on #3801: a program Run stored by an earlier engine is named complete_stale in the reply\'s `run`, never current', async () => {
+      await savedProgram();
+      const { programRunOf } = await import('../core-turn.js');
+      const run = (persisted!.living_model.runs as Json[]).at(-1)!;
+      const today = String(run.receipt.versions.engine);
+      expect(today).toMatch(/^mp-[0-9a-f]{12}$/);
+      // Contrast: the Run as the route stored it, on today's engine and the saved model, is current.
+      expect(programRunOf(persisted, null)).toMatchObject({ run_id: run.run_id, state: { kind: 'complete_current', computed_at: run.computed_at } });
+      // The same stored Run with the engine token from before W10 (staging 3ea44fea): the saved model is unchanged, the engine is not.
+      const older = JSON.parse(JSON.stringify(persisted).split(today).join('mp-a04e2cebf944')) as Json;
+      expect(programRunOf(older, null)).toMatchObject({ run_id: run.run_id, state: { kind: 'complete_stale', computed_at: run.computed_at } });
+    });
+
     it('S3 (batch 2 mrr-r3): two program proposals in one turn still leave the person ONE card to approve; the second is refused with its way on', async () => {
       await savedProgram();
       // The drafter's updated model for whichever proposal runs: the oven price, in their words.

@@ -120,20 +120,21 @@ describe('present: the canonical analysis view from a simulated model', () => {
   });
 
   it('(b) the basis: "on your figures" only when every input is the person’s; otherwise "if" with Olumi’s assumptions listed', () => {
-    // (i) Olumi's own estimated range for the per-£ loss, −2.2 to −1.4 around −1.8 (sd 0.8/√12 = 0.231, |−1.8| ≥ 0.462: a
-    //     spread): conditional on Olumi's provisional conversion of its own range, for every option and every target.
+    // (i) Olumi's own estimated range for the per-£ loss, −2.2 to −1.4 around −1.8 (W10: read as the range it falls in 8 times
+    //     out of 10, a spread): conditional on Olumi's provisional reading of its own range, for every option and every target.
     const olumi = present(model(MRR_QUANTITIES(range('per_pound', -2.2, -1.4, -1.8, 'customers', 'olumi_estimate')), MRR_GOALS, MRR_OPTIONS),
       { ...MRR_LABELS, per_pound: { label: 'Customers lost per £1 of price rise', author: 'olumi' } });
-    const conversion = 'if ‘Customers lost per £1 of price rise’ follows Olumi’s provisional conversion of Olumi’s own estimated range,';
+    const conversion = 'if ‘Customers lost per £1 of price rise’ follows Olumi’s provisional reading of Olumi’s own estimated range, '
+      + '-2.2 customers to -1.4 customers, as the range it falls in 8 times out of 10, with -1.8 customers as the middle value';
     for (const id of ['hold', 'raise']) {
       expect(cell(olumi, id).face).toContain(`, in this model, ${conversion}`);
       expect(cell(olumi, id).face).not.toContain('on your figures');
     }
     expect(olumi.goal_chance.targets.per_target[1].words).toContain(`${CUST_WORDS}, in this model, ${conversion}`);
-    // (ii) The person's own range for the price: the bounds are theirs, the law is Olumi's provisional conversion of them.
+    // (ii) The person's own range for the price: the ends are theirs, the reading is Olumi's provisional reading of them (W10).
     const theirs = present(model([...MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')).filter((x) => x.id !== 'price'),
       range('price', 39, 59, 49, '£', 'person_range')], MRR_GOALS, MRR_OPTIONS), MRR_LABELS);
-    expect(cell(theirs, 'hold').face).toContain(', in this model, if ‘Price’ follows Olumi’s provisional conversion of your range, £39 to £59, into a bell-shaped spread.');
+    expect(cell(theirs, 'hold').face).toContain(', in this model, if ‘Price’ follows Olumi’s provisional reading of your range, £39 to £59, as the range it falls in 8 times out of 10, with £49 as the middle value.');
     // (iii) An option's own Olumi figure: only that option's chance is conditional on it; the target says which option.
     const own = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers'), fixed('price_59', 59, '£', 'state', 'olumi')), MRR_GOALS, MRR_OPTIONS),
       MRR_LABELS);
@@ -195,7 +196,7 @@ describe('present: the canonical analysis view from a simulated model', () => {
     const thousands = JSON.stringify(present(build(1000), labels, {}, 20000));
     // The main driver's record holds its ends in the quantity's own unit, so they are the unit's own difference too.
     const swapped = [['£39', '0.039 £k'], ['£59', '0.059 £k'], ['£5,000', '5 £k'], ['£1,100', '1.1 £k'], ['"value":39,', '"value":0.039,'], ['"value":59,', '"value":0.059,'],
-      ['(£49)', '(0.049 £k)'], ['"value":49,', '"value":0.049,']]
+      ['(£49)', '(0.049 £k)'], ['"value":49,', '"value":0.049,'], ['£49 as the middle value', '0.049 £k as the middle value']]
       .reduce((s, [a, b]) => s.split(a!).join(b!), pounds);
     expect(swapped).not.toBe(pounds);
     expect(thousands).toBe(swapped);
@@ -383,7 +384,8 @@ const SPEC = (c: Quantity, d: Quantity = range('d', -0.1, 0.1, undefined, 'ticke
 const SPEC_LABELS: Record<string, PresentQuantity> = { base: person('Tickets today'), d: person('Day-to-day variation'), start: person('Tickets before hiring', true),
   c: { label: 'Capacity per specialist', author: 'olumi' }, added: { label: 'Specialists added', author: 'structure' }, one: { label: 'One specialist', author: 'structure' },
   capacity: person('Weekly capacity', true), target: person('Capacity target') };
-// c + e ≥ target: c is Olumi's 10 to 30 (spread 20/√12 = 5.77), e Olumi's 15 to 25 (2.89), both centred on 20.
+// c + e ≥ target: c is Olumi's 10 to 30, e Olumi's 15 to 25, both centred on 20; W10 reads each as the range it falls in 8 times
+// out of 10: sd 10/1.2815516 = 7.8030 and 5/1.2815516 = 3.9015.
 const PAIR = (target: number) => model([range('c', 10, 30, undefined, 'tickets', 'olumi_estimate'), range('e', 15, 25, undefined, 'tickets', 'olumi_estimate'),
   def('total', 'sum', ['c', 'e'], 'tickets'), fixed('t', target, 'tickets')], [goal('g', 'total', '>=', 't')], [option('plan', 'Plan')]);
 const PAIR_LABELS: Record<string, PresentQuantity> = { c: { label: 'Capacity per specialist', author: 'olumi' }, e: { label: 'Extra capacity', author: 'olumi' },
@@ -451,7 +453,10 @@ describe('present: what each computed chance rests on most (one figure at a time
     expect(driver(hire, 'hire')).toEqual({ kind: 'available',
       driver: { quantity: 'delay', author: 'olumi', low: { value: 2, display: '100%' }, middle: { value: 6, display: '100%' }, high: { value: 10, display: '0%' }, swing_points: 100, draws: 200, untested: [] },
       detail: 'In this model, of the figures tested one at a time, the chance is most sensitive to ‘Start delay’ (Olumi’s estimate): at the low end (2 months) 100%, at the middle (6 months) 100%, at the high end (10 months) 0%.' });
-    expect(cell(hire, 'hire').face).toContain('‘Start delay’ follows Olumi’s provisional conversion of Olumi’s own estimated range');
+    // Codex B1 on #3801: the floor of 0 cuts into the lower tail (σL = 4/1.2815516 = 3.12122, a = −6/3.12122 = −1.92232:
+    // ½ × (0.1 − Φ(a))/(½ − Φ(a)) = 0.0769 below 2, not 1 in 10), so no frequency is said; the middle value stays the median.
+    expect(cell(hire, 'hire').face).toContain('‘Start delay’ follows Olumi’s provisional reading of Olumi’s own estimated range, 2 months to 10 months, '
+      + 'with 6 months as the middle value, kept to Olumi’s reading of what it can be (never below 0 months)');
     const outage = driver(present(timed('risk'), { ...labels, delay: { label: 'Outage delay', author: 'olumi' as const } }), 'carry_on');
     expect(outage.kind).toBe('available');
     expect(outage.driver).toEqual({ quantity: 'delay', author: 'olumi', low: { value: 2, display: 'less than 1%' }, middle: { value: 6, display: 'less than 1%' },
@@ -483,7 +488,8 @@ describe('present: what each computed chance rests on most (one figure at a time
   it('Codex r2 numbers#2 (6), spec §3.7: a chance drawn within Olumi’s floor is said kept to that floor, and swept only within it', () => {
     // Capacity 110, less 50 when the outage happens; the target is 100, so the goal is met exactly when it does not happen. Its
     // chance is Olumi's 10 % to 60 % with Olumi's floor of 20 % (as the compiler gives it: the floor and a chance's 0 to 1): drawn
-    // within 20 % to 100 %, so said kept to "0.2 to 1", never "0 to 1". The sweep sets it at the low end, middle and high end of
+    // within 20 % to 100 %, so said kept to "0.2 to 1", never "0 to 1"; its stated low end, 0.1, is past that floor, so W10 says
+    // only that it is never below 0.2 (no 1-in-10 or middle value is claimed where an end lies past an edge). The sweep sets it at the low end, middle and high end of
     // what it is drawn within, 0.2, 0.4 and 0.6 (chances about 80 %, 60 % and 40 %), never at 0.1, which it can never be.
     const within = { min: 0.2, max: 1 };
     const m = { periods: 1, period_unit: 'month', withheld: [], limits: [],
@@ -492,7 +498,8 @@ describe('present: what each computed chance rests on most (one figure at a time
       goals: [goal('g', 'base', '>=', 'target')], options: [option('plan', 'Plan')],
       risks: [{ id: 'outage', occurrence: 'p', severity: 'loss', effect_on: 'base', mode: 'add', from_period: 0 }] } as unknown as ExecutableModel;
     const v = present(m, { p: { label: 'Outage chance', author: 'olumi' }, base: person('Capacity'), loss: person('Loss'), target: person('Target') });
-    expect(cell(v, 'plan').face).toContain('‘Outage chance’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 0.1 to 0.6, into a bell-shaped spread, kept to Olumi’s reading of what it can be (0.2 to 1)');
+    expect(cell(v, 'plan').face).toContain('‘Outage chance’ follows Olumi’s provisional reading of Olumi’s own estimated range, 0.1 to 0.6, as never below 0.2, '
+      + 'kept to Olumi’s reading of what it can be (0.2 to 1)');
     const d = driver(v, 'plan');
     expect(d.kind).toBe('available');
     expect([d.driver.quantity, d.driver.low.value, d.driver.middle.value, d.driver.high.value]).toEqual(['p', 0.2, 0.4, 0.6]);
@@ -523,19 +530,22 @@ describe('present: what each computed chance rests on most (one figure at a time
 
   it('none is licensed when no figure moves the chance by more than 5 points; over 5 points the largest swing is the driver', () => {
     expect(NO_DRIVER_REASON).toBe('Tested one at a time at each figure’s low end, middle and high end, no figure moved this chance by more than 5 points.');
-    // Target 24 (hand-calculated): c at 10, 20, 30 gives P(e ≥ 14) = 98%, P(e ≥ 4) = 100%, 100%: 2 points. e at 15, 20, 25 gives
-    // P(c ≥ 9) = 97%, P(c ≥ 4) = 99.7%, P(c ≥ −1) = 100%: 3 points. Neither is over 5.
-    const none = present(PAIR(24), PAIR_LABELS, {}, 4000);
+    // W10 (adopted; the wider plausible reading moved the old targets 24 and 30, whose hand values were for the √12 law):
+    // Target 20 (hand-calculated): c at 10, 20, 30 gives P(e ≥ 10) = Φ(10/3.9015 = 2.5631) = 99.5%, P(e ≥ 0) = 100%, 100%:
+    // 0.5 points. e at 15, 20, 25 gives P(c ≥ 5) = Φ(15/7.8030 = 1.9223) = 97.3%, P(c ≥ 0) = Φ(2.5631) = 99.5%, P(c ≥ −5) =
+    // Φ(3.2039) = 99.9%: 2.7 points. Neither is over 5.
+    const none = present(PAIR(20), PAIR_LABELS, {}, 4000);
     expect(driver(none, 'plan')).toEqual({ kind: 'none_licensed', reason: NO_DRIVER_REASON });
     expect(JSON.stringify(none)).not.toContain('No single figure moves');
-    // Target 30: c at 10, 20, 30 gives P(e ≥ 20) = 50%, P(e ≥ 10) = 99.97%, 100%: 50 points. e at 15, 20, 25 gives P(c ≥ 15) =
-    // 81%, P(c ≥ 10) = 96%, P(c ≥ 5) = 99.5%: 19 points. c is the driver.
-    const d = driver(present(PAIR(30), PAIR_LABELS, {}, 4000), 'plan');
+    // Target 28: c at 10, 20, 30 gives P(e ≥ 18) = Φ(2/3.9015 = 0.5126) = 69.6%, P(e ≥ 8) = Φ(3.0757) = 99.9%, P(e ≥ −2) = 100%:
+    // 30.4 points. e at 15, 20, 25 gives P(c ≥ 13) = Φ(7/7.8030 = 0.8971) = 81.5%, P(c ≥ 8) = Φ(1.5379) = 93.8%, P(c ≥ 3) =
+    // Φ(2.1786) = 98.5%: 17.0 points. c is the driver (on 4,000 draws each chance is within about ±1.5 points).
+    const d = driver(present(PAIR(28), PAIR_LABELS, {}, 4000), 'plan');
     expect(d.kind).toBe('available');
     expect(d.driver.quantity).toBe('c');
-    expect(d.driver.swing_points).toBeGreaterThan(45);
-    expect(d.driver.swing_points).toBeLessThan(55);
-    expect(d.driver.low.display).toMatch(/^about (4[89]|5[012])%$/);
+    expect(d.driver.swing_points).toBeGreaterThan(25);
+    expect(d.driver.swing_points).toBeLessThan(35);
+    expect(d.driver.low.display).toMatch(/^about (6[89]|7[01])%$/);
     expect(d.driver.middle.display).toBe('more than 99%');
     expect(d.driver.high.display).toBe('more than 99%');
     expect(d.driver.draws).toBe(4000);
@@ -568,17 +578,19 @@ describe('present: which option is most likely to achieve the goal, in this mode
     return { ...m, quantities: m.quantities.map((x) => (x.id === 'target' ? fixed('target', target, 'tickets') : x)) };
   };
   /** The basis both chances rest on: the person's day-to-day range and Olumi's own range for the capacity per specialist. */
-  const HIRE_BASIS = 'if ‘Day-to-day variation’ follows Olumi’s provisional conversion of your range, -0.1 tickets to 0.1 tickets, into a bell-shaped spread '
-    + 'and ‘Capacity per specialist’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 10 tickets to 30 tickets, into a bell-shaped spread';
+  const HIRE_BASIS = 'if ‘Day-to-day variation’ follows Olumi’s provisional reading of your range, -0.1 tickets to 0.1 tickets, as the range it falls in 8 times '
+    + 'out of 10, with 0 tickets as the middle value and ‘Capacity per specialist’ follows Olumi’s provisional reading of Olumi’s own estimated range, '
+    + '10 tickets to 30 tickets, as the range it falls in 8 times out of 10, with 20 tickets as the middle value';
   const DRIVER_C = (low: string, middle: string, high: string) =>
     `Its chance is most sensitive to ‘Capacity per specialist’ (Olumi’s estimate): ${low} at its low end, ${middle} at its middle and ${high} at its high end.`;
 
   it('a clear leader: the highest chance, apart from the next by more than the simulation precision, is named with both chances, the basis and its driver', () => {
-    // Target 95: Add meets it when c ≥ 15 − d; c is a bell spread on 10 to 30 (mean 20, sd 5.77), so about 1 − Φ(−0.87) ≈ 81%.
+    // Target 95: Add meets it when c ≥ 15 − d; c is read as 10 to 30 eight times out of 10 (W10: median 20, sd 10/1.2815516 =
+    // 7.8030), so about Φ(5/7.8030 = 0.6408) = 73.9% (on 2,000 draws within about ±2 points; before W10, 81%).
     // Keep is 80 + d (d within ±0.1): below 95 in every draw, sampled (d is drawn), so "less than 1%". The intervals are far apart.
     const v = present(HIRE(95), SPEC_LABELS, {}, 2000);
     const add = cell(v, 'add'), keep = cell(v, 'keep');
-    expect(add.display).toMatch(/^about (7[6-9]|8[0-6])%$/);
+    expect(add.display).toMatch(/^about (7[0-8])%$/);
     expect(keep.display).toBe('less than 1%');
     expect(v.leader_licence).toBe('permitted');
     expect(v.leader).toEqual({ licence: 'permitted', option_id: null, goal_chance_leader: 'add', similar_option_ids: [], words: expect.any(String) });
@@ -590,17 +602,18 @@ describe('present: which option is most likely to achieve the goal, in this mode
   });
 
   it('a clear leader that is still more likely to miss the goal says so', () => {
-    // Target 105: Add needs c ≥ 25 − d, about 1 − Φ(0.87) ≈ 19%, its interval wholly below 50%; Keep is still less than 1%.
+    // Target 105: Add needs c ≥ 25 − d, about 1 − Φ(0.6408) = 26.1% (W10; before it, 19%), its interval wholly below 50%; Keep
+    // is still less than 1%.
     const v = present(HIRE(105), SPEC_LABELS, {}, 2000);
-    expect(cell(v, 'add').display).toMatch(/^about (1[4-9]|2[0-4])%$/);
+    expect(cell(v, 'add').display).toMatch(/^about (2[2-9]|30)%$/);
     expect(v.leader.goal_chance_leader).toBe('add');
     expect(v.leader.words).toContain(`against less than 1% for ‘Keep’, the next most likely, `);
     expect(v.leader.words).toContain('. Even so, in this model it is more likely to miss the goal than to meet it. Its chance is most sensitive to');
   });
 
   it('overlapping precision: the options are too close to call, each chance said, no option named', () => {
-    // Total = x + extra, x the person's 0 to 10 (a bell spread, mean 5, sd 2.89); Nudge adds 0.2. P(x ≥ 5) = 50% against
-    // P(x ≥ 4.8) ≈ 53%: on 200 draws each interval is about ±7 points, so they overlap.
+    // Total = x + extra, x the person's 0 to 10 (W10: median 5, sd 5/1.2815516 = 3.9015); Nudge adds 0.2. P(x ≥ 5) = 50%
+    // against P(x ≥ 4.8) = Φ(0.0513) ≈ 52%: on 200 draws each interval is about ±7 points, so they overlap.
     const m = model([range('x', 0, 10, undefined, 'tickets', 'person_range'), fixed('extra', 0, 'tickets', 'state', 'structure'), fixed('tiny', 0.2, 'tickets'),
       def('total', 'sum', ['x', 'extra'], 'tickets'), fixed('t', 5, 'tickets')], [goal('g', 'total', '>=', 't')],
     [option('hold', 'Hold'), option('nudge', 'Nudge', [{ quantity: 'extra', to: 'tiny', from_period: 0 }])]);
@@ -610,33 +623,38 @@ describe('present: which option is most likely to achieve the goal, in this mode
     expect(v.leader_licence).toBe('withheld');
     expect(v.leader).toEqual({ licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: ['hold', 'nudge'],
       words: `In this model, ‘Hold’ (${hold.display}) and ‘Nudge’ (${nudge.display}) are too close to call: for their chances of `
-        + '‘Total’ being at least 5 tickets at 1 month from the start of this model, their precision ranges overlap, if ‘Tickets’ follows Olumi’s provisional conversion of your range, 0 tickets to 10 tickets, into a bell-shaped spread.' });
+        + '‘Total’ being at least 5 tickets at 1 month from the start of this model, their precision ranges overlap, if ‘Tickets’ follows Olumi’s provisional reading of your range, '
+        + '0 tickets to 10 tickets, as the range it falls in 8 times out of 10, with 5 tickets as the middle value.' });
   });
 
   // ── W6 review B1: the estate's three science conditions (goal-chance-licence.ts:891), all on the DISPLAYED chances ──────
-  /** Total = x + extra, x the person's 0 to 10 (a bell spread, mean 5, sd 2.89); Nudge adds `by`. */
+  /** Total = x + extra, x the person's 0 to 10 (W10: median 5, sd 3.9015); Nudge adds `by`. */
   const NUDGE = (by: number, target = 5) => model([range('x', 0, 10, undefined, 'tickets', 'person_range'), fixed('extra', 0, 'tickets', 'state', 'structure'), fixed('tiny', by, 'tickets'),
     def('total', 'sum', ['x', 'extra'], 'tickets'), fixed('t', target, 'tickets')], [goal('g', 'total', '>=', 't')],
   [option('hold', 'Hold'), option('nudge', 'Nudge', [{ quantity: 'extra', to: 'tiny', from_period: 0 }])]);
   const NUDGE_LABELS = { x: person('Tickets'), extra: { label: 'Extra', author: 'structure' as const }, tiny: person('Nudge size'), total: person('Total', true), t: person('Target') };
-  const NUDGE_BASIS = 'if ‘Tickets’ follows Olumi’s provisional conversion of your range, 0 tickets to 10 tickets, into a bell-shaped spread';
+  const NUDGE_BASIS = 'if ‘Tickets’ follows Olumi’s provisional reading of your range, 0 tickets to 10 tickets, as the range it falls in 8 times out of 10, '
+    + 'with 5 tickets as the middle value';
   const pctOf = (display: string): number => (display === 'less than 1%' ? 0 : display === 'more than 99%' ? 100 : Number(display.replace(/^about /, '').replace('%', '')));
 
   it('B1: a leading chance displayed under 1% names no option, though its precision interval is apart from the next (the probe "less than 1% against less than 1%")', () => {
-    // Target 115: Add needs c ≥ 35 − d, c a bell spread on 10 to 30 (mean 20, sd 5.77): 1 − Φ(2.6) ≈ 0.5%, shown "less than 1%";
-    // Keep (80 + d) never reaches it. On 10,000 draws Add's interval sits above Keep's, so only the 1% condition withholds it.
-    const v = present(HIRE(115), SPEC_LABELS, {}, 10_000);
+    // Target 120 (W10: at the old 115, Add's 1 − Φ(15/7.8030) = 2.7% is no longer under 1%): Add needs c ≥ 40 − d, c read as
+    // 10 to 30 eight times out of 10 (median 20, sd 7.8030): 1 − Φ(20/7.8030 = 2.5631) = 0.52% (table Φ(2.56) = 0.99477,
+    // Φ(2.57) = 0.99492), shown "less than 1%"; Keep (80 + d) never reaches it. On 10,000 draws Add's interval (about 52
+    // draws) sits above Keep's (none), so only the 1% condition withholds it.
+    const v = present(HIRE(120), SPEC_LABELS, {}, 10_000);
     const add = cell(v, 'add'), keep = cell(v, 'keep');
     expect([add.display, keep.display]).toEqual(['less than 1%', 'less than 1%']);
     expect(add.detail.precision_95[0]).toBeGreaterThan(keep.detail.precision_95[1]);
     expect(v.leader_licence).toBe('withheld');
     expect(v.leader).toEqual({ licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: [],
-      words: 'In this model, no option is likely to achieve the goal: the chance of ‘Weekly capacity’ being at least 115 tickets at 1 month from the start of this model '
+      words: 'In this model, no option is likely to achieve the goal: the chance of ‘Weekly capacity’ being at least 120 tickets at 1 month from the start of this model '
         + `is less than 1% for ‘Keep’ and less than 1% for ‘Add one specialist’, ${HIRE_BASIS}.` });
   });
 
   it('B1: a displayed gap under 10 points is too close to call, though the precision intervals are apart (the probe "about 54% against about 50%")', () => {
-    // Nudge adds 0.5: P(x ≥ 4.5) = Φ(0.5 / 2.89) ≈ 57% against P(x ≥ 5) = 50%; on 10,000 draws each interval is about ±1 point.
+    // Nudge adds 0.5: P(x ≥ 4.5) = Φ(0.5 / 3.9015) = Φ(0.1282) ≈ 55% against P(x ≥ 5) = 50% (W10; before it, 57%); on 10,000
+    // draws each interval is about ±1 point.
     const v = present(NUDGE(0.5), NUDGE_LABELS, {}, 10_000);
     const hold = cell(v, 'hold'), nudge = cell(v, 'nudge');
     expect(nudge.detail.precision_95[0]).toBeGreaterThan(hold.detail.precision_95[1]);
@@ -646,7 +664,8 @@ describe('present: which option is most likely to achieve the goal, in this mode
     expect(v.leader).toEqual({ licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: ['hold', 'nudge'],
       words: `In this model, ‘Hold’ (${hold.display}) and ‘Nudge’ (${nudge.display}) are too close to call: their chances of `
         + `‘Total’ being at least 5 tickets at 1 month from the start of this model are less than 10 points apart, ${NUDGE_BASIS}.` });
-    // Contrast: Nudge adds 3, P(x ≥ 2) ≈ 85% against 50%: more than 10 points apart and distinct, so it is named.
+    // Contrast: Nudge adds 3, P(x ≥ 2) = Φ(3/3.9015) = Φ(0.7689) ≈ 78% against 50% (W10; before it, 85%): more than 10 points
+    // apart and distinct, so it is named.
     const apart = present(NUDGE(3), NUDGE_LABELS, {}, 10_000);
     expect(apart.leader_licence).toBe('permitted');
     expect(apart.leader.goal_chance_leader).toBe('nudge');
@@ -654,7 +673,7 @@ describe('present: which option is most likely to achieve the goal, in this mode
   });
 
   it('B2: while a limit is not yet checked no option is named; the words say why, with each chance', () => {
-    // The same clear leader as above (81% against less than 1%), with a budget limit waiting on the specialist's cost.
+    // The same clear leader as above (74% against less than 1%), with a budget limit waiting on the specialist's cost.
     const limits = [{ limit_id: 'cost', label: 'Within budget', status: 'asks' as const, reasons: ['It needs the cost.'], asks: ['price'] }];
     const v = present(HIRE(95), SPEC_LABELS, { limits, asks: [{ quantity_id: 'price', label: 'Specialist cost', unit: '£' }] }, 2000);
     const add = cell(v, 'add');
@@ -693,7 +712,7 @@ describe('present: which option is most likely to achieve the goal, in this mode
     // tell the chances apart (34.9% against 33.4% overlapped, yet the paired gap was 1.47 ± 0.63 points). Every leader form:
     // overlapping ranges (200 draws), a gap under 10 points, under 1%, a limit not yet checked, and a named leader.
     const overlap = present(NUDGE(0.2), NUDGE_LABELS);
-    const views = [overlap, present(NUDGE(0.5), NUDGE_LABELS, {}, 10_000), present(HIRE(115), SPEC_LABELS, {}, 10_000), present(HIRE(95), SPEC_LABELS, {}, 2000),
+    const views = [overlap, present(NUDGE(0.5), NUDGE_LABELS, {}, 10_000), present(HIRE(120), SPEC_LABELS, {}, 10_000), present(HIRE(95), SPEC_LABELS, {}, 2000),
       present(HIRE(95), SPEC_LABELS, { limits: [{ limit_id: 'cost', label: 'Within budget', status: 'asks', reasons: ['It needs the cost.'], asks: ['price'] }],
         asks: [{ quantity_id: 'price', label: 'Specialist cost', unit: '£' }] }, 2000)];
     // Positive control: the overlapping case is the form the old words were said in, and it says what was tested instead.
@@ -708,7 +727,7 @@ describe('present: which option is most likely to achieve the goal, in this mode
       present(model(MRR_QUANTITIES(range('per_pound', -2.2, -1.4, -1.8, 'customers', 'olumi_estimate')), MRR_GOALS, MRR_OPTIONS),
         { ...MRR_LABELS, per_pound: { label: 'Customers lost per £1 of price rise', author: 'olumi' } }),
       // W6 review: each withheld form (under 1%, too close to call, a limit not yet checked) is held to the same negative.
-      present(HIRE(115), SPEC_LABELS, {}, 10_000), present(NUDGE(0.5), NUDGE_LABELS, {}, 10_000),
+      present(HIRE(120), SPEC_LABELS, {}, 10_000), present(NUDGE(0.5), NUDGE_LABELS, {}, 10_000),
       present(HIRE(95), SPEC_LABELS, { limits: [{ limit_id: 'cost', label: 'Within budget', status: 'asks', reasons: ['It needs the cost.'], asks: ['price'] }],
         asks: [{ quantity_id: 'price', label: 'Specialist cost', unit: '£' }] }, 2000)];
     expect(views.filter((v) => v.leader !== undefined)).toHaveLength(views.length);

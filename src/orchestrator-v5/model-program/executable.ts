@@ -12,8 +12,9 @@ export type Dist =
   | { kind: 'fixed'; value: number; author: FixedAuthor }
   | { kind: 'range'; low: number; high: number; mode?: number; basis: 'person_range' | 'olumi_estimate'; range_kind: 'bounds' | 'plausible'; domain?: Domain };
 // range_kind: bounds = the person's words fix hard ends ("between", "no more than", "at least"): the ruled Normal CONDITIONED on
-//   [low, high], never clamped onto the ends. plausible = a rough span ("about", "roughly", "likely"): the ruled Normal, which
-//   may fall outside it. Either way the law is Olumi's provisional conversion, never the person's calibration (simulate/range-law.ts).
+//   [low, high], never clamped onto the ends. plausible = a rough span ("about", "roughly", "likely"): read so that it falls
+//   below its low end 1 time in 10 and above its high end 1 time in 10, an end on a hard edge of its domain being that edge
+//   (W10, interim). Either way the law is Olumi's provisional reading, never the person's calibration (simulate/range-law.ts).
 // domain: truncation ONLY for a mathematical domain (a chance in [0, 1], a non-negative count) or a stated hard restriction.
 export type Domain = { min?: number; max?: number };
 export type Equation =
