@@ -80,7 +80,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // 24 Oct (DL, marketing "no path"; AIE policy): a goal or limit an update adds comes with the options' relations to it, only
     // where an option plausibly affects it, never added merely to connect.
     // 26 Oct: alpha G2, floor and ceiling are Olumi's reading of what a quantity can physically be (0 for a count or level; null for a change).
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('67e5fae5a050b3293dacd9fa3975e1c21b04048317191929ce3df67c02414b28'); // 25 Oct: alpha G21, the reach rule is the compiler's (at least one goal or limit, only when every goal has a measure)
+    // 26 Oct (drafter candidate A, Paul's rulings + Codex buddy AMENDs): no aim stated -> ONE working aim of Olumi's, its target asked;
+    // short neutral option names with their words as the quote; one or two lower-commitment options of Olumi's where they name none,
+    // one or only opposites; additions materially useful, never a quota; one statement, one record.
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('fbdeb5fe9c102a642760d922be72eeaf20bec699ee7a25d0de0a6ee4499fadb8'); // 25 Oct: alpha G21, the reach rule is the compiler's (at least one goal or limit, only when every goal has a measure)
     // 24 Oct (DL, DoD-G classes 12 and 4): an update returns only the records it changes or adds; the host merges them by id.
     expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('b54257c11969f65208dfead1d0006e17a88c65d20f0e0880588c650b58d8e4c8');
     expect(createHash('sha256').update(UPDATE_REPAIR_PREFIX, 'utf8').digest('hex')).toBe('1b52b62678cfab1b06670bc026504a9e63e186e458fec752c4b56ba9df918daf');
@@ -185,20 +188,30 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'what they know or decide: current levels, prices, costs, budgets and how they split them, headcount, dates, durations, targets.',
       'Never ask them for a link\'s size or an option\'s effect.',
       // DL 24 Oct (blind score of 1510a008, mrr structure): an identity is a definition; a missing figure is asked on its item.
-      'Mechanism: when the model has a goal and every goal has a measure, each option reaches, through relations from what it sets, at least one goal or limit it plausibly affects, never a link added only to connect it; a quantity that is by definition a product or sum of others is a definition, never an effect; each other link is sized by their coefficient or Olumi\'s estimate.',
+      'Mechanism: each option reaches, through relations from what it sets, at least one measured goal or limit it plausibly affects, never a link added only to connect it; a quantity that is by definition a product or sum of others is a definition, never an effect; each other link is sized by their coefficient or Olumi\'s estimate.',
       // AIE 6386018855 §5 (DL 24 Oct): the capture-only clauses replaced, each permission once, attributed and grounded.
-      'Olumi\'s own additions (a suggested measure, options, drivers, risks) are made when the model is first drafted; a repair or an update changes only what it asks, and a goal or limit an update adds comes with the relations from the options to it, only where an option plausibly affects it; never added merely to connect.',
+      // Candidate A: the update's own goal-or-limit rule is said once, in UPDATE_PREFIX (pinned below), which every update sends.
+      'Olumi\'s own additions (a working aim, a suggested measure, options, drivers, risks) are made when the model is first drafted; a repair or an update changes only what it asks.',
+      'What Olumi adds is author "olumi", quote null, never presented as theirs.',
       'Model the main reason each option could succeed and the main reason it could fail.',
       'Every driver, constraint and current state they mention feeds the calculation or the record that fits it.',
-      'Where the brief leaves out a driver, countereffect or risk that is plausible and could change the result, add it as Olumi\'s hypothesis (author olumi, with a basis and its direction); plausibility alone never justifies a figure, so size it like any other link.',
+      'Where the brief leaves out a driver, countereffect, side effect or risk that is plausible and could change the result, add it as Olumi\'s hypothesis (author olumi, with a basis and its direction); plausibility alone never justifies a figure, so size it like any other link.',
+      'Only what is materially useful: no quota, nothing merely conceivable.',
+      // Paul 26 Oct (1): no aim stated -> one provisional working aim of Olumi's, its target asked, never invented.
+      'No aim stated: ONE working aim of Olumi\'s (a short plain label), the outcome the brief most plainly points to, measured the same way, its target asked by a question offering the aim to confirm or change',
       'An aim they state without a measure stays theirs: where a measure can responsibly track it, suggest one (measure_by "olumi":',
       'its target asked unless they gave one and its exclusions naming what it misses; a suggested measure is never their definition of success.',
       'An aim no measure can responsibly track, and a guardrail without one, keep measure null and a question.',
-      'Where they named none, or the question is how to divide something (money, staff, hours), propose a small set of feasible, distinct options of Olumi\'s (author olumi, short plain names; a proposed division is a design, not a fact about today) within their stated budgets, exclusions and scope,',
+      // Paul 26 Oct (2) and (3): short neutral names, their words the quote; Olumi's lower-commitment options where they name none, one or only opposites.
+      'Options: every option they named, each under a short neutral name ("Second oven"), their words as its quote.',
+      'Where they name none or one, only two opposites (do it or not), or ask what they can do, add one or two materially different options of Olumi\'s, lower-commitment where it fits (staged, partial, reversible or learn-first); where the question is how to divide something (money, staff, hours), a small set of feasible divisions (a design, not a fact about today). Olumi\'s options stay within their stated budgets, exclusions and scope.',
+      'option "Local ads", olumi (they named only one; reversible, lower-commitment): sets ad_spend to its own value 1000, olumi',
       'left_out holds only what matters to the result but cannot be calculated, with the reason;',
       // AMEND (DL 24 Oct, blind score of #3735): a lever only the options set, and a whole, are structure; a stated limit stays a limit.
       'So are the starting level of a setting only the options change, when they gave none (0, an Olumi division\'s share included), and a whole such as 100 %: never asked.',
-      'what another record can hold goes there: a condition the plan must not break → limits, a statement about the situation → claims,',
+      // Codex buddy AMEND (26 Oct): one statement, one record; assertion vs evidence and value vs assumed relationship stay distinct.
+      'One statement, one record, never paraphrased into a second; an assertion and its evidence, or a figure and the relationship assumed about it, stay two.',
+      'the rest goes in the record that fits: a condition the plan must not break → limits, a disagreement → dissent,',
       // DL 24 Oct: the one worked example shows the proposing half once (an aim with no measure, Olumi's suggested measure).
       'goal "to grow the bakery", measure_by olumi (a suggested measure): sales change_abs from now >= grow_target, end, window null,',
       // Codex BLOCK on #3735: the exclusion is Olumi's reading, marked as canonical.ts attribution requires.
@@ -221,6 +234,9 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     ]) expect(count(DRAFTING_INSTRUCTIONS, rule), rule).toBe(1);
     // Alpha G21: the old universal reach rule, stricter than the compiler's (compile.ts set_reaches_nothing / option_reaches_no_goal), is gone.
     expect(DRAFTING_INSTRUCTIONS).not.toContain('every option reaches every measured goal');
+    // Candidate A: the capture-only clauses are gone (no aim -> no goal; options only where none named; exact names; the goal precondition).
+    for (const old of ['No aim stated: no goal', 'when the model has a goal', 'by its exact name in full', 'a left_out note with id aim', 'option "A second oven"'])
+      expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
     // What over-applied the estimate rule, and the old period numbering, are gone.
     for (const old of ['never invent a measure', 'its direction in words', 'Important but uncalculable', 'from what the brief names', 'goes in left_out with the reason', 'a link you cannot size goes in left_out', 'Every other figure it needs stays null', 'Only coefficients are Olumi', 'never "unknown" with no question', 'flows of periods 1 to n', 'from period 0'])
       expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
@@ -267,10 +283,13 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // r5 (buddy, accepted): never numerical bounds demanded where only a direction is defensible (r4's "order of magnitude").
     // AIE §5: the schema says the same as the prompt: a suggested measure where one can track the aim; Olumi's options where structure is missing.
     for (const rule of ['Where one can, Olumi suggests it instead (measure_by olumi).', 'the measure is a suggestion, never their definition of success;',
-      'each with its own measure (theirs, Olumi\'s suggestion, or null with a question), target and window. Never an aim they did not state.',
-      'and, where they named none or the question is how to divide something, a small set of Olumi\'s own (author olumi) within their stated budgets and scope.'])
+      'each with its own measure (theirs, Olumi\'s suggestion, or null with a question), target and window; when they state none, ONE working aim of Olumi\'s (author olumi), its target asked. Never an aim of Olumi\'s beside theirs.',
+      'and, where they name none, one or only two opposites, or ask what they can do, one or two materially different ones of Olumi\'s (author olumi), lower-commitment where it fits; for how to divide something, a small set; always within their stated budgets and scope.',
+      // The sent schema is JSON text, so its double quotes arrive escaped: pin the clause after the example name.
+      '); a person\'s option keeps their own words in quote.'])
       expect(count(sentSchema, rule), rule).toBe(1);
     for (const old of ['Never invent a measure', 'An aim with no measure is valid; never invent one']) expect(sentSchema, old).not.toContain(old);
+    for (const old of ['Never an aim they did not state', 'by its exact name', 'exact name as the person wrote it']) expect(sentSchema, old).not.toContain(old);
     for (const old of ['nobody can give or responsibly estimate it yet', 'is never unknown', 'basis says why. ', 'whenever one is supportable', 'order of magnitude']) expect(sentSchema, old).not.toContain(old);
     for (const old of ['when one is supportable, else', 'not even its direction or order of magnitude', 'a wide range is supportable', 'At most three questions asked now']) expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
   });
