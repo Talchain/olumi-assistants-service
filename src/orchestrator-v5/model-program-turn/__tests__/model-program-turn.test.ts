@@ -110,6 +110,8 @@ const creates: { readonly body: Json }[] = [];
 let createAnswers: (number | Error | ((init: any) => Response | Promise<Response>))[] = [];
 /** The served 503 of 26 Oct (04:57:12Z ×2, 07:44:06Z), as its proxy sent it: plain text, no JSON. */
 const ENVOY_503 = 'upstream connect error or disconnect/reset before headers. retried and the latest reset reason: remote connection failure, transport failure reason: delayed connect error: Connection refused';
+/** What the agent says on a host turn's reply (T1) when a row queues no reply of its own. */
+const DEFAULT_AGENT_REPLY = 'Here is what the model shows, in a few points.';
 const createAnswer = (status: number): Response => (status < 300
   ? new Response(JSON.stringify({ id: `conv_created_${creates.length}`, object: 'conversation', created_at: 0, metadata: null }), { status, headers: { 'content-type': 'application/json' } })
   : status === 503 ? new Response(ENVOY_503, { status, headers: { 'content-type': 'text/plain' } })
@@ -172,10 +174,17 @@ describe('the model-program turn on the real core route', () => {
         const next = createAnswers.shift();
         if (next instanceof Error) throw next;
         if (next !== undefined) return typeof next === 'function' ? next(init) : createAnswer(next);
+        // T1 (Paul 26 Oct): a first draft's reply is the AI's own, so a draft opens the Conversation; with no answer given,
+        // the create succeeds.
+        return createAnswer(201);
       }
       if (!u.startsWith('https://api.openai.com/') || !u.endsWith('/responses')) return new Response(JSON.stringify({ error: 'blocked by the spike test' }), { status: 599 });
-      sent.push(JSON.parse(String(init?.body ?? '{}')));
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      sent.push(body);
       const next = replies.shift();
+      // A host turn's reply (T1: a first draft, a Run press) is the agent's, in the scenario's Conversation: with no reply
+      // queued for it, it says a line of its own. A drafter call (no Conversation) still needs the test's reply.
+      if (next === undefined && body.conversation !== undefined) return sse(DEFAULT_AGENT_REPLY);
       if (next === undefined) throw new Error('the test gave no reply for this call');
       return typeof next === 'function' ? next() : sse(next);
     }));
