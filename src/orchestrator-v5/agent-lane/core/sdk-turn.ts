@@ -130,8 +130,42 @@ async function scenarioConversation(scenarioId: string, store: ConversationIdSto
   return { id: winner, created: winner === created };
 }
 
+/**
+ * A HOST-WRITTEN REPLY GOES INTO THE SCENARIO'S CONVERSATION (C12, assessor 26 Oct). A program's Run press is answered by the
+ * host with no model call, so its words were in no Conversation, and the next typed turn could not refer to them. Once the
+ * scenario has a Conversation, the press and the reply are added to it as the person saw them; before then, the turns that
+ * open it carry them (`earlierTurns`). While a run waits on a card, its tool call must be answered first, so nothing is added
+ * (logged). One request, no retry of ours: a failure is logged and the reply the person saw stands.
+ */
+export async function addHostTurnToConversation(input: {
+  readonly scenarioId: string; readonly userText: string; readonly assistantText: string;
+  readonly conversationStore?: ConversationIdStore; readonly pausedRunStore?: PausedRunStore; readonly client?: OpenAI;
+}): Promise<'added' | 'empty' | 'no_conversation' | 'held' | 'failed'> {
+  const said = input.assistantText.trim();
+  if (said === '') return 'empty';
+  try {
+    const id = await input.conversationStore?.read(input.scenarioId);
+    if (typeof id !== 'string' || id === '') return 'no_conversation';
+    if ((await input.pausedRunStore?.read(input.scenarioId)) != null) {
+      log.info({ event: 'core_turn.host_reply_to_conversation', scenario_id: input.scenarioId, outcome: 'held' }, 'core-turn: host reply not added (a run waits on a card)');
+      return 'held';
+    }
+    const client = input.client ?? ledgeredAgentsClient({ site: 'agent-core.host-reply', conversationBound: true,
+      detailOf: (body) => ({ model: String(body['model'] ?? ''), purpose: 'conversation', ...agentRequestIdentity('agent.converse', body) }) });
+    await client.conversations.items.create(id, { items: [
+      ...(input.userText.trim() === '' ? [] : [{ type: 'message' as const, role: 'user' as const, content: input.userText }]),
+      { type: 'message' as const, role: 'assistant' as const, content: said },
+    ] }, { maxRetries: 0 });
+    return 'added';
+  } catch (err) {
+    log.warn({ event: 'core_turn.host_reply_to_conversation', scenario_id: input.scenarioId, outcome: 'failed', ...createFailureOf(err) },
+      'core-turn: host reply not added to the Conversation');
+    return 'failed';
+  }
+}
+
 /** What fetch itself threw beneath the client's error: present only when there was no answer at all. */
-const thrownByFetch = (err: unknown): unknown => (err instanceof APIConnectionError ? err.cause : undefined);
+const thrownByFetch =(err: unknown): unknown => (err instanceof APIConnectionError ? err.cause : undefined);
 
 /** A failed create as its log line names it: the HTTP status, else the name (and system code) of what was thrown. Never a message. */
 function createFailureOf(err: unknown): { readonly status: number } | { readonly error: string; readonly error_code?: string } {

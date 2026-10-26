@@ -185,6 +185,8 @@ let holdProvider: Promise<void> | undefined;
 /** When set, only a call this picks is held (the reply call after a tool ran: the approval has committed and awaits its words). */
 let holdWhen: ((body: Json) => boolean) | undefined;
 let preparedId = '';
+/** Items added to a Conversation (`POST /v1/conversations/{id}/items`), with the Conversation they were added to. */
+let conversationItems: { readonly conversation: string; readonly items: Json[] }[] = [];
 const responsesBody = (output: Json[]): Json => {
   served += 1;
   return { id: `resp_${served}`, object: 'response', model: 'gpt-scripted', status: 'completed',
@@ -222,6 +224,11 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return json({ id: `conv_${randomUUID()}`, object: 'conversation' });
+      const added = /\/v1\/conversations\/([^/]+)\/items$/.exec(String(url));
+      if (added !== null) {
+        conversationItems.push({ conversation: added[1]!, items: (JSON.parse(String(init?.body ?? '{}')) as Json).items as Json[] });
+        return json({ object: 'list', data: [], first_id: null, last_id: null, has_more: false });
+      }
       const body = JSON.parse(String(init?.body ?? '{}')) as Json;
       // The canonical drafter's strict call answers with the row's canned canonical model (none: no draft).
       if (body.text?.format?.name === 'canonical_model') {
@@ -279,7 +286,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   beforeEach(() => {
     SCENARIO = randomUUID(); persisted = programGraph(); canonicalDraft = undefined; canonicalDrafts = []; registered.length = 0; fenceRows.clear(); turnRows.clear(); conversationIds.clear();
     readiness = { status: 'blocked', may_run: false, options: [], blockers: [] }; runState = undefined; carriedResult = undefined; otherRun = undefined;
-    pausedRun = null; calls = []; outputs = []; preparedId = ''; holdProvider = undefined; holdWhen = undefined; registerRefusal = null;
+    pausedRun = null; calls = []; conversationItems = []; outputs = []; preparedId = ''; holdProvider = undefined; holdWhen = undefined; registerRefusal = null;
   });
   const post = (payload: Json) => app.inject({ method: 'POST', url: '/agent/v1/core-turn',
     payload: { kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', ...payload } });
@@ -660,6 +667,32 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(shown?.run_id, 'the live view shows a stored Run').toEqual(expect.any(String));
     expect(again.canonical_analysis_view).toEqual(live.canonical_analysis_view);
     expect(again.run).toMatchObject({ run_id: shown!.run_id, run_key: shown!.run_id, state: { kind: 'complete_current' } });
+  });
+
+  it('C12 (assessor 26 Oct): a program Run press, answered by the host with no model call, joins the scenario\'s Conversation once it has one, so the next typed turn can refer to it', async () => {
+    const press = () => post({ turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } });
+    // Contrast: before the scenario has a Conversation, nothing is added (the turns that open it carry the reply).
+    expect((await press()).statusCode).toBe(200);
+    expect(conversationItems).toEqual([]);
+    outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
+    expect((await typed('What does the model hold now?')).statusCode).toBe(200);
+    const conversation = String(calls.at(-1)!.conversation);
+    expect(conversation).toMatch(/^conv_/);
+    calls = [];
+    const ran = await press();
+    expect(ran.statusCode, ran.body).toBe(200);
+    expect(calls, 'the Run press makes no model call').toHaveLength(0);
+    const said = String((ran.json() as Json).assistant_text);
+    expect(said.trim()).not.toBe('');
+    // The press and the reply, as the person saw them, in the scenario's own Conversation.
+    expect(conversationItems).toEqual([{ conversation, items: [
+      { type: 'message', role: 'user', content: 'Run the analysis' },
+      { type: 'message', role: 'assistant', content: said },
+    ] }]);
+    // The next typed turn continues that Conversation.
+    outputs = [[{ type: 'message', text: 'That Run is the one I described.' }]];
+    expect((await typed('What did that Run say?')).statusCode).toBe(200);
+    expect(calls.at(-1)!.conversation).toBe(conversation);
   });
 
   it('two turns at once: the second waits on the scenario’s slot and starts from what the first saved', async () => {

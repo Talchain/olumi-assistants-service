@@ -25,7 +25,7 @@ import { config } from '../config/index.js';
 import { getRuntimeEnv } from '../config/env-resolver.js';
 import { OPENAI_ONLY, providerCallsMade, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { requestWasTyped } from '../cee/provenance/provenance-of.js';
-import { acquireCoreTurnSlot, CoreDeliveryUnknownError, CoreStateUnavailableError, runCoreTurn, type CoreTurnCalls } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
+import { acquireCoreTurnSlot, addHostTurnToConversation, CoreDeliveryUnknownError, CoreStateUnavailableError, runCoreTurn, type CoreTurnCalls } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { coreBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { AI_CORE_MODE, laneModeFor, type AgentLaneMode, type AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../orchestrator-v5/core-route/internal-dispatch.js';
@@ -735,6 +735,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           if (first !== null) return await replayed(first);
         }
         durability = 'recorded';
+        // C12: a reply the host wrote (a program's Run press, or a draft) joins the agent's Conversation once it has one.
+        if (modelProgram) await addHostTurnToConversation({ scenarioId, userText: message, assistantText, ...coreTurnStores(store) });
       } catch (err) {
         if (err instanceof ModelWriteOwnershipRefused) {
           const released = await releaseUnwrittenTurnClaim();
