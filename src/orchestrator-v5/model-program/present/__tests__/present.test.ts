@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ExecutableModel, FixedAuthor, Goal, Limit, Option, Quantity, Reading, Withheld } from '../../executable.js';
 import { simulate } from '../../simulate/simulate.js';
+import { separated } from '../../simulate/paired.js';
 import { NO_DRIVER_REASON, NO_RANGE_REASON, presentAnalysisView, type PresentInput, type PresentQuantity } from '../present.js';
 
 type Rec = Record<string, any>;
@@ -611,20 +612,21 @@ describe('present: which option is most likely to achieve the goal, in this mode
     expect(v.leader.words).toContain('. Even so, in this model it is more likely to miss the goal than to meet it. Its chance is most sensitive to');
   });
 
-  it('overlapping precision: the options are too close to call, each chance said, no option named', () => {
-    // Total = x + extra, x the person's 0 to 10 (W10: median 5, sd 5/1.2815516 = 3.9015); Nudge adds 0.2. P(x ≥ 5) = 50%
-    // against P(x ≥ 4.8) = Φ(0.0513) ≈ 52%: on 200 draws each interval is about ±7 points, so they overlap.
-    const m = model([range('x', 0, 10, undefined, 'tickets', 'person_range'), fixed('extra', 0, 'tickets', 'state', 'structure'), fixed('tiny', 0.2, 'tickets'),
-      def('total', 'sum', ['x', 'extra'], 'tickets'), fixed('t', 5, 'tickets')], [goal('g', 'total', '>=', 't')],
-    [option('hold', 'Hold'), option('nudge', 'Nudge', [{ quantity: 'extra', to: 'tiny', from_period: 0 }])]);
-    const v = present(m, { x: person('Tickets'), extra: { label: 'Extra', author: 'structure' }, tiny: person('Nudge size'), total: person('Total', true), t: person('Target') });
+  it('options the shared draws cannot separate are too close to call, each chance said, no option named; the words say what was tested (SC2)', () => {
+    // Hold meets 5 when x ≥ 5 (50%); Nudge when its own count y ≥ 4.8 (W10: Φ(0.2/3.9015 = 0.0513) ≈ 52%). x and y are drawn
+    // separately, so on 200 draws the paired gap's precision is about ±10 points: the shared draws cannot separate them.
+    const v = present(INDEP(0.2), INDEP_LABELS);
     const hold = cell(v, 'hold'), nudge = cell(v, 'nudge');
-    expect(hold.detail.precision_95[0]).toBeLessThanOrEqual(nudge.detail.precision_95[1]);
     expect(v.leader_licence).toBe('withheld');
-    expect(v.leader).toEqual({ licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: ['hold', 'nudge'],
-      words: `In this model, ‘Hold’ (${hold.display}) and ‘Nudge’ (${nudge.display}) are too close to call: for their chances of `
-        + '‘Total’ being at least 5 tickets at 1 month from the start of this model, their precision ranges overlap, if ‘Tickets’ follows Olumi’s provisional reading of your range, '
-        + '0 tickets to 10 tickets, as the range it falls in 8 times out of 10, with 5 tickets as the middle value.' });
+    expect(v.leader).toMatchObject({ licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: ['hold', 'nudge'] });
+    expect(v.leader.words.startsWith(`In this model, ‘Hold’ (${hold.display}) and ‘Nudge’ (${nudge.display}) are too close to call: for their chances of `
+      + '‘Total’ being at least 5 tickets at 1 month from the start of this model, the simulation cannot tell them apart on its shared draws, ')).toBe(true);
+    // Contrast: NUDGE shares x, so Nudge meets the target wherever Hold does. Its two intervals overlap just as much, yet the
+    // shared draws separate them, so only the 10-point condition holds it back and the words never say "cannot tell".
+    const coupled = present(NUDGE(0.2), NUDGE_LABELS);
+    expect(cell(coupled, 'hold').detail.precision_95[0]).toBeLessThanOrEqual(cell(coupled, 'nudge').detail.precision_95[1]);
+    expect(coupled.leader.words).toContain(' are less than 10 points apart, ');
+    expect(coupled.leader.words).not.toMatch(/cannot tell/);
   });
 
   // ── W6 review B1: the estate's three science conditions (goal-chance-licence.ts:891), all on the DISPLAYED chances ──────
@@ -635,6 +637,12 @@ describe('present: which option is most likely to achieve the goal, in this mode
   const NUDGE_LABELS = { x: person('Tickets'), extra: { label: 'Extra', author: 'structure' as const }, tiny: person('Nudge size'), total: person('Total', true), t: person('Target') };
   const NUDGE_BASIS = 'if ‘Tickets’ follows Olumi’s provisional reading of your range, 0 tickets to 10 tickets, as the range it falls in 8 times out of 10, '
     + 'with 5 tickets as the middle value';
+  /** As NUDGE, but Nudge reads its own count ‘y’ (the same 0 to 10, drawn separately): the options share no draw of what decides them. */
+  const INDEP = (by: number) => model([range('x', 0, 10, undefined, 'tickets', 'person_range'), range('y', 0, 10, undefined, 'tickets', 'person_range'),
+    def('base', 'sum', ['x'], 'tickets'), fixed('extra', 0, 'tickets', 'state', 'structure'), fixed('tiny', by, 'tickets'),
+    def('total', 'sum', ['base', 'extra'], 'tickets'), fixed('t', 5, 'tickets')], [goal('g', 'total', '>=', 't')],
+  [option('hold', 'Hold'), option('nudge', 'Nudge', [{ quantity: 'base', to: 'y', from_period: 0 }, { quantity: 'extra', to: 'tiny', from_period: 0 }])]);
+  const INDEP_LABELS = { ...NUDGE_LABELS, y: person('Second count'), base: person('Counted', true) };
   const pctOf = (display: string): number => (display === 'less than 1%' ? 0 : display === 'more than 99%' ? 100 : Number(display.replace(/^about /, '').replace('%', '')));
 
   it('B1: a leading chance displayed under 1% names no option, though its precision interval is apart from the next (the probe "less than 1% against less than 1%")', () => {
@@ -707,16 +715,17 @@ describe('present: which option is most likely to achieve the goal, in this mode
     expect(waiting.leader_licence).toBe('withheld');
   });
 
-  it('the negative (science session, 26 Oct): no leader words say the simulation "cannot tell" the options apart; they say only what was tested', () => {
-    // Overlapping 95% intervals are each option's own precision; they never show that a paired test on the same draws cannot
-    // tell the chances apart (34.9% against 33.4% overlapped, yet the paired gap was 1.47 ± 0.63 points). Every leader form:
-    // overlapping ranges (200 draws), a gap under 10 points, under 1%, a limit not yet checked, and a named leader.
-    const overlap = present(NUDGE(0.2), NUDGE_LABELS);
-    const views = [overlap, present(NUDGE(0.5), NUDGE_LABELS, {}, 10_000), present(HIRE(120), SPEC_LABELS, {}, 10_000), present(HIRE(95), SPEC_LABELS, {}, 2000),
+  it('the negative (science session, 26 Oct; SC2): the words say the simulation cannot tell options apart only where its shared draws cannot', () => {
+    const gap = (m: ExecutableModel, draws: number) => simulate(m, { seed: 20261023, draws }).paired[0]!.joint_within_limits;
+    // Positive control: drawn separately (INDEP), the shared draws do not separate the options, and the words say so.
+    expect(separated(gap(INDEP(0.2), 200))).toBe(false);
+    expect(present(INDEP(0.2), INDEP_LABELS).leader.words).toContain(', the simulation cannot tell them apart on its shared draws, ');
+    // Every other form never says it: overlapping intervals that the shared draws separate (NUDGE 0.2 on 200 draws), a gap
+    // under 10 points, under 1%, a limit not yet checked, and a named leader.
+    expect(separated(gap(NUDGE(0.2), 200))).toBe(true);
+    const views = [present(NUDGE(0.2), NUDGE_LABELS), present(NUDGE(0.5), NUDGE_LABELS, {}, 10_000), present(HIRE(120), SPEC_LABELS, {}, 10_000), present(HIRE(95), SPEC_LABELS, {}, 2000),
       present(HIRE(95), SPEC_LABELS, { limits: [{ limit_id: 'cost', label: 'Within budget', status: 'asks', reasons: ['It needs the cost.'], asks: ['price'] }],
         asks: [{ quantity_id: 'price', label: 'Specialist cost', unit: '£' }] }, 2000)];
-    // Positive control: the overlapping case is the form the old words were said in, and it says what was tested instead.
-    expect(overlap.leader.words).toContain(', their precision ranges overlap, ');
     expect(views.filter((v) => typeof v.leader?.words === 'string')).toHaveLength(views.length);
     for (const v of views) expect(v.leader.words).not.toMatch(/cannot tell/i);
   });

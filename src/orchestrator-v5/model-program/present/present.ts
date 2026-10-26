@@ -29,7 +29,8 @@
  *     and quantities, never a figure and never a failure.
  *   - WHICH OPTION IS MOST LIKELY TO ACHIEVE THE GOAL (Paul 6 and 14 Oct; W6): with every option's chance worked out and at
  *     least two options, `leader` names the option with the highest chance (`goal_chance_leader`, `leader_licence: 'permitted'`)
- *     only under the estate's three science conditions (`LEADER_MIN_PCT`, `SUPERLATIVE_GAP_POINTS`, distinct precision) and
+ *     only under the estate's three science conditions (`LEADER_MIN_PCT`, `SUPERLATIVE_GAP_POINTS`, and the shared draws
+ *     separating it from every other option: SC2, `paired.ts`, never two separate intervals) and
  *     only when every limit is checked. Otherwise it is withheld, its words naming each option's chance and why: no option is
  *     likely to achieve it (under 1%), the options are too close to call (`similar_option_ids`), or a limit is not yet checked
  *     (a target-only chance is not the whole goal). Its `words` say both chances, the basis and what the leading chance is most
@@ -41,6 +42,7 @@ import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
 import { displayedPctAt } from '../../goal-target/goal-chance-display.js';
 import { comparatorWords, displayRoundingFor, sayDisplayedPct } from './display-words.js';
 import type { Aggregation, Cmp, Domain, ExecutableModel, FixedAuthor, Goal, Limit, Quantity, Window } from '../executable.js';
+import { separated, type PairedDifference } from '../simulate/paired.js';
 import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
 import { isWithheld, type Chance, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
 import { costOf, readingOf, restsOn, simulate } from '../simulate/simulate.js';
@@ -254,7 +256,8 @@ const whoseRange = (author: 'person' | 'olumi' | 'unverified'): string => (autho
  *   - the leading option's DISPLAYED chance is at least LEADER_MIN_PCT (whole percentage points);
  *   - its displayed gap to the next option is at least SUPERLATIVE_GAP_POINTS: "Science's interim superlative gap, in
  *     displayed whole percentage points (d5 6005279728)" (`goal-chance-licence.ts:87-88`);
- *   - its 95% simulation-precision interval is distinct from every other option's (ruling 6, `intervalsDistinct`).
+ *   - the Run's shared draws separate it from every other option: the paired gap's 95% simulation precision is clear of 0
+ *     (SC2, `paired.ts`; it replaced two separate intervals, `intervalsDistinct`, which say less than the shared draws do).
  */
 export const LEADER_MIN_PCT = 1;
 export const SUPERLATIVE_GAP_POINTS = 10;
@@ -722,19 +725,31 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       const them = unchecked.length === 1 ? 'a limit is not yet checked and these chances leave it out' : 'limits are not yet checked and these chances leave them out';
       return withheld([], `In this model, which option is most likely to achieve ${aim} is not said yet, as ${them}: the chance of ${jointWords} is ${each}, ${basis}. ${stop(uncheckedLine!)}`);
     }
-    // W6 review B1, the three science conditions (LEADER_MIN_PCT, SUPERLATIVE_GAP_POINTS, distinct precision intervals).
+    // W6 review B1, the three science conditions (LEADER_MIN_PCT, SUPERLATIVE_GAP_POINTS, separated on the shared draws: SC2).
     if (top.pct < LEADER_MIN_PCT) return withheld([], `In this model, no option is likely to achieve ${aim}: the chance of ${jointWords} is ${each}, ${basis}.`);
-    const distinct = (a: Chance, b: Chance): boolean => a.precision_95[0] > b.precision_95[1] || b.precision_95[0] > a.precision_95[1];
+    /** SC2: the top option's gap over x on the Run's shared draws (paired.ts), oriented top − x; apart only where it is clear of 0. */
+    const gapOver = (x: typeof top): PairedDifference | undefined => {
+      const p = (result.paired ?? []).find((g) => (g.a === top.id && g.b === x.id) || (g.a === x.id && g.b === top.id));
+      if (p === undefined) return undefined;
+      const g = p.joint_within_limits;
+      if (p.a === top.id || g.kind === 'withheld') return g;
+      return g.kind === 'exact' ? { kind: 'exact', difference: -g.difference }
+        : { ...g, difference: -g.difference, precision_95: [-g.precision_95[1], -g.precision_95[0]] };
+    };
+    const apart = (x: typeof top): boolean => {
+      const g = gapOver(x);
+      return g !== undefined && separated(g) && (g.kind === 'exact' ? g.difference > 0 : g.kind === 'sampled' && g.precision_95[0] > 0);
+    };
     const near = (x: typeof top): boolean => top.pct - x.pct < SUPERLATIVE_GAP_POINTS;
-    const close = rest.filter((x) => near(x) || !distinct(top.c, x.c));
+    const close = rest.filter((x) => near(x) || !apart(x));
     if (close.length > 0) {
       const tied = said.filter((x) => x.id === top.id || close.includes(x));
-      // Each reason says only what was tested, and only where it is true of every option named (science session, 26 Oct: the
-      // intervals are each option's own, so overlapping ones never show the simulation cannot tell the chances apart; a paired
-      // test on the same draws can, e.g. 34.9% against 33.4%, a gap of 1.47 ± 0.63 points).
-      const why = close.every((x) => !distinct(top.c, x.c)) ? `for their chances of ${jointWords}, their precision ranges overlap`
+      // Each reason says only what was tested, and only where it is true of every option named. SC2: the test is the paired one
+      // on the Run's shared draws, so "cannot tell them apart" is now what was tested (34.9% against 33.4% overlap as two
+      // intervals, yet the shared draws separate them by 1.47 ± 0.63 points).
+      const why = close.every((x) => !apart(x)) ? `for their chances of ${jointWords}, the simulation cannot tell them apart on its shared draws`
         : close.every(near) ? `their chances of ${jointWords} are less than ${SUPERLATIVE_GAP_POINTS} points apart`
-          : `their chances of ${jointWords} are less than ${SUPERLATIVE_GAP_POINTS} points apart, or their precision ranges overlap`;
+          : `their chances of ${jointWords} are less than ${SUPERLATIVE_GAP_POINTS} points apart, or the simulation cannot tell them apart on its shared draws`;
       return withheld(tied.map((x) => x.id), `In this model, ${listWords(tied.map((x) => `${name(x.id)} (${x.display})`))} are too close to call: ${why}, ${basis}.`);
     }
     const next = rest[0]!, d = top.driver;
