@@ -697,6 +697,14 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       expect(r.errors.map((e) => [e.code, e.items]), what).toContainEqual(['timing', ['promo', 'opens']]);
       expect(r.executable, what).toBeNull();
     }
+    // Codex r1 #3770: on a ruled-out option it blocks nothing; the live options still run.
+    const out = (() => { const g = gymFilled();
+      g.quantities.push(qty('opens', 'month', { status: 'derived', kind: 'derived' }), person('lease', 'month', 2, 'the lease is signed in two months'), person('fit', 'month', 1, 'a month to fit out'));
+      g.relations.push(def('opens_rel', 'opens', 'sum', ['lease', 'fit']));
+      g.options = g.options.map((o) => (o.id === 'promo' ? { ...o, status: 'ruled_out' as const, sets: o.sets.map((s) => ({ ...s, starts_after_periods: 'opens' })) } : o));
+      return compile(g); })();
+    expect(out.errors).toEqual([]);
+    expect(out.executable!.options.map((o) => o.id)).toEqual(['carry_on']);
     // Contrast: an asked timing is asked of them (the option waits on it), never an error and never period 0.
     const asked = timed({ status: 'asked', question: 'When does it open?' });
     expect(asked.errors).toEqual([]);
