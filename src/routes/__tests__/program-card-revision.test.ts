@@ -86,17 +86,21 @@ async function realRoutes() {
   return { app, dispatch };
 }
 
-/** The bakery saved, and a change card held on it (one new figure), with the program it was made on as its base. */
-async function heldCard() {
+/** Olumi's estimate of the oven price: a change the analysis hash sees. */
+const estimateOven = (m: CanonicalModelT): CanonicalModelT => ({ ...m, quantities: m.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'estimated', author: 'olumi',
+  value: 2500, low: 2000, high: 3000, range_kind: 'plausible', question: null, basis: 'A typical second-hand deck oven.' } : x)) as CanonicalModelT['quantities'] });
+/** The person's approval of a figure of theirs: a change the analysis hash cannot see. */
+const approveSales = (m: CanonicalModelT): CanonicalModelT => ({ ...m, quantities: m.quantities.map((x) => (x.id === 'base_sales' ? { ...x, approval: 'approved' as const } : x)) });
+
+/** The bakery saved, and a change card held on it (by default one new figure), with the program it was made on as its base. */
+async function heldCard(edit: (m: CanonicalModelT) => CanonicalModelT = estimateOven) {
   const routes = await realRoutes();
   const first = withNewRun({ model_program: MODEL_PROGRAM, canonical: bakery(), seed: seedOf(SCENARIO), person_words: [BRIEF], runs: [] });
   const created = await routes.dispatch(`/assist/v1/scenarios/${SCENARIO}/graph/register`, { graph: first.graph, thin_core: true, expected_graph_identity_hash: null, brief_text: BRIEF });
   expect(created.status).toBe(200);
   const base = await readSaved({ dispatch: routes.dispatch }, SCENARIO);
   if (!isSavedRead(base)) throw new Error('no saved base');
-  const changed = bakery();
-  changed.quantities = changed.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'estimated', author: 'olumi', value: 2500, low: 2000, high: 3000, range_kind: 'plausible',
-    question: null, basis: 'A typical second-hand deck oven.' } : x)) as CanonicalModelT['quantities'];
+  const changed = edit(bakery());
   const next: SavedProgram = withNewRun({ ...savedProgramOf(base.graph)!, canonical: changed }).program;
   const proposals = new ProposalStore();
   const card = holdProgramCard(proposals, { scenarioId: SCENARIO, userId: null, graphHash: base.graphHash, identity: base.identity!, base: savedProgramOf(base.graph)! },
@@ -161,8 +165,7 @@ describe('a model program card is judged by its own revision', () => {
   it('W2 RED→GREEN: the model moved where the analysis hash cannot see (an approval) → the register keeps the held card for review, never approvable; its press stays refused', async () => {
     const { app, dispatch, base, card, press, resave, first } = await heldCard();
     // The person approved one of their own figures: the model moved; the display projection did not.
-    const approved = bakery();
-    approved.quantities = approved.quantities.map((x) => (x.id === 'base_sales' ? { ...x, approval: 'approved' as const } : x));
+    const approved = approveSales(bakery());
     store.readMostRecentPendingActions.mockResolvedValue([carrierOf(card)]);
     await resave(withNewRun({ ...first.program, canonical: approved }).graph);
     const moved = await readSaved({ dispatch }, SCENARIO);
@@ -181,6 +184,27 @@ describe('a model program card is judged by its own revision', () => {
     const told = await press();
     await app.close();
     expect(told).toMatchObject({ status: 'refused', reason: 'superseded' });
+    expect(append.mock.calls.length).toBe(writes);
+  });
+  it('Codex #3803 r1: a card the analysis hash cannot see (an approval) applied → the register never marks its OWN carrier for review, so a retry after an interrupted press still binds and is answered "already saved"', async () => {
+    const { app, dispatch, base, card, press } = await heldCard(approveSales);
+    store.readMostRecentPendingActions.mockResolvedValue([carrierOf(card)]);
+    const told = await press();
+    expect(told).toMatchObject({ status: 'ok', data: { saved: true } });
+    const row = append.mock.calls.at(-1)![0] as { pending_actions?: PendingAction[] };
+    // The case itself: this write moved the program's revision and not the analysis hash.
+    const after = await readSaved({ dispatch }, SCENARIO);
+    if (!isSavedRead(after)) throw new Error('no readback');
+    expect(after.graphHash).toBe(base.graphHash);
+    expect(programCardApplies(card, after.graph)).toBe(false);
+    const carried = (row.pending_actions ?? []).filter((pa) => pa.action.kind === 'apply_proposed_change'
+      && (pa.action.inline_patch['agent_proposal'] as Rec | undefined)?.['proposal_id'] === card.proposal_id);
+    expect(carried).toHaveLength(1);
+    expect(heldCardUnderReview(carried[0]!)).toBe(false);
+    const writes = append.mock.calls.length;
+    const again = await press();
+    await app.close();
+    expect(again).toMatchObject({ status: 'ok', data: { already_saved: true } });
     expect(append.mock.calls.length).toBe(writes);
   });
 });

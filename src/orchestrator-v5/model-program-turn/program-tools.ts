@@ -32,6 +32,7 @@ import { isSaved, postimageOf, programOperationId, savePostimage, withNewRun } f
 import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, sourceTextOf, unreadableWords, type SavedProgram } from './program-store.js';
 import { shownRun, shownView, type StoredRun } from './run-receipt.js';
 import { programCardApplies, programDigestOf, runsExtend } from './program-card.js';
+import { runApplyingHeldCard } from '../agent-lane/proposal-object/still-applies.js';
 import { log } from '../../utils/telemetry.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 
@@ -295,7 +296,9 @@ export async function applyProgramChange(deps: ProgramToolDeps, ctx: Ctx, propos
     : shown === undefined || (shown.current && shown.engine_current) ? { program, graph: postimageOf(program) }
     : withNewRun({ ...program, runs: program.runs.slice(0, -1) });
   const commit = async (): Promise<ToolOutcome> => {
-    const { write } = await savePostimage(deps.dispatch, { scenarioId: ctx.scenario_id, operationId, expectedIdentity: before.identity, ownVersion }, graph);
+    // Its own write is never a change to review on its own card (`runApplyingHeldCard`): an interrupted press stays bound on retry.
+    const { write } = await runApplyingHeldCard(ctx.scenario_id, p.proposal_id,
+      () => savePostimage(deps.dispatch, { scenarioId: ctx.scenario_id, operationId, expectedIdentity: before.identity, ownVersion }, graph));
     if (write.status === 'unknown') return write.outcome;
     if (write.status === 'stale') return refused('superseded');
     // Authorised, then refused: said so, with the store's code (Paul 25 Oct: told only the code, it blamed his "typed yes").
