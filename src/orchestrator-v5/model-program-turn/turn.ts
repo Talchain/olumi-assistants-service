@@ -68,13 +68,18 @@ export const NO_AIM_NOTE = 'aim';
  * writes no question: a blocker with no question of the AI's (a reading, a recount) is counted, never worded.
  */
 function replyOf(model: CanonicalModelT, run: StoredRun, kind: TurnKind, words: readonly string[]): string {
-  const lines: string[] = [OPENING[kind](model)];
+  const view = run.result.canonical_analysis_view as { options?: readonly { cell: { kind: string; face?: string; reasons?: readonly { code: string; message: string | null }[] } }[] };
+  const options = view.options ?? [];
+  // A Run refused for its size withholds every cell for that one reason: said once, in the view's own words, and a Run press
+  // never says it is an analysis (words#11).
+  const tooLarge = options.some((o) => o.cell.kind === 'figure') ? null : options.flatMap((o) => o.cell.reasons ?? []).find((r) => r.code === 'too_large')?.message ?? null;
+  const lines: string[] = kind === 'run' && tooLarge !== null ? [] : [OPENING[kind](model)];
   // The first draft says, in one line, how much is theirs, how much is Olumi's to check and how much is left out (alpha G13);
   // the reading card under it lists each, in the same groups.
   const counted = kind === 'draft' ? readingLine(readingGroups(model, (quote) => verbatimIn(quote, words))) : null;
   if (counted !== null) lines.push(counted);
-  const view = run.result.canonical_analysis_view as { options?: readonly { cell: { kind: string; face?: string } }[] };
-  for (const o of view.options ?? []) if (o.cell.kind === 'figure' && typeof o.cell.face === 'string') lines.push(o.cell.face);
+  if (tooLarge !== null) lines.push(tooLarge);
+  for (const o of options) if (o.cell.kind === 'figure' && typeof o.cell.face === 'string') lines.push(o.cell.face);
   const compiled = run.result.compile as { blockers?: readonly Blocker[] };
   // A Run stored before blockers (reused while current) gets them from the model as it stands: the same compiler, typed.
   const blockers = compiled.blockers ?? compile(model).blockers;
@@ -142,7 +147,9 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
   })() : undefined;
   return {
     assistantText: saved ? replyOf(next.program.canonical, next.run, kind, next.program.person_words)
-      // An unknown outcome may have been written: never say nothing changed (alpha review G4); the same operation id reconciles it.
+      // An unknown outcome may have been written: never say nothing changed (alpha review G4). Where no acknowledgement came,
+      // the save has already looked for this operation's own version (`savePostimage`): unknown here means none was found, or
+      // the model read back is not the one sent, so this model is never narrated as saved.
       : write.status === 'unknown' ? 'The save could not be confirmed, so the model may or may not have changed. Reload to see the current model before changing it again.'
         : `The model could not be saved (${write.status}). Nothing was changed.`,
     toolCalls: [{ name: kind === 'draft' ? 'draft_canonical_model' : 'run_program', ok: saved, outcome: saved ? 'ok' : write.status, mutated: saved, ...(saved ? {} : { refusal: `save_${write.status}` }) },
