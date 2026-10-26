@@ -465,11 +465,15 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   // ── timing: a whole period, or a quantity holding one ──────────────────────────────────────────────────────────────
   const fixedTimings = new Set<string>();
   /** A whole period; or, for an uncertain timing, the quantity's id (S2 samples it; its whole-period reading is the PL's). */
-  const timingOf = (t: number | string, at: string, item: string): number | string | null => {
+  const timingOf = (t: number | string, at: string, item: string, live = true): number | string | null => {
     if (typeof t === 'number') { if (t < 0) err('timing', `${at} starts after ${t} periods; the count starts at 0 (from the start).`, [item]); return t; }
     if (!isQ(t, `${at}'s timing`, item)) return null;
     const q = Q.get(t)!;
     if (U.has(t) && !sameDims(U.get(t)!, period)) { err('timing', `${at}'s timing ${name(t)} is ${showUnit(U.get(t)!)}; it counts ${model.period}s from now.`, [item, t]); return null; }
+    // alpha G6: a timing worked out by a relation, or one that does not apply, has no count to start from; never period 0.
+    // An option that is not compared is never built, so its timing blocks nothing (Codex r1 #3770).
+    if (!live && (q.status === 'derived' || q.status === 'not_applicable')) return null;
+    if (q.status === 'derived' || q.status === 'not_applicable') { err('timing', `${at}'s timing ${name(t)} is ${q.status === 'derived' ? 'worked out by a relation' : 'marked as not applying'}; a timing is a figure of ${model.period}s from now, given or estimated.`, [item, t]); return null; }
     if (!FIGURE_STATUSES.has(q.status)) return null; // asked, unknown or unsupported: an ask or a withholding, through its closure
     if (has(q.low) && has(q.high) && q.low !== q.high) {
       if (q.low < 0) err('timing', `${at}'s timing ${name(t)} starts at ${q.low}; a timing counts ${model.period}s from now, 0 or more.`, [item, t]);
@@ -600,7 +604,7 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
     let reaches = false;
     const times: (number | string | null)[] = [];
     o.sets.forEach((s, i) => {
-      const from = timingOf(s.starts_after_periods, `${at}'s setting of ${name(s.quantity)}`, o.id);
+      const from = timingOf(s.starts_after_periods, `${at}'s setting of ${name(s.quantity)}`, o.id, o.status === 'live');
       times.push(from);
       const to = s.to ?? '';
       if (!isQ(s.quantity, at, o.id) || !isQ(to, at, o.id)) return;

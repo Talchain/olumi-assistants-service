@@ -684,6 +684,33 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(setting.conversions.find((c) => c.quantity === 'promo__members_now'), JSON.stringify(setting.errors)).toMatchObject({ kind: 'range_law', domain: { min: 0 } });
   });
 
+  it('alpha G6: a setting\'s timing worked out by a relation, or one that does not apply, is a typed error, never period 0', () => {
+    const timed = (opens: Partial<CanonicalQuantityT>, relation = false) => {
+      const g = gymFilled();
+      g.quantities.push(qty('opens', 'month', opens), person('lease', 'month', 2, 'the lease is signed in two months'), person('fit', 'month', 1, 'a month to fit out'));
+      if (relation) g.relations.push(def('opens_rel', 'opens', 'sum', ['lease', 'fit']));
+      g.options = g.options.map((o) => (o.id === 'promo' ? { ...o, sets: o.sets.map((s) => ({ ...s, starts_after_periods: 'opens' })) } : o));
+      return compile(g);
+    };
+    for (const [what, r] of [['derived', timed({ status: 'derived', kind: 'derived' }, true)],
+      ['not applicable', timed({ status: 'not_applicable', author: 'olumi', basis: 'Nothing sets when it opens.' })]] as const) {
+      expect(r.errors.map((e) => [e.code, e.items]), what).toContainEqual(['timing', ['promo', 'opens']]);
+      expect(r.executable, what).toBeNull();
+    }
+    // Codex r1 #3770: on a ruled-out option it blocks nothing; the live options still run.
+    const out = (() => { const g = gymFilled();
+      g.quantities.push(qty('opens', 'month', { status: 'derived', kind: 'derived' }), person('lease', 'month', 2, 'the lease is signed in two months'), person('fit', 'month', 1, 'a month to fit out'));
+      g.relations.push(def('opens_rel', 'opens', 'sum', ['lease', 'fit']));
+      g.options = g.options.map((o) => (o.id === 'promo' ? { ...o, status: 'ruled_out' as const, sets: o.sets.map((s) => ({ ...s, starts_after_periods: 'opens' })) } : o));
+      return compile(g); })();
+    expect(out.errors).toEqual([]);
+    expect(out.executable!.options.map((o) => o.id)).toEqual(['carry_on']);
+    // Contrast: an asked timing is asked of them (the option waits on it), never an error and never period 0.
+    const asked = timed({ status: 'asked', question: 'When does it open?' });
+    expect(asked.errors).toEqual([]);
+    expect(asked.perOption.find((o) => o.option_id === 'promo')).toMatchObject({ status: 'asks', asks: ['opens'] });
+  });
+
   it('DL ruling 4 (S2 law 9d34ef05+): a plausible range is a spread, never a point and never an invented domain; one with no room is HELD; a most likely figure at an end is an error', () => {
     const withCosts = (f: Partial<CanonicalQuantityT>) => { const m = bakery(); m.quantities = m.quantities.map((q) => (q.id === 'costs' ? { ...q, value: null, ...f } : q)); return compile(m); };
     // A wide money range with no most likely figure: read unbounded (money carries no invented domain), so it calculates.
