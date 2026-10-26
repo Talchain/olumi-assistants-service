@@ -917,7 +917,9 @@ export default async function route(app: FastifyInstance) {
       // The restored refs come back exactly (a restored node brings its own ref); only `ref_high_water` rises to cover
       // everything the current graph issued, so the next new entity never reuses a number. The counter is outside the
       // identity hash, so these bytes still bind to the target version (`graph/entity-refs.ts`).
-      const graphForStore = raiseRefHighWaterForRestore(projectGraphForPersistence(parsedGraph.data, {
+      // A model program's version is restored as it was saved (inventory F4): the legacy persistence passes are not program rules.
+      const programRestore = isProgramGraph(parsedGraph.data);
+      const graphForStore = raiseRefHighWaterForRestore(programRestore ? parsedGraph.data : projectGraphForPersistence(parsedGraph.data, {
         scenarioId: ctx.scenarioId,
         turnClass: "direct_answer",
         source: "version_restore",
@@ -927,7 +929,7 @@ export default async function route(app: FastifyInstance) {
       // ingress. The controlled door independently checks these same bytes at
       // dispatch, including service/collab callers that never visit this route.
       try {
-        assertNoPreconditionRiskLinks(graphForStore);
+        if (!programRestore) assertNoPreconditionRiskLinks(graphForStore);
         if (!isReturnLegRestore({ head, targetVersionId: parsedBody.data.version_id, currentGraph })) {
           assertNoIntroducedGraphViolations({
             graph: graphForStore,
@@ -935,6 +937,7 @@ export default async function route(app: FastifyInstance) {
             writesGraph: true,
             baseGraphForInvariants: currentGraph,
             source: "version_restore",
+            programSave: programRestore,
           });
         }
       } catch (err) { return graphRefusal(reply, requestId, err, true); }

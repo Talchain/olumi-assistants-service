@@ -79,6 +79,13 @@ const ANALYSIS_HASH = "d".repeat(64);
 // REAL config (a hand-listed stub silently drops every key added since —
 // trap 12), pin only what this suite asserts about.
 const { mockConfig } = vi.hoisted(() => ({ mockConfig: { value: null as unknown } }));
+/** The legacy persistence projection, spied (it calls the real one): a program version's restore never runs it (inventory F4). */
+const projection = vi.hoisted(() => ({ full: vi.fn() }));
+vi.mock("../../orchestrator-v5/persisted-graph-projection.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../orchestrator-v5/persisted-graph-projection.js")>();
+  projection.full.mockImplementation(actual.projectGraphForPersistence);
+  return { ...actual, projectGraphForPersistence: projection.full };
+});
 vi.mock("../../config/index.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../config/index.js")>();
   mockConfig.value = {
@@ -1745,6 +1752,29 @@ describe("POST /versions/restore — a version the receipt cannot carry is refus
     expect(returned.graph.nodes.find((n: { id: string }) => n.id === 'oven_price').observed_state).not.toHaveProperty('value');
     expect(returned.full_hash).toBe(computeGraphIdentityHash(returned.graph)!.value);
     expect(JSON.stringify(graph)).toBe(original);
+  });
+
+  it('F4: a program version is restored as it was saved: the legacy persistence projection never runs on it; CONTRAST: a non-program version still runs it', async () => {
+    const graph = projectCorePostimageForPersistence(postimageOf({ model_program: MODEL_PROGRAM, canonical: bakery(), seed: 1, person_words: [BRIEF], runs: [] }));
+    getVersion.mockResolvedValue({ status: 'ok', value: { ...summary(), graph, graph_identity_hash: computeGraphIdentityHash(graph as never)!.value } });
+    restoreVersionAtomic.mockImplementation(async (args: { graph: unknown }) => {
+      const ok = atomicRestoreOk();
+      return { ...ok, value: { ...ok.value, graph: args.graph, graph_identity_hash: computeGraphIdentityHash(args.graph as never)!.value } };
+    });
+    const app = await buildApp();
+    projection.full.mockClear();
+    const res = await post(app, '/versions/restore', { version_id: VERSION_A });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(projection.full).not.toHaveBeenCalled();
+    const written = (restoreVersionAtomic.mock.calls.at(-1)![0] as { graph: { living_model: unknown; nodes: unknown[] } }).graph;
+    expect(JSON.stringify(written.living_model)).toBe(JSON.stringify(graph.living_model));
+    expect(JSON.stringify(written.nodes)).toBe(JSON.stringify(graph.nodes));
+    // CONTRAST: the default (non-program) version still passes through the legacy projection.
+    getVersion.mockResolvedValue({ status: 'ok', value: summary() });
+    projection.full.mockClear();
+    expect((await post(app, '/versions/restore', { version_id: VERSION_A })).statusCode).toBe(200);
+    expect(projection.full).toHaveBeenCalledTimes(1);
+    await app.close();
   });
 
   it("CONTROL: a receiptable version still restores and returns its receipt", async () => {

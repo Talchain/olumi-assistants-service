@@ -16,6 +16,7 @@ import { GuestCopyStoreError } from './guest-copy/index.js';
 import type { GuestCopyStorePort, GuestCopyOutcome } from './guest-copy/index.js';
 import { readVerifiedWriteCaller, assertDoorOwnership } from './ownership/door-ownership.js';
 import { computeGraphIdentityHash } from './context/graph-identity.js';
+import { isProgramGraph } from './model-program-turn/program-store.js';
 import { ModelVersionSignInRequiredError, ModelVersionStoreError } from './model-management/store-adapter.js';
 import type { SaveVersionWrite, AtomicRestoreVersionWrite, ModelVersionStorePort } from './model-management/store-adapter.js';
 import type { VersionWriteOutcome, AtomicRestoreVersionOutcome, ModelVersionRecord } from './model-management/types.js';
@@ -336,7 +337,8 @@ export async function appendCheckedGraphWrite(
     let expectedLatestRowId: string | null | undefined;
     // Pending issue lifetime is a persistence obligation even on a read-only conversational turn.
     // Only this sidecar is extended here; graph bytes and both hashes remain exactly as prepared.
-    if (typeof store.readMostRecentPendingActions === 'function') {
+    // A model program's save carries its own pendings (the register threads them) and has no goal scope: no read here.
+    if (typeof store.readMostRecentPendingActions === 'function' && !programSave) {
       const prior = await store.readMostRecentPendingActions(write.scenario_id, { validation: 'strict',
         ...(params.heldProposals !== undefined ? { onLatestRowId: (id: string | null) => { expectedLatestRowId = id; } } : {}) });
       if (writesGraph && !programSave) assertNoPendingScopeAmendment(write.graph, params.baseGraphForInvariants, prior);
@@ -482,7 +484,7 @@ export async function commitModelChange(params: ModelChange): Promise<VersionWri
       }
       try {
         assertNoIntroducedGraphViolations({ graph, writesGraph: true,
-          identity: { scenario_id: params.sourceScenarioId }, baseGraphForInvariants: null, source: 'guest_copy' });
+          identity: { scenario_id: params.sourceScenarioId }, baseGraphForInvariants: null, source: 'guest_copy', programSave: isProgramGraph(graph) });
       } catch (error) {
         if (error instanceof PersistedGraphInvariantError || error instanceof PreconditionRiskLinkWriteError) {
           return { kind: 'refused', reason: 'no_model' };
@@ -512,10 +514,12 @@ export async function commitModelChange(params: ModelChange): Promise<VersionWri
   if (params.operation === 'SAVE_VERSION') {
     assertNoIntroducedGraphViolations({ graph: params.write.graph, writesGraph: true,
       identity: { scenario_id: write.scenario_id, turn_id: null, turn_class: null },
-      baseGraphForInvariants: null, source: 'version_save' });
+      baseGraphForInvariants: null, source: 'version_save', programSave: isProgramGraph(params.write.graph) });
     return store.saveVersion(params.write);
   }
-  assertNoPreconditionRiskLinks(params.write.graph);
+  // A model program's save, restore and copy keep the structural checks only (inventory F4): no legacy edit rule runs on one.
+  const programRestore = isProgramGraph(params.write.graph);
+  if (!programRestore) assertNoPreconditionRiskLinks(params.write.graph);
   if (isReturnLegRestore({ head: params.restoreHead ?? null,
     targetVersionId: params.write.version_id, currentGraph: params.write.current_graph })) {
     const admitted = checkPersistedGraphInvariants(params.write.graph, { baseGraph: params.write.current_graph });
@@ -526,7 +530,7 @@ export async function commitModelChange(params: ModelChange): Promise<VersionWri
   } else {
     assertNoIntroducedGraphViolations({ graph: params.write.graph, writesGraph: true,
       identity: { scenario_id: write.scenario_id, turn_id: null, turn_class: null },
-      baseGraphForInvariants: params.write.current_graph, source: 'version_restore' });
+      baseGraphForInvariants: params.write.current_graph, source: 'version_restore', programSave: programRestore });
   }
   if (store.restoreVersionAtomic === undefined) throw new ModelVersionStoreError('Atomic model-version restore is not available in this store.');
   return store.restoreVersionAtomic(params.write);
