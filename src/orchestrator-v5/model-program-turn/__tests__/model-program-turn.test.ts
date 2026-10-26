@@ -2406,7 +2406,9 @@ describe('the model-program turn on the real core route', () => {
     // unchanged comes back 'proposed' from the host; it is still the saved record, never their new words on the old figure.
     const canon = persisted!.living_model.canonical as CanonicalModelT;
     canon.quantities = canon.quantities.map((x) => (x.id === 'weeks_counted' ? { ...x, approval: 'approved' as const, author_id: 'person-1' } : x));
-    replies = [savedWith(() => {})];
+    const returned = JSON.parse(savedWith(() => {})) as Json; // the drafter returns that record, unchanged
+    returned.quantities = [...((returned.quantities as Json[] | undefined) ?? []), canon.quantities.find((x) => x.id === 'weeks_counted')];
+    replies = [JSON.stringify(returned)];
     expect(await ask([answer({ id: 'weeks_counted', quote: until })], ctx(until))).toEqual(unread('weeks_counted'));
     replies = [savedWith((d) => setQ(d, 'sell_through', { low: 0.6, high: 0.8, basis: 'Read as about last year.' }))]; // Olumi's estimate, and it compiles
     expect(await ask([answer({ id: 'sell_through', quote: same })], ctx(same))).toEqual(unread('sell_through'));
