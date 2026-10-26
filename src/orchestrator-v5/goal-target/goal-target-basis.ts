@@ -21,6 +21,7 @@
  */
 import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { readGoalRecord } from './goal-record.js';
+import { comparatorWords } from '../model-program/present/display-words.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -285,8 +286,7 @@ export function periodWords(basis: Pick<GoalTargetBasis, 'reference' | 'period_m
   return basis.reference === 'launch' ? `${n} after launch` : `at ${n}`;
 }
 
-const COMPARATOR_WORDS: Readonly<Record<string, string>> = { '>=': 'at least', '>': 'above', '<=': 'at most', '<': 'below' };
-export const comparatorWords = (op: unknown): string | undefined => typeof op === 'string' ? COMPARATOR_WORDS[op] : undefined;
+export { comparatorWords };
 
 /**
  * The words after "chance of", for the goal's own target (rulings 18–21): `undefined` when they cannot be said exactly.
@@ -370,7 +370,7 @@ export interface StatusQuoLevel {
  * unit; every other case the generic line.
  */
 export function statusQuoRowWords(label: string, level?: StatusQuoLevel): string {
-  const bound = level === undefined ? undefined : COMPARATOR_WORDS[level.comparator];
+  const bound = level === undefined ? undefined : comparatorWords(level.comparator);
   // Plain words (Paul's principle review, C.md #3028): the same meaning, still no promise that a figure unlocks a chance, and
   // still no future-event comparison (the AIE's rule for this row: never "stays at" or "meets"), so it says the assumption.
   const opening = `This Run can’t give a chance for carrying on as now, because it treats ‘${label}’ as unchanged from today`;

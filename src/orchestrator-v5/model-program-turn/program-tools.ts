@@ -18,11 +18,11 @@
  * the editing person is that figure's approver (its author_id and its history entry's), as on an approved card.
  */
 import { z } from 'zod-v4';
-import type { InternalDispatch } from '../agent-lane/runtime/agent-capabilities.js';
+import type { InternalDispatch } from '../core-route/internal-dispatch.js';
 import type { AgentToolContext } from '../agent-lane/runtime/agent-tools.js';
 import { createProposal, type ProposalChange, type ProposalOperation, type ProposalStore, type StructuredProposal } from '../agent-lane/proposal.js';
 import { findOperationVersion } from '../path-b/tools/core-write.js';
-import { isNoModelYet, isSavedRead, readSaved } from '../path-b/tools/context-tool.js';
+import { isNoModelYet, isSavedRead, readSaved } from './saved-read.js';
 import { ok, refused, unavailable, type ToolOutcome } from '../path-b/tools/outcome.js';
 import { CanonicalQuantity, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
 import { compile } from '../model-program/compile.js';

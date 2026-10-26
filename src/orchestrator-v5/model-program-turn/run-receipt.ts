@@ -20,8 +20,7 @@ import { stableStringify } from '../../orchestrator/context/stable-stringify.js'
 import { CANONICAL_VERSION, type CanonicalModelT } from '../model-program/canonical.js';
 
 /** The engine's modules outside `model-program/`: the evaluation itself and the helpers present.ts imports. */
-const ENGINE_MODULES_OUTSIDE = ['model-program-turn/evaluate', 'agent-lane/say-figure', 'goal-target/goal-target-basis', 'goal-target/goal-chance-driver',
-  'goal-target/goal-chance-display', 'goal-target/goal-targets-joint'];
+const ENGINE_MODULES_OUTSIDE = ['model-program-turn/evaluate', 'agent-lane/say-figure', 'goal-target/goal-chance-display'];
 /** The engine token of these modules' bytes (path and contents), so any change to one makes earlier Runs read as before an update. */
 export function engineToken(files: readonly { readonly path: string; readonly bytes: Uint8Array }[]): string {
   const h = createHash('sha256');

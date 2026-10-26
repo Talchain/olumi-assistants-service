@@ -7,13 +7,12 @@
  * count as proof; an unverifiable save stays UNKNOWN.
  */
 import { createHash } from 'node:crypto';
-import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
+import type { InternalDispatch } from '../../core-route/internal-dispatch.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
-import { approvedGraphHeld } from '../../agent-lane/runtime/draft-replacement.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
 import type { AtomicCommittedModelVersionReceipt } from '../../session/store.js';
-import { isSavedRead, readSaved, type SavedRead } from './context-tool.js';
+import { approvedGraphHeld, isSavedRead, readSaved, type SavedRead } from '../../model-program-turn/saved-read.js';
 import { unavailable, OUTCOME_TRACE, type DraftVerification, type ToolOutcome } from './outcome.js';
 
 type Rec = Record<string, unknown>;

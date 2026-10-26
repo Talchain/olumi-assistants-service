@@ -8,7 +8,6 @@ import { createHash } from 'node:crypto';
 import { config } from '../../config/index.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../../config/timeouts.js';
 import type { AgentSelectionContext } from '../agent-lane/selection-context.js';
-import { NOTE_NODE_KINDS } from '../path-b/tools/note-on-item.js';
 
 /**
  * ⛔ A TURN'S IDENTITY IS CLAIMED BEFORE IT RUNS — independent review of #1720
@@ -149,6 +148,8 @@ export function sameAgentTurnRequest(stored: string, requested: string, chipless
   return chiplessRetry && !requested.includes(CHIP_HASH_SEP) && stored.startsWith(`${requested}${CHIP_HASH_SEP}`);
 }
 
+/** The card kinds a note can sit beside (the decision is the question itself, never a card to note). */
+export const NOTE_NODE_KINDS: ReadonlySet<string> = new Set(['factor', 'option', 'goal', 'risk', 'constraint', 'outcome']);
 /** The canvas's Challenge press on one card (DGAI `NodeQuickActions` → `askAi`, chip `ask:challenge`). */
 export const ASK_CHALLENGE_CHIP_ID = 'ask:challenge';
 /**

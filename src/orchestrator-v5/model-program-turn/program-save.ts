@@ -4,11 +4,10 @@
  * independent readback). The saved graph is S1's GraphV3 projection; the program rides it in `living_model`.
  */
 import { createHash } from 'node:crypto';
-import type { InternalDispatch } from '../agent-lane/runtime/agent-capabilities.js';
+import type { InternalDispatch } from '../core-route/internal-dispatch.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { findOperationVersion, unknownWrite, writeCorePostimage, type CoreWrite } from '../path-b/tools/core-write.js';
-import { isSavedRead, readSaved } from '../path-b/tools/context-tool.js';
-import { approvedGraphHeld } from '../agent-lane/runtime/draft-replacement.js';
+import { approvedGraphHeld, isSavedRead, readSaved } from './saved-read.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { compile } from '../model-program/compile.js';

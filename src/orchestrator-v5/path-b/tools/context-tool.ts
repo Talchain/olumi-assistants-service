@@ -19,13 +19,13 @@ import { linkDefaultAssumptionsOf } from '../../../cee/magnitude/link-default-as
 import { z } from 'zod-v4';
 import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
-import { FRESH_READ } from '../../agent-lane/turn-read-cache.js';
+import { isNoModelYet, isSavedRead, readSaved, type SavedRead } from '../../model-program-turn/saved-read.js';
 import { readRunEvidence } from '../../agent-lane/run-evidence.js';
 import { runFactsOf } from '../../agent-lane/run-facts.js';
 import { claimRecordsOn } from '../../statement-door/statements.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { authorshipOf, provenanceOf } from '../../../cee/provenance/provenance-of.js';
-import { ok, refused, unavailable, type ToolOutcome } from './outcome.js';
+import { ok, type ToolOutcome } from './outcome.js';
 import { livingViewOf } from '../living-model/view.js';
 
 export const READ_CANONICAL_CONTEXT = 'read_canonical_context';
@@ -97,36 +97,7 @@ function selectedRunOf(json: Rec, graph: Rec): Rec | null {
   };
 }
 
-/** The saved scenario as the product's graph route returns it: the FULL graph, for mutation and readback. */
-export interface SavedRead {
-  readonly json: Rec;
-  readonly graph: Rec;
-  readonly graphHash: string;
-  readonly identity: string | null;
-}
-
-/** ONE fresh read of the saved scenario. The full graph stays internal; `readCanonicalContext` is the AI's view of it. */
-export async function readSaved(deps: { readonly dispatch: InternalDispatch }, scenarioId: string): Promise<SavedRead | ToolOutcome> {
-  let r: Awaited<ReturnType<InternalDispatch>>;
-  try {
-    r = await deps.dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, { ...FRESH_READ });
-  } catch {
-    return unavailable('read_failed');
-  }
-  if (r.status === 404) return refused('not_found');
-  if (r.status !== 200) return unavailable('read_failed', 'none', `HTTP ${r.status}`);
-  // A NEW scenario reads `graph: null, graph_present: false` (assist.v1.scenario-graph.ts: "An EMPTY graph is a valid answer"):
-  // no model yet, a valid state, never malformed. A non-null read that is not a graph stays malformed.
-  if (r.json.graph === null && r.json.graph_present === false) return refused(NO_MODEL_YET);
-  const graphHash = str(r.json.graph_hash);
-  if (graphHash === null || !isRec(r.json.graph)) return unavailable('read_malformed');
-  const identity = isRec(r.json.graph_identity_hash) ? str(r.json.graph_identity_hash.value) : str(r.json.graph_identity_hash);
-  return { json: r.json, graph: r.json.graph, graphHash, identity };
-}
-export const isSavedRead = (v: SavedRead | ToolOutcome): v is SavedRead => 'graphHash' in v;
-export const NO_MODEL_YET = 'no_model_yet';
-/** The scenario has no model yet: the draft proceeds, the AI's view is empty, and a change says there is nothing to change. */
-export const isNoModelYet = (v: SavedRead | ToolOutcome): boolean => !isSavedRead(v) && v.status === 'refused' && v.reason === NO_MODEL_YET;
+export { readSaved, isSavedRead, NO_MODEL_YET, isNoModelYet, type SavedRead } from '../../model-program-turn/saved-read.js';
 const NO_MODEL: Pick<SavedRead, 'json' | 'graph'> & { readonly graphHash: null; readonly identity: null } = { json: {}, graph: { nodes: [], edges: [] }, graphHash: null, identity: null };
 
 /** The ONE reader's AI view: a fresh read of the saved scenario, as typed facts. Mutates nothing. */

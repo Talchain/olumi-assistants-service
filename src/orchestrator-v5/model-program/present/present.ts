@@ -38,10 +38,8 @@
  *     current, no `status_quo`, no `historical_figures`. `run` is null and currentness unknown unless the caller passes the Run's facts.
  */
 import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
-import { comparatorWords } from '../../goal-target/goal-target-basis.js';
-import { displayRoundingFor } from '../../goal-target/goal-chance-driver.js';
 import { displayedPctAt } from '../../goal-target/goal-chance-display.js';
-import { sayDisplayedPct } from '../../goal-target/goal-targets-joint.js';
+import { comparatorWords, displayRoundingFor, sayDisplayedPct } from './display-words.js';
 import type { Aggregation, Cmp, Domain, ExecutableModel, FixedAuthor, Goal, Limit, Quantity, Window } from '../executable.js';
 import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
 import { isWithheld, type Chance, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';

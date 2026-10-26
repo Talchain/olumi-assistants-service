@@ -12,7 +12,7 @@
  *
  * A reused read is a deep copy, so no caller can alter what another caller is given.
  */
-import type { InternalDispatch } from './runtime/agent-capabilities.js';
+import type { InternalDispatch } from '../core-route/internal-dispatch.js';
 import { withAnalysisReadDeadline } from '../session/analysis-read-deadline.js';
 
 export interface TurnReadCache {

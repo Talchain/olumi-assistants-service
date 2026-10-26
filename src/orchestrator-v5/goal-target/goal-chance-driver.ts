@@ -26,6 +26,7 @@ import { deriveInferredValues } from '../coaching/inferred-value-disclosure.js';
 import { readEdgeParams } from '../../cee/unified-pipeline/utils/edge-format.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink, validatedDefinition } from './held-user-links.js';
 import { displayedPctAt, type GoalChanceDisplayRounding } from './goal-chance-display.js';
+import { WHOLE_PCT_MAX_HALF_WIDTH_POINTS, displayRoundingFor } from '../model-program/present/display-words.js';
 export { displayedPctAt, goalChanceDisplayClass, type GoalChanceDisplayRounding } from './goal-chance-display.js';
 
 type Rec = Record<string, unknown>;
@@ -37,13 +38,7 @@ const TOL = 1e-9;
 
 /** z for a two-sided 95% interval: ISL's own constant (isl-4d §10). */
 export const WILSON_Z_95 = 1.959963984540054;
-/** Ruling 5: the widest Wilson half-width, in percentage points, that is still shown as a whole percentage. */
-export const WHOLE_PCT_MAX_HALF_WIDTH_POINTS = 2.5;
-
-/** Ruling 5 on a half-width in percentage points. */
-export function displayRoundingFor(halfWidthPoints: number): GoalChanceDisplayRounding {
-  return halfWidthPoints <= WHOLE_PCT_MAX_HALF_WIDTH_POINTS + TOL ? 'whole' : 'nearest_5';
-}
+export { WHOLE_PCT_MAX_HALF_WIDTH_POINTS, displayRoundingFor };
 
 /** The 95% Wilson half-width of a proportion `p` over `n` draws, in percentage points. */
 export function wilsonHalfWidthPoints(p: number, n: number): number {
