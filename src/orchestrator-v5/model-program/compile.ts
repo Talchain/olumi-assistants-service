@@ -466,6 +466,8 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
     if (!isQ(t, `${at}'s timing`, item)) return null;
     const q = Q.get(t)!;
     if (U.has(t) && !sameDims(U.get(t)!, period)) { err('timing', `${at}'s timing ${name(t)} is ${showUnit(U.get(t)!)}; it counts ${model.period}s from now.`, [item, t]); return null; }
+    // alpha G6: a timing worked out by a relation, or one that does not apply, has no count to start from; never period 0.
+    if (q.status === 'derived' || q.status === 'not_applicable') { err('timing', `${at}'s timing ${name(t)} is ${q.status === 'derived' ? 'worked out by a relation' : 'marked as not applying'}; a timing is a figure of ${model.period}s from now, given or estimated.`, [item, t]); return null; }
     if (!FIGURE_STATUSES.has(q.status)) return null; // asked, unknown or unsupported: an ask or a withholding, through its closure
     if (has(q.low) && has(q.high) && q.low !== q.high) {
       if (q.low < 0) err('timing', `${at}'s timing ${name(t)} starts at ${q.low}; a timing counts ${model.period}s from now, 0 or more.`, [item, t]);
