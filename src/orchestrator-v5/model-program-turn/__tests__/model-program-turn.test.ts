@@ -7,7 +7,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod-v4';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
@@ -31,6 +31,8 @@ import { withNewRun } from '../program-save.js';
 import { projectCorePostimageForPersistence } from '../../persisted-graph-projection.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { ENGINE_VERSIONS, revisionDigest, RUN_AGAIN_AFTER_UPDATE, RUN_AGAIN_FOR_CHANCE } from '../run-receipt.js';
+import { registrationTurnId } from '../../graph-registration/registration-identity.js';
+import { responsesSse } from '../../agent-lane/__tests__/stream-when-asked.js';
 import { at, bakery, bakeryWithDefect, BRIEF, club, CLUB_BRIEF, q, updateOf } from './bakery.fixture.js';
 
 /** A draft captured before a field existed, read in today's format (the saved-model reader's own mapping). */
@@ -88,12 +90,14 @@ function graphRead(): Json {
 // ── the provider, stubbed at fetch: canned Responses streams, every request body kept ────────────────────────────────
 const sent: Json[] = [];
 /** Each call's answer: a model's JSON text (a completed stream), or the provider's own Response (a failure). */
-let replies: (string | (() => Response))[] = [];
-const sse = (text: string): Response => {
+let replies: (string | (() => Response | Promise<Response>))[] = [];
+/** Pause either side of the fake store's atomic commit, without changing the production writer. */
+let registerPause: ((stage: 'before' | 'after') => Promise<void>) | undefined;
+const sse = (text: string, output?: Json[]): Response => {
   const response = { id: `resp_${sent.length}`, object: 'response', status: 'completed', model: 'gpt-6.1-sol',
-    output: [{ type: 'message', id: 'msg_1', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] }],
+    output: output ?? [{ type: 'message', id: 'msg_1', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] }],
     usage: { input_tokens: 1000, input_tokens_details: { cached_tokens: 0 }, output_tokens: 500, output_tokens_details: { reasoning_tokens: 100 }, total_tokens: 1500 } };
-  const body = `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', sequence_number: 1, response })}\n\n`;
+  const body = responsesSse(response);
   return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
 };
 
@@ -101,6 +105,25 @@ let app: FastifyInstance;
 /** The route's internal dispatch, into this harness's stores (for the agent's tools, called as the SDK turn calls them). */
 const dispatch = async (path: string, body: unknown) => { const r = await app.inject({ method: 'POST', url: path, payload: body as never }); return { status: r.statusCode, json: r.json() as Record<string, unknown> }; };
 const turn = (payload: Json, headers: Record<string, string> = {}) => app.inject({ method: 'POST', url: '/agent/v1/core-turn', headers, payload: { kind: 'message', scenario_id: SCENARIO, stage: 'frame', turn_class: 'frame', turn_id: randomUUID(), source: 'composer', ...payload } });
+
+const latch = () => {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => { release = resolve; });
+  return { promise, release };
+};
+/** The real transport's raw-reply boundary (as in sse-terminal-delivery-truth.test.ts), with the REAL core route behind it. */
+const streamedTurn = async (payload: Json) => {
+  const { streamTurnAsStagedSse } = await import('../../../routes/streamed-turn-sse.js');
+  const delivered: string[] = [];
+  const raw = { destroyed: false, writableEnded: false, setHeader: () => {}, writeHead: () => {},
+    write(chunk: string) { if (this.destroyed) return false; delivered.push(chunk); return true; },
+    end() { this.writableEnded = true; } };
+  const done = streamTurnAsStagedSse({ app, reply: { raw, getHeaders: () => ({}) } as unknown as FastifyReply,
+    requestId: randomUUID(), internalHeaders: {}, internalTarget: '/agent/v1/core-turn',
+    payload: JSON.stringify({ kind: 'message', scenario_id: SCENARIO, stage: 'frame', turn_class: 'frame', source: 'composer', ...payload }),
+    featureVersion: 'v5', endpoint: '/proxy/v5/turn/stream' });
+  return { done, delivered, disconnect: () => { raw.destroyed = true; } };
+};
 
 /** The saved model with `edit` applied, whole. */
 const wholeWith = (edit: (m: CanonicalModelT) => void): string => { const m = JSON.parse(JSON.stringify(persisted!.living_model.canonical)) as CanonicalModelT; edit(m); return JSON.stringify(m); };
@@ -137,11 +160,13 @@ describe('the model-program turn on the real core route', () => {
     app.post('/assist/v1/scenarios/:id/graph', async () => graphRead());
     app.post('/assist/v1/scenarios/:id/graph/register', async (req, reply) => {
       const b = req.body as Json;
+      await registerPause?.('before');
       const current = persisted === null ? null : computeGraphIdentityHash(persisted as never)!.value;
       if ((b.expected_graph_identity_hash ?? null) !== current) return reply.code(409).send({ details: { code: 'GRAPH_STALE' } });
       // Stored as JSON, as a database column gives it back: never the caller's object.
       persisted = JSON.parse(JSON.stringify(b.graph)) as Json; registered.push(b);
       const identity = computeGraphIdentityHash(persisted as never)!;
+      await registerPause?.('after');
       return { registered: true, graph_identity_hash: identity, graph_hash: hashOf(persisted),
         model_version: { version_id: `v_${registered.length}`, version_number: registered.length, mutation_id: `m_${registered.length}`,
           creation_kind: registered.length === 1 ? 'initial' : 'committed_mutation', graph_identity_hash: identity.value,
@@ -153,7 +178,85 @@ describe('the model-program turn on the real core route', () => {
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); });
-  beforeEach(() => { SCENARIO = randomUUID(); persisted = null; registered.length = 0; turnRows.clear(); conversationIds.clear(); pausedRun = null; sent.length = 0; replies = []; });
+  beforeEach(() => { SCENARIO = randomUUID(); persisted = null; registered.length = 0; turnRows.clear(); conversationIds.clear(); pausedRun = null; sent.length = 0; replies = []; registerPause = undefined; });
+
+  it('T gap3: disconnect while drafting stops delivery, not the provider or the complete save; the same turn replays without another call or Run', async () => {
+    const started = latch(); const finish = latch();
+    replies = [async () => { started.release(); await finish.promise; return sse(JSON.stringify(bakery())); }];
+    const payload = { turn_id: randomUUID(), message: BRIEF };
+    const stream = await streamedTurn(payload);
+    try {
+      await Promise.race([started.promise, stream.done.then(() => { throw new Error('The turn ended before drafting started.'); })]);
+      expect(persisted).toBeNull();
+      const signal = vi.mocked(fetch).mock.calls.at(-1)?.[1]?.signal;
+      stream.disconnect();
+      expect(signal?.aborted ?? false).toBe(false);
+      finish.release();
+      await stream.done;
+      expect(signal?.aborted ?? false).toBe(false);
+      expect(stream.delivered.some((f) => f.includes('"stage":"COMPLETE"'))).toBe(false);
+      expect(registered).toHaveLength(1);
+      expect(sent).toHaveLength(1);
+      expect(persisted!.living_model.canonical).toEqual(bakery());
+      const snapshot = JSON.stringify(persisted);
+      const cold = reopenProgram(JSON.parse(snapshot))!;
+      expect(cold.current).toBe(true);
+      expect(persisted!.living_model.runs).toHaveLength(1);
+      expect(turnRows.get(payload.turn_id)?.assistant_message).toBeTruthy();
+      const replay = await turn(payload);
+      expect([replay.statusCode, replay.json().durability]).toEqual([200, 'replayed']);
+      expect(replay.json().cards).toHaveLength(1); // the lost reading card is recovered too
+      expect(replay.json().canonical_analysis_view.run.run_id).toBe(cold.run!.run_id);
+      expect([registered.length, sent.length, JSON.stringify(persisted)]).toEqual([1, 1, snapshot]);
+    } finally { finish.release(); await stream.done; }
+  });
+
+  it.each(['before', 'after'] as const)('T gap3: disconnect %s the approval commit preserves the frozen model and Run; replay and a cold proposal retry never write twice', async (stage) => {
+    replies = [JSON.stringify(bakery())];
+    const draft = (await turn({ message: BRIEF })).json();
+    const card = draft.cards[0];
+    const held = agentProposalOf([...turnRows.values()].find((r) => r.pending_actions?.length)?.pending_actions[0])!;
+    conversationIds.set(SCENARIO, `conv_${SCENARIO}`);
+    replies = [() => sse('', [{ type: 'function_call', id: 'fc_approve', call_id: 'call_approve', status: 'completed', name: 'apply_change',
+      arguments: JSON.stringify({ proposal_id: card.proposal_id }) }]), 'Saved.'];
+    const reached = latch(); const finish = latch();
+    registerPause = async (at) => { if (at === stage) { reached.release(); await finish.promise; } };
+    const payload = { turn_id: randomUUID(), message: card.approve_action.message, chip: card.approve_action };
+    const stream = await streamedTurn(payload);
+    try {
+      await Promise.race([reached.promise, stream.done.then(() => { throw new Error(`The turn ended before the ${stage}-commit pause.`); })]);
+      expect(registered).toHaveLength(stage === 'before' ? 1 : 2);
+      expect(turnRows.has(payload.turn_id)).toBe(false); // no terminal answer yet, even after the save
+      stream.disconnect(); finish.release();
+      await stream.done;
+      registerPause = undefined;
+      expect(stream.delivered.some((f) => f.includes('"stage":"COMPLETE"'))).toBe(false);
+      expect([registered.length, sent.length]).toEqual([2, 3]); // draft, native apply call, native reply
+      expect(sent[1]!.tool_choice).toMatchObject({ type: 'function', name: 'apply_change' });
+      expect(stableStringify(persisted!.living_model)).toBe(stableStringify(held.living_model));
+      expect(persisted!.living_model.runs).toHaveLength(2);
+      expect(persisted!.living_model.runs[0]).toEqual(registered[0]!.graph.living_model.runs[0]);
+      const snapshot = JSON.stringify(persisted);
+      const cold = reopenProgram(JSON.parse(snapshot))!;
+      expect(cold.current).toBe(true);
+      expect(cold.run!.run_id).toBe(persisted!.living_model.runs[1].run_id);
+      const replay = await turn(payload);
+      expect([replay.statusCode, replay.json().durability]).toEqual([200, 'replayed']);
+      expect(replay.json().canonical_analysis_view.run.run_id).toBe(cold.run!.run_id);
+
+      // A fresh proposal store has no applied flag or execution memo: only THIS operation's persisted version can reconcile it.
+      const proposals = new ProposalStore(); proposals.put(JSON.parse(JSON.stringify(held)));
+      const operation = registered[1]!.operation_id;
+      const ownReceipt = { version_id: 'v_2', version_number: 2, mutation_id: 'm_2', source_turn_id: registrationTurnId(SCENARIO, operation) };
+      const historyDispatch = async (path: string, body: unknown) => path.endsWith('/versions')
+        ? { status: 200, json: { versions: [{ version_id: 'unrelated', sequence: 3, creation: { kind: 'committed_mutation', mutation_id: 'other', source_turn_id: 'other' } },
+          { version_id: ownReceipt.version_id, sequence: 2, creation: { kind: 'committed_mutation', mutation_id: ownReceipt.mutation_id, source_turn_id: ownReceipt.source_turn_id } }] } }
+        : dispatch(path, body);
+      expect(await applyProgramChange({ dispatch: historyDispatch, proposals }, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, held.proposal_id))
+        .toMatchObject({ status: 'ok', data: { already_saved: true, receipt: ownReceipt } });
+      expect([registered.length, sent.length, JSON.stringify(persisted)]).toEqual([2, 3, snapshot]);
+    } finally { finish.release(); await stream.done; registerPause = undefined; }
+  });
 
   it('step 1, drafter: the first turn sends ONE strict canonical-schema call at gpt-6.1-sol, effort medium, with the fixed prompt', async () => {
     replies = [JSON.stringify(bakery())];
