@@ -28,7 +28,7 @@ import { GROUPS, readingOf, validatePostimage } from '../postimage.js';
 import { proposalPendingAction } from '../../agent-lane/durable-proposal.js';
 import { agentProposalOf, proposalFieldsWire, proposalRecord } from '../../agent-lane/proposal-object/record.js';
 import { ProposalChangeSchema, ProposalStore, type ProposalChange } from '../../agent-lane/proposal.js';
-import { withNewRun } from '../program-save.js';
+import { savePostimage, withNewRun } from '../program-save.js';
 import { projectCorePostimageForPersistence } from '../../persisted-graph-projection.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { ENGINE_VERSIONS, revisionDigest, RUN_AGAIN_AFTER_UPDATE, RUN_AGAIN_FOR_CHANCE } from '../run-receipt.js';
@@ -592,6 +592,29 @@ describe('the model-program turn on the real core route', () => {
     expect(held.payload.model_program).toMatchObject({ turn: 'draft', saved: true, write: 'already_saved', readback: { read: true, canonical_identical: true, runs_identical: true } });
     expect(held.toolCalls[0]).toEqual({ name: 'draft_canonical_model', ok: true, outcome: 'ok', mutated: true });
     expect(held.assistantText.split('\n\n')[0]).toBe('I\'ve drafted a first model of: Should the bakery buy a second oven?');
+  });
+
+  it('writes#4 (Codex r2): an already_saved the register\'s own 409 lookup returns is this save only while the read holds the postimage sent; a later save in its place leaves it unknown', async () => {
+    replies = [JSON.stringify(bakery())];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const base = JSON.parse(JSON.stringify(persisted)) as Json;
+    const sent = JSON.parse(JSON.stringify(base)) as Json;
+    sent.living_model.canonical.quantities = sent.living_model.canonical.quantities.map((x: Json) => (x.id === 'base_sales' ? { ...x, value: 310, quote: 'We bake 310 loaves a week' } : x));
+    const receipt = { version_id: 'v_own', version_number: 2, mutation_id: 'm_own' };
+    /** The register answers 409 reused after `landed` is saved in its place: the sent postimage itself, or another save. */
+    const reused = (landed: Json): typeof dispatch => async (path, body) => {
+      if (!path.endsWith('/graph/register')) return dispatch(path, body);
+      await dispatch(path, { graph: landed, thin_core: true, operation_id: randomUUID(), expected_graph_identity_hash: computeGraphIdentityHash(persisted as never)!.value });
+      return { status: 409, json: { details: { code: 'OPERATION_ID_REUSED' } } };
+    };
+    const other = JSON.parse(JSON.stringify(sent)) as Json;
+    other.living_model.canonical.quantities = other.living_model.canonical.quantities.map((x: Json) => (x.id === 'base_sales' ? { ...x, value: 320, quote: 'We bake 320 loaves a week' } : x));
+    const op = { scenarioId: SCENARIO, operationId: randomUUID(), ownVersion: async () => receipt };
+    const later = await savePostimage(reused(other), { ...op, expectedIdentity: computeGraphIdentityHash(base as never)!.value }, sent);
+    expect([later.write.status, later.readback.canonical_identical]).toEqual(['unknown', false]);
+    // Contrast: the sent postimage is what landed, so the same lookup is that save, with its own receipt.
+    const same = await savePostimage(reused(sent), { ...op, expectedIdentity: computeGraphIdentityHash(persisted as never)!.value }, sent);
+    expect(same.write).toEqual({ status: 'already_saved', receipt });
   });
 
   it('step 3, simulate + present: the view is the simulator\'s result on the scenario\'s seed; the display graph is S1\'s projection', async () => {

@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import type { InternalDispatch } from '../agent-lane/runtime/agent-capabilities.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
-import { findOperationVersion, writeCorePostimage, type CoreWrite } from '../path-b/tools/core-write.js';
+import { findOperationVersion, unknownWrite, writeCorePostimage, type CoreWrite } from '../path-b/tools/core-write.js';
 import { isSavedRead, readSaved } from '../path-b/tools/context-tool.js';
 import { approvedGraphHeld } from '../agent-lane/runtime/draft-replacement.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -72,8 +72,10 @@ export type ProgramSave = { readonly write: CoreWrite; readonly readback: Rec };
  * A write whose acknowledgement never came (the register threw, or answered 5xx or 409 reused) may have landed: this
  * operation's own version is looked up once more, by its own id (writes#4). A hit proves this operation committed, never
  * what (a resend's other bytes, or a save after it), so it IS this save, never a second revision, only while the read holds
- * the complete postimage sent; otherwise, as when none is found, it stays unknown. An acknowledged write whose read does not
- * match is never settled by the lookup: its content is in doubt.
+ * the complete postimage sent; otherwise, as when none is found, it stays unknown. The register's own 409 lookup (a caller's
+ * `ownVersion`) is held to the same read: an `already_saved` whose postimage the read no longer holds is unknown, as a later
+ * save stands where it was (Codex r2). An acknowledged write whose read does not match is never settled by the lookup: its
+ * content is in doubt.
  */
 export async function savePostimage(dispatch: InternalDispatch, w: { readonly scenarioId: string; readonly operationId: string; readonly expectedIdentity: string | null;
   readonly briefText?: string; readonly ownVersion?: () => Promise<unknown | null> }, graph: Rec): Promise<ProgramSave> {
@@ -84,7 +86,9 @@ export async function savePostimage(dispatch: InternalDispatch, w: { readonly sc
   const sent = savedProgramOf(graph);
   const read = await readSaved({ dispatch }, w.scenarioId);
   const back = isSavedRead(read) ? savedProgramOf(read.graph) : undefined;
-  const write: CoreWrite = own !== null && isSavedRead(read) && approvedGraphHeld(graph, read.graph) ? { status: 'already_saved', receipt: own } : sentWrite;
+  const held = isSavedRead(read) && approvedGraphHeld(graph, read.graph);
+  const write: CoreWrite = own !== null && held ? { status: 'already_saved', receipt: own }
+    : sentWrite.status === 'already_saved' && !held ? unknownWrite('not_verified', { check: 'hash_mismatch', field: 'read_identity', expected: null, actual: null }) : sentWrite;
   return { write, readback: { read: isSavedRead(read), version: back?.canonical.version ?? null, model_program: back?.model_program ?? null,
     seed_identical: back !== undefined && back.seed === sent?.seed,
     canonical_identical: back !== undefined && stableStringify(back.canonical) === stableStringify(sent?.canonical),

@@ -44,6 +44,8 @@ export type CoreWrite =
 const hashPrefix = (value: unknown): string | null => typeof value === 'string' && /^[a-f0-9]{12,64}$/i.test(value) ? value.slice(0, 12) : null;
 const unknown = (reason: string, diagnostic: DraftVerification): CoreWrite => ({ status: 'unknown',
   outcome: Object.defineProperty(unavailable(reason, 'unknown'), OUTCOME_TRACE, { value: { draft_verification: diagnostic } }) });
+/** The same unknown outcome, for a caller that settles a write against its own read (`savePostimage`). */
+export const unknownWrite = unknown;
 
 export async function writeCorePostimage(deps: { readonly dispatch: InternalDispatch }, w: CoreWriteRequest): Promise<CoreWrite> {
   let reg: Awaited<ReturnType<InternalDispatch>>;
