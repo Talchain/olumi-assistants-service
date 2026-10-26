@@ -47,7 +47,7 @@ const MEASURE = ['measure.quantity', 'measure.per', 'measure.cmp'];
 const WHEN = ['measure.aggregation', 'measure.window.start', 'measure.window.periods', 'measure.window.origin_event', 'measure.window.origin_offset'];
 const OWN = { ...by('author', 'author'), ...by('words', 'party', 'quote') };
 export const GROUPS: Readonly<Record<Family, Readonly<Record<string, string>>>> = {
-  quantities: { ...by('name', 'label'), ...by('figure', 'value', 'low', 'high', 'range_kind', 'unit', 'direction'), ...by('kind', 'kind'), ...by('status', 'status'),
+  quantities: { ...by('name', 'label'), ...by('figure', 'value', 'low', 'high', 'range_kind', 'unit', 'direction', 'floor', 'ceiling'), ...by('kind', 'kind'), ...by('status', 'status'),
     ...by('question', 'question'), ...by('basis', 'basis'), ...OWN },
   relations: { ...by('name', 'defines'), ...by('how', 'form', 'op', 'base', 'start', 'parts.*.id', 'parts.*.sign', 'parts.*.power', 'terms.*.driver', 'terms.*.coefficient', 'inflows.*', 'outflows.*'),
     ...by('link#', ...WORDS.map((k) => `terms.*.${k}`)), ...OWN },
@@ -345,7 +345,9 @@ function wordsIn(m: CanonicalModelT) {
     // What it moves is said by name; a direction on a size no link has is never said (the host clears it, on both sides).
     const moves = typeof r['direction'] === 'string' && typeof r['id'] === 'string' ? linkTargets(m, r['id']) : [];
     const sign = (said: string) => [said, ...(moves.length > 0 ? [`${of(DIRECTION_WORDS, r['direction'])} ${and(moves.map(label))}`] : [])].filter((x) => x !== '').join(', ');
-    const reading = typeof r['range_kind'] === 'string' ? ` (${of(RANGE_WORDS, r['range_kind'])})` : '';
+    // alpha G2: what it can be is Olumi's reading, said as such, so a change to it shows.
+    const can = [...(at('floor') !== null ? [`never below ${bare('floor')}`] : []), ...(at('ceiling') !== null ? [`never above ${bare('ceiling')}`] : [])];
+    const reading = (typeof r['range_kind'] === 'string' ? ` (${of(RANGE_WORDS, r['range_kind'])})` : '') + (can.length > 0 ? ` (${can.join(', ')}: Olumi’s reading)` : '');
     if (at('low') !== null && at('high') !== null) return sign(`from ${bare('low')} to ${at('high')}${at('value') !== null ? `, most likely ${bare('value')}` : ''}${reading}`);
     const ends = [...(at('low') !== null ? [`no lower than ${at('low')}`] : []), ...(at('high') !== null ? [`no higher than ${at('high')}`] : [])].join(', ');
     // A worked-out figure has no figure of its own to give: only its unit.

@@ -20,7 +20,7 @@ import { revisionDigest } from '../../model-program-turn/run-receipt.js';
 // ── builders ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 const base = { party: null, approval: 'proposed' as const, author_id: null };
 const qty = (id: string, unit: string, f: Partial<CanonicalQuantityT>): CanonicalQuantityT => ({
-  id, label: id.replace(/_/g, ' '), unit, kind: 'fact', value: null, low: null, high: null, range_kind: null, status: 'known', question: null, basis: null, direction: null, author: 'person', quote: null, ...base, ...f,
+  id, label: id.replace(/_/g, ' '), unit, kind: 'fact', value: null, low: null, high: null, range_kind: null, status: 'known', question: null, basis: null, direction: null, floor: null, ceiling: null, author: 'person', quote: null, ...base, ...f,
 });
 const person = (id: string, unit: string, value: number, quote: string) => qty(id, unit, { value, quote });
 const structure = (id: string, unit: string, value: number, basis: string) => qty(id, unit, { value, author: 'structure', basis });
@@ -664,24 +664,52 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(probeValue(both.executable!, both.executable!.goals[0], 'raise')).toBe(312); // 12 × 26: the set is active at boundary 3
   });
 
-  it('alpha G2: the never-negative count domain is a FACT\'s (a level of their situation); a coefficient in a count unit, the size of a change, may be below 0', () => {
+  it('alpha G2: what a figure can be is DECLARED (Olumi\'s floor and ceiling), never inferred from its unit; a setting is read within what it sets', () => {
     const withMembers = (f: Partial<CanonicalQuantityT>) => { const g = gymFilled(); g.quantities = g.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, range_kind: 'plausible' as const, ...f } : q)); return compile(g); };
-    const olumiCoefficient = { kind: 'coefficient' as const, author: 'olumi' as const, status: 'estimated' as const, quote: null, basis: 'a guess' };
-    // A signed change in members (it may fall): drawn on both sides of 0, never kept to [0, inf).
-    const signed = withMembers({ ...olumiCoefficient, low: -50, high: 200 });
-    expect(signed.conversions.find((c) => c.quantity === 'members_now'), JSON.stringify(signed.errors)).toMatchObject({ kind: 'range_law', domain: null });
-    // Wholly below 0 is a fall, not a contradiction, for a coefficient.
-    const fall = withMembers({ ...olumiCoefficient, low: -1010, high: -990 });
-    expect(fall.perGoal.flatMap((p) => p.reasons).join(' ')).not.toContain('a count cannot be below 0');
-    // Contrast, the same field as a FACT (members today): the domain and its contradiction rule are unchanged.
-    expect(withMembers({ low: 280, high: 320 }).conversions.find((c) => c.quantity === 'members_now')).toMatchObject({ kind: 'range_law', domain: { min: 0 } });
-    expect(withMembers({ low: -1010, high: -990 }).blockers).toContainEqual({ id: 'members_now', code: 'recount', scope: ['reach_400'] });
-    // Codex r1: an option's setting stands in for the fact it sets. Olumi's estimated setting of members today (made a
-    // coefficient by normalise) keeps the fact's domain; its inline quantity is promo__members_now.
-    const g = gymFilled();
-    g.options = g.options.map((o) => (o.id === 'promo' ? { ...o, sets: [...o.sets, { ...o.sets[0]!, quantity: 'members_now', to: null, value: 5, low: 0, high: 10, range_kind: 'plausible' as const, author: 'olumi' as const, quote: null }] } : o));
-    const setting = compile(g);
-    expect(setting.conversions.find((c) => c.quantity === 'promo__members_now'), JSON.stringify(setting.errors)).toMatchObject({ kind: 'range_law', domain: { min: 0 } });
+    const domain = (r: ReturnType<typeof compile>, id = 'members_now') => (r.conversions.find((c) => c.kind === 'range_law' && c.quantity === id) as { domain?: unknown } | undefined)?.domain;
+    // Undeclared: no domain, whatever the unit's name, so a level of members and a signed change are both drawn on both sides of 0.
+    expect(domain(withMembers({ low: 280, high: 320 }))).toBeNull();
+    expect(domain(withMembers({ kind: 'coefficient', author: 'olumi', status: 'estimated', quote: null, basis: 'a guess', low: -50, high: 200 }))).toBeNull();
+    // Declared floor 0 (a count of members cannot be negative): the draw is conditioned on it.
+    expect(domain(withMembers({ low: 280, high: 320, floor: 0 }))).toEqual({ min: 0 });
+    // Both ends, in the quantity's own unit, scaled with it: a share declared 0 to 100 % is drawn within 0 to 1.
+    const share = compile(model({
+      question: 'Will enough visitors join?', period: 'month',
+      quantities: [person('visitors', 'visitor', 1000, '1,000 visitors'),
+        qty('share', '%', { kind: 'coefficient', author: 'olumi', status: 'estimated', basis: 'a guess', low: 10, high: 90, range_kind: 'plausible', floor: 0, ceiling: 100 }),
+        derived('joined', 'visitor'), person('want', 'visitor', 300, '300 to join'), person('one', 'month', 1, 'this month')],
+      relations: [def('joined_rel', 'joined', 'product', ['visitors', 'share'])],
+      goals: [goal('enough', 'joined', '>=', 'want', 'end', 'one', '300 to join')],
+      options: [option('carry_on', 'Carry on as now', [], 'carry on as now')],
+    }));
+    expect(domain(share, 'share'), JSON.stringify(share.errors)).toEqual({ min: 0, max: 1 });
+    // A setting stands in for what it sets: Olumi's estimated setting of members today (inline: promo__members_now) is read
+    // within the declared floor of members today; with no declaration on either, it has none.
+    const setting = (floor: number | null) => {
+      const m = gymFilled();
+      m.quantities = m.quantities.map((q) => (q.id === 'members_now' ? { ...q, floor } : q));
+      m.options = m.options.map((o) => (o.id === 'promo' ? { ...o, sets: [...o.sets, { ...o.sets[0]!, quantity: 'members_now', to: null, value: 5, low: 0, high: 10, range_kind: 'plausible' as const, author: 'olumi' as const, quote: null }] } : o));
+      return compile(m);
+    };
+    expect(domain(setting(0), 'promo__members_now'), JSON.stringify(setting(0).errors)).toEqual({ min: 0 });
+    expect(domain(setting(null), 'promo__members_now')).toBeNull();
+  });
+
+  it('alpha G2: a figure given wholly outside its declared bounds is asked again (theirs) or held (Olumi\'s), naming Olumi\'s reading; a fixed one too', () => {
+    const withMembers = (f: Partial<CanonicalQuantityT>) => { const g = gymFilled(); g.quantities = g.quantities.map((q) => (q.id === 'members_now' ? { ...q, floor: 0, ...f } : q)); return compile(g); };
+    const why = (r: ReturnType<typeof compile>) => r.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ');
+    const fixed = withMembers({ value: -5, low: null, high: null });
+    expect(fixed.blockers).toContainEqual({ id: 'members_now', code: 'recount', scope: ['reach_400'] });
+    expect(why(fixed)).toContain('needs "members now" again: "members now" is given as -5 member, but Olumi reads it as never below 0 member.');
+    // A ceiling, from above.
+    expect(why(withMembers({ value: 900, low: null, high: null, ceiling: 500 }))).toContain('is given as 900 member, but Olumi reads it as never above 500 member');
+    // Olumi's own fixed figure outside: held as unsupported, never asked of them.
+    const olumis = withMembers({ value: -5, low: null, high: null, author: 'olumi', status: 'estimated', quote: null, basis: 'a guess' });
+    expect(olumis.perGoal.find((p) => p.goal_id === 'reach_400')).toMatchObject({ status: 'withheld' });
+    expect(why(olumis)).toContain('but Olumi reads it as never below 0 member; Olumi\'s figure is unsupported');
+    // Contrast: inside its bounds, or undeclared, a figure below 0 is no contradiction.
+    expect(withMembers({ value: 5, low: null, high: null }).blockers.some((b) => b.code === 'recount')).toBe(false);
+    expect(withMembers({ value: -5, low: null, high: null, floor: null }).blockers.some((b) => b.code === 'recount')).toBe(false);
   });
 
   it('alpha G6: a setting\'s timing worked out by a relation, or one that does not apply, is a typed error, never period 0', () => {
@@ -711,6 +739,47 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(asked.perOption.find((o) => o.option_id === 'promo')).toMatchObject({ status: 'asks', asks: ['opens'] });
   });
 
+  it('Codex r1 #3771: a setting is read within what it sets in ITS own unit, and within every quantity it sets at once, whatever the order', () => {
+    // A share in "1" capped at 1, set by an option to a figure in "%": the cap is 100 % for the setting.
+    const shareModel = (target: Partial<CanonicalQuantityT>, setting: Partial<CanonicalQuantityT>) => compile(model({
+      question: 'Will enough visitors join?', period: 'month',
+      quantities: [person('visitors', 'visitor', 1000, '1,000 visitors'), qty('share', '1', { value: 0.2, quote: 'a fifth join', ...target }),
+        qty('boost_share', '%', { value: 50, quote: 'half would join', ...setting }),
+        derived('joined', 'visitor'), person('want', 'visitor', 300, '300 to join'), person('one', 'month', 1, 'this month')],
+      relations: [def('joined_rel', 'joined', 'product', ['visitors', 'share'])],
+      goals: [goal('enough', 'joined', '>=', 'want', 'end', 'one', '300 to join')],
+      options: [option('boost', 'Boost sign-ups', [set('share', 'boost_share', 'half would join')], 'boost sign-ups'), option('carry_on', 'Carry on as now', [], 'carry on as now')],
+    }));
+    const recounts = (r: ReturnType<typeof compile>) => r.blockers.filter((b) => b.code === 'recount').map((b) => b.id);
+    expect(recounts(shareModel({ floor: 0, ceiling: 1 }, {}))).toEqual([]);                     // 50 % within 0 to 1
+    const over = shareModel({ floor: 0, ceiling: 1 }, { value: 150 });
+    expect(recounts(over)).toEqual(['boost_share']);
+    expect(over.perOption.find((o) => o.option_id === 'boost')!.reasons.join(' ')).toContain('"boost share" is given as 150 %, but Olumi reads it as never above 100 %');
+    // The other way: a target capped at 100 % set by a figure in "1": 2 is 200 %, outside.
+    const back = (v: number) => recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 100 }, { unit: '1', value: v }));
+    expect(back(2)).toEqual(['boost_share']);
+    expect(back(0.5)).toEqual([]);
+    // Codex r2: a setting AT its inherited bound, in the same unit, is within it (29 % with a 29 % ceiling); and across
+    // units (0.29 with a 29 % ceiling).
+    expect(recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 29 }, { value: 29 }))).toEqual([]);
+    expect(recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 29 }, { unit: '1', value: 0.29 }))).toEqual([]);
+    expect(recounts(shareModel({ unit: '%', value: 20, floor: 0, ceiling: 29 }, { value: 29.5 }))).toEqual(['boost_share']);
+    // Codex r3: a large exact bound is kept exactly: a same-unit setting one above it is outside, at it is within.
+    expect(recounts(shareModel({ unit: '%', value: 20, ceiling: 9999999999999 }, { value: 10000000000000 }))).toEqual(['boost_share']);
+    expect(recounts(shareModel({ unit: '%', value: 20, ceiling: 9999999999999 }, { value: 9999999999999 }))).toEqual([]);
+    // One figure setting two quantities, capped at 100 and at 1,000 a month: 200 is outside the first, in either order.
+    const shared = (reversed: boolean) => {
+      const g = gymFilled();
+      g.quantities = g.quantities.map((q) => (q.id === 'joins' ? { ...q, ceiling: 100 } : q.id === 'promo_joins' ? { ...q, value: 200 } : q));
+      g.quantities.push(qty('extra_joins', 'member/month', { value: 0, quote: 'no extra joins now', ceiling: 1000 }));
+      g.relations = g.relations.map((r) => (r.form === 'stock' ? { ...r, inflows: [...r.inflows, 'extra_joins'] } : r));
+      const second = option('referrals', 'Run referrals', [set('extra_joins', 'promo_joins', 'a promotion could bring 40 a month')], 'run referrals');
+      g.options = reversed ? [second, ...g.options] : [...g.options, second];
+      return compile(g);
+    };
+    for (const reversed of [false, true]) expect(recounts(shared(reversed)), `reversed ${reversed}`).toEqual(['promo_joins']);
+  });
+
   it('DL ruling 4 (S2 law 9d34ef05+): a plausible range is a spread, never a point and never an invented domain; one with no room is HELD; a most likely figure at an end is an error', () => {
     const withCosts = (f: Partial<CanonicalQuantityT>) => { const m = bakery(); m.quantities = m.quantities.map((q) => (q.id === 'costs' ? { ...q, value: null, ...f } : q)); return compile(m); };
     // A wide money range with no most likely figure: read unbounded (money carries no invented domain), so it calculates.
@@ -720,19 +789,19 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     // A count whose WHOLE range is below 0 contradicts what it can be (the PL's ruling, 23 Oct): never pinned near 0, never
     // read as a spread. The person's is ASKED again with its words kept; Olumi's is HELD as unsupported.
     const g = gymFilled();
-    g.quantities = g.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const } : q));
+    g.quantities = g.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const, floor: 0 } : q));
     const theirs = compile(g);
     expect(theirs.perGoal.find((p) => p.goal_id === 'reach_400')).toMatchObject({ status: 'asks', asks: ['members_now'] });
     expect(theirs.blockers).toContainEqual({ id: 'members_now', code: 'recount', scope: ['reach_400'] });
-    expect(theirs.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ')).toContain('is given as -1010–-990 member, but a count cannot be below 0.');
+    expect(theirs.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ')).toContain('is given as -1010–-990 member, but Olumi reads it as never below 0 member.');
     expect(theirs.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ')).not.toContain('What is it?');
     expect(theirs.conversions.some((c) => c.quantity === 'members_now')).toBe(false);
     expect(theirs.perGoal.find((p) => p.goal_id === 'class_income')).toMatchObject({ status: 'calculable' }); // contrast
     const olumis = gymFilled();
-    olumis.quantities = olumis.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const, author: 'olumi' as const, status: 'estimated' as const, quote: null, basis: 'a guess' } : q));
+    olumis.quantities = olumis.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const, author: 'olumi' as const, status: 'estimated' as const, quote: null, basis: 'a guess', floor: 0 } : q));
     const heldR = compile(olumis);
     expect(heldR.perGoal.find((p) => p.goal_id === 'reach_400')).toMatchObject({ status: 'withheld' });
-    expect(heldR.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ')).toContain('a count cannot be below 0; Olumi\'s range is unsupported');
+    expect(heldR.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ')).toContain('but Olumi reads it as never below 0 member; Olumi\'s range is unsupported');
     // Only a count's domain: a money range wholly below 0 (a loss) stays an ordinary spread.
     const loss = withCosts({ low: -700, high: -500, range_kind: 'plausible' });
     expect(loss.conversions.find((c) => c.quantity === 'costs')).toMatchObject({ kind: 'range_law', domain: null });
@@ -777,8 +846,10 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(xq(rd).get('breakdown_chance')!.dist).toMatchObject({ domain: { min: 0, max: 1 } });
     expect(lawIn(rd, 'breakdown_chance').reading).toMatchObject({ lower: 0, upper: 1 });
     expect(xq(rd).get('extra_per_oven')!.dist).not.toHaveProperty('domain');
-    const counts = compile(model({ ...gymFilled(), quantities: gymFilled().quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: 280, high: 320, range_kind: 'bounds' as const } : q)) }));
-    expect(xq(counts).get('members_now')!.dist).toMatchObject({ range_kind: 'bounds', domain: { min: 0 } });
+    // alpha G2: a count's domain is its declared floor, never its unit's name.
+    const counts = (floor: number | null) => compile(model({ ...gymFilled(), quantities: gymFilled().quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: 280, high: 320, range_kind: 'bounds' as const, floor } : q)) }));
+    expect(xq(counts(0)).get('members_now')!.dist).toMatchObject({ range_kind: 'bounds', domain: { min: 0 } });
+    expect(xq(counts(null)).get('members_now')!.dist).not.toHaveProperty('domain');
     // Olumi's own range always states its kind.
     const noKind = bakery(); noKind.quantities = noKind.quantities.map((q) => (q.id === 'extra_per_oven' ? { ...q, range_kind: null } : q));
     expect(compile(noKind).errors.map((e) => [e.code, e.items])).toEqual([['range_kind', ['extra_per_oven']]]);
@@ -876,7 +947,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
         [{ id: 'cash_buffer', code: 'deadline', scope: ['cash_buffer'] }]],
       ['range kind', edit(bakery(), (m) => { m.quantities = m.quantities.map((q) => (q.id === 'costs' ? { ...q, value: null, low: 500, high: 700 } : q)); }),
         [{ id: 'costs', code: 'range_kind', scope: ['weekly_profit', 'cash_buffer'] }]],
-      ['recount', edit(gymFilled(), (m) => { m.quantities = m.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const } : q)); }),
+      ['recount', edit(gymFilled(), (m) => { m.quantities = m.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const, floor: 0 } : q)); }),
         [{ id: 'members_now', code: 'recount', scope: ['reach_400'] }]],
       ['structure', edit(bakery(), (m) => { m.quantities = m.quantities.map((q) => (q.id === 'costs' ? structure('costs', 'GBP/week', 612.5, 'Costs.') : q)); }),
         [{ id: 'costs', code: 'asked', scope: ['weekly_profit', 'cash_buffer'] }]],

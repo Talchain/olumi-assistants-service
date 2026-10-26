@@ -97,6 +97,8 @@ export const CanonicalQuantity = z.object({
   low: z.number().nullable().describe('The low end of a stated or estimated range, in the unit. Null when not a range.'),
   high: z.number().nullable().describe('The high end of a stated or estimated range, in the unit. Null when not a range.'),
   range_kind: RANGE_KIND,
+  floor: z.number().nullable().describe('Olumi\'s reading of the lowest physically possible value, in this quantity\'s unit. Null when no lower bound is justified. Not the person\'s stated range.'),
+  ceiling: z.number().nullable().describe('Olumi\'s reading of the highest physically possible value, in this quantity\'s unit. Null when no upper bound is justified. Not the person\'s stated range.'),
   kind: z.enum(QUANTITY_KINDS).describe(
     'fact: a figure about the person\'s own situation (their price, costs, headcount, members today, dates, targets): only they can give it, so a missing fact is asked, never estimated. '
     + 'coefficient: the size of a mechanism (each extra oven adds so many loaves; the share of visitors who join; a rate): Olumi may estimate it, labelled, with low and high; a link\'s size stays a coefficient even when it is worked out by a relation. '
@@ -265,14 +267,14 @@ export const OPTION_STATUSES = ['live', 'ruled_out', 'removed'] as const;
 export const STARTS_AFTER_PERIODS = 'How many whole periods pass before it takes effect: 0 = from the start ("straight away", "from the first month" and "from now" are all 0), "from month 3" is 2, "in two months" is 2';
 const timing = z.union([z.number().int(), id]).describe(`${STARTS_AFTER_PERIODS}. Or the id of a quantity in the model's period unit giving that count, when the timing is the person's figure, asked, or differs by option ("when the extension opens").`);
 /** The old fields, mapped ONCE, where a saved model is read (program-store): `from_period` k is `starts_after_periods` k, the
- *  same count under its old name, and a quantity saved before `direction` existed has none (null). A model that has both
- *  timing names, or neither, is left for the schema to judge. */
+ *  same count under its old name. Missing quantity direction and physical bounds read as null, without inferring them.
+ *  A model that has both timing names, or neither, is left for the schema to judge. */
 export function withDeclaredTiming(raw: unknown): unknown {
   const rec = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
   const renamed = (x: unknown) => { if (!rec(x) || !('from_period' in x) || 'starts_after_periods' in x) return x; const { from_period, ...rest } = x; return { ...rest, starts_after_periods: from_period }; };
   if (!rec(raw) || !Array.isArray(raw['options']) || !Array.isArray(raw['risks'])) return raw;
-  const directed = (x: unknown) => (rec(x) && !('direction' in x) ? { ...x, direction: null } : x);
-  return { ...raw, ...(Array.isArray(raw['quantities']) ? { quantities: raw['quantities'].map(directed) } : {}),
+  const declaredQuantity = (x: unknown) => (rec(x) ? { direction: null, floor: null, ceiling: null, ...x } : x);
+  return { ...raw, ...(Array.isArray(raw['quantities']) ? { quantities: raw['quantities'].map(declaredQuantity) } : {}),
     options: raw['options'].map((o) => (rec(o) && Array.isArray(o['sets']) ? { ...o, sets: o['sets'].map(renamed) } : o)), risks: raw['risks'].map(renamed) };
 }
 
