@@ -93,7 +93,14 @@ export const CANONICAL_JSON_SCHEMA: Readonly<Record<string, unknown>> = Object.f
 /** The update's strict output: the same records, by the same walk. */
 export const UPDATE_JSON_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze(strictSchema(CanonicalUpdate));
 export const CANONICAL_SCHEMA_NAME = 'canonical_model';
-/** Today's date for the drafter, after the fixed instructions: a date they state is counted from it (refusals #2, #8, #9, #13, #15, #16 of 25 Oct). */
-export const todayLine = (today: string): string => `Today is ${today} (Europe/London). A date they state counts in whole periods from today, which is period 0.`;
+/**
+ * Today's date for the drafter, after the fixed instructions: a date they state is counted from it (refusals #2, #8, #9, #13, #15,
+ * #16 of 25 Oct). An update on a later day than the first draft also names the model's period 0, that draft's day (the saved
+ * `drafted_on`), so a date read now counts from the same day as every date already in the model, never from a second
+ * period 0 (words#5). A first draft, and an update on the day it was drafted, send exactly the line they always did.
+ */
+export const todayLine = (today: string, periodZero: string = today): string => (periodZero === today
+  ? `Today is ${today} (Europe/London). A date they state counts in whole periods from today, which is period 0.`
+  : `Today is ${today} (Europe/London). This model's period 0 is ${periodZero}, the day it was first drafted: a date they state, and anything they time from today, counts in whole periods from ${periodZero}.`);
 export const DRAFTING_PROMPT_SHA256 = createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex');
 export const CANONICAL_SCHEMA_SHA256 = createHash('sha256').update(JSON.stringify(CANONICAL_JSON_SCHEMA), 'utf8').digest('hex');
