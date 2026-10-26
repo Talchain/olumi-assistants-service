@@ -1140,6 +1140,26 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(simulate(cancelling(0.31).executable!, { seed: 7, draws: 2 }).options[0]!.per_goal[0]).toEqual({ goal_id: 'enough', withheld: { reason: 'invalid_domain', count: 2, quantities: ['share'] } });
   });
 
+  it('Codex r3 numbers#2 (3), spec §3.7: a rounding allowance that overflows bounds nothing, so 0 + 1 × 1e308 is above a ceiling of 1', () => {
+    // U × (|1e308| + |1e308|) would overflow to Infinity and admit any value; an allowance that is not finite admits none.
+    const huge = (ceiling: number | null) => compile(model({
+      question: 'Is the share within one?', period: 'month',
+      quantities: [person('none', '1', 0, 'none yet'), person('big', '1', 1e308, 'a huge figure'), qty('one', '1', { kind: 'coefficient', value: 1, quote: 'one for one' }),
+        { ...derived('share', '1'), ceiling }, person('two', '1', 2, 'at most two'), person('one_month', 'month', 1, 'this month')],
+      relations: [eff('share_rel', 'share', 'none', [['big', 'one']])],
+      goals: [goal('small', 'share', '<=', 'two', 'end', 'one_month', 'at most two')],
+      options: [option('as_is', 'Carry on', [], 'carry on')],
+    }));
+    const capped = huge(1);
+    expect(capped.errors).toEqual([]);
+    expect(simulate(capped.executable!, { seed: 7, draws: 3 }).options[0]!.per_goal[0]).toEqual({ goal_id: 'small', withheld: { reason: 'invalid_domain', count: 3, quantities: ['share'] } });
+    expect(exactInitialValues(capped.executable!).has('share')).toBe(false);
+    // Contrast: with no ceiling the same finite value is one it can be, and the goal is worked out (not met).
+    const free = huge(null).executable!;
+    expect(simulate(free, { seed: 7, draws: 3 }).options[0]!.per_goal[0]).toEqual({ goal_id: 'small', chance: 0, precision_95: [0, 0] });
+    expect(exactInitialValues(free).get('share')).toBe(1e308);
+  });
+
   it('Codex r2 numbers#2 (4), spec §3.7: a window length given outside Olumi\'s reading of it is asked again before any Run on that window; reversed bounds on it withhold; never run for the given length', () => {
     const windowed = (f: Partial<CanonicalQuantityT>) => {
       const g = gymFilled();

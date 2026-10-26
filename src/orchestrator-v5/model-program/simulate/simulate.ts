@@ -399,10 +399,13 @@ const U = Number.EPSILON;
 /**
  * Within what it can be (spec §3.7), up to rounding: finite, and no further outside an end than its own rounding bound `e`
  * plus the end's. So £0.10 + £0.20 is on a ceiling of £0.30, and 100000000 + 0.3 − 100000000 (0.29999999701976776) is on a
- * floor of 0.3, while £1,000,000,000,500 is above a ceiling of £1,000,000,000,000. A NaN `e` is never within.
+ * floor of 0.3, while £1,000,000,000,500 is above a ceiling of £1,000,000,000,000. A bound `e` that is not finite (NaN, or
+ * an overflow near 1e308) bounds nothing, so a value against a finite end with it is never within (Codex r3).
  */
 const inside = (v: number, e: number, lo: number, hi: number): boolean =>
-  Number.isFinite(v) && v >= lo - e - U * Math.abs(lo) && v <= hi + e + U * Math.abs(hi);
+  Number.isFinite(v)
+  && (lo === -Infinity || (Number.isFinite(e) && v >= lo - e - U * Math.abs(lo)))
+  && (hi === Infinity || (Number.isFinite(e) && v <= hi + e + U * Math.abs(hi)));
 
 /** A period in draw d: a whole number, or the strict ceil of the timing quantity's one draw; below 0 or NaN is NaN (invalid). */
 function periodOf(t: Timing, c: Compiled, inputs: Inputs, d: number): number {
@@ -440,7 +443,7 @@ function evaluate(node: Exclude<Node, StockNode>, vals: Float64Array, errs: Floa
         if (zero) continue;
         const ab = a * b;
         v += ab;
-        e += Math.abs(a) * errs[row + driver]! + Math.abs(b) * errs[row + coefficient]! + U * (Math.abs(ab) + Math.abs(v));
+        e += Math.abs(a) * errs[row + driver]! + Math.abs(b) * errs[row + coefficient]! + U * Math.abs(ab) + U * Math.abs(v);
       }
       errs[at] = e;
       return v;
