@@ -1,9 +1,10 @@
 /**
- * ⛔ A MODEL PROGRAM'S READ RUNS NONE OF THE LEGACY READ PRODUCERS (inventory F3, PR-A). The scenario read serves every reload,
- * every core turn's read and every program save's readback, and it ran the legacy goal-scope claim reader, today-part notes,
- * the admission projection and, on a reload, the goal-chance egress gate over the stored words and the answer-offers leg, on a
- * program graph. Through the REAL read route, with a mock store and spies that call the real functions: a program read calls
- * none of them and serves the same body; the SAME graph with no program still calls every one (each row's contrast).
+ * ⛔ THE SCENARIO READ RUNS NONE OF THE LEGACY READ PRODUCERS (inventory F3, PR-A then PR-C). The read serves every reload,
+ * every core turn's read and every program save's readback. It ran the legacy goal-scope claim reader, today-part notes, the
+ * analysis reader and its claim permissions, the admission projection and, on a reload, the goal-chance egress gate over the
+ * stored words, the answer offers and the changed-since-Run marks. Through the REAL read route, with a mock store and spies
+ * that call the real functions: a program read calls none of them and serves its own view and readiness; since PR-C a read of
+ * the SAME graph with no program calls none of them either and serves no analysis. Each probe counts a direct call.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
@@ -12,7 +13,7 @@ import { withScenarioRevision } from '../../../tests/utils/revision-store-double
 
 const SCENARIO = 'f1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c';
 
-const spies = vi.hoisted(() => ({ scope: vi.fn(), today: vi.fn(), admission: vi.fn(), egress: vi.fn(), offers: vi.fn(), analysis: vi.fn(), claims: vi.fn(), changed: vi.fn() }));
+const spies = vi.hoisted(() => ({ scope: vi.fn(), today: vi.fn(), egress: vi.fn(), analysis: vi.fn(), claims: vi.fn() }));
 vi.mock('../../orchestrator-v5/compose/goal-scope-claim-input.js', async (load) => {
   const actual = await load<typeof import('../../orchestrator-v5/compose/goal-scope-claim-input.js')>();
   spies.scope.mockImplementation(actual.goalScopeClaimInput);
@@ -23,22 +24,12 @@ vi.mock('../../orchestrator-v5/agent-lane/goal-definition-sum.js', async (load) 
   spies.today.mockImplementation(actual.deriveTodayParts);
   return { ...actual, deriveTodayParts: spies.today };
 });
-vi.mock('../analysis-admission-projection.js', async (load) => {
-  const actual = await load<typeof import('../analysis-admission-projection.js')>();
-  spies.admission.mockImplementation(actual.projectAnalysisAdmission);
-  return { ...actual, projectAnalysisAdmission: spies.admission };
-});
 vi.mock('../../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js', async (load) => {
   const actual = await load<typeof import('../../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js')>();
   spies.egress.mockImplementation(actual.withEstimateGoalPointsAtEgress);
   return { ...actual, withEstimateGoalPointsAtEgress: spies.egress };
 });
-vi.mock('../../orchestrator-v5/agent-lane/answer-offers-reload.js', async (load) => {
-  const actual = await load<typeof import('../../orchestrator-v5/agent-lane/answer-offers-reload.js')>();
-  spies.offers.mockImplementation(actual.answerOffersForReload);
-  return { ...actual, answerOffersForReload: spies.offers };
-});
-// PR-C: the legacy analysis reader, its claim permissions and the changed-since-Run marks.
+// PR-C: the legacy analysis reader and its claim permissions.
 vi.mock('../scenario-graph-analysis-read.js', async (load) => {
   const actual = await load<typeof import('../scenario-graph-analysis-read.js')>();
   spies.analysis.mockImplementation(actual.readScenarioAnalysis);
@@ -48,11 +39,6 @@ vi.mock('../../orchestrator-v5/agent-lane/first-analysis.js', async (load) => {
   const actual = await load<typeof import('../../orchestrator-v5/agent-lane/first-analysis.js')>();
   spies.claims.mockImplementation(actual.claimPermissionsFrom);
   return { ...actual, claimPermissionsFrom: spies.claims };
-});
-vi.mock('../../orchestrator-v5/context/changed-since-run.js', async (load) => {
-  const actual = await load<typeof import('../../orchestrator-v5/context/changed-since-run.js')>();
-  spies.changed.mockImplementation(actual.readChangedSinceRun);
-  return { ...actual, readChangedSinceRun: spies.changed };
 });
 vi.mock('../../config/index.js', async (load) => {
   const actual = await load<typeof import('../../config/index.js')>();
@@ -133,51 +119,73 @@ const internalRead = (graph: Rec) => read(graph, { fresh: true });
 /** The UI's reload: the conversation restored with the model. */
 const reload = (graph: Rec) => read(graph, { include_conversation_turns: true });
 
-describe('a program read runs none of the legacy read producers (inventory F3, PR-A + PR-C)', () => {
-  it('the internal read (every core turn, every save readback): no goal-scope reader, today-part notes or admission projection; the same readiness, admission and stored Run', async () => {
+/** Each legacy producer, called directly: the probes are live (each spy counts a direct call). */
+async function callEachDirectly(): Promise<void> {
+  const calls: (() => Promise<unknown>)[] = [
+    async () => (await import('../../orchestrator-v5/compose/goal-scope-claim-input.js')).goalScopeClaimInput([], null),
+    async () => (await import('../../orchestrator-v5/agent-lane/goal-definition-sum.js')).deriveTodayParts({}),
+    async () => (await import('../../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js')).withEstimateGoalPointsAtEgress({ assistant_text: '' }, {} as never),
+    async () => (await import('../scenario-graph-analysis-read.js')).readScenarioAnalysis({ scenarioId: SCENARIO, graph: null, requestId: 'r' }),
+    async () => (await import('../../orchestrator-v5/agent-lane/first-analysis.js')).claimPermissionsFrom(null, undefined),
+  ];
+  for (const call of calls) { try { await call(); } catch { /* the call is what counts */ } }
+}
+const none = () => Object.values(spies).map((spy) => spy.mock.calls.length);
+
+describe('the scenario read runs none of the legacy read producers (inventory F3, PR-A + PR-C)', () => {
+  it('the internal read of a program (every core turn, every save readback): none runs; its own readiness and stored Run, no legacy analysis', async () => {
     const body = await internalRead(await storedProgram());
-    expect(spies.scope).not.toHaveBeenCalled();
-    expect(spies.today).not.toHaveBeenCalled();
-    expect(spies.admission).not.toHaveBeenCalled();
-    // PR-C: nor the legacy analysis reader or its claim permissions; the program's readiness is served as its own.
-    expect(spies.analysis).not.toHaveBeenCalled();
-    expect(spies.claims).not.toHaveBeenCalled();
+    expect(none()).toEqual([0, 0, 0, 0, 0]);
     expect([body.analysis_state, body.analysis_result]).toEqual([null, null]);
     expect(body.current_read).toEqual({ run_state: null, computed_against_hash: null, current_analysis_hash: null, figures: [],
-      analysis_ready: expect.objectContaining({ goal_node_id: 'more_loaves' }) });
+      analysis_ready: expect.objectContaining({ goal_node_id: 'more_loaves', status: 'ready', may_run: true }) });
     expect(body.analysis_admission).toBeNull();
     expect(body).not.toHaveProperty('goal_scope_reconciliation');
     expect(body).not.toHaveProperty('today_part_notes');
-    expect((body.current_read as Rec).analysis_ready).toMatchObject({ goal_node_id: 'more_loaves', status: 'ready', may_run: true });
     expect(body.canonical_analysis_view).not.toBeNull();
   });
 
-  it('CONTRAST: the SAME graph with no program still runs each of them on the internal read', async () => {
-    await internalRead(withoutProgram(await storedProgram()));
-    expect(spies.analysis).toHaveBeenCalled();
-    expect(spies.claims).toHaveBeenCalled();
-    expect(spies.scope).toHaveBeenCalled();
-    expect(spies.today).toHaveBeenCalled();
-    expect(spies.admission).toHaveBeenCalled();
-  });
-
-  it('the reload: its stored words are restored as sent, with no egress gate, and no answer offer is re-derived', async () => {
+  it('the reload of a program: its stored words are restored as sent; none runs; no offers and no changed-since-Run marks', async () => {
     const body = await reload(await storedProgram());
-    expect(spies.egress).not.toHaveBeenCalled();
-    expect(spies.offers).not.toHaveBeenCalled();
-    // PR-C: no changed-since-Run marks (a program's Run keeps no item marks) and no legacy analysis reader.
-    expect(spies.changed).not.toHaveBeenCalled();
-    expect(spies.analysis).not.toHaveBeenCalled();
-    expect(body).not.toHaveProperty('changed_since_run');
+    expect(none()).toEqual([0, 0, 0, 0, 0]);
     expect((body.conversation_turns as Rec[]).map((t) => t.assistant_message)).toEqual([SAID]);
+    expect((body.conversation_turns as Rec[]).at(-1)).not.toHaveProperty('suggested_actions');
+    expect(body).not.toHaveProperty('changed_since_run');
+    expect(body).not.toHaveProperty('action_bar');
+    // Kept from the retired offers suite (x4 row 9): a restored turn is exactly its four keys.
+    expect(Object.keys((body.conversation_turns as Rec[])[0]!)).toEqual(['turn_id', 'created_at', 'user_message', 'assistant_message']);
   });
 
-  it('CONTRAST: the SAME graph with no program still crosses the egress gate and re-derives its offers on reload', async () => {
-    const body = await reload(withoutProgram(await storedProgram()));
-    expect(spies.egress).toHaveBeenCalled();
-    expect(spies.offers).toHaveBeenCalledTimes(1);
-    expect(spies.changed).toHaveBeenCalledTimes(1);
-    expect(spies.analysis).toHaveBeenCalled();
-    expect((body.conversation_turns as Rec[]).map((t) => t.assistant_message)).toEqual([SAID]);
+  it('kept from the retired analysis-read suite: a scenario with no graph yet answers no analysis and spends no fact read; no read carries a prose surface', async () => {
+    store.readExistingScenario.mockResolvedValue({ userId: null, graph: null, briefText: BRIEF, analysisInvalidatedAt: null, revision: 1 });
+    const app = Fastify();
+    await scenarioGraphRoute(app);
+    await app.ready();
+    const res = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: { include_conversation_turns: true } });
+    await app.close();
+    expect(res.statusCode, res.body).toBe(200);
+    const body = res.json() as Rec;
+    expect([body.graph_present, body.graph, body.analysis_state, body.analysis_result, body.canonical_analysis_view]).toEqual([false, null, null, null, null]);
+    expect(store.readScenarioRunAnalysisFactsFor).not.toHaveBeenCalled();
+    for (const prose of ['assistant_text', 'blocks', 'suggested_actions']) expect(body).not.toHaveProperty(prose);
+    // CONTRAST: the same read of a program serves its view.
+    expect((await internalRead(await storedProgram())).canonical_analysis_view).not.toBeNull();
+  });
+
+  it('PR-C: the SAME graph with no program, internal read and reload: none runs either, its words restored as sent, and no analysis, readiness or view; CONTRAST: the program read serves its readiness and view, and each probe counts a direct call', async () => {
+    const stored = await storedProgram();
+    const plain = await internalRead(withoutProgram(stored));
+    expect(none(), 'the internal read').toEqual([0, 0, 0, 0, 0]);
+    const reloaded = await reload(withoutProgram(stored));
+    expect(none(), 'the reload').toEqual([0, 0, 0, 0, 0]);
+    expect([plain.analysis_state, plain.analysis_result, plain.canonical_analysis_view, plain.analysis_admission]).toEqual([null, null, null, null]);
+    expect(plain.current_read).toEqual({ run_state: null, computed_against_hash: null, current_analysis_hash: null, figures: [] });
+    expect((reloaded.conversation_turns as Rec[]).map((t) => t.assistant_message)).toEqual([SAID]);
+    expect(reloaded).not.toHaveProperty('changed_since_run');
+    const program = await internalRead(stored);
+    expect((program.current_read as Rec).analysis_ready).toMatchObject({ goal_node_id: 'more_loaves' });
+    expect(program.canonical_analysis_view).not.toBeNull();
+    await callEachDirectly();
+    expect(none().every((n) => n === 1), JSON.stringify(none())).toBe(true);
   });
 });

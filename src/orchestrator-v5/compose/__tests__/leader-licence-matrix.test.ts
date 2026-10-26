@@ -35,7 +35,7 @@ const CELLS = {
   M6_absent: { status: 'ready', may_run: true },
   M6_malformed: { status: 'ready', may_run: true, analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'leader_please' } },
   M6_no_ready: undefined,
-  /** The `/graph` read's top-level projection spells the run-axis flag `admitted` (`analysis-admission-projection.ts`). */
+  /** The `/graph` read's former top-level projection spells the run-axis flag `admitted` (retired with inventory F3, PR-C). */
   M1_projection: { analysis_admission: { admitted: true, permitted_analysis_mode: 'comparative_leader', semantic_quality_sufficient: true } },
   M2_projection: { analysis_admission: { admitted: true, permitted_analysis_mode: 'quantified_provisional' } },
   M3_projection: { analysis_admission: { admitted: true, permitted_analysis_mode: 'exploratory' } },

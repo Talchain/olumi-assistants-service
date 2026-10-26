@@ -2,7 +2,9 @@
  * ⛔ A MODEL PROGRAM NEVER ENTERS THE LEGACY CODE AROUND THE MODEL (spec §3 and §8; DL 26 Oct). Through the REAL routes, with a
  * mock store (nothing reaches a database) and spies that call the real functions: a program's read, write and browser turn
  * never invoke the legacy analysis composer, action ranker, Living Model reader, kind repair, event_risk contract or legacy
- * turn route. Each row has its contrast: the SAME graph with no program still runs every one of them. Synthetic bakery.
+ * turn route. The write rows' contrast is the SAME graph with no program, which still runs them. The read runs none of them on
+ * any graph (inventory F3, PR-C), so its rows' contrast is the program's own view and readiness beside the plain graph's empty
+ * read, and a direct call that each probe counts. Synthetic bakery.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
@@ -63,7 +65,6 @@ import scenarioGraphRoute from '../assist.v1.scenario-graph.js';
 import { proxyV5TurnRoute } from '../proxy-v5-turn.js';
 import proxyV5TurnStreamRoute, { PROXY_STREAMED_TURN_ROUTE } from '../proxy-v5-turn-stream.js';
 import { scenarioOwnershipPlugin } from '../../plugins/scenario-ownership.js';
-import { coreActionBarOf } from '../../orchestrator-v5/core-route/action-bar.js';
 import { seedOf } from '../../orchestrator-v5/model-program-turn/evaluate.js';
 import { withNewRun } from '../../orchestrator-v5/model-program-turn/program-save.js';
 import { MODEL_PROGRAM } from '../../orchestrator-v5/model-program-turn/program-store.js';
@@ -133,13 +134,20 @@ describe('item 1: the legacy analysis reader and composer never run on a program
       .toBe(stableStringify({ ...((run.result as Rec).canonical_analysis_view as Rec), staleness: null, run: null }));
   });
 
-  it('CONTRAST: the SAME graph with no program still reads its facts and composes its state (`never_run`, no Run yet)', async () => {
+  it('F3 PR-C: the SAME graph with no program is served its graph with no analysis (no fact read, no composed state, no readiness, no view); CONTRAST: the program beside it serves both, and the probe counts a direct call', async () => {
     const stored = await storedProgram();
     spies.compose.mockClear();
-    const body = await read(withoutProgram(stored));
+    const plain = await read(withoutProgram(stored));
+    expect(spies.compose).not.toHaveBeenCalled();
+    expect(store.readScenarioRunAnalysisFactsFor).not.toHaveBeenCalled();
+    expect([plain.analysis_state, plain.analysis_result, plain.canonical_analysis_view]).toEqual([null, null, null]);
+    expect(plain.current_read).not.toHaveProperty('analysis_ready');
+    expect(plain.graph).not.toBeNull();
+    const program = await read(stored);
+    expect((program.current_read as Rec).analysis_ready).toMatchObject({ goal_node_id: 'more_loaves' });
+    expect(program.canonical_analysis_view).not.toBeNull();
+    try { (await import('../../orchestrator-v5/compose/analysis-state-v1.js')).composeAnalysisStateV1({} as never); } catch { /* the call is what counts */ }
     expect(spies.compose).toHaveBeenCalledTimes(1);
-    expect(store.readScenarioRunAnalysisFactsFor).toHaveBeenCalled();
-    expect(((body.analysis_state as Rec).run_state as Rec).kind).toBe('never_run');
   });
 });
 
@@ -150,25 +158,28 @@ describe('item 2: the legacy action ranker never runs on a program (reload and c
     const body = await read(stored, conversation, headers);
     expect(spies.rank).not.toHaveBeenCalled();
     expect(body).not.toHaveProperty('action_bar');
-    // The core turn ranks from its own read's body (`core-turn.ts` `coreActionBarOf(scenarioId, after.body)`): none either.
-    expect(coreActionBarOf(SCENARIO, body)).toBeUndefined();
-    expect(spies.rank).not.toHaveBeenCalled();
   });
 
-  it.each([['the default lane', {}], ['the core lane', { 'x-olumi-ai-mode': 'core' }]] as const)('CONTRAST: the SAME graph with no program is ranked on %s', async (_lane, headers) => {
+  it.each([['the default lane', {}], ['the core lane', { 'x-olumi-ai-mode': 'core' }]] as const)('F3 PR-C: the SAME graph with no program is not ranked on %s either (no read carries a bar); the probe counts a direct call', async (_lane, headers) => {
     const stored = await storedProgram();
-    await read(withoutProgram(stored), conversation, headers);
+    const body = await read(withoutProgram(stored), conversation, headers);
+    expect(spies.rank).not.toHaveBeenCalled();
+    expect(body).not.toHaveProperty('action_bar');
+    try { (await import('../../orchestrator-v5/agent-lane/actions/rank.js')).actionBarOf({} as never); } catch { /* the call is what counts */ }
     expect(spies.rank).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('item 4 (on the read): the Living Model reader never runs on a program', () => {
-  it('a program read never calls `livingViewOf`; the same graph with no program does', async () => {
+  it('a program read never calls `livingViewOf`, and (F3 PR-C) nor does a read of a graph with no program; the probe counts a direct call', async () => {
     const stored = await storedProgram();
     const program = await read(stored);
     expect(spies.living).not.toHaveBeenCalled();
     expect(program.withheld).toBeNull();
-    await read({ ...withoutProgram(stored), living_model: { not: 'a program' } });
+    const plain = await read({ ...withoutProgram(stored), living_model: { not: 'a program' } });
+    expect(spies.living).not.toHaveBeenCalled();
+    expect(plain.withheld).toBeNull();
+    (await import('../../orchestrator-v5/path-b/living-model/view.js')).livingViewOf(stored);
     expect(spies.living).toHaveBeenCalledTimes(1);
   });
 });

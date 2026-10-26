@@ -6,9 +6,7 @@ import { leaderLicenceFromState } from '../../compose/leader-licence.js';
 import { isDurableAnswerOffer, METHOD_PRESS_IDS, NEXT_STEP_CHIPS, offersNextSteps, withheldToolsOf, CHIP_TURN_WITHHELD_TOOLS } from '../../../routes/agent-v1-turn.js';
 import { nextStepOffersForTurn, nextStepsFromGuidance, SUGGEST_RISKS_CHIP } from '../next-steps-from-guidance.js';
 import { widenOffered, nextStepsWithWiden } from '../method-turn/widen-turn.js';
-import { answerOffersForReload } from '../answer-offers-reload.js';
 import { strengthenCardFor } from '../strengthen-press.js';
-import { RUN_EXPLANATION_PREFIX, runExplanationChip } from '../run-explanation.js';
 import type { TurnGuidanceInputs } from '../turn-context/guidance-wire.js';
 
 interface Capture {
@@ -102,21 +100,11 @@ it('4 W5: the witnessed pills, with the guidance press (Suggest options) leading
     [...servedNow].sort((a, b) => a.id.localeCompare(b.id)));
   assert.equal(offered.filter(chip => chip.id === 'agent-next-widen').length, 1);
 });
-it('5 every composed id survives durable filtering and same-Run reload; stale and waiting suppress', () => {
+it('5 every composed id survives durable filtering (the reload re-derivation retired with inventory F3, PR-C)', () => {
   assert.equal(isDurableAnswerOffer(SUGGEST_RISKS_CHIP), true);
   for (const capture of [draft, example, strengthen, nearTie]) {
     const offered = compose(capture).offered;
     for (const chip of offered) assert.equal(isDurableAnswerOffer(chip), true, chip.id);
-    const i = inputs(capture);
-    const scenarioId = 'captured-pill-reload';
-    const now = { graphHash: capture.graph_hash, analysisState: capture.analysis_state, analysisResult: i.state.analysisResult,
-      analysisReady: capture.analysis_ready, modelExists: true, outstandingProposalIds: new Set<string>() };
-    const bound = runExplanationChip(scenarioId, now);
-    assert.ok(bound, 'capture must bind to a current canonical Run');
-    const stored = { turn_id: 'captured-answer', run_key: bound.id.slice(RUN_EXPLANATION_PREFIX.length), suggested_actions: offered.filter(isDurableAnswerOffer) };
-    assert.deepEqual(answerOffersForReload(stored, scenarioId, now), offered);
-    assert.deepEqual(answerOffersForReload(stored, scenarioId, { ...now, analysisState: { run_state: { kind: 'stale' } } }), []);
-    assert.deepEqual(answerOffersForReload(stored, scenarioId, { ...now, outstandingProposalIds: new Set(['waiting-proposal']) }), []);
   }
 });
 it('6 lifecycle controls: proposal exactly approve + amend; Run exactly Explain this result', () => {

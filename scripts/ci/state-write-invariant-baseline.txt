@@ -13,7 +13,6 @@
 # build-turn-context.ts / apply-operations.ts), a behaviour-bearing refactor
 # that is out of scope for the PR that restores the gate.
 import	src/orchestrator/turn-fence-prehandler.ts	import { getSessionStore } from '../orchestrator-v5/session/index.js';	stop-fence prehandler resolves the store (added 30 Jul 2026)
-import	src/orchestrator-v5/agent-lane/answer-offers-reload.ts	import type { AnswerOffersRead } from '../session/store.js';	type-only import (added 6 Oct 2026, X4)
 import	src/orchestrator-v5/agent-lane/run-currentness.ts	import type { SessionStore } from '../session/store.js';	type-only import (added #2501, 2 Oct 2026)
 import	src/orchestrator-v5/handlers/clarify-v2-dispatch.ts	import { getSessionStore } from '../session/index.js';	clarify v2 dispatch resolves the store (added 17 Jul 2026, E0-B)
 import	src/orchestrator-v5/persist-graph-write.ts	import type { SessionAppendOutcome, SessionStore, SessionTurnWrite } from './session/store.js';	type-only import for the graph persistence floor (added #1151, 27 Aug 2026)

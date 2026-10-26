@@ -58,7 +58,7 @@ export function leaderLicence(o: LeaderLicenceInput): LeaderLicence {
  *
  * ⚠ TWO SPELLINGS OF ONE FLAG, BOTH PRODUCER-MINTED. `analysis_ready.analysis_admission.structurally_analysable` (the
  * canonical payload) and the `/graph` read's top-level projection `analysis_admission.admitted`
- * (`routes/analysis-admission-projection.ts`: `admitted: a.structurally_analysable`), which the Agent's follow-up state
+ * (`admitted: a.structurally_analysable`; its producer retired with inventory F3, PR-C), which the Agent's follow-up state
  * passes in (`withSavedRunCertainty`). The canonical spelling wins when present; neither present fails closed.
  */
 function claimStrengthMode(analysisReady: unknown): 'comparative_leader' | 'quantified_provisional' | null {

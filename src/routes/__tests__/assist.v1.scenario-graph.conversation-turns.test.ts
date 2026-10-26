@@ -174,47 +174,6 @@ const NEWEST_FIRST = [
 beforeEach(() => { readRecent.mockResolvedValue(NEWEST_FIRST); });
 
 describe("the conversation, when asked", () => {
-  it.each([true, false])("r12 reload: replaces a licensed estimate point with or without a scored-goal snapshot (%s), preserving risk bytes", async scored => {
-    const graph = { nodes: [
-      { id: "raise", kind: "option", label: "Raise to £59" },
-      { id: "keep", kind: "option", label: "Keep at £49" },
-      { id: "revenue", kind: "goal", label: "Revenue goal" },
-    ], edges: [] };
-    // Historical labels may come from the graph; a legacy licence binds its named option and exact value itself.
-    const result = { type: "analysis_result", computed_against_hash: "0123456789abcdef", ...(scored ? { input_snapshot: { goal_node_id: "revenue" } } : {}),
-      enrichment: { inference_warnings: [{
-      code: "GOAL_CHANCE_LICENSED", form: "each", option_ids: ["raise", "keep"],
-      pct_by_option: { raise: 67, keep: 30 }, olumi_estimate_link_count: 1,
-      target: { comparator: "at_least", value: 1000, unit: "£" },
-    }] } };
-    const state = { run_state: { kind: "complete_current", computed_at: "2026-09-30T08:00:30.000Z" }, leader_claim: { permitted: true } };
-    estimateAnalysis.value = {
-      analysis_state: state,
-      analysis_result: result, current_read: { analysis_ready: { status: "ready", may_run: true }, result },
-      analysis_constraint_verdict_state: null,
-    };
-    loadGraphAndBriefText.mockResolvedValue({ graph, briefText: "Improve revenue." });
-    // AMENDED (reload Run identity, 14 Oct): a reloaded answer is re-gated against the current Run only when the narration
-    // stored WITH it names that Run. This row narrates the current Run (its 67%), so it is stored with that Run's narration.
-    const { runExplanationKeyForRecord } = await import("../../orchestrator-v5/agent-lane/run-explanation.js");
-    const runKey = runExplanationKeyForRecord(SCENARIO, state, result);
-    expect(runKey).toMatch(/^[0-9a-f]{16}$/);
-    readCommittedTurn.mockResolvedValue({ run_narration: { status: "ready", run_key: runKey! } });
-    const bare = "‘Raise to £59’: about 67% in this model.";
-    const preserved = "The chance of supplier failure is 10%.\n\tSupplier delivery has about 67% probability.  Keep this spacing.";
-    const labelled = "‘Raise to £59’: about 67% chance of meeting your goal, in this model, using Olumi's estimates for 1 relationship (see Check estimates).";
-    readRecent.mockResolvedValue([row(1, "What was the recorded chance?", `${bare}\n${preserved}\n${labelled}`)]);
-    const app = await buildApp();
-    const response = await read(app, SCENARIO, { include_conversation_turns: true });
-    expect(response.statusCode).toBe(200);
-    const text = response.json().conversation_turns[0].assistant_message as string;
-    expect(text).not.toContain(bare);
-    expect(text).toContain(labelled);
-    expect(text.split(labelled).length - 1).toBe(1);
-    expect(text).toContain(preserved);
-    await app.close();
-  });
-
   it("RED: include_conversation_turns → the turns oldest first, text only, capped at 50, as stored", async () => {
     const app = await buildApp();
     const res = await read(app, SCENARIO, { include_conversation_turns: true });
@@ -387,12 +346,6 @@ describe("the reload keeps each answer's own Run's words", () => {
     user_message: r.user_message, assistant_message: r.assistant_message }));
   const stored = (id: string): string => (FX.rows as Record<string, any>[]).find(r => r.turn_id === id)!.assistant_message;
   const RUN1 = "a3e3933c-47c5-4eda-9779-a471dd170bc5", RUN2 = "8ac9acfa-e312-425b-850e-47f8d1540bf1", BUILT = "3db16588-be9b-4257-9157-323bf2797ddd";
-  const boundRun2 = async () => {
-    const run = structuredClone(FX.run2);
-    const { computeAnalysisAffectingGraphHash } = await import('../../orchestrator-v5/context/graph-hash.js');
-    run.analysis_result.computed_against_hash = computeAnalysisAffectingGraphHash(run.graph);
-    return run;
-  };
   const reloadOnRun2 = async (storedRows = rows, run = FX.run2) => {
     estimateAnalysis.value = { ...run, analysis_constraint_verdict_state: null };
     scenarioExists.mockResolvedValue(true);
@@ -437,53 +390,4 @@ describe("the reload keeps each answer's own Run's words", () => {
     }
   });
 
-  it("an answer stored WITH the current Run's narration is still re-gated against it: a wrong figure there is corrected", async () => {
-    const wrong = stored(RUN2).replace("about 64% chance of meeting your goal", "about 50% chance of meeting your goal");
-    expect(wrong).not.toBe(stored(RUN2));
-    const shown = await reloadOnRun2(rows.map(r => r.turn_id === RUN2 ? { ...r, assistant_message: wrong } : r));
-    expect(shown.get(RUN2)).toContain("about 64% chance of meeting your goal");
-    expect(shown.get(RUN2)).not.toContain("about 50%");
-    expect(shown.get(RUN1)).toBe(stored(RUN1));
-  });
-
-  it("a fabricated census on the current answer cannot borrow the recorded producer's count", async () => {
-    const wrong = stored(RUN2).replace("Olumi's estimates: 2,", "Olumi's estimates: 99,");
-    expect(wrong).not.toBe(stored(RUN2));
-    const shown = await reloadOnRun2(rows.map(r => r.turn_id === RUN2 ? { ...r, assistant_message: wrong } : r), await boundRun2());
-    expect(shown.get(RUN2)).not.toContain("Olumi's estimates: 99,");
-    expect(shown.get(RUN2)).toContain('about 64% chance of meeting your goal');
-    expect(shown.get(RUN1)).toBe(stored(RUN1));
-  });
-
-  it("reopen uses the producer census including an Olumi setting on a withheld option", async () => {
-    const run = await boundRun2();
-    const licence = run.analysis_result.enrichment.inference_warnings.find((w: any) => w.code === 'GOAL_CHANCE_LICENSED');
-    licence.option_ids.push('add_half_time_specialist');
-    licence.withheld_option_ids.push('add_half_time_specialist');
-    const { checkEstimatesOf } = await import('../../orchestrator-v5/agent-lane/actions/state.js');
-    const { runExplanationKeyForRecord } = await import('../../orchestrator-v5/agent-lane/run-explanation.js');
-    const census = checkEstimatesOf({ scenarioId: SID, graph: run.graph,
-      graphHash: run.analysis_result.computed_against_hash, analysisResult: run.analysis_result });
-    expect(census).toMatchObject({ count: 3 });
-    expect(census!.values.map(v => v.id)).toContain('add_half_time_specialist:additional_specialists');
-    expect(runExplanationKeyForRecord(SID, run.analysis_state, run.analysis_result)).not.toBeNull();
-    const ownText = stored(RUN2).replace("Olumi's estimates: 2,", "Olumi's estimates: 3,");
-    expect(ownText).not.toBe(stored(RUN2));
-    const withText = (text: string) => rows.map(r => r.turn_id === RUN2 ? { ...r, assistant_message: text } : r);
-    const shown = (await reloadOnRun2(withText(ownText), run)).get(RUN2);
-    expect(shown).toBe(ownText);
-    const wrong = ownText.replace("Olumi's estimates: 3,", "Olumi's estimates: 99,");
-    expect((await reloadOnRun2(withText(wrong), run)).get(RUN2)).not.toContain('estimates: 99');
-  });
-
-  it("reopen keeps the producer census when the licence omits the census fields", async () => {
-    const run = await boundRun2();
-    const licence = run.analysis_result.enrichment.inference_warnings.find((w: any) => w.code === 'GOAL_CHANCE_LICENSED');
-    delete licence.olumi_estimate_link_count;
-    const shown = await reloadOnRun2(rows, run);
-    expect(shown.get(RUN2)).toBe(stored(RUN2));
-    const wrong = stored(RUN2).replace("Olumi's estimates: 2,", "Olumi's estimates: 99,");
-    const poisoned = rows.map(r => r.turn_id === RUN2 ? { ...r, assistant_message: wrong } : r);
-    expect((await reloadOnRun2(poisoned, run)).get(RUN2)).not.toContain('estimates: 99');
-  });
 });

@@ -52,7 +52,6 @@ import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
 import { log } from "../utils/telemetry.js";
-import { readScenarioAnalysis } from "./scenario-graph-analysis-read.js";
 import { isProgramGraph } from "../orchestrator-v5/model-program-turn/program-store.js";
 
 /** Wire schema discriminators. Frozen — the UI lane builds against these. */
@@ -1029,19 +1028,13 @@ export default async function route(app: FastifyInstance) {
       }
 
       const replayed = restored.value.replayed;
-      // A restored model program has no legacy analysis state: its analysis is its own stored Run (inventory F3, PR-A).
-      const analysis = isProgramGraph(restored.value.graph) ? { analysis_state: null } : await readScenarioAnalysis({
-        scenarioId: ctx.scenarioId,
-        graph: restored.value.graph,
-        requestId,
-        analysisInvalidatedAt: restored.value.analysis_invalidated_at,
-      });
       const outcome = AtomicRestoreRouteResponseSchema.safeParse({
         schema: MODEL_VERSION_RESTORE_SCHEMA,
         scenario_id: ctx.scenarioId,
         restored: true,
         receipt: toModelVersionMutationReceiptV1(ctx.scenarioId, restored.value),
-        analysis_state: analysis.analysis_state,
+        // No legacy analysis state on a restore (inventory F3, PR-C): a model program's analysis is its own stored Run, read with it.
+        analysis_state: null,
         request_id: requestId,
       });
       if (!outcome.success) {

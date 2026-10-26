@@ -526,7 +526,7 @@ describe('S-D reload: proposal_fields on the opt-in graph read', () => {
     } finally { await app.close(); latest = []; }
   });
 
-  it('S-B × S-D (#2751 × #2743): the same opt-in reload carries BOTH proposal_fields and the action bar; the internal read neither', async () => {
+  it('S-D (#2743): the opt-in reload carries proposal_fields and (inventory F3, PR-C) no action bar; the internal read neither', async () => {
     const pin = computeAnalysisAffectingGraphHash(GRAPH_NO_LAYOUT)!;
     latest = [gmHold(pin)];
     readRecent.mockResolvedValue([]);
@@ -534,7 +534,7 @@ describe('S-D reload: proposal_fields on the opt-in graph read', () => {
     try {
       const body = (await read(app, SCENARIO, { include_conversation_turns: true })).json();
       expect(body.proposal_fields?.proposals.map((p: { proposal_id: string }) => p.proposal_id)).toEqual(['gmh_abcdefabcdef']);
-      expect(body.action_bar).toEqual(expect.objectContaining({ v: 1, revision: expect.objectContaining({ graph_hash: pin }) }));
+      expect(body).not.toHaveProperty('action_bar');
       const plain = (await read(app, SCENARIO, {})).json();
       expect(plain.proposal_fields).toBeUndefined();
       expect(plain.action_bar, 'the Agent’s own internal reads carry no bar').toBeUndefined();

@@ -5,11 +5,6 @@
  * The handler retains payload validation, persisted-graph fidelity and analysis projection. */
 
 import { toOutboundGraph } from '../orchestrator-v5/goal-target/outbound-graph.js';
-import { deriveTodayParts } from '../orchestrator-v5/agent-lane/goal-definition-sum.js';
-import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
-import { claimPermissionsFrom } from '../orchestrator-v5/agent-lane/first-analysis.js';
-
-
 import type { FastifyInstance } from "fastify";
 
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
@@ -19,47 +14,26 @@ import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-ident
 import { computeAnalysisAffectingGraphHash } from "../orchestrator-v5/context/graph-hash.js";
 import { proposalRecord, proposalFieldsWire, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalIssuingRow } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
-import { isProgramGraph, programReadOf, reopenProgram, unreadableWords } from "../orchestrator-v5/model-program-turn/program-store.js";
+import { programReadOf, reopenProgram, unreadableWords } from "../orchestrator-v5/model-program-turn/program-store.js";
 import { programReadinessOf } from "../orchestrator-v5/model-program-turn/program-readiness.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
 import { log } from "../utils/telemetry.js";
-// ROADMAP 2.1271 — the additive analysis payload. All composition lives in the
-// helper; this route contributes the security ladder and the graph it read.
-import { readScenarioAnalysis } from "./scenario-graph-analysis-read.js";
-import { withEstimateGoalPointsAtEgress } from "../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js";
-import { runExplanationKeyForRecord } from "../orchestrator-v5/agent-lane/run-explanation.js";
-import { projectAnalysisAdmission } from './analysis-admission-projection.js';
+import type { CurrentReadProjection } from "./current-read-projection.js";
 import { readExecutableHeldProposalOffers, type HeldProposalOfferRead } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import type { PendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { isAgentAnswerRow } from "../orchestrator-v5/session/conversation-as-seen.js";
-import type { AnswerOffersRead } from '../orchestrator-v5/session/store.js';
-import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
-import { answerOffersForReload } from '../orchestrator-v5/agent-lane/answer-offers-reload.js';
-import { executableWaitingProposal } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
-import { actionFactsOf } from '../orchestrator-v5/agent-lane/actions/state.js';
-import { actionBarOf, type ActionBarV1 } from '../orchestrator-v5/agent-lane/actions/rank.js';
-import { coreActionBarOf } from '../orchestrator-v5/core-route/action-bar.js';
-import { laneModeFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
-import { isLegacyGraph, livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
-import { getRuntimeEnv } from '../config/env-resolver.js';
-import { readEvaluatedIdentityNodeIds } from '../orchestrator-v5/agent-lane/admit-model.js';
-import type { GuidanceState } from '../orchestrator-v5/agent-lane/guidance/index.js';
-import { readChangedSinceRun } from '../orchestrator-v5/context/changed-since-run.js';
-import { deriveDecisionContextGraphHash } from '../orchestrator-v5/build-turn-context.js';
 
 /** Wire schema discriminator. Frozen — the UI lane builds against this. */
 export const SCENARIO_GRAPH_SCHEMA = "scenario_graph.v1" as const;
 
-type LegacyAnalysis = Awaited<ReturnType<typeof readScenarioAnalysis>>;
-type ProgramOrLegacyAnalysis = Omit<LegacyAnalysis, 'canonical_analysis_view'> & { readonly canonical_analysis_view?: LegacyAnalysis['canonical_analysis_view'] };
-
 /**
- * A MODEL PROGRAM's analysis block on the read (inventory F3, PR-C): no state and no result from the legacy facts, an empty
- * current read, and the program's own readiness. The same bytes the legacy reader's program answer gave, with none of it run.
+ * The read's analysis block (inventory F3, PR-C): no state and no result from legacy facts, an empty current read, and a model
+ * program's own readiness (`program-readiness.ts`). A graph that is not a program gets none. On a program, the same bytes the
+ * legacy reader's program answer gave, with none of it run.
  */
-function programAnalysisRead(graph: unknown): ProgramOrLegacyAnalysis {
+function programAnalysisRead(graph: unknown): { readonly analysis_state: null; readonly analysis_result: null; readonly current_read: CurrentReadProjection } {
   const ready = programReadinessOf(graph);
   return {
     analysis_state: null,
@@ -126,13 +100,12 @@ export const CONVERSATION_TURNS_CAP = 50;
  *  claim row and its sub-turns). */
 export const CONVERSATION_ROWS_READ = CONVERSATION_TURNS_CAP * 4;
 
-/** One restored turn: stored text, with the same current-Run estimate attribution gate as live replies. */
+/** One restored turn: its stored text, as it was sent. */
 export interface ConversationTurnRead {
   readonly turn_id: string;
   readonly created_at: string;
   readonly user_message: string | null;
   readonly assistant_message: string | null;
-  readonly suggested_actions?: readonly SuggestedAction[];
 }
 
 function wantsConversationTurns(body: unknown): boolean {
@@ -166,65 +139,26 @@ export { AGENT_ANSWER_REQUEST_HASH_PREFIX } from "../orchestrator-v5/session/con
  * `null` and the graph read stands.
  */
 async function readConversationTurns(
-  store: { readRecent(scenarioId: string, limit?: number): Promise<readonly (ProposalIssuingRow & { readonly created_at: string })[]>; readCommittedTurn?: (scenarioId: string, turnId: string) => Promise<{ pending_actions?: readonly unknown[]; run_narration?: { readonly run_key: string } | null } | null>; readLatestAnswerOffers?: (scenarioId: string) => Promise<AnswerOffersRead | null> },
+  store: { readRecent(scenarioId: string, limit?: number): Promise<readonly (ProposalIssuingRow & { readonly created_at: string })[]>; readCommittedTurn?: (scenarioId: string, turnId: string) => Promise<{ pending_actions?: readonly unknown[]; run_narration?: { readonly run_key: string } | null } | null> },
   scenarioId: string,
   requestId: string,
-  authority: { userId: string | null; graphHash: string | undefined; latest: readonly PendingAction[];
-    analysisState: unknown; analysisResult: unknown; analysisReady: unknown; graph: unknown; modelExists: boolean;
-    /** A model program: its stored words are restored as they were sent, and no legacy answer offer is re-derived (inventory F3). */
-    program: boolean },
+  authority: { userId: string | null; graphHash: string | undefined; latest: readonly PendingAction[]; graph: unknown; modelExists: boolean },
 ): Promise<{ turns: ConversationTurnRead[]; heldOffers: HeldProposalOfferRead[]; proposalRows: readonly ProposalIssuingRow[] } | null> {
   try {
     const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
     const answers = rows.filter(isAgentAnswerRow)
       .filter(r => typeof r.user_message === "string" || typeof r.assistant_message === "string").slice(0, CONVERSATION_TURNS_CAP);
-    const current = (authority.analysisState as { run_state?: { kind?: unknown } } | null)?.run_state?.kind === "complete_current";
-    const userAuthoredTexts = answers.flatMap(answer => typeof answer.user_message === 'string' ? [answer.user_message] : []);
-    // ⛔ AN EARLIER ANSWER NEVER ACQUIRES A NEWER RUN'S WORDS (capacity witness, staging 351eeda0, 14 Oct: an answer that
-    // said "about 37%" reloaded as the second Run's "about 64%"). The stored text is the post-wire text the user saw, already
-    // gated for its own Run when it was written. It is re-gated against the CURRENT Run only when the narration stored WITH
-    // it names that Run (`run_narration`, migration 20261013230000); an older or unknown Run keeps its words byte for byte.
-    const currentRunKey = current ? runExplanationKeyForRecord(scenarioId, authority.analysisState, authority.analysisResult) : null;
-    const egress = { analysisResult: authority.analysisResult, graph: authority.graph, current, userAuthoredTexts };
-    // The ONE estimate point classifier on this read (one call site); `current` only where the text's own Run is current.
-    const atEgress = (text: string, ownRunIsCurrent: boolean): string => {
-      // A program's words were said from its own stored Run; the legacy goal-chance gate never re-reads them.
-      if (authority.program) return text;
-      return withEstimateGoalPointsAtEgress({ assistant_text: text }, { ...egress, current: current && ownRunIsCurrent }).assistant_text;
-    };
-    const turns: ConversationTurnRead[] = (await Promise.all([...answers].reverse()
-      .map(async (r) => {
-        // Only a row the gate would change reads its own Run (one read each; none in the usual case). Every row still
-        // crosses the gate; for any other Run it is not current, and the gate returns the stored text unchanged.
-        const ownRunIsCurrent = typeof r.assistant_message === "string" && currentRunKey !== null
-          && typeof store.readCommittedTurn === "function"
-          && atEgress(r.assistant_message, true) !== r.assistant_message
-          && (await store.readCommittedTurn(scenarioId, r.turn_id).catch(() => null))?.run_narration?.run_key === currentRunKey;
-        return {
-          turn_id: r.turn_id,
-          created_at: r.created_at,
-          user_message: typeof r.user_message === "string" ? r.user_message : null,
-          assistant_message: typeof r.assistant_message === "string"
-            ? atEgress(r.assistant_message, ownRunIsCurrent) : null,
-        };
-      })))
+    // The stored words are restored as they were sent: a program's words were said from its own stored Run (inventory F3).
+    const turns: ConversationTurnRead[] = [...answers].reverse()
+      .map((r) => ({
+        turn_id: r.turn_id,
+        created_at: r.created_at,
+        user_message: typeof r.user_message === "string" ? r.user_message : null,
+        assistant_message: typeof r.assistant_message === "string" ? r.assistant_message : null,
+      }))
       .filter((t) => t.user_message !== null || t.assistant_message !== null)
       .slice(-CONVERSATION_TURNS_CAP); // the cap counts AFTER the drop (CURRENT-READ-v1 row 5)
     const heldOffers = await readExecutableHeldProposalOffers({ scenarioId, ...authority, rows: answers, store });
-    if (!authority.program && typeof store.readLatestAnswerOffers === 'function') {
-      // This optional leg must never change the graph, held cards or text if it fails.
-      try {
-        const stored = await store.readLatestAnswerOffers(scenarioId);
-        const last = turns[turns.length - 1];
-        if (stored !== null && last !== undefined && last.turn_id === stored.turn_id) {
-          const outstandingProposalIds = new Set(heldOffers.map(offer => offer.proposal_id));
-          const waiting = executableWaitingProposal(scenarioId, authority.userId, authority.graphHash, authority.graph);
-          if (waiting !== undefined) outstandingProposalIds.add(waiting);
-          const actions = answerOffersForReload(stored, scenarioId, { ...authority, latestPending: authority.latest, outstandingProposalIds });
-          if (actions.length > 0) turns[turns.length - 1] = { ...last, suggested_actions: actions };
-        }
-      } catch { /* Offers unavailable: retain the existing response. */ }
-    }
     return { turns, heldOffers, proposalRows: rows };
   } catch (err) {
     log.warn(
@@ -399,12 +333,10 @@ export default async function route(app: FastifyInstance) {
       // ── 4. The read ─────────────────────────────────────────────────────
       let graph: unknown;
       let briefText: string | null;
-      let revision: number | undefined;
       try {
         const loaded = snapshot ?? await store.loadGraphAndBriefText(scenarioId);
         graph = loaded.graph;
         briefText = loaded.briefText;
-        revision = loaded.revision;
       } catch (err) {
         log.warn(
           {
@@ -419,63 +351,25 @@ export default async function route(app: FastifyInstance) {
       }
 
       if (typeof store.readMostRecentPendingActions !== 'function') return unavailable();
-      // A MODEL PROGRAM (a readable one or not): none of the legacy producers below runs on it (inventory F3, PR-A). Its held
-      // cards still need the pending read; it holds no goal-scope issue (no program code makes one).
-      const programGraph = graph !== null && graph !== undefined && isProgramGraph(graph);
-      let scopeInput: ReturnType<typeof goalScopeClaimInput>;
+      // The held cards need the pending read (inventory F3: no goal-scope reader runs on the read; no program code makes an issue).
       let latestPending: readonly PendingAction[];
-      try {
-        latestPending = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' });
-        scopeInput = programGraph ? { status: 'clear', issues: [] } : goalScopeClaimInput(latestPending, graph);
-      } catch { return unavailable(); }
-      const scopeIssues = scopeInput.issues;
+      try { latestPending = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }); } catch { return unavailable(); }
 
       // An EMPTY graph is a valid answer, not an error: every scenario starts
       // there, and 404-ing it would make "no graph yet" indistinguishable from
       // "not yours" — collapsing the very distinction the UI needs.
       const graphPresent = graph !== null && graph !== undefined;
 
-      // ── 5. THE ADDITIVE ANALYSIS PAYLOAD (ROADMAP 2.1271) ───────────────
+      // ── 5. THE ANALYSIS: THE MODEL PROGRAM'S OWN (inventory F3, PR-C) ──────
       //
-      // ADDITIVE BY CONSTRUCTION. Two new keys, both nullable; not one existing
-      // key is rewritten, reordered or conditioned on them. A client that has
-      // never heard of them sees a byte-identical body — asserted against a
-      // capture taken on the PR BASE, not against a fixture this lane wrote
-      // (`__tests__/scenario-graph-analysis-additive.test.ts`).
-      //
-      // WHY IT BELONGS ON THIS ROUTE RATHER THAN A NEW ONE. The security ladder
-      // above — identity → UUID → existence-before-ownership → ownership
-      // pre-flight → per-IP limiter — is 120 lines of hard-won reasoning, and a
-      // dedicated `/assist/v1/scenarios/:id/analysis` would need every line of
-      // it a second time. Same route, same ownership check, same limiter, same
-      // scenario's own data: the caller entitled to read this graph is exactly
-      // the caller entitled to read the analysis OF that graph.
-      //
-      // It reads the SAME graph object this response returns, so the freshness
-      // verdict cannot describe a different model than the one being delivered.
-      // Never throws; on any failure both keys are `null` and the graph stands.
-      //
-      // A MODEL PROGRAM's analysis is its own (inventory F3, PR-C): its newest stored Run is served below from the program
-      // (`canonical_analysis_view`) and its readiness is `program-readiness.ts`'s, so the legacy analysis reader never runs on one.
-      const analysis: ProgramOrLegacyAnalysis = programGraph ? programAnalysisRead(graph) : await readScenarioAnalysis({
-        scenarioId,
-        graph: graphPresent ? graph : null,
-        requestId,
-        goalScopeClaimInput: scopeInput,
-        revision,
-        ...(snapshot !== undefined && snapshot !== null ? { analysisInvalidatedAt: snapshot.analysisInvalidatedAt } : {}),
-      });
-      // The selected block already has one public carrier, `analysis_result`.
-      // The current-read sidecar exposes its bounded identity and typed figures
-      // without a second copy of raw enrichment/probability fields.
+      // A model program's analysis is its newest STORED Run, never a recompute (`program-store.ts`), and its readiness is its
+      // own (`program-readiness.ts`). No legacy analysis reader runs on this read: a scenario saved before the alpha (a Living
+      // Model, or a graph with neither) is served its graph, identity and hashes, with no analysis.
+      const analysis = programAnalysisRead(graphPresent ? graph : null);
       const { result: _selectedBlock, ...currentReadWire } = analysis.current_read;
-      // A MODEL PROGRAM (alpha): its analysis is its newest STORED Run, never a recompute (its readiness is the program's own,
-      // `program-readiness.ts`). A claimed program that cannot be read shows NO analysis (never the legacy reader's) and says why.
+      // A claimed program that cannot be read shows NO analysis and says why.
       const programRead = graphPresent ? programReadOf(graph) : { kind: 'none' as const };
       const program = programRead.kind === 'program' ? reopenProgram(graph) : undefined;
-      // Compatibility projection reads the common canonical claim, never the
-      // issue count. The pending actions remain explanatory data only.
-      const scopePermissions = programGraph ? undefined : claimPermissionsFrom(analysis.analysis_state, undefined);
 
       // ── 6. THE CONVERSATION, OPT-IN (DL lease #75 5907582591; Canvas 5907308286) ──
       //
@@ -503,49 +397,13 @@ export default async function route(app: FastifyInstance) {
           // EXACTLY the graph_hash the Agent turn reads from this route, not identity.v1's different projection.
           graphHash: (graphPresent ? computeAnalysisAffectingGraphHash(graph as GraphStateIngress) : null) ?? undefined,
           latest: latestPending,
-          analysisState: analysis.analysis_state,
-          analysisResult: analysis.analysis_result,
-          analysisReady: analysis.current_read.analysis_ready,
           graph: graphPresent ? graph : null,
           modelExists: graphPresent && typeof graph === 'object'
             && ['nodes', 'edges'].some(key => Array.isArray((graph as Record<string, unknown>)[key])
               && ((graph as Record<string, unknown>)[key] as unknown[]).length > 0),
-          program: programGraph,
         }) : undefined;
       const conversationTurns = conversationRead === undefined ? undefined : conversationRead?.turns ?? null;
       const heldOffers = conversationRead?.heldOffers;
-      /**
-       * ⭐ S-B: THE ACTION BAR ON RELOAD (github-a2 contract amendment 9: reload by re-derivation). The same pure function the
-       * live turn uses (`actionBarOf(actionFactsOf(…))`), over this read's own fields and the persisted guidance history, so
-       * an unchanged state reloads the bar the last answer carried, byte for byte, and a changed state reloads the bar it
-       * now earns. Only on the reload that restores the conversation (a viewer member's read carries none). A failed
-       * history read ranks with no cooldown; a failed ranking carries no bar and never costs the read.
-       */
-      let actionBar: ActionBarV1 | undefined;
-      // PATH-B core ranks its own bar (`core-route/action-bar.ts`) from the fields this read sends, as each core turn does from
-      // the body of its own read: the graph, its hash, the state, the current read, the result and the option participation.
-      // A program has no bar (spec §3: none of these actions is a program contract), so neither ranker runs on one.
-      const rankBar = conversationRequested && programRead.kind === 'none';
-      // The lane shapes a legacy result and ranks its bar; a program has neither (its analysis_result is null), so it is never read.
-      const coreLane = !programGraph && laneModeFor('full', req.headers['x-olumi-ai-mode'], getRuntimeEnv(), graphPresent && isLegacyGraph(graph)) === 'core';
-      if (rankBar && coreLane) {
-        actionBar = coreActionBarOf(scenarioId, { graph: graphPresent ? graph : null,
-          graph_hash: graphPresent ? computeAnalysisAffectingGraphHash(graph as GraphStateIngress) : null,
-          analysis_state: analysis.analysis_state, current_read: currentReadWire, analysis_result: analysis.analysis_result,
-          analysis_option_participation: analysis.analysis_option_participation });
-      } else if (rankBar) {
-        let guidance: GuidanceState | null = null;
-        try { guidance = typeof store.readGuidanceHistory === 'function' ? await store.readGuidanceHistory(scenarioId) : null; } catch { guidance = null; }
-        try {
-          const evaluated = readEvaluatedIdentityNodeIds(analysis.analysis_identity_evaluated_node_ids);
-          actionBar = actionBarOf(actionFactsOf({
-            scenarioId, graph: graphPresent ? graph : null,
-            ...(graphPresent ? { graphHash: computeAnalysisAffectingGraphHash(graph as GraphStateIngress) ?? undefined } : {}),
-            analysisState: analysis.analysis_state, analysisReady: analysis.current_read.analysis_ready, analysisResult: analysis.analysis_result,
-            optionParticipation: analysis.analysis_option_participation, ...(evaluated !== undefined ? { identityEvaluated: evaluated } : {}), guidance, pending: latestPending,
-          }));
-        } catch { actionBar = undefined; }
-      }
       /**
        * ⭐ S-D RELOAD (lane EDIT-PANEL; design §4): the proposals still held, with what each assumes and its exact card,
        * so a reload keeps them editable and approvable. The SAME projection the Agent turn sends (`_proposal_fields`),
@@ -562,37 +420,19 @@ export default async function route(app: FastifyInstance) {
           computeAnalysisAffectingGraphHash(graph as GraphStateIngress) ?? undefined)
         : undefined;
 
-      /**
-       * ⭐ P48 (audit #27): what changed in the model since the last Run, by id, so the canvas marks it until the next
-       * Run and a reload keeps the marks. Recomputed from the durable receipts (`context/changed-since-run.ts`). Opt-in
-       * with the conversation, so the Agent's own internal reads stay byte-identical; absent = could not answer.
-       */
-      // A program's Runs are its own and keep no item marks (a Run stores only its digest), so this never runs on one.
-      const changedSinceRun = conversationRequested && graphPresent && !programGraph ? await readChangedSinceRun(store, scenarioId,
-        // The Run's own projection (CS-AN-2): the raw-bytes hash never equals `graph_hash_at_run` on a promoted graph.
-        deriveDecisionContextGraphHash(graph)) : undefined;
-
-      const todayPartNotes = graphPresent && !programGraph ? deriveTodayParts(graph).notes : [];
       // identity.v1, from the single normaliser authority. Null when the graph is absent or identity-empty — there is no
       // identity to anchor to, and a hash of nothing would be a false anchor.
       const identity = graphPresent ? computeGraphIdentityHash(graph as GraphStateIngress) : null;
-      // Why an item is not in the calculation (canvas-lm, DL 22 Oct): the mapper's own holds on a core scenario, from the same
-      // mapping every write and Run uses (`livingViewOf`). Null for an absent or legacy graph, a program (the Living Model reader
-      // never runs on one), or a living model that does not parse.
-      const living = graphPresent && programRead.kind === 'none' ? livingViewOf(graph) : undefined;
       return reply.code(200).send({
         schema: SCENARIO_GRAPH_SCHEMA,
         ...(heldOffers !== undefined && heldOffers.length > 0 ? { held_proposal_offers: heldOffers } : {}),
         ...(proposalFields !== undefined ? { proposal_fields: proposalFields } : {}),
-        ...(changedSinceRun !== undefined ? { changed_since_run: changedSinceRun } : {}),
         scenario_id: scenarioId,
         graph: graphPresent ? toOutboundGraph(graph) : null,
         // The same identity.v1 value, under the name the UI's read-after-write check reads (DGAI #2911): what the core turn
         // serves as `model.scenario_revision` (DL 22 Oct: one function, one value).
         content_hash: identity?.value ?? null,
-        withheld: living !== undefined && 'withheld' in living ? living.withheld : null,
-        // STEP 8: the stored bytes stay as stored; an invalid saved today part is said, with the value every Run uses instead.
-        ...(todayPartNotes.length > 0 ? { today_part_notes: todayPartNotes } : {}),
+        withheld: null,
         graph_present: graphPresent,
         brief_text: briefText,
         scenario_created_at: snapshot?.createdAt ?? null,
@@ -668,60 +508,12 @@ export default async function route(app: FastifyInstance) {
         // told it about (the H4 seam — the two authorities answer different
         // questions).
         analysis_state: analysis.analysis_state,
-        ...(scopeIssues.length > 0 ? { goal_scope_reconciliation: scopeIssues } : {}),
-        ...(scopePermissions?.total_goal_claims_allowed === false ? {
-          goal_scope_claim_permissions: { total_goal_claims_allowed: false, exploratory_work_allowed: true },
-        } : {}),
-        analysis_result: coreLane && analysis.analysis_result?.type === 'analysis_result'
-          ? { ...analysis.analysis_result, summary: '' } : analysis.analysis_result,
+        analysis_result: analysis.analysis_result,
         // A program scenario's analysis is its newest STORED Run, exactly as computed (`program-store.ts`); never recomputed here.
-        canonical_analysis_view: programRead.kind === 'none' ? analysis.canonical_analysis_view : program?.view ?? null,
+        canonical_analysis_view: program?.view ?? null,
         ...(programRead.kind === 'unreadable' ? { model_program: { readable: false, message: unreadableWords(programRead.reason) } } : {}),
-        ...(analysis.run_recording === undefined ? {} : { run_recording: analysis.run_recording }),
-        // CURRENT-READ-v1: one selected Run's canonical freshness and typed
-        // figures. The raw graph_hash above remains the edit/CAS token; the
-        // projection's hashes are the analysis selector's separate domain.
+        // CURRENT-READ-v1: the raw graph_hash above remains the edit/CAS token.
         current_read: currentReadWire,
-        // The selected fact's own constraint verdict state — present exactly when
-        // `analysis_result` is (same fact, same gate). See `ScenarioAnalysisRead`.
-        ...(analysis.analysis_constraint_verdict_state !== undefined
-          ? { analysis_constraint_verdict_state: analysis.analysis_constraint_verdict_state }
-          : {}),
-        // The selected fact's leader-limit risks — same fact, same gates as the state above.
-        ...(analysis.analysis_leader_limit_risks !== undefined
-          ? { analysis_leader_limit_risks: analysis.analysis_leader_limit_risks }
-          : {}),
-        // B5: the selected fact's per-limit rows — same fact, same gates; absent when it attests none.
-        ...(analysis.analysis_limit_verdicts !== undefined
-          ? { analysis_limit_verdicts: analysis.analysis_limit_verdicts }
-          : {}),
-        // 0.63.0: the selected fact's own goal certainty — same fact, same gates; absent = not recorded.
-        ...(analysis.analysis_goal_certainty !== undefined
-          ? { analysis_goal_certainty: analysis.analysis_goal_certainty }
-          : {}),
-        // 52f8cd: the Olumi options the selected Run left out of the comparison, and why — same fact, same gates.
-        ...(analysis.analysis_option_participation !== undefined
-          ? { analysis_option_participation: analysis.analysis_option_participation }
-          : {}),
-        ...(analysis.analysis_run_option_set !== undefined
-          ? { analysis_run_option_set: analysis.analysis_run_option_set }
-          : {}),
-        // §9: the selected Run's own run_id, input_snapshot and row occurrence — same fact, same gates.
-        ...(analysis.analysis_run_evidence !== undefined
-          ? { analysis_run_evidence: analysis.analysis_run_evidence }
-          : {}),
-        // C46 × R3-4: the carriers the selected fact's engine evaluated — same fact, same gates; absent when it records none.
-        ...(analysis.analysis_identity_evaluated_node_ids !== undefined
-          ? { analysis_identity_evaluated_node_ids: analysis.analysis_identity_evaluated_node_ids }
-          : {}),
-        // Item 2: what the selected Run implies for the quantity nearest an aim with no target — same fact, same gates.
-        ...(analysis.analysis_implied_quantity !== undefined
-          ? { analysis_implied_quantity: analysis.analysis_implied_quantity }
-          : {}),
-        // R3-9 (#2248): the last successful Run's use of each declared identity — the link writer's own input, not gated.
-        ...(analysis.analysis_identity_run_use !== undefined
-          ? { analysis_identity_run_use: analysis.analysis_identity_run_use }
-          : {}),
         /**
          * ⭐ MAY A RUN BE ADMITTED RIGHT NOW — the question `analysis_state`
          * does not answer. It reports whether a FACT HAS LANDED for this graph;
@@ -732,9 +524,8 @@ export default async function route(app: FastifyInstance) {
          * projection, because this route ships no enforceable prose. `null` when
          * there is no graph to judge: "this leg did not answer", never a state.
          */
-        analysis_admission: programGraph ? null : projectAnalysisAdmission(graph, graphPresent),
+        analysis_admission: null,
         ...(conversationTurns !== undefined ? { conversation_turns: conversationTurns } : {}),
-        ...(actionBar !== undefined ? { action_bar: actionBar } : {}),
         request_id: requestId,
       });
     },
