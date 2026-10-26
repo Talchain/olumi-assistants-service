@@ -1964,8 +1964,8 @@ describe('the model-program turn on the real core route', () => {
       expect(face.split(FEES).length - 1).toBe(1);
       expect(face).toContain(`, in this model, if ${FEES}: in every simulated draw`);
       expect((v.goal_chance.targets.per_target as Json[]).map((t) => t.words)).toEqual([
-        `‘members’ being at least 340 member at 3 months from now, in this model, if ${FEES}`,
-        `‘members’ being at least 320 member at 3 months from now, in this model, if ${FEES}`]);
+        `‘members’ being at least 340 member at 3 months from the start of this model, in this model, if ${FEES}`,
+        `‘members’ being at least 320 member at 3 months from the start of this model, in this model, if ${FEES}`]);
     });
 
     const HALL_WORDS = `${OWN} The council must let us use the hall. And keep at least 320 members.`;
@@ -1977,7 +1977,7 @@ describe('the model-program turn on the real core route', () => {
     };
     const optionFace = (v: Json, id: string) => (v.options as Json[]).find((o) => o.option_id === id)!.cell.face as string;
     const HALL_MET = 'if your condition ‘The council must let us use the hall’ is met';
-    const REACH = '‘members’ being at least 340 member at 3 months from now, in this model,';
+    const REACH = '‘members’ being at least 340 member at 3 months from the start of this model, in this model,';
 
     it('Codex #3769: a prerequisite on a limit is named in every option\'s chance (each is within the limit), never in the goal\'s own line', () => {
       const m = approved(allTheirs());
@@ -2010,8 +2010,8 @@ describe('the model-program turn on the real core route', () => {
       m.conditions.push({ ...hall, concerns: ['keep_320'] });
       const v = evaluateCanonical(m, { sourceText: `${OWN} The council must let us use the hall. And keep at least 320 members.`, seed: 7 }).view as Json;
       const words = (id: string) => (v.goal_chance.targets.per_target as Json[]).find((t) => t.constraint_id === id)!.words as string;
-      expect(words('keep_320')).toBe('‘members’ being at least 320 member at 3 months from now, in this model, if your condition ‘The council must let us use the hall’ is met');
-      expect(words('reach_340')).toBe('‘members’ being at least 340 member at 3 months from now, in this model, on your figures');
+      expect(words('keep_320')).toBe('‘members’ being at least 320 member at 3 months from the start of this model, in this model, if your condition ‘The council must let us use the hall’ is met');
+      expect(words('reach_340')).toBe('‘members’ being at least 340 member at 3 months from the start of this model, in this model, on your figures');
       expect(((v.options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string)).toContain(', in this model, if your condition ‘The council must let us use the hall’ is met: in every simulated draw');
     });
   });
@@ -2025,9 +2025,9 @@ describe('the model-program turn on the real core route', () => {
     // The compiler lists no deadline for it (a static level), so nothing on the result says one is missing.
     expect(evaluateCanonical(bakery(), { sourceText: BRIEF, seed: 7 }).compiled.blockers.filter((b) => b.code === 'deadline')).toEqual([]);
     expect(JSON.stringify(((evaluateCanonical(bakery(), { sourceText: BRIEF, seed: 7 }).view as Json).goal_chance as Json).notes)).not.toContain('is there one?');
-    expect(noDeadline).not.toMatch(/from now/);
+    expect(noDeadline).not.toMatch(/from now|from the start of this model/);
     // Contrast: the club's aim states three months, and says it.
-    expect(goalWords(club(), CLUB_BRIEF)).toContain('at 3 months from now');
+    expect(goalWords(club(), CLUB_BRIEF)).toContain('at 3 months from the start of this model');
     // "Grow sales by 10%": the target is said as 10%, never as the compiler's 0.1.
     const rel = bakery();
     rel.quantities.push(q('growth', '%', { value: 10, quote: 'grow sales by 10%' }));
