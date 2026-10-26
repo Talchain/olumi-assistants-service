@@ -44,7 +44,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(b).not.toContain(NOTE_ON_ITEM_INSTRUCTION);
     expect(b.endsWith(CORE_REPLY_RULES)).toBe(true);
     // 23 Oct (ALPHA): the model-program prompt replaces arm B's assembled reference (055841368f…, 29,512 characters sent).
-    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('5192e50e1cfce72ee67a65c6802fb14c4eab302955988daddb0088e45eeb2588'); // 25 Oct: alpha G10, no threshold sentences. 25 Oct: alpha G5, no note_on_item sentence on the program path. 24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
+    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('d9836e169d977115ce426a2471307d416264a17479ee14eace51c59ea9cb13ab'); // 26 Oct: integrated review words#7, the "on Olumi’s reading of …" basis. 25 Oct: alpha G10, no threshold sentences. 25 Oct: alpha G5, no note_on_item sentence on the program path. 24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
     // Candidate-3 witness kept (21 Oct): WHEN to build. Text only, not behaviour.
     expect(b).toContain('draft the first model from their brief in that same turn, even when figures are missing');
   });
@@ -103,7 +103,8 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'If a question asks for something their words already state or answer, do not ask it: put it in with the edit tools, quoting them, and say so.',
       'Ask at most three questions in a reply, each once, the blocking ones first;',
       // 2. a chance as the code words it, what it rests on, the limit lines, and ONE next step
-      'report each option\u2019s chance as the result words it: the figure, the goal, target and horizon it answers, and what it rests on, "on your figures" or "if" with Olumi\'s assumptions (name them briefly; never drop the "if" or turn it into a forecast).',
+      // Integrated review 26 Oct (words#7, adopted): the third basis #3769 serves, quoted as the result words it, never shortened.
+      'report each option\u2019s chance as the result words it: the figure, the goal, target and horizon it answers, and what it rests on, "on your figures", "on Olumi\u2019s reading of \u2026" or "if" with Olumi\'s assumptions (name them briefly; quote "on Olumi\u2019s reading of \u2026" as the result words it, with any "(not yet confirmed)", never shortened to "on your figures"; never drop the "if" or turn it into a forecast).',
       'Never work out, round, combine or rank a chance yourself.',
       'Then give ONE next step: replace an Olumi estimate the chance rests on with their own figure, or test the assumption the result rests on. Call an input the one that matters most only when the result measured that.',
       // 3. edits in chat, never a figure invented for them; a loose figure is theirs with Olumi's labelled range
@@ -152,7 +153,11 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     for (const field of ['its revision; model, the canonical model exactly as authored (', 'earlier_versions, how many earlier versions it has;',
       // S1 (A4): what the Run waits on is typed; the AI asks in its own words, and each code says what the person supplies.
       'blockers, what the stored Run waits on, in the model\'s order, each with its id, code and scope (what it holds up). No question is written for you:',
-      'asked, the figure', 'range_kind, whether the ends of their range are firm or a rough estimate;', 'recount, the count again',
+      'asked, the figure', 'range_kind, whether the ends of their range are firm or a rough estimate;',
+      // Integrated review 26 Oct (words#4, adopted): a recount is a figure outside Olumi's floor or ceiling, never "given below 0";
+      // its bound is the blocker's reason, and a Run stored before reasons gives none (Codex B1).
+      'recount, their figure outside Olumi\'s reading of what it can be (a floor or ceiling): ask again, quoting the blocker\'s reason, which names their figure and Olumi\'s bound, so they can correct either;',
+      'a blocker with no reason (a Run stored before it) gives no bound: say only that their figure is outside what Olumi reads it can be, and name none;',
       'unknown, a figure no one can give or responsibly estimate yet: say why (its basis) and what evidence, question or activity would size it; never ask them for the number;',
       'measure, how the aim or guardrail is measured;', 'deadline, by when;', 'no_goal, the result they want.',
       'and run, the stored Run, with current and engine_current.']) expect(d.read_canonical_context, field).toContain(field);

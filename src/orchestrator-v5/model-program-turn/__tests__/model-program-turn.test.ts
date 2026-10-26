@@ -844,20 +844,6 @@ describe('the model-program turn on the real core route', () => {
     expect(u.model.quantities.find((y: Json) => y.id === 'promo_start')).toMatchObject({ floor: null });
   });
 
-  it('words#4: a recount carries the bound the person\'s figure contradicts, in their unit, into what the agent reads', async () => {
-    // Olumi reads base sales as never above 250 a week; the person says 300.
-    const m = bakery();
-    setQ(m, 'base_sales', { ceiling: 250 });
-    replies = [JSON.stringify(m)];
-    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
-    const read = await readProgramContext({ dispatch, proposals: new ProposalStore() }, { scenario_id: SCENARIO, authenticated_user_id: null }) as Json;
-    const blockers = read.data.blockers as Json[];
-    expect(blockers.filter((b) => b.code === 'recount')).toEqual([{ id: 'base_sales', code: 'recount', scope: ['more_loaves'],
-      reason: '"base sales" is given as 300 loaf/week, but Olumi reads it as never above 250 loaf/week' }]);
-    // Contrast: an asked figure's blocker carries no reason of the code's (the AI asks in its own words).
-    expect(blockers.find((b) => b.id === 'oven_price')).toEqual({ id: 'oven_price', code: 'asked', scope: ['within_budget'] });
-  });
-
   it('issue 40: a first draft with an Olumi link of unknown size and a stated direction shows its reading card, the direction said as an arrow and words on what it moves', async () => {
     const m = withOlumiLinks(bakery());
     replies = [JSON.stringify(m)];
@@ -1976,6 +1962,26 @@ describe('the model-program turn on the real core route', () => {
     expect(persisted!.living_model.person_words.at(-1)).toBe(words);
     const blockers = (persisted!.living_model.runs.at(-1).result.compile as Json).blockers as Json[];
     expect(blockers.some((x) => x.id === 'extra_per_oven')).toBe(false);
+  });
+
+  it('words#4 + Codex B1: a recount the agent reads carries the compiler\'s reason, naming their figure and Olumi\'s bound; an asked figure carries none; a Run stored before reasons is read as stored, no bound filled in', async () => {
+    // Olumi's reading of what the bakery sells today (synthetic): never above 250 loaves a week, so their 300 is outside it.
+    const m = bakery();
+    m.quantities = m.quantities.map((x) => (x.id === 'base_sales' ? { ...x, ceiling: 250 } : x));
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null };
+    const read = await readProgramContext(deps, ctx) as Json;
+    expect(read.data.blockers).toEqual([
+      { id: 'base_sales', code: 'recount', scope: ['more_loaves'], reason: '"base sales" is given as 300 loaf/week, but Olumi reads it as never above 250 loaf/week' },
+      // Contrast: an asked figure's blocker has no reason; what to ask is the AI's.
+      { id: 'oven_price', code: 'asked', scope: ['within_budget'] },
+    ]);
+    // A Run stored before blockers carried reasons: read as it was stored, with no bound filled in (the agent is told to name none).
+    for (const b of (persisted!.living_model.runs.at(-1).result.compile as Json).blockers as Json[]) delete b.reason;
+    const old = await readProgramContext(deps, ctx) as Json;
+    expect(old.data.blockers).toEqual([{ id: 'base_sales', code: 'recount', scope: ['more_loaves'] }, { id: 'oven_price', code: 'asked', scope: ['within_budget'] }]);
   });
 
   it('Codex r1 #3709 (2): the PRESENTED Run never says "on your figures" for a figure said to be theirs whose words were not found', () => {

@@ -1057,7 +1057,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('(6) ALPHA (23 Oct) + Codex r1 BLOCK 4 on #3709: a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model keeps the old text, byte for byte', async () => {
       // Pinned from the request bodies the provider received on this route, not from the module that builds them.
-      const PROGRAM_SHA = '5192e50e1cfce72ee67a65c6802fb14c4eab302955988daddb0088e45eeb2588'; // 25 Oct: alpha G10 (no threshold sentences). // 25 Oct: alpha G5 (no note_on_item sentence). // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
+      const PROGRAM_SHA = 'd9836e169d977115ce426a2471307d416264a17479ee14eace51c59ea9cb13ab'; // 26 Oct: integrated review words#7 (the "on Olumi’s reading of …" basis). // 25 Oct: alpha G10 (no threshold sentences). // 25 Oct: alpha G5 (no note_on_item sentence). // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
       const LIVING_MODEL_SHA = '7a1bced23a44dccc478a00d075b28bbe2dda487a4b6da868ae3a477698097e44'; // staging 646d374e's
       const sha = (c: Json) => createHash('sha256').update(String(c.instructions), 'utf8').digest('hex');
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
@@ -1069,6 +1069,13 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       outputs = [[{ type: 'message', text: 'Tell me more about the situation first.' }]];
       expect((await typed('What does the model hold now?')).statusCode).toBe(200);
       expect(calls).toHaveLength(1);
+      // Integrated review 26 Oct (words#7): the RESULTS rule, as SENT, names the basis the Run gives before approval (#3769) and
+      // keeps it whole, never shortened to "on your figures"; the two-basis wording is gone, and the "if" rule stays once.
+      const sent = String(calls[0]!.instructions);
+      expect(sent).toContain('what it rests on, "on your figures", "on Olumi’s reading of …" or "if" with Olumi\'s assumptions (name them briefly; '
+        + 'quote "on Olumi’s reading of …" as the result words it, with any "(not yet confirmed)", never shortened to "on your figures";');
+      expect(sent).not.toContain('"on your figures" or "if" with Olumi');
+      expect(sent.split('never drop the "if" or turn it into a forecast')).toHaveLength(2);
       expect(sha(calls[0]!)).toBe(PROGRAM_SHA);
       expect(String(calls[0]!.instructions)).toContain('draft the first model from their brief in that same turn, even when figures are missing');
       expect(String(calls[0]!.instructions)).not.toContain('POLYMATH COACHING');
@@ -1314,6 +1321,15 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(calls).toHaveLength(2);
       // The tools as the provider received them: the four program tools, each with #3707's description, none with core's.
       const sentTools = Object.fromEntries((calls[0]!.tools as Json[]).filter((t) => t.type === 'function').map((t) => [t.name, t.description]));
+      // Integrated review 26 Oct (words#4): a recount, as SENT, is a figure outside Olumi's reading of what it can be, asked again
+      // quoting the blocker's reason; a blocker with none (a Run stored before it) names no bound (Codex B1); never "given below 0".
+      // The range_kind clause before it is unchanged.
+      const readWords = String(sentTools.read_canonical_context);
+      expect(readWords).toContain('recount, their figure outside Olumi\'s reading of what it can be (a floor or ceiling): '
+        + 'ask again, quoting the blocker\'s reason, which names their figure and Olumi\'s bound, so they can correct either; '
+        + 'a blocker with no reason (a Run stored before it) gives no bound: say only that their figure is outside what Olumi reads it can be, and name none; unknown, ');
+      expect(readWords).not.toContain('given below 0');
+      expect(readWords).toContain('range_kind, whether the ends of their range are firm or a rough estimate; recount, ');
       expect(sentTools).toEqual(PROGRAM_TOOL_DESCRIPTIONS);
       for (const [name, description] of Object.entries(sentTools)) expect(description).not.toBe((TOOL_DESCRIPTIONS as Record<string, string>)[name]);
       // Targeted answers (DL 24 Oct): propose_change, as SENT, puts an answer in answers on its item's id and anything else in
