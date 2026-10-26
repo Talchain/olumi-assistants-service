@@ -71,6 +71,8 @@ import {
 } from '../orchestrator-v5/core-route/contract.js';
 import { CONVERSATION_ROWS_READ } from './assist.v1.scenario-graph.js';
 import { runModelProgramTurn } from '../orchestrator-v5/model-program-turn/turn.js';
+import { approveReadingRows } from '../orchestrator-v5/model-program-turn/approve-rows.js';
+import type { ToolOutcome } from '../orchestrator-v5/path-b/tools/outcome.js';
 import { isProgramGraph, programReadOf, reopenProgram, savedProgramOf, sourceTextOf, unreadableWords } from '../orchestrator-v5/model-program-turn/program-store.js';
 import { compile } from '../orchestrator-v5/model-program/compile.js';
 import { applyCanvasFigure, draftReplyGuidance, HOST_REPLY_WITHHELD_TOOLS, PROGRAM_TURN_GUIDANCE, readProgramContext, RUN_REPLY_GUIDANCE } from '../orchestrator-v5/model-program-turn/program-tools.js';
@@ -84,6 +86,9 @@ export const CORE_TURN_PATH = '/agent/v1/core-turn';
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
+/** The reading card's ticked rows (D4): distinct non-empty ids, sorted, so one set is one request; anything else is null. */
+const approvedRowsOf = (v: unknown): readonly string[] | null => (Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === 'string' && x !== '')
+  && new Set(v).size === v.length ? [...(v as string[])].sort() : null);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MODE: AgentLaneMode = 'core';
 
@@ -187,6 +192,22 @@ async function heldCardsOf(store: ReturnType<typeof getSessionStore>, scenarioId
   const wire = proposalFieldsWire(records, graphHash, issuers,
     (r) => pending.some((h) => h.id === r.revision && heldProposalId(h) === r.proposal_id && programHoldApplies(h, read.graph, graphHash)));
   return [...(wire?.proposals ?? [])];
+}
+
+/** A refused tick of the reading card's rows (D4): its code and words, by the host's reason; nothing was written. */
+const NOT_WAITING = ['CARD_NOT_WAITING', 'Those items are not waiting for your approval on this card. Nothing in your model was changed.'] as const;
+const ROWS_REFUSED: Readonly<Record<string, readonly [string, string]>> = {
+  superseded: ['SUPERSEDED', 'Your model changed since this card was shown, so nothing was saved. Reload to see the card as it is now.'],
+  not_a_reading_card: NOT_WAITING, not_authorised: NOT_WAITING, not_on_the_card: NOT_WAITING, not_proposed: NOT_WAITING,
+};
+const ROWS_NOT_APPROVED = 'Those items could not be confirmed just now. Nothing in your model was changed.';
+/** The host's reply to the reading card's ticked rows: what was saved and how many are still open, never a model's words. */
+function rowsReply(outcome: ToolOutcome, open: number): string {
+  if (outcome.status === 'unavailable') return 'The save could not be confirmed, so the model may or may not have changed. Reload to see the current model before changing it again.';
+  if (outcome.status === 'refused') return outcome.reason === 'registration_refused' ? 'The save was refused, so nothing was written and your model is unchanged.' : ROWS_REFUSED[outcome.reason]?.[1] ?? ROWS_NOT_APPROVED;
+  if (outcome.data['already_saved'] === true) return 'Those items were already confirmed and saved.';
+  const n = Number(outcome.data['approved'] ?? 0);
+  return `Saved: ${n} ${n === 1 ? 'item' : 'items'} confirmed.${open > 0 ? ` ${open} still to check.` : ''}`;
 }
 
 /** Each saved version this turn's tools reported, with who authorised it: an approved card is the person's; a Run the AI started, Olumi's. */
@@ -405,10 +426,15 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
     const declinedProposal = declinedProposalOf(chip?.id);
     const runPress = approvedProposal === undefined && declinedProposal === undefined && chip?.action_type === 'run_analysis';
     const selected = parseSelectedElements(body.selected_elements);
+    // The reading card's ticked rows (D4): ONLY with its own press, a list of distinct record ids; part of the turn's identity.
+    const rowIds = approvedProposal === undefined || body.approve_ids === undefined ? undefined : approvedRowsOf(body.approve_ids);
+    if (rowIds === null || (approvedProposal === undefined && body.approve_ids !== undefined)) {
+      return fail(422, { code: 'BAD_INPUT', message: '`approve_ids` is a list of the card\'s own item ids, sent with its press.', retry_safe: false, nothing_saved: true });
+    }
     // The approval's own operation (`approve:<id>`), as the legacy route binds it, and the selection when there is one: a typed
     // message with neither hashes plain, so its row stays provably typed (`typedRowProof`).
     const operation = approvedProposal !== undefined || selected !== null
-      ? JSON.stringify({ ...(approvedProposal !== undefined ? { approve: approvedProposal } : {}), ...(selected !== null ? { selected } : {}) })
+      ? JSON.stringify({ ...(approvedProposal !== undefined ? { approve: approvedProposal } : {}), ...(rowIds !== undefined ? { rows: rowIds } : {}), ...(selected !== null ? { selected } : {}) })
       : undefined;
     const requestHash = withChipOperation(agentTurnRequestHash(scenarioId, userId, message, operation),
       approvedProposal === undefined ? chipOperationOf(body) : undefined, runPress ? RUN_PRESS_HASH_TAG : '');
@@ -621,10 +647,16 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       const press = !coreOwns ? undefined
         : approvedProposal !== undefined ? (offeredCard !== undefined && offeredCard.message === message ? { decision: 'approve' as const, proposal_id: approvedProposal } : undefined)
         : { decision: 'decline' as const, proposal_id: declinedProposal! };
+      // The reading card's ticked rows (D4): approved by the host on the card this scenario holds, never by a model call, and
+      // never widened to the whole card.
+      const rowsPress = rowIds !== undefined && offeredCard !== undefined && proposals.get(approvedProposal!)?.reading === true ? approvedProposal : undefined;
+      if (rowIds !== undefined && rowsPress === undefined) {
+        return await refuseUnrun(409, 'CARD_NOT_WAITING', 'Those items are not on a card waiting for your approval. Nothing in your model was changed.');
+      }
       // A card that never paused, declined: set aside here, as the legacy route's withdraw does. No model call.
       const declinedCardOnly = declinedProposal !== undefined && !coreOwns
         && heldAtStart.some((h) => heldProposalId(h) === declinedProposal) ? declinedProposal : undefined;
-      if ((approvedProposal !== undefined && press === undefined) || (declinedProposal !== undefined && !coreOwns && declinedCardOnly === undefined)) {
+      if ((approvedProposal !== undefined && press === undefined && rowsPress === undefined) || (declinedProposal !== undefined && !coreOwns && declinedCardOnly === undefined)) {
         return await refuseUnrun(409, 'CARD_NOT_WAITING', 'That change is no longer waiting for your approval. Nothing in your model was changed.');
       }
 
@@ -699,6 +731,27 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       if (declinedCardOnly !== undefined) {
         proposals.discard(declinedCardOnly);
         result = noCallAnswer();
+      } else if (rowsPress !== undefined) {
+        const t0 = Date.now();
+        const { outcome, card } = await approveReadingRows({ dispatch: countingDispatch, proposals }, { scenario_id: scenarioId, authenticated_user_id: userId },
+          { proposalId: rowsPress, ids: rowIds! });
+        // Refused or unreadable before anything was written: said with its reason, and the same turn may be sent again.
+        if (outcome.status !== 'ok' && writesDispatched === 0 && !(outcome.status === 'unavailable' && outcome.write === 'unknown')) {
+          return outcome.status === 'refused' ? await refuseUnrun(409, ROWS_REFUSED[outcome.reason]?.[0] ?? 'ROWS_NOT_APPROVED', ROWS_REFUSED[outcome.reason]?.[1] ?? ROWS_NOT_APPROVED)
+            : await refuseUnrun(503, 'MODEL_READ_FAILED', 'Your model could not be read just now. Nothing was changed; please try again.');
+        }
+        const saved = outcome.status === 'ok';
+        if (saved && outcome.mutated) verifiedSave = true;
+        const data = saved ? outcome.data : {};
+        programPayload = { canonical_analysis_view: null, model_program: { turn: 'approve_rows', saved, approved: saved ? data['approved'] ?? 0 : 0, still_open: card?.changes?.length ?? 0 } };
+        const ms = Date.now() - t0;
+        result = { assistant_text: rowsReply(outcome, card?.changes?.length ?? 0), items: [],
+          tool_calls: [{ name: 'approve_rows', ok: saved, outcome: outcome.status, mutated: saved && outcome.mutated, ...(saved ? {} : { refusal: outcome.reason }) },
+            ...(card !== undefined ? [{ name: CONFIRM_READING, ok: true, outcome: 'ok', mutated: false, proposal_id: card.proposal_id }] : [])],
+          tool_results: [{ ok: saved, mutated: saved && outcome.mutated, ...(saved && isRec(data['receipt']) ? { model_version: data['receipt'] } : {}) },
+            ...(card !== undefined ? [{ ok: true, mutated: false, proposal_id: card.proposal_id, public_label: card.public_label }] : [])],
+          mutated: saved && outcome.mutated, hops: 0, stopped_reason: 'answered',
+          timing: { total_ms: ms, provider_ms: 0, tool_ms: ms, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 1, hops: 0 } };
       } else {
         // The agent's view, read only for its turn: the program's own.
         const canonical = modelProgram ? undefined : await readProgramContext({ dispatch: readingDispatch, proposals }, { scenario_id: scenarioId, authenticated_user_id: userId });

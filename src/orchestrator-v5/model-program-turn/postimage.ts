@@ -105,6 +105,9 @@ const accepted = (v: unknown, by: string | null, fresh: readonly string[], prior
 /** A first draft, as the host saves it: every record proposed and approved by no one, whatever the drafter wrote (step 2). */
 export const asDrafted = (m: CanonicalModelT): CanonicalModelT =>
   ({ ...m, ...Object.fromEntries(FAMILIES.map(([f]) => [f, hostSet(m[f], 'proposed', null)])) }) as CanonicalModelT;
+/** Per-item approval (D4): the listed records accepted by the approving person; every other record exactly as saved. */
+export const withApproved = (m: CanonicalModelT, ids: ReadonlySet<string>, by: string | null): CanonicalModelT =>
+  ({ ...m, ...Object.fromEntries(FAMILIES.map(([f]) => [f, (m[f] as readonly Rec[]).map((r) => (ids.has(String(r['id'])) ? accepted(r, by) : r))])) }) as CanonicalModelT;
 /** One changed field: its path (`*` for a position in a list), where in lists it sits, and its saved and proposed values. */
 type Delta = { readonly path: string; readonly pattern: string; readonly at: readonly number[]; readonly old: unknown; readonly now: unknown };
 /**
