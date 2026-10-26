@@ -26,12 +26,11 @@
  * that cannot hold the id stops the turn (`CoreStateUnavailableError`): never a Conversation the next turn could not find.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { setTimeout as delay } from 'node:timers/promises';
 import {
   Agent, extractAllTextOutput, MaxTurnsExceededError, OpenAIResponsesModel, run, RunState, setTracingDisabled,
   ToolCallError, withTrace, type AgentInputItem, type RunToolApprovalItem, type Tool,
 } from '@openai/agents';
-import { APIConnectionError, APIConnectionTimeoutError, APIError, APIUserAbortError, type OpenAI } from 'openai-v7';
+import { APIConnectionError, APIError, type OpenAI } from 'openai-v7';
 import { getRuntimeEnv } from '../../../config/env-resolver.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
 import { currentStageEmitter, emitAgentPhase } from '../../../cee/unified-pipeline/stage-stream-context.js';
@@ -40,7 +39,6 @@ import type { CardId, OpenAiPausedRun } from '../../session/store.js';
 import type { DraftVerification } from '../../path-b/tools/outcome.js';
 import { agentRequestIdentity } from '../runtime/prompt-identity.js';
 import type { AgentToolContext, ToolResult } from '../runtime/agent-tools.js';
-import { providerServerFault } from '../runtime/transport-retry.js';
 import { WITHHELD_ON_CHIP_TURN, type AgentTurnResult } from '../runtime/agent-loop.js';
 import type { CallBudget } from '../model-budgets.js';
 import { BRIEF_LABEL, runFactsContext, turnContextItems, turnContextText } from '../turn-context.js';
@@ -132,26 +130,10 @@ async function scenarioConversation(scenarioId: string, store: ConversationIdSto
   return { id: winner, created: winner === created };
 }
 
-/** Attempts at a scenario's empty Conversation create, in all, and the wait before each further one (ms). */
-export const CONVERSATION_CREATE_ATTEMPTS = 3;
-export const CONVERSATION_CREATE_BACKOFF_MS: readonly number[] = [500, 1_000];
-
 /** What fetch itself threw beneath the client's error: present only when there was no answer at all. */
 const thrownByFetch = (err: unknown): unknown => (err instanceof APIConnectionError ? err.cause : undefined);
 
-/**
- * A create worth sending again: no answer at all (fetch threw, not a timeout) or a 5xx. A cancellation of the turn, a 429,
- * every other 4xx and every timeout are answers or decisions: never repeated. The client raises each timeout as an
- * `APIConnectionTimeoutError`, a subclass of `APIConnectionError`: its own deadline (fetch aborted, or a body not read in
- * time, with no cause) and undici's connect or headers timeout (a `TypeError` cause), so the class is tested first.
- */
-export function createFailureIsTransient(err: unknown): boolean {
-  if (err instanceof APIUserAbortError || err instanceof APIConnectionTimeoutError) return false;
-  if (err instanceof APIConnectionError) return true;
-  return err instanceof APIError && typeof err.status === 'number' && err.status >= 500 && err.status <= 599;
-}
-
-/** A failed attempt as its log line names it: the HTTP status, else the name (and system code) of what was thrown. Never a message. */
+/** A failed create as its log line names it: the HTTP status, else the name (and system code) of what was thrown. Never a message. */
 function createFailureOf(err: unknown): { readonly status: number } | { readonly error: string; readonly error_code?: string } {
   if (err instanceof APIError && typeof err.status === 'number') return { status: err.status };
   const thrown = thrownByFetch(err) ?? err;
@@ -162,37 +144,23 @@ function createFailureOf(err: unknown): { readonly status: number } | { readonly
 }
 
 /**
- * ⭐ A SCENARIO'S EMPTY CONVERSATION IS CREATED IN AT MOST THREE ATTEMPTS (served staging 26 Oct, 04:57:12Z twice and 07:44:06Z:
- * a scenario's first conversation turn, the approval after its first draft, failed in about 3 s on "503 upstream connect error
- * or disconnect/reset before headers … Connection refused", with 0 AI calls and nothing saved, and the next turn on the same
- * board went through). The request is the one the SDK's `startOpenAIConversationsSession` sends (`{ items: [] }`, its id
- * returned), sent here so it carries the turn's signal. Only this create is tried again, because a repeat cannot double
- * anything: it sends no reply and writes nothing of the model, so the worst a lost result leaves is an unused empty
- * Conversation (the store's claim keeps the id it saved).
- * - Tried again only on no answer (fetch threw, not a timeout) or a 5xx (`createFailureIsTransient`); the last failure is
- *   thrown as it would have been from the one attempt before, so the turn fails as it did.
- * - The turn's signal goes with each attempt and each wait: an abort stops it at once, with no further attempt.
- * - Conversation-bound Responses calls and item writes keep `maxRetries: 0` (`ledgeredAgentsClient`); the client's generic
- *   retries, which also repeat a 429, stay off here too, and neither the store's claim nor the turn is repeated.
- * - ONE log line per attempt at this non-model boundary (path, status or what fetch threw, attempt, ms): no body, no key, no
- *   Conversation id. A create is not a model call, so it takes no `_provider_calls` row (the ledger records `/responses` only).
+ * A SCENARIO'S EMPTY CONVERSATION, CREATED ONCE. The request is the one the SDK's `startOpenAIConversationsSession` sends
+ * (`{ items: [] }`, its id returned), sent here so it carries the turn's signal. It is sent once: this code adds no retry of
+ * its own (strip, Paul 26 Oct), and a failure is the turn's failure. ONE log line at this non-model boundary (path, status or
+ * what fetch threw, ms): no body, no key, no Conversation id. A create is not a model call, so it takes no `_provider_calls` row.
  */
 async function createScenarioConversation(client: OpenAI, scenarioId: string, signal: AbortSignal | undefined): Promise<string> {
   const path = `${new URL(client.baseURL).pathname.replace(/\/+$/, '')}/conversations`;
-  for (let attempt = 1; ; attempt += 1) {
-    const t0 = Date.now();
-    try {
-      const { data, response } = await client.conversations.create({ items: [] }, { maxRetries: 0, ...(signal !== undefined ? { signal } : {}) }).withResponse();
-      log.info({ event: 'core_turn.conversation_create', scenario_id: scenarioId, path, attempt, status: response.status, duration_ms: Date.now() - t0 },
-        'core-turn: conversation create');
-      return data.id;
-    } catch (err) {
-      const retry = attempt < CONVERSATION_CREATE_ATTEMPTS && createFailureIsTransient(err);
-      log.warn({ event: 'core_turn.conversation_create', scenario_id: scenarioId, path, attempt, ...createFailureOf(err), duration_ms: Date.now() - t0, retry },
-        'core-turn: conversation create');
-      if (!retry) throw err;
-    }
-    await delay(CONVERSATION_CREATE_BACKOFF_MS[attempt - 1] ?? CONVERSATION_CREATE_BACKOFF_MS.at(-1)!, undefined, signal !== undefined ? { signal } : {});
+  const t0 = Date.now();
+  try {
+    const { data, response } = await client.conversations.create({ items: [] }, { maxRetries: 0, ...(signal !== undefined ? { signal } : {}) }).withResponse();
+    log.info({ event: 'core_turn.conversation_create', scenario_id: scenarioId, path, status: response.status, duration_ms: Date.now() - t0 },
+      'core-turn: conversation create');
+    return data.id;
+  } catch (err) {
+    log.warn({ event: 'core_turn.conversation_create', scenario_id: scenarioId, path, ...createFailureOf(err), duration_ms: Date.now() - t0 },
+      'core-turn: conversation create');
+    throw err;
   }
 }
 
@@ -528,52 +496,23 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
        * not choose provider transport. A stage emitter is optional; the reply, outcomes and saved state remain final JSON.
        */
       const showProgress = currentStageEmitter() !== undefined;
-      /** The run state of the last run that failed: its tool outputs, so a call after them can be sent again without them re-running. */
-      let failedRun: RunState<unknown, Agent> | undefined;
-      const goOnce = async (from: string | AgentInputItem[] | RunState<unknown, Agent>) => {
-        failedRun = undefined;
+      // Each model call is sent once: this code adds no retry of its own (strip, Paul 26 Oct); a failure is the turn's failure.
+      const go = async (from: string | AgentInputItem[] | RunState<unknown, Agent>) => {
         const live = await run(agent, from, { ...options, stream: true });
         let writing = false;
-        try {
-          for await (const event of live) {
-            accepted = true;
-            // The provider created the response from this request's input: the turn's items are now in the Conversation.
-            if (carrying && event.type === 'raw_model_stream_event' && event.data.type === 'response_started') { delivered = true; carrying = false; }
-            if (!writing && event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta') {
-              writing = true;
-              if (showProgress) emitAgentPhase('writing');
-            }
+        for await (const event of live) {
+          accepted = true;
+          // The provider created the response from this request's input: the turn's items are now in the Conversation.
+          if (carrying && event.type === 'raw_model_stream_event' && event.data.type === 'response_started') { delivered = true; carrying = false; }
+          if (!writing && event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta') {
+            writing = true;
+            if (showProgress) emitAgentPhase('writing');
           }
-          await live.completed;
-        } catch (err) { failedRun = live.state; throw err; }
+        }
+        await live.completed;
         await Promise.allSettled(pendingRows);
         if (deliveryUnknown !== undefined) throw new CoreDeliveryUnknownError(deliveryUnknown.cause);
         return live;
-      };
-      /**
-       * ⭐ THE REPLY AFTER A SAVED CHANGE IS ASKED FOR ONCE MORE (W9; served 26 Oct 13:33Z: the approval saved, then OpenAI sent
-       * "overloaded" mid-stream on the reply call, and the person got a 502 for a change that was kept). Only when this turn has
-       * already saved a write and the call failed on the provider's own server fault (`providerServerFault`: busy, a server
-       * error, a 5xx) or its stream ended with no terminal event; never a refusal, a rate or quota answer, a call with no answer
-       * at all, or a cancelled turn. ONE retry per turn, from the failed run's own state: the tool outputs are in it, so the
-       * request carries them again and no tool runs twice. A retry that fails too is the turn's failure, as before.
-       */
-      let replyRetried = false;
-      const go = async (from: string | AgentInputItem[] | RunState<unknown, Agent>) => {
-        try { return await goOnce(from); } catch (err) {
-          const state = failedRun;
-          await Promise.allSettled(pendingRows);
-          const fault = providerServerFault(err)
-            ?? (deliveryUnknown !== undefined && !(err instanceof APIConnectionError) ? 'no_terminal_event' as const : undefined);
-          if (replyRetried || state === undefined || fault === undefined || input.signal?.aborted === true
-            || !toolResults.some((r) => r.mutated === true)) throw err;
-          replyRetried = true;
-          log.warn({ event: 'agent_core.reply_retried', scenario_id: input.ctx.scenario_id, request_id: input.ctx.request_id, fault },
-            'agent-core: the reply after a saved change failed on the provider; asking for it once more');
-          const lost = deliveryUnknown;
-          deliveryUnknown = undefined;
-          try { return await goOnce(state); } catch (again) { deliveryUnknown ??= lost; throw again; }
-        }
       };
       // At most two interrupted calls are answered, each once, and only when the turn's FIRST request was refused with a 400
       // before anything was accepted (no model event, no tool run): only then is a resend sure to repeat nothing (Codex r1

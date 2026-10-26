@@ -7,10 +7,8 @@
  * draft as the assistant's turn, the errors as the next user turn: phase 0b's repair shape), at most twice. Nothing here
  * edits the model but the host's own fields (`withHostFields`): what compiles is the AI's own draft.
  */
-import { APIConnectionError, APIUserAbortError } from 'openai-v7';
 import { streamedLedgeredResponse, type StreamedResponsesBody } from '../../adapters/llm/openai-agents-client.js';
 import { coreBudget } from '../agent-lane/model-budgets.js';
-import { providerServerFault } from '../agent-lane/runtime/transport-retry.js';
 import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
 import { todayInLondon } from '../goal-target/deadline-date.js';
@@ -38,24 +36,6 @@ const named = (v: unknown): string | null => (typeof v === 'string' && v !== '' 
 export function providerErrorOf(err: unknown): ProviderError {
   const e = (err !== null && typeof err === 'object' ? err : {}) as Record<string, unknown>;
   return { status: typeof e['status'] === 'number' ? e['status'] : null, type: named(e['type']), code: named(e['code']), request_id: named(e['requestID']) };
-}
-
-/**
- * ⭐ A DRAFTING CALL WORTH SENDING AGAIN, ONCE (W9; served 26 Oct 13:44Z, european: the repair call ended after 12.4 s on the
- * provider's error, the loop stopped on it, and the change was refused as does_not_compile, with no card). The same body is
- * sent again, counted against MAX_REPAIRS, when a stream the client was reading failed: on the provider's own server fault
- * (`providerServerFault`: busy, a server error) or with no typed reason. The client cannot resend those; it already resends
- * a call with no answer and an HTTP 5xx or 429 itself (`AGENTS_CLIENT_MAX_RETRIES`), so those are not sent again here. Never a
- * call the provider refused with a reason (a 4xx, a quota or a rate limit: a decision a resend repeats), nor a cancelled one.
- */
-export function resendable(err: unknown): boolean {
-  // APIConnectionTimeoutError is an APIConnectionError: a call with no answer, already resent by the client, or timed out.
-  if (err instanceof APIConnectionError || err instanceof APIUserAbortError) return false;
-  if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) return false;
-  const p = providerErrorOf(err);
-  if (p.status !== null) return false;
-  // A streamed `error` event's own type is 'error': the event's name, not a reason.
-  return providerServerFault(err) !== undefined || (p.code === null && (p.type === null || p.type === 'error'));
 }
 
 export type DraftAttempt = {
@@ -155,8 +135,8 @@ export function ledgeredResponsesCall(): ResponsesCall {
 
 /**
  * Draft → compile → (repair → compile) ≤ MAX_REPAIRS. `sourceText` is the person's own words (the brief), against which the
- * compiler checks every quote. A call that failed is sent again once, with the same body, when `resendable` (counted against
- * MAX_REPAIRS); a second failure in a row, or a refusal, ends the loop with what it has.
+ * compiler checks every quote. A call that failed ends the loop with what it has: this loop sends nothing again (strip, Paul
+ * 26 Oct); the OpenAI client's own configured retries are the only resend.
  * `interpret` (a FIRST draft): the model returned, compiled, saved and sent back to the agent is the compiler's reading of
  * the draft (`normalise`: a structure figure that is no structural constant is their question), never the raw draft
  * (buddy, #3709 r7). An update is read the same way, so its postimage is in the saved form. `periodZero` (an update): the
@@ -172,26 +152,18 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
   const attempts: DraftAttempt[] = [];
   let model: CanonicalModelT | null = null;
   let compiled: CompileResult | null = null;
-  // The last attempt was a call sent again after a failure: a second failure in a row ends the loop.
-  let resent = false;
   for (let a = 0; a <= MAX_REPAIRS; a += 1) {
     const t0 = Date.now();
     let out: CallOutput;
     try { out = await call(draftRequestBody(input, onto !== undefined, today, periodZero)); } catch (err) {
       attempts.push({ attempt: a, errors: null, failed: `call failed: ${err instanceof Error ? err.name : 'error'}`, provider_error: providerErrorOf(err), status: null, usage: null, ms: Date.now() - t0 });
-      if (resent || !resendable(err)) break;
-      resent = true;
-      continue;
+      break;
     }
     const ms = Date.now() - t0;
     if (out.text === null) {
       attempts.push({ attempt: a, errors: null, failed: `no output (${out.status ?? 'unknown'}${out.incomplete ? `: ${out.incomplete}` : ''})`, status: out.status, usage: out.usage, ms });
-      // A stream that ended with no terminal response (status null) is sent again once; an incomplete or failed response is an answer.
-      if (resent || out.status !== null) break;
-      resent = true;
-      continue;
+      break;
     }
-    resent = false;
     let json: unknown;
     try { json = withHostFields(JSON.parse(out.text)); } catch { attempts.push({ attempt: a, errors: null, failed: 'output is not JSON', status: out.status, usage: out.usage, ms }); break; }
     // An update returns only its changes: the model it proposes is the saved one with them merged by id.
