@@ -30,7 +30,7 @@ import { comparatorWords } from '../../goal-target/goal-target-basis.js';
 import { displayRoundingFor } from '../../goal-target/goal-chance-driver.js';
 import { displayedPctAt } from '../../goal-target/goal-chance-display.js';
 import { sayDisplayedPct } from '../../goal-target/goal-targets-joint.js';
-import type { Aggregation, Cmp, ExecutableModel, FixedAuthor, Goal, Limit, Quantity, Window } from '../executable.js';
+import type { Aggregation, Cmp, Domain, ExecutableModel, FixedAuthor, Goal, Limit, Quantity, Window } from '../executable.js';
 import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
 import { isWithheld, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
 import { costOf, readingOf, restsOn, simulate } from '../simulate/simulate.js';
@@ -285,6 +285,11 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
    * dependency authority (`restsOn`), timings included, so a basis and a driver never miss what the chance rests on. */
   const upstream = (roots: readonly string[], optionId: string | null): Set<string> => restsOn(model, roots, optionId);
 
+  /** A domain's ends in plain words (alpha G2): "never below 0 member", "0 to 1". */
+  const canBe = (id: string, unit: string, d: Domain | undefined): string => {
+    const min = d?.min !== undefined && Number.isFinite(d.min) ? sayOf(id, d.min, unit) : null, max = d?.max !== undefined && Number.isFinite(d.max) ? sayOf(id, d.max, unit) : null;
+    return min !== null && max !== null ? `${min} to ${max}` : min !== null ? `never below ${min}` : max !== null ? `never above ${max}` : 'the values it can take';
+  };
   /** Olumi's assumptions among these quantities, in plain words, model order, each said once (a shadow named as its quantity,
    * compile.ts `shadowLabel`, says the same words). Empty = every input is the person's. */
   const assumptions = (ids: ReadonlySet<string>): string[] => [...new Set(model.quantities.filter((x) => ids.has(x.id)).flatMap((x): string[] => {
@@ -294,7 +299,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       // probability law; the person's bounds stay theirs and are named as such.
       // The PL's range law (AMEND): conditioned on the person's bounds, or on a domain, as the simulator draws it.
       const d: RangeDist = x.dist;
-      const reading = rangeLaw(d, model.risks.some((r) => r.occurrence === x.id) ? { domain: { min: 0, max: 1 } } : {});
+      const chance = model.risks.some((r) => r.occurrence === x.id), domain = chance ? { min: 0, max: 1 } : d.domain;
+      const reading = rangeLaw(d, chance ? { domain: { min: 0, max: 1 } } : {});
       const ends = `${sayOf(x.id, d.low, x.unit)} to ${sayOf(x.id, d.high, x.unit)}`;
       // DL ruling (author not recorded): a range whose basis is neither the person's nor Olumi's is listed as such, never
       // passed as the person's; `rangeLaw` draws it unbounded (only a person's stated bounds condition the draw).
@@ -304,7 +310,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
         return d.basis === 'person_range' && !unverified ? [] : [`${name} is ${sayOf(x.id, reading.value, x.unit)}${unverified ? ` ${NOT_IN_THEIR_WORDS}` : d.basis === 'olumi_estimate' ? ', Olumi’s estimate' : ` ${NOT_RECORDED}`}`];
       }
       const held = reading.lower === d.low && reading.upper === d.high ? ', held within those bounds'
-        : Number.isFinite(reading.lower) || Number.isFinite(reading.upper) ? ', kept to the values it can take' : '';
+        : Number.isFinite(reading.lower) || Number.isFinite(reading.upper) ? `, kept to Olumi’s reading of what it can be (${canBe(x.id, x.unit, domain)})` : '';
       return [`${name} follows Olumi’s provisional conversion of ${whose}, ${ends}, into a bell-shaped spread${held}`];
     }
     if (x.dist?.kind === 'fixed') {

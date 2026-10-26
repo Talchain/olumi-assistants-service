@@ -191,7 +191,7 @@ export function normalise(model: CanonicalModelT): CanonicalModelT {
         kind: status === 'estimated' ? 'coefficient' : 'fact',
         value: s.value, low: s.low, high: s.high, range_kind: s.range_kind, status, question: s.question,
         basis: status === 'estimated' ? `Olumi's estimate of what "${o.label}" sets this to.` : proposal ? `Olumi's proposed setting for its option "${o.label}".` : s.author === 'structure' ? `"${o.label}" switched on.` : null,
-        direction: null, author: s.author, party: null, quote: s.quote, approval: o.approval, author_id: o.author_id,
+        direction: null, floor: null, ceiling: null, author: s.author, party: null, quote: s.quote, approval: o.approval, author_id: o.author_id,
       });
       return { ...s, to: id, value: null, low: null, high: null, range_kind: null, question: null };
     }),
@@ -671,28 +671,37 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   // ── the ruled range law, for every range (a held range withholds what rests on it) ─────────────────────────────────
   const chances = new Set(model.risks.map((k) => k.occurrence));
   /**
-   * A count of things (one plain unit, not time or money) that is a FACT, a level of the person's situation (members today,
-   * headcount), or an option's setting of one: never negative. A coefficient in the same unit is the size of a mechanism (customers an option adds or
-   * loses), which can be below 0, so it is never truncated (alpha G2: a signed change was drawn on [0, inf)).
+   * WHAT A FIGURE CAN BE (alpha G2): a chance lies in [0, 1] and an elapsed time (a set's or risk's timing) is 0 or more
+   * (the PL's ruling, 23 Oct); anything else only within the floor and ceiling the model declares, Olumi's reading, never
+   * inferred from its unit's name. An option's setting stands in for the quantity it sets, so it is read within that
+   * quantity's bounds unless it declares its own. Each truncation is Olumi's conversion, disclosed.
    */
-  // An option's setting stands in for the quantity it sets, so a setting of a fact is a level too (Codex r1 #3764: Olumi's
-  // estimated setting of members today, made a coefficient by normalise, must still never draw below 0).
-  const setsFact = new Set(model.options.flatMap((o) => o.sets.flatMap((s) => (has(s.to) && Q.get(s.quantity)?.kind === 'fact' ? [s.to] : []))));
-  const isCount = (q: CanonicalQuantityT): boolean => {
-    const d = U.get(q.id) ? Object.entries(U.get(q.id)!.dims) : [];
-    return (q.kind === 'fact' || setsFact.has(q.id)) && !chances.has(q.id) && d.length === 1 && d[0][1] === 1 && !TIME_DIMS.has(d[0][0]) && !['gbp', 'usd', 'eur'].includes(d[0][0]);
+  const setOf = new Map(model.options.flatMap((o) => o.sets.flatMap((s) => (has(s.to) ? [[s.to, s.quantity] as const] : []))));
+  const boundsOf = (q: CanonicalQuantityT): Pick<CanonicalQuantityT, 'floor' | 'ceiling'> => {
+    const own = { floor: q.floor ?? null, ceiling: q.ceiling ?? null }, set = Q.get(setOf.get(q.id) ?? '');
+    return own.floor === null && own.ceiling === null && set ? { floor: set.floor ?? null, ceiling: set.ceiling ?? null } : own;
+  };
+  const domainOf = (q: CanonicalQuantityT): Domain | undefined => {
+    if (chances.has(q.id)) return { min: 0, max: 1 };
+    if (timingQs.has(q.id)) return { min: 0 };
+    const { floor, ceiling } = boundsOf(q), scale = U.get(q.id)?.scale ?? 1;
+    return floor === null && ceiling === null ? undefined : { ...(floor === null ? {} : { min: floor * scale }), ...(ceiling === null ? {} : { max: ceiling * scale }) };
   };
   /**
-   * Truncation only for a mathematical domain: a chance lies in [0, 1]; a count of things is never negative; an elapsed
-   * time (a set's or risk's timing) is 0 or more (the PL's ruling, 23 Oct). Each is Olumi's conversion, disclosed.
+   * A figure given WHOLLY outside what it can be (its fixed value, or its whole range) contradicts Olumi's reading of it
+   * (the PL's ruling, 23 Oct): never pinned to the bound, never moved inside. Its words and figure stay as given; the
+   * person's is asked again, naming the reading so they can correct either; Olumi's is held as unsupported.
    */
-  const domainOf = (q: CanonicalQuantityT): Domain | undefined => (chances.has(q.id) ? { min: 0, max: 1 } : timingQs.has(q.id) || isCount(q) ? { min: 0 } : undefined);
-  /**
-   * A count whose WHOLE range lies below 0 contradicts what it can be (the PL's ruling, 23 Oct): never pinned near 0, never
-   * made positive. Its words and range stay as given; the person's is asked again, Olumi's is held as unsupported.
-   */
-  const contradictory = new Map(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && isCount(q) && has(q.low) && has(q.high) && q.high < 0)
-    .map((q) => [q.id, `"${q.label}" is given as ${q.low}–${q.high} ${q.unit}, but a count cannot be below 0`] as const));
+  const outside = (q: CanonicalQuantityT): string | undefined => {
+    const { floor, ceiling } = boundsOf(q), lo = has(q.low) ? q.low : q.value, hi = has(q.high) ? q.high : q.value;
+    if (!has(lo) || !has(hi)) return undefined;
+    const given = lo === hi ? `${lo} ${q.unit}` : `${lo}–${hi} ${q.unit}`;
+    if (floor !== null && hi < floor) return `"${q.label}" is given as ${given}, but Olumi reads it as never below ${floor} ${q.unit}`;
+    if (ceiling !== null && lo > ceiling) return `"${q.label}" is given as ${given}, but Olumi reads it as never above ${ceiling} ${q.unit}`;
+    return undefined;
+  };
+  const contradictory = new Map(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && !chances.has(q.id) && !timingQs.has(q.id) && outside(q) !== undefined)
+    .map((q) => [q.id, outside(q)!] as const));
   /** A person's range whose words do not say whether its ends are hard: an UNRESOLVED reading, a blocker (PL ruling B). */
   const unresolved = new Set(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && q.author === 'person' && has(q.low) && has(q.high) && q.low < q.high && !has(q.range_kind) && !windowQs.has(q.id) && !contradictory.has(q.id))
     .map((q) => q.id));
@@ -702,8 +711,8 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
     readings.set(q.id, readRange(rangeDistOf(q, U.get(q.id)!.scale, domainOf(q))));
   }
   const held = new Map([...[...readings].filter(([, r]) => r.kind === 'held').map(([id, r]) => [id, (r as { reason: string }).reason] as const),
-    ...[...contradictory].filter(([id]) => Q.get(id)!.author !== 'person').map(([id, why]) => [id, `${why}; Olumi's range is unsupported`] as const)]);
-  /** The person's contradictory counts: theirs to give again, with the reason. */
+    ...[...contradictory].filter(([id]) => Q.get(id)!.author !== 'person').map(([id, why]) => [id, `${why}; Olumi's ${has(Q.get(id)!.low) ? 'range' : 'figure'} is unsupported`] as const)]);
+  /** The person's figures given outside what they can be: theirs to give again, with the reason. */
   const recheck = new Map([...contradictory].filter(([id]) => Q.get(id)!.author === 'person'));
 
   // ── typed outcomes: what each goal, limit and option rests on ──────────────────────────────────────────────────────
