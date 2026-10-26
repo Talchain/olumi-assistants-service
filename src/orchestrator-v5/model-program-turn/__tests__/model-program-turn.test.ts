@@ -597,20 +597,28 @@ describe('the model-program turn on the real core route', () => {
       ['quantity', 'base_sales', 'add', null], ['quantity', 'ovens_added', 'add', null], ['quantity', 'one_oven', 'add', null], ['quantity', 'extra_per_oven', 'add', null],
       ['quantity', 'sell_through', 'add', null], ['quantity', 'sold_per_oven', 'add', null], ['quantity', 'sales', 'add', null], ['quantity', 'sales_target', 'add', null],
       ['quantity', 'budget', 'add', null], ['quantity', 'oven_price', 'add', null], ['quantity', 'spend', 'add', null]]);
+    // (7) Alpha G13: each row's group, and the first reply's one line counting the same rows (11 theirs in their words, Olumi's
+    // sell-through estimate, the 3 left-out notes; its workings, structure and the asked oven price are in no count).
+    expect(card.changes.map((c: Json) => [c.id, c.group])).toEqual([
+      ['more_loaves', 'used'], ['within_budget', 'used'], ['second_oven', 'used'], ['keep_one', 'used'], ['staff_morale', 'left_out'], ['longer_shifts', 'left_out'],
+      ['delivery_days', 'left_out'], ['sold_rel', 'other'], ['sales_rel', 'used'], ['spend_rel', 'other'], ['base_sales', 'used'], ['ovens_added', 'used'], ['one_oven', 'used'],
+      ['extra_per_oven', 'used'], ['sell_through', 'inferred'], ['sold_per_oven', 'other'], ['sales', 'other'], ['sales_target', 'used'], ['budget', 'used'],
+      ['oven_price', 'other'], ['spend', 'other']]);
+    expect(r.assistant_text.split('\n\n')[1]).toBe('I used 11 things from your brief, added 1 of my own for you to check, and left 3 out of the calculation.');
     // (6) The kinds the card reads, spelled as DGAI's proposalChangeSchema has them at 128bd2db (left_out added there first).
     expect(ProposalChangeSchema.shape.kind.options).toEqual(['quantity', 'relation', 'goal', 'option', 'risk', 'record', 'left_out']);
     // (3) A left-out item: its words are the label, and `after` is its substance in plain words, its why first (the card
     // reads "Leaves out ‘…’ (after)"); every part it has is said, and none it lacks.
     expect(card.changes[5]).toEqual({ id: 'longer_shifts', kind: 'left_out', action: 'add', label: 'Longer shifts for the staff', before: null,
       after: 'It is not measured in this model. Olumi asks: “How will staff feel?”. It concerns Reach 380 loaves a week and A second oven. Your words: “Our staff may not like longer shifts”',
-      author: 'person' });
+      author: 'person', group: 'left_out' });
     // Words the person reports from someone else are that someone's, by name, never "Your words".
     expect(card.changes[6]).toEqual({ id: 'delivery_days', kind: 'left_out', action: 'add', label: 'Which days flour is delivered', before: null,
-      after: 'Nobody has said how it changes sales. Our supplier’s words: “deliveries only on weekdays”', author: 'person' });
+      after: 'Nobody has said how it changes sales. Our supplier’s words: “deliveries only on weekdays”', author: 'person', group: 'left_out' });
     // Contrast: a left-out item with only its why says only its why, as written.
     expect(card.changes[4]).toEqual({ id: 'staff_morale', kind: 'left_out', action: 'add', label: 'Staff morale while the second oven beds in', before: null,
-      after: 'It has no measure in this model.', author: 'olumi' });
-    expect(card.changes[0]).toEqual({ id: 'more_loaves', kind: 'goal', action: 'add', label: 'Reach 380 loaves a week', before: null, after: '"sales" at least "sales target" 380 loaf/week, no deadline set, the measure you named, in your words "want to reach 380 loaves a week"', author: 'person' });
+      after: 'It has no measure in this model.', author: 'olumi', group: 'left_out' });
+    expect(card.changes[0]).toEqual({ id: 'more_loaves', kind: 'goal', action: 'add', label: 'Reach 380 loaves a week', before: null, after: '"sales" at least "sales target" 380 loaf/week, no deadline set, the measure you named, in your words "want to reach 380 loaves a week"', author: 'person' , group: 'used' });
     // The held card's model: the saved draft accepted by its approver (a guest here), authorship and words untouched; a new Run.
     const held = agentProposalOf([...turnRows.values()].at(-1).pending_actions[0])!;
     expect(held.proposal_id).toBe(card.proposal_id);
@@ -2565,7 +2573,9 @@ describe('the model-program turn on the real core route', () => {
     const r = (await turn({ message: BRIEF })).json();
     expect(r.model_program.saved).toBe(true);
     // The AI's three, in the model's order (goals, limits, then quantities): the oven price's question is the fourth, counted.
+    // Alpha G13's count line: 13 records theirs in their words (the asked base sales is in none), Olumi's sell-through estimate.
     expect(r.assistant_text).toBe(['I\'ve drafted a first model of: Should the bakery buy a second oven?',
+      'I used 13 things from your brief and added 1 of my own for you to check.',
       '1. How would you tell the regulars are happy?\n2. How would you tell the staff are happy?\n3. How would you tell it stays friendly?',
       'The chance also waits on 3 other things, listed with the result.'].join('\n\n'));
     // The result lists every one of them, by label, with the figure its answer box fills; no question of the code's anywhere.
@@ -2675,6 +2685,7 @@ describe('the model-program turn on the real core route', () => {
     const r = (await turn({ message: BRIEF })).json();
     expect(r.model_program.saved).toBe(true);
     expect(r.assistant_text).toBe(['I\'ve drafted a first model of: Should the bakery buy a second oven?',
+      'I used 10 things from your brief, added 1 of my own for you to check, and left 2 out of the calculation.',
       '1. What result would make this worth it for you?\n2. What would the second oven cost?'].join('\n\n'));
     expect(r.model_program.blockers.map((b: Json) => [b.id, b.code])).toEqual([['(model)', 'no_goal'], ['oven_price', 'asked']]);
     expect(r.assistant_text).not.toContain('Who is your supplier?');
@@ -2683,7 +2694,8 @@ describe('the model-program turn on the real core route', () => {
     beforeEachReset();
     replies = [JSON.stringify(bare)];
     const b = (await turn({ message: BRIEF })).json();
-    expect(b.assistant_text).toBe(['I\'ve drafted a first model of: Should the bakery buy a second oven?', '1. What would the second oven cost?',
+    expect(b.assistant_text).toBe(['I\'ve drafted a first model of: Should the bakery buy a second oven?',
+      'I used 10 things from your brief and added 1 of my own for you to check.', '1. What would the second oven cost?',
       'The chance also waits on 1 other thing, listed with the result.'].join('\n\n'));
   });
 });

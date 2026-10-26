@@ -243,6 +243,8 @@ export const ProposalChangeSchema = z.object({
   before: z.string().nullable(),
   after: z.string().nullable(),
   author: z.enum(['person', 'olumi']),
+  // A reading card's row only (alpha G13): which of the first reply's counts it is in (model-program-turn/reading-groups.ts).
+  group: z.enum(['used', 'inferred', 'left_out', 'other']).optional(),
 });
 export type ProposalChange = Readonly<z.infer<typeof ProposalChangeSchema>>;
 
