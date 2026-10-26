@@ -116,8 +116,8 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   const labelOf = new Map(read.goals.map((g) => [g.id, g.label] as const));
   const records = recordsOf(read, compiled), confirmed = records.confirmed;
   // R8: the compiler's premises for each goal (`rests_on`), in their own words, whose they are and whether confirmed.
-  const premiseOf = new Map<string, PresentPremise>([...read.assumptions.map((a) => [a.id, { id: a.id, text: a.text, author: a.author, kind: 'assumption' as const, confirmed: confirmed.has(a.id) }] as const),
-    ...read.conditions.map((c) => [c.id, { id: c.id, text: c.text, author: c.author, kind: 'condition' as const, confirmed: confirmed.has(c.id) }] as const)]);
+  const premiseOf = new Map<string, PresentPremise>([...read.assumptions.map((a) => [a.id, { id: a.id, text: a.text, author: a.author, party: a.party, kind: 'assumption' as const, confirmed: confirmed.has(a.id) }] as const),
+    ...read.conditions.map((c) => [c.id, { id: c.id, text: c.text, author: c.author, party: c.party, kind: 'condition' as const, confirmed: confirmed.has(c.id) }] as const)]);
   const premisesFor = (ids: readonly string[]) => ids.flatMap((id) => (premiseOf.has(id) ? [premiseOf.get(id)!] : []));
   // Aims with no measure yet are left out of the chance (said in `leaves_out`), never a goal that waits.
   const goals: PresentGoal[] = compiled.perGoal.filter((p) => !p.needs_measure)

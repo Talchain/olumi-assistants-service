@@ -62,6 +62,8 @@ export interface PresentPremise {
   readonly id: string;
   readonly text: string;
   readonly author: 'person' | 'olumi';
+  /** Someone whose statement the person reports; acceptance does not make it the person's own premise. */
+  readonly party?: string | null;
   readonly kind: 'assumption' | 'condition';
   /** The same rule as `PresentQuantity.confirmed`. */
   readonly confirmed: boolean;
@@ -225,7 +227,9 @@ export type PresentMainDriver =
 export function listWords(parts: readonly string[]): string {
   return parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
-const q = (label: string): string => `‘${label.trim()}’`;
+/** Display words stay on one line; the authored model and its quoted source are never rewritten. */
+const inlineWords = (text: string): string => text.trim().replace(/\s+/g, ' ');
+const q = (label: string): string => `‘${inlineWords(label)}’`;
 /** A sentence's full stop, unless it already ends in one (a question keeps its "?"). */
 const stop = (x: string): string => (/[.?!]$/.test(x) ? x : `${x}.`);
 /** A figure in its unit; a pure number (unit "1") is said alone. */
@@ -326,7 +330,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       if (m?.author === 'unverified') return [`${name} is ${sayOf(x.id, x.dist.value, x.unit)} ${NOT_IN_THEIR_WORDS}`];
       const author: string | undefined = x.dist.author ?? m?.author;
       if (author === 'olumi') return [`${name} is ${sayOf(x.id, x.dist.value, x.unit)}, Olumi’s figure`];
-      if (m?.approximate !== undefined) return [`using ${sayOf(x.id, x.dist.value, x.unit)} for ${name} for now — you said ‘${m.approximate.quote}’`];
+      if (m?.approximate !== undefined) return [`using ${sayOf(x.id, x.dist.value, x.unit)} for ${name} for now — you said ${q(m.approximate.quote)}`];
       return author !== undefined && NOT_ASSUMPTIONS.has(author) ? [] : [`${name} is ${sayOf(x.id, x.dist.value, x.unit)} ${NOT_RECORDED}`];
     }
     // S3 smoke fix 1: only an Olumi-authored EFFECT relation is an assumed relationship. A definition (an identity: a
@@ -336,9 +340,10 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     if (x.equation?.form !== 'effect' || m?.relation_author === 'person') return [];
     return [m?.relation_author === 'olumi' ? `${name} follows Olumi’s assumed relationship` : `${name} follows a relationship ${NOT_RECORDED}`];
   }))];
-  /** R8: each premise in its own words: "your" only when it is the person's and confirmed; theirs not yet confirmed says so. */
+  /** R8: a reported premise keeps its speaker; "your" only when it is the person's own and confirmed. */
   const premiseWords = (p: PresentPremise): string => {
-    const text = q(p.text.trim().replace(/[.!]+$/, '')), whose = p.author === 'olumi' ? 'Olumi’s' : p.confirmed ? 'your' : 'the';
+    const text = q(p.text.trim().replace(/[.!]+$/, '')), party = p.party == null ? '' : inlineWords(p.party);
+    const whose = p.author === 'olumi' ? 'Olumi’s' : party !== '' ? `${party}’s` : p.confirmed ? 'your' : 'the';
     return `${whose} ${p.kind === 'condition' ? `condition ${text} is met` : `assumption ${text} holds`}${p.author === 'person' && !p.confirmed ? ' (not yet confirmed)' : ''}`;
   };
   /** R8 (default deny): what it reads (its goals and limits, each quantity) not `confirmed` is Olumi's reading (a structural constant is nobody's), named
@@ -505,15 +510,19 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const switches = new Set(model.options.flatMap((o) => o.sets.map((s) => s.quantity)));
   const SETTINGS = ['low end', 'middle', 'high end'];
   const sweepDraws = Math.min(SWEEP_DRAWS, result.draws);
-  /** Its low end, middle and high end, within what it is drawn within (spec §3.7): never a setting it can never be. */
-  const settingsOf = (x: Quantity & { dist: RangeDist }): [number, number, number] => {
-    const r = lawOf(x.id, x.dist).reading, low = r.kind === 'normal' ? Math.max(x.dist.low, r.lower) : x.dist.low, high = r.kind === 'normal' ? Math.min(x.dist.high, r.upper) : x.dist.high;
-    return [low, (low + high) / 2, high];
-  };
-  const atEnds = new Map<string, readonly SimResult[]>();
-  const endsOf = (x: Quantity & { dist: RangeDist }): readonly SimResult[] => {
-    if (!atEnds.has(x.id)) atEnds.set(x.id, settingsOf(x).map((value) => simulate({ ...model, quantities: model.quantities
-      .map((z) => (z.id === x.id ? { ...z, dist: { kind: 'fixed' as const, value, author: 'olumi' as const } } : z)) }, { seed: result.seed, draws: sweepDraws })));
+  const atEnds = new Map<string, { readonly values: readonly number[]; readonly results: readonly SimResult[] }>();
+  const endsOf = (x: Quantity & { dist: RangeDist }) => {
+    if (!atEnds.has(x.id)) {
+      // Use the Run's own domain, including the mathematical [0, 1] for a risk's occurrence. Never test or describe an
+      // impossible setting. Cache the actual settings with their results so the words name exactly what was tested.
+      const chance = model.risks.some((r) => r.occurrence === x.id);
+      const reading = rangeLaw(x.dist, chance ? { domain: { min: 0, max: 1 } } : {});
+      const values = [x.dist.low, (x.dist.low + x.dist.high) / 2, x.dist.high]
+        .map((value) => reading.kind === 'point' ? reading.value : Math.min(reading.upper, Math.max(reading.lower, value)));
+      const results = values.map((value) => simulate({ ...model, quantities: model.quantities
+        .map((z) => (z.id === x.id ? { ...z, dist: { kind: 'fixed' as const, value, author: 'olumi' as const } } : z)) }, { seed: result.seed, draws: sweepDraws }));
+      atEnds.set(x.id, { values, results });
+    }
     return atEnds.get(x.id)!;
   };
   const mainDriverOf = (o: OptionResult): PresentMainDriver => {
@@ -524,7 +533,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     // Codex r1 #3728: a setting that cannot be worked out (a nonfinite draw) is never dropped: the swing counts only the
     // settings that computed, the input is named as not tested there, and nothing is concluded about a setting not tested.
     const tested = inputs.map((x) => {
-      const at = endsOf(x).map((r) => r.options.find((p) => p.option_id === o.option_id)!.joint_within_limits);
+      const at = endsOf(x).results.map((r) => r.options.find((p) => p.option_id === o.option_id)!.joint_within_limits);
       const chances = at.flatMap((c) => (isWithheld(c) ? [] : [c.chance]));
       return { x, at, swing: chances.length === 0 ? 0 : Math.max(...chances) - Math.min(...chances), missing: SETTINGS.filter((_, i) => isWithheld(at[i]!)) };
     });
@@ -539,7 +548,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const { x, at } = best;
     const author = meta(x.id)?.author === 'unverified' ? 'unverified' as const : x.dist.basis === 'person_range' ? 'person' as const : 'olumi' as const;
     const whose = author === 'unverified' ? NOT_IN_THEIR_WORDS : author === 'person' ? '(your range)' : '(Olumi’s estimate)';
-    const [low, middle, high] = settingsOf(x).map((value, i) => ({ value, display: shown(at[i]!, sweepDraws)?.display ?? null }));
+    const [low, middle, high] = endsOf(x).values.map((value, i) => ({ value, display: shown(at[i]!, sweepDraws)?.display ?? null }));
     const said = (e: End) => `(${sayOf(x.id, e.value, x.unit)}) ${e.display ?? 'could not be tested'}`;
     const others = untested.filter((t) => t.x.id !== x.id);
     return { kind: 'available', driver: { quantity: x.id, author, low: low!, middle: middle!, high: high!, swing_points: Number((best.swing * 100).toFixed(1)), draws: sweepDraws,
