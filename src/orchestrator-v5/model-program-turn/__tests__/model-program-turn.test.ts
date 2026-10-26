@@ -771,6 +771,27 @@ describe('the model-program turn on the real core route', () => {
     expect(face).toContain('‘promo effect’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 3 member / month / promotion to 7 member / month / promotion, into a bell-shaped spread, kept to Olumi’s reading of what it can be (never below 0 member / month / promotion)');
   });
 
+  it('the real Run tests the middle of an 80–120% range inside its declared 100% ceiling: 80%, 90%, 100%', () => {
+    const m = bakery(), rangeWords = 'between 80 and 120 percent';
+    m.quantities = m.quantities.map((x) => x.id === 'sell_through'
+      ? { ...x, unit: '%', status: 'known', value: null, low: 80, high: 120, range_kind: 'bounds', ceiling: 100, author: 'person', quote: rangeWords, basis: null }
+      : x.id === 'sales_target' ? { ...x, value: 390, quote: 'reach 390 loaves a week' }
+      : x.id === 'oven_price' ? { ...x, status: 'known', value: 2500, question: null, quote: 'The oven costs £2,500' } : x);
+    m.goals = m.goals.map((g) => ({ ...g, label: 'Reach 390 loaves a week', quote: 'want to reach 390 loaves a week' }));
+    const source = `${BRIEF.replace('380', '390')} Sell-through is ${rangeWords}. The oven costs £2,500.`;
+    const result = evaluateCanonical(m, { sourceText: source, seed: 7 });
+    expect(result.sim).not.toBeNull();
+    const d = (result.view as Json).options.find((o: Json) => o.option_id === 'second_oven').main_driver;
+    expect(d.kind).toBe('available');
+    expect(d.driver.quantity).toBe('sell_through');
+    expect(d.driver.low.value).toBe(0.8);
+    expect(d.driver.middle.value).toBe(0.9);
+    expect(d.driver.high.value).toBe(1);
+    expect(d.detail).toContain('at the middle (90%)');
+    expect(d.detail).not.toContain('(120%)');
+    expect(m.quantities.find((x) => x.id === 'sell_through')).toMatchObject({ low: 80, high: 120, ceiling: 100 });
+  });
+
   it('issue 40: a first draft with an Olumi link of unknown size and a stated direction shows its reading card, the direction said as an arrow and words on what it moves', async () => {
     const m = withOlumiLinks(bakery());
     replies = [JSON.stringify(m)];
@@ -1929,14 +1950,45 @@ describe('the model-program turn on the real core route', () => {
       for (const kind of ['assumption', 'condition'] as const) {
         const m = approved(allTheirs()), party = 'Our treasurer';
         const text = kind === 'assumption' ? 'Membership fees stay the same.' : hall.text;
-        const quote = text.slice(0, -1), source = `${OWN} ${party} says: ${text}`;
+        const quote = text.slice(0, -1), source = `${OWN} ${party} says: ${text} And keep at least 320 members.`;
+        m.quantities.push(q('floor', 'member', { value: 320, quote: 'at least 320 members', approval: 'approved' }));
+        m.goals.push({ ...m.goals[0]!, id: 'keep_320', label: 'Keep at least 320 members', measure: { ...m.goals[0]!.measure!, target: 'floor' }, quote: 'keep at least 320 members' });
         if (kind === 'assumption') m.assumptions.push({ id: 'fees', text, applied: true, concerns: ['reach_340'], author: 'person', quote, ...at, party, approval: 'approved' });
         else m.conditions.push({ ...hall, party });
-        const face = faceOf(m, source);
-        expect(face).toContain(`${party}’s ${kind} ‘${quote}’ ${kind === 'assumption' ? 'holds' : 'is met'}`);
+        const v = evaluateCanonical(m, { sourceText: source, seed: 7 }).view as Json;
+        const face = (v.options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
+        const premise = `${party}’s ${kind} ‘${quote}’ ${kind === 'assumption' ? 'holds' : 'is met'}`;
+        expect(face).toContain(premise);
+        expect(v.goal_chance.targets.per_target[0].words).toContain(premise);
         expect(face).not.toContain(`your ${kind}`);
         expect(face).not.toContain('(not yet confirmed)');
       }
+    });
+
+    it('a wrapped prerequisite stays on one line throughout a multi-goal result, including its joint and notes', () => {
+      const m = approved(allTheirs()), wrapped = 'The council must let us\nuse the hall.';
+      m.quantities.push(q('floor', 'member', { value: 320, quote: 'at least 320 members', approval: 'approved' }));
+      m.goals.push({ ...m.goals[0]!, id: 'keep_320', label: 'Keep at least 320 members', measure: { ...m.goals[0]!.measure!, target: 'floor' }, quote: 'keep at least 320 members' });
+      m.conditions.push({ ...hall, text: wrapped, quote: wrapped.slice(0, -1), concerns: ['reach_340', 'keep_320'] });
+      // A qualitative aim without a measure makes the coverage note real; it remains outside the calculation.
+      m.goals.push({ ...m.goals[0]!, id: 'welcoming', label: 'Keep the hall\nwelcoming', measure: null, question: 'How would you measure a welcoming hall?', quote: 'Keep the hall\nwelcoming' });
+      const v = evaluateCanonical(m, { sourceText: `${OWN} ${wrapped} And keep at least 320 members. Keep the hall\nwelcoming.`, seed: 7 }).view as Json;
+      const detail = v.goal_chance, premise = 'your condition ‘The council must let us use the hall’ is met';
+      expect(detail.targets.per_target).toHaveLength(2);
+      for (const target of detail.targets.per_target) {
+        expect(target.words).toContain(premise);
+        expect(target.words).not.toMatch(/[\r\n]/);
+      }
+      expect(detail.targets.joint.words).not.toMatch(/[\r\n]/);
+      expect(detail.chance_words).not.toMatch(/[\r\n]/);
+      expect(detail.notes.length).toBeGreaterThan(0);
+      for (const note of detail.notes) expect(note).not.toMatch(/[\r\n]/);
+      expect(detail.notes.join(' ')).toContain('Keep the hall welcoming');
+      for (const o of v.options) {
+        expect(o.cell.face).toContain(premise);
+        expect(o.cell.face).not.toMatch(/[\r\n]/);
+      }
+      expect(m.conditions[0]!.text).toBe(wrapped);
     });
 
     it('a stated condition and an Olumi estimate: the basis names both, never "on your figures"', () => {
