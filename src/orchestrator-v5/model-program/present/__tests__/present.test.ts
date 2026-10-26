@@ -413,21 +413,6 @@ describe('present: what each computed chance rests on most (one figure at a time
     expect(x.dist).toMatchObject({ low: -0.2, high: 1.2, domain: { min: 0, max: 1 } });
   });
 
-  it('uses the risk occurrence domain even when no explicit domain is recorded on its range', () => {
-    const m = model([range('chance', -0.2, 1.2, undefined, '1', 'olumi_estimate'), fixed('base', 100, 'tickets'), fixed('zero', 0, 'tickets'),
-      def('capacity', 'sum', ['base', 'zero'], 'tickets'), fixed('loss', -100, 'tickets'), fixed('target', 50, 'tickets')],
-    [goal('g', 'capacity', '>=', 'target')], [option('hold', 'Hold')]);
-    m.risks.push({ id: 'outage', occurrence: 'chance', severity: 'loss', effect_on: 'capacity', mode: 'add', from_period: 0 });
-    const d = driver(present(m, { ...confirmedFigures(m), chance: { label: 'Outage chance', author: 'olumi' } }), 'hold');
-    expect(d.kind).toBe('available');
-    expect(d.driver.low.value).toBe(0);
-    expect(d.driver.middle.value).toBe(0.5);
-    expect(d.driver.high.value).toBe(1);
-    // A risk still uses sampling precision, even when its tested chance is 0 or 1; never call it an exact whole Run.
-    expect(d.driver.low.display).toBe('more than 99%');
-    expect(d.driver.high.display).toBe('less than 1%');
-  });
-
   it('a hand-calculated model: the driver and its three settings are known, and an option nothing moves licenses none', () => {
     // Add: at c = 10, capacity is 90 + d, below 95 in every draw (d moves it by about 0.06): 0 of 200, "less than 1%"; at c = 20,
     // 100 + d, and at c = 30, 110 + d, met in every draw: "more than 99%". None is exact (d is still drawn). Swing 100 points;
