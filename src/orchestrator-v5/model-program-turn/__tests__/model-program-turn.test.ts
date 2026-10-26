@@ -1935,6 +1935,23 @@ describe('the model-program turn on the real core route', () => {
     expect([p.data.changes[0].before, p.data.changes[0].after]).toEqual([
       'no figure yet (in week), still to be given, Olumi asks "When will the second oven arrive?", no basis given, not in your words',
       `2 week, known, no question, based on "Two whole weeks from today, 25 October 2026.", in your words "${words}"`]);
+
+    // Integrated review 26 Oct: read means the drafter returned that record changed, as a known figure. One it leaves as saved
+    // (the merge keeps it) or reads only as an estimate is refused by name, never restamped as theirs.
+    const unread = (id: string) => ({ status: 'refused', reason: 'not_an_answer', detail: `${id}: the change read no figure from your answer, so nothing changed.`, data: { ids: [id] } });
+    const same = 'About the same as last year.';
+    replies = [savedWith(() => {})]; // Olumi's 0.5–0.9 estimate, not returned: never "known, yours"
+    expect(await ask([answer({ id: 'sell_through', quote: same })], ctx(same))).toEqual(unread('sell_through'));
+    const until = 'We count until the oven is paid for.';
+    replies = [savedWith(() => {})]; // their 8 weeks, not returned: never their new words on the old figure
+    expect(await ask([answer({ id: 'weeks_counted', quote: until })], ctx(until))).toEqual(unread('weeks_counted'));
+    replies = [savedWith((d) => setQ(d, 'sell_through', { low: 0.6, high: 0.8, basis: 'Read as about last year.' }))]; // Olumi's estimate, and it compiles
+    expect(await ask([answer({ id: 'sell_through', quote: same })], ctx(same))).toEqual(unread('sell_through'));
+    const vague = 'Sometime in the next month or so.';
+    for (const status of ['estimated', 'unsupported'] as const) {
+      replies = Array.from({ length: 3 }, () => savedWith((d) => setQ(d, 'oven_weeks', { status, author: 'olumi', question: null, low: 2, high: 6, range_kind: 'plausible', basis: 'Vague words read as two to six weeks.' })));
+      expect(await ask([answer({ quote: vague })], ctx(vague))).toEqual(unread('oven_weeks'));
+    }
   });
 
   it('DL 23 Oct (batch 4 marketing-r2): what a measure leaves out is kept in their words and named; the chance says what it covers and what it leaves out, never that it covers everything', () => {
