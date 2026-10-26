@@ -294,7 +294,7 @@ export const CanonicalOptionSet = z.object({
   starts_after_periods: timing,
   author: z.enum(QUANTITY_AUTHORS).describe('Who gave the inline value: person, olumi, or structure (a switch: 1 for on).'),
   quote: attribution.quote,
-}).strict().describe('What the option changes, and to what: a quantity id in to, or the option\'s own inline value (value, or low and high), with who gave it. An inline value compiles into a named quantity of its own.');
+}).strict().describe('What the option changes, and to what: a quantity id in to, or the option\'s own inline value (one fixed value: a choice, not an uncertainty), with who gave it. An inline value compiles into a named quantity of its own.');
 export type CanonicalOptionSetT = z.infer<typeof CanonicalOptionSet>;
 
 export const CanonicalOption = z.object({
