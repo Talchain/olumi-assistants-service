@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import type { InternalDispatch } from '../agent-lane/runtime/agent-capabilities.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { findOperationVersion, unknownWrite, writeCorePostimage, type CoreWrite } from '../path-b/tools/core-write.js';
-import { isSavedRead, readSaved, type SavedRead } from '../path-b/tools/context-tool.js';
+import { isSavedRead, readSaved } from '../path-b/tools/context-tool.js';
 import { approvedGraphHeld } from '../agent-lane/runtime/draft-replacement.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
@@ -64,8 +64,7 @@ export function programOperationId(scenarioId: string, key: string): string {
   return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20)}`;
 }
 
-/** `heldRead`: the read that holds the complete postimage sent, so a recovered save (`already_saved`) is bound to the graph it saved. */
-export type ProgramSave = { readonly write: CoreWrite; readonly readback: Rec; readonly heldRead?: SavedRead };
+export type ProgramSave = { readonly write: CoreWrite; readonly readback: Rec };
 
 /**
  * ONE core write of a postimage, then an independent read: the saved program and its Runs must come back equal. Compared
@@ -90,7 +89,7 @@ export async function savePostimage(dispatch: InternalDispatch, w: { readonly sc
   const held = isSavedRead(read) && approvedGraphHeld(graph, read.graph);
   const write: CoreWrite = own !== null && held ? { status: 'already_saved', receipt: own }
     : sentWrite.status === 'already_saved' && !held ? unknownWrite('not_verified', { check: 'hash_mismatch', field: 'read_identity', expected: null, actual: null }) : sentWrite;
-  return { write, ...(held && isSavedRead(read) ? { heldRead: read } : {}), readback: { read: isSavedRead(read), version: back?.canonical.version ?? null, model_program: back?.model_program ?? null,
+  return { write, readback: { read: isSavedRead(read), version: back?.canonical.version ?? null, model_program: back?.model_program ?? null,
     seed_identical: back !== undefined && back.seed === sent?.seed,
     canonical_identical: back !== undefined && stableStringify(back.canonical) === stableStringify(sent?.canonical),
     runs_identical: back !== undefined && stableStringify(back.runs) === stableStringify(sent?.runs) } };

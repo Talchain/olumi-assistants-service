@@ -131,19 +131,17 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
   // This evaluation is a NEW Run, stored with the model; the Runs before it are kept exactly as they were.
   const kind: TurnKind = prior === undefined ? 'draft' : 'run';
   const next = withNewRun(program);
-  const { write, readback, heldRead } = await savePostimage(input.dispatch, { scenarioId: input.scenarioId, operationId: programOperationId(input.scenarioId, `turn:${input.turnId}`),
+  const { write, readback } = await savePostimage(input.dispatch, { scenarioId: input.scenarioId, operationId: programOperationId(input.scenarioId, `turn:${input.turnId}`),
     expectedIdentity: input.saved.identity, ...(kind === 'draft' ? { briefText: input.message } : {}) }, next.graph);
   const saved = isSaved(write);
   if (write.status === 'saved') { try { input.onModelRegistered?.(write.after.graph); } catch { /* an observer never decides the outcome */ } }
   const receipt = saved && 'receipt' in write ? write.receipt : null;
   // STEP 2, "Check what I understood": the saved draft read back on ONE held card, every item an add, for the person to confirm
   // ("Yes, that’s what I meant") or correct. Its model is the draft accepted by them, with a new Run; nothing more is saved now.
-  // The saved graph it is bound to: an acknowledged save's own read, or a recovered save's (`already_saved`, held to its read).
-  const savedAt = write.status === 'saved' ? write.after : write.status === 'already_saved' ? heldRead ?? null : null;
-  const reading = kind === 'draft' && savedAt !== null && savedAt.identity !== null && input.proposals !== undefined ? (() => {
+  const reading = kind === 'draft' && write.status === 'saved' && write.after.identity !== null && input.proposals !== undefined ? (() => {
     const v = readingOf(next.program.canonical, { words: next.program.person_words, approver: input.userId ?? null });
     if (!v.ok) return { call: { name: CONFIRM_READING, ok: false, outcome: 'refused', refusal: v.code, mutated: false }, result: { ok: false, mutated: false, refusal: v.code, ids: v.ids } };
-    const p = holdProgramCard(input.proposals!, { scenarioId: input.scenarioId, userId: input.userId ?? null, graphHash: savedAt.graphHash, identity: savedAt.identity! },
+    const p = holdProgramCard(input.proposals!, { scenarioId: input.scenarioId, userId: input.userId ?? null, graphHash: write.after.graphHash, identity: write.after.identity! },
       { label: READING_LABEL, basis: 'Olumi’s reading of the brief, for the person to confirm or correct.', program: withNewRun({ ...next.program, canonical: v.model }).program, changes: v.changes, reading: true });
     return { call: { name: CONFIRM_READING, ok: true, outcome: 'ok', mutated: false, proposal_id: p.proposal_id }, result: { ok: true, mutated: false, proposal_id: p.proposal_id, public_label: p.public_label } };
   })() : undefined;
