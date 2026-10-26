@@ -69,7 +69,7 @@ export interface CoreTurnContract {
   /** The card the turn's run paused on: a non-empty id or null, never '' (a pause on no card is no pause). */
   readonly paused: { readonly proposal_id: CardId | null } | null;
   readonly error: CoreTurnError | null;
-  /** The panel's action bar (`action-bar.ts`), ranked from the turn's own final read; null when it offers nothing. */
+  /** The panel's action bar: always null on the program-only route (inventory F1b; a program has no action bar), kept on the wire for the UI's reader. */
   readonly action_bar: unknown;
   readonly _agent?: Readonly<Record<string, unknown>>;
   readonly _provider_calls?: unknown;

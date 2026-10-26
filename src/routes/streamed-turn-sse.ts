@@ -113,8 +113,7 @@ import { coreTurnStreamTimeout } from "../orchestrator-v5/core-route/contract.js
  * same target from the same enum. A second copy of that decision is exactly the
  * drift this file's own header warns about.
  */
-export const STREAMED_TURN_INTERNAL_TARGET =
-  config.proxy.proxyV5Target === "agent" ? "/agent/v1/turn" : "/orchestrate/v2/turn";
+export const STREAMED_TURN_INTERNAL_TARGET = "/agent/v1/core-turn";
 
 /** The turn id the request body names, for a terminal frame the turn itself never wrote. */
 function turnIdOfPayload(payload: string): string | null {

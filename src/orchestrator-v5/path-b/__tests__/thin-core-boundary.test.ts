@@ -23,11 +23,17 @@ const FORBIDDEN = [
   'agent-v1-turn',
 ];
 
+/**
+ * ⭐ THE CORE ROUTE IS PROGRAM-ONLY (inventory F1b, 26 Oct): the route and its dependencies load none of the Living Model's turn
+ * machinery: the held-approval writer, the action ranker's bar, the Run restore, the timing carry, the legacy readiness builder
+ * and the note tool.
+ */
+const CORE_ROUTE_FILES = ['routes/core-turn.ts', 'orchestrator-v5/core-route/deps.ts'];
+const CORE_ROUTE_FORBIDDEN = ['approve-held-proposal', 'action-bar', 'run-operation', 'carried-effects-timing', 'analysis-ready-helper', 'note-on-item'];
+
 /** Protocol helpers that live in a forbidden module but carry no meaning. */
 const ALLOWED_BY_NAME: Record<string, readonly string[]> = {
   'build-model': ['constructionOperationId', 'findConstructionVersion'],
-  // The core route's Run runs on the existing pipeline (DL 22 Oct): `core-route/deps.ts` builds the capabilities for it alone.
-  'agent-capabilities': ['createAgentCapabilities'],
   // Whether the request's words were typed: the one authority's predicate over the request shape, no meaning.
   'provenance-of': ['requestWasTyped'],
 };
@@ -47,10 +53,10 @@ function filesUnder(rel: string): string[] {
  * The declarations that bind names are read from the compiler's own tree, so a type-only import or re-export, or a type-only
  * name inside one, loads nothing and is skipped.
  */
-export function forbiddenImports(source: string): string[] {
+export function forbiddenImports(source: string, list: readonly string[] = FORBIDDEN): string[] {
   const out: string[] = [];
   const baseOf = (spec: string): string => spec.split('/').pop()!.replace(/\.js$/, '');
-  const forbidden = (spec: string): boolean => FORBIDDEN.includes(baseOf(spec));
+  const forbidden = (spec: string): boolean => list.includes(baseOf(spec));
   const referenced = ts.preProcessFile(source, true, true).importedFiles.map((f) => f.fileName).filter(forbidden);
   const declared: string[] = [];
   for (const s of ts.createSourceFile('boundary.ts', source, ts.ScriptTarget.Latest, true).statements) {
@@ -87,6 +93,12 @@ describe('thin core dependency boundary', () => {
     const violations = THIN_CORE_ROOTS.flatMap(filesUnder).flatMap((file) =>
       forbiddenImports(readFileSync(file, 'utf8')).map((v) => `${relative(SRC, file)} → ${v}`));
     expect(violations).toEqual([]);
+  });
+
+  it('F1b: the core route and its dependencies load none of the Living Model turn machinery; CONTRAST: the program tools they do load are seen', () => {
+    const read = (rel: string) => readFileSync(join(SRC, rel), 'utf8');
+    expect(CORE_ROUTE_FILES.flatMap((rel) => forbiddenImports(read(rel), CORE_ROUTE_FORBIDDEN).map((v) => `${rel} → ${v}`))).toEqual([]);
+    expect(forbiddenImports(read('routes/core-turn.ts'), ['program-tools']), 'the probe sees a module the route imports').toEqual(['program-tools: applyCanvasFigure, PROGRAM_TURN_GUIDANCE, readProgramContext']);
   });
 
   it('POSITIVE CONTROL: the checker flags a runtime import and passes type-only and named protocol imports', () => {

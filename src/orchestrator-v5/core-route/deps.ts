@@ -2,16 +2,13 @@
  * ⭐ CORE ROUTE: THE CORE TURN'S DEPENDENCIES, BUILT IN ONE PLACE (22 Oct 2026; DL: core moves to its own thin route,
  * `routes/core-turn.ts`; port, never rewrite). Moved VERBATIM from `routes/agent-v1-turn.ts`'s core branch, which now calls
  * these, so both routes give `runCoreTurn` the same tools and stores:
- *  · `coreTurnTools`: the SDK turn's typed adapters (`pathBTools`) over the route's primitives;
+ *  · `programTurnTools`: the core route's tools, a model program's typed adapters over the route's counting dispatch;
+ *  · `coreTurnTools`: the legacy route's tools (`agent-v1-turn.ts`, a Living Model or legacy scenario); it goes with that route;
  *  · `coreTurnStores`: where the scenario's paused run and OpenAI Conversation id are kept;
  *  · `graphReadyEmitter`: the streamed GRAPH_READY frame for a drafted model;
  *  · `CORE_RUN_PRESS_WITHHELD`: the tools a Run press withholds.
  *  · `constructionDeadline`: when the turn's construction call must have ended.
- *  · `coreTurnCapabilities`: the legacy capabilities, built for `routes/core-turn.ts` and used there ONLY for the Run
- *    (`runAnalysis`, the existing Run pipeline and its press guard); propose_link_strengths reaches them through
- *    `dispatchTool` on a legacy scenario only, and the stress variant is `runStressVariant`'s own. Nothing else is used, so
- *    the legacy Run pipeline can be cut out later.
- * The turn's write accounting (`countingDispatch`, `capDispatch`, the fenced doors) is the route's: it is passed in.
+ * The turn's write accounting (`countingDispatch`, the fenced doors) is the route's: it is passed in.
  */
 import { randomUUID } from 'node:crypto';
 import { config } from '../../config/index.js';
@@ -24,9 +21,7 @@ import type { CoreTurnInput } from '../agent-lane/core/sdk-turn.js';
 import { coreBudget } from '../agent-lane/model-budgets.js';
 import { CONSTRUCTION_TAIL_RESERVE_MS } from '../agent-lane/runtime/construction-deadline.js';
 import { dispatchTool, type AgentCapabilities, type AgentLaneMode, type AgentToolContext } from '../agent-lane/runtime/agent-tools.js';
-import { createAgentCapabilities } from '../agent-lane/runtime/agent-capabilities.js';
 import type { InternalDispatch } from './internal-dispatch.js';
-import type { RecoveredRun } from '../agent-lane/run-operation.js';
 import { runStressVariant } from '../handlers/stress-variant-run.js';
 import { pathBTools, type PathBToolDeps } from '../path-b/tools/index.js';
 import type { OpenAiPausedRun, SessionStore } from '../session/store.js';
@@ -145,6 +140,32 @@ export function coreTurnTools(i: CoreTurnToolsInput): CoreTurnInput['tools'] {
     }, i.scenario);
 }
 
+export interface ProgramTurnToolsInput {
+  /** The turn's tool context (the route's typed-words carrier, with any grounded selection). */
+  readonly ctx: AgentToolContext;
+  readonly mode: AgentLaneMode;
+  /** The route's counting dispatch: every save goes through it. */
+  readonly dispatch: InternalDispatch;
+  readonly proposals: PathBToolDeps['proposals'];
+  /** Told when a tool's own receipt AND its successful postimage readback establish a saved change. */
+  readonly onVerifiedSave: () => void;
+}
+
+/**
+ * A model program's tools (inventory F1b, F7): read, propose_change, apply_change and run_analysis on the program
+ * (`path-b/tools/index.ts` programTools), each call recorded once. A program's Run is its own (`runProgram`): the Living Model's
+ * Run pipeline is never handed in, and a call to it is an error, never a Run.
+ */
+export function programTurnTools(i: ProgramTurnToolsInput): CoreTurnInput['tools'] {
+  const noLivingModelRun: PathBToolDeps['runAnalysis'] = () => Promise.reject(new Error('a model program runs its own Run'));
+  return (onCall, press) => pathBTools({ dispatch: i.dispatch, proposals: i.proposals, runAnalysis: noLivingModelRun,
+    ...(press !== undefined ? { pressedProposal: press.approves } : {}) }, i.ctx, i.mode,
+    (row, result) => {
+      if (result.ok && result.mutated && (result.receipts?.length ?? 0) > 0) i.onVerifiedSave();
+      onCall(row, { ...result });
+    }, 'program');
+}
+
 type CoreTurnStoreReaders = Pick<SessionStore, 'readOpenAiPausedRun' | 'saveOpenAiPausedRun' | 'takeOpenAiPausedRun'
   | 'readOpenAiConversationId' | 'claimOpenAiConversationId'>;
 
@@ -167,13 +188,4 @@ export function coreTurnStores(store: CoreTurnStoreReaders): Pick<CoreTurnInput,
         claim: (sid: string, id: string) => store.claimOpenAiConversationId!(sid, id),
       } } : {}),
   };
-}
-
-/**
- * The capabilities `routes/core-turn.ts` runs the Run on: the existing pipeline over the route's counting dispatch, the
- * request's own Run operation (or the restore's recorded Run) and the turn's deadline. Used for `runAnalysis` only.
- */
-export function coreTurnCapabilities(dispatch: InternalDispatch, proposals: PathBToolDeps['proposals'],
-  run: { readonly recoveredRun?: RecoveredRun; readonly runOperationId?: string; readonly deadlineAt: number }): AgentCapabilities {
-  return createAgentCapabilities(dispatch, proposals, undefined, 'core', undefined, { turnAuthority: true, ...run });
 }

@@ -2227,7 +2227,7 @@ describe('the model-program turn on the real core route', () => {
       othersAsSaved(now, last, 'quantities/sell_through');
     });
 
-    it('contrast: on a board that is not a program, the same edit from the same caller takes the existing canvas-edit path untouched, forwarded as sent, and the program writer never runs', async () => {
+    it('contrast (inventory F1b): on a board that is not a program, the same edit from the same caller is refused as out of the alpha: never forwarded to a legacy turn route, and nothing is written', async () => {
       replies = [JSON.stringify(bakery())];
       await turn({ message: BRIEF });
       const { living_model: _program, ...plain } = persisted!;
@@ -2237,11 +2237,9 @@ describe('the model-program turn on the real core route', () => {
       sent.length = 0;
       const event = { kind: 'factor_value_edit', target_id: 'base_sales', value: 320 };
       const edit = await turn({ kind: 'system_event', event }, { [CALLER_HEADER]: EDITOR, authorization: 'Bearer hc0-caller' });
-      expect(edit.json()._agent).toEqual({ forwarded_kind: 'system_event' });
-      expect(legacyForwards).toHaveLength(1);
-      expect(legacyForwards[0]!.body.event).toEqual(event);
-      expect(legacyForwards[0]!.headers.authorization).toBe('Bearer hc0-caller');
-      expect(JSON.stringify(legacyForwards[0]!.body)).not.toContain(EDITOR);
+      expect(edit.statusCode, edit.body).toBe(409);
+      expect(edit.json()).toMatchObject({ error: { code: 'legacy_scenario', nothing_saved: true }, _agent: { forwarded_kind: 'system_event' } });
+      expect(legacyForwards).toHaveLength(0);
       expect([registered.length, sent.length]).toEqual([saves, 0]);
       expect(persisted).toEqual(plain);
     });

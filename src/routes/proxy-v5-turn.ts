@@ -36,7 +36,6 @@ import { log } from "../utils/telemetry.js";
 import { ROUTE_TIMEOUT_MS, DRAFT_REQUEST_BUDGET_MS } from "../config/timeouts.js";
 import { recordExplicitTurnStop } from "./turn-stop.js";
 import { coreTurnStreamTimeout } from "../orchestrator-v5/core-route/contract.js";
-import { isProgramGraph } from "../orchestrator-v5/model-program-turn/program-store.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -63,33 +62,15 @@ export const AI_MODE_HEADER = "x-olumi-ai-mode" as const;
  * (`agent-tools.ts` `laneModeFor`; ignored in production). The value is forwarded unchanged with the other allowed headers.
  */
 export type BrowserAiMode = "conventional" | "openai" | "core" | "core-route";
-export type ProxyInternalTarget = "/orchestrate/v2/turn" | "/agent/v1/turn" | "/agent/v1/core-turn";
+export type ProxyInternalTarget = "/agent/v1/core-turn";
 
 /**
- * Explicit comparison mode wins over deployment default. The value is a closed
- * enum and can only select one of the two already-mounted Olumi turn routes.
- * Missing/invalid headers retain the deployment's configured target.
+ * ⭐ EVERY TURN IS THE CORE ROUTE'S (inventory F1b, 26 Oct; Paul: "all of the old code stripped"). Whatever mode the browser
+ * names, and with none, the turn goes to `routes/core-turn.ts`, the alpha's one turn route: no browser request reaches the
+ * legacy turn routes (`/orchestrate/v2/turn`, `/agent/v1/turn`). The streamed proxy resolves the same target here.
  */
-export function resolveProxyInternalTarget(mode: unknown): ProxyInternalTarget {
-  if (mode === "conventional") return "/orchestrate/v2/turn";
-  // The core route (`routes/core-turn.ts`): the PoC's own thin turn, with its own contract.
-  if (mode === "core-route") return "/agent/v1/core-turn";
-  if (mode === "openai" || mode === "core") return "/agent/v1/turn";
-  return config.proxy.proxyV5Target === "agent"
-    ? "/agent/v1/turn"
-    : "/orchestrate/v2/turn";
-}
-
-/**
- * ⛔ A MODEL PROGRAM NEVER REACHES A LEGACY TURN ROUTE (spec §3: never a fall back to an older model, validator or analysis
- * route). Its turns are the core route's; any other target (an explicit `?ai=openai` / `?ai=conventional`, or the deployment
- * default) is refused with this typed error, never run. Read from the snapshot the ownership hook admitted this request on, so
- * it costs no read and says nothing to a caller the hook refused. EXPORTED for the streamed sibling: one rule, not two.
- */
-export function programOnLegacyRouteRefusal(target: ProxyInternalTarget, request: FastifyRequest, requestId: string): Record<string, unknown> | undefined {
-  if (target === "/agent/v1/core-turn" || !isProgramGraph(request.scenarioAccess?.snapshot?.graph)) return undefined;
-  return { error: { code: "MODEL_PROGRAM_LEGACY_ROUTE", source: "proxy", request_id: requestId, retry_safe: false, nothing_saved: true,
-    message: "This scenario's model can only be opened in Olumi's standard mode. Nothing was run or changed. Switch back to the standard mode to continue." } };
+export function resolveProxyInternalTarget(_mode: unknown): ProxyInternalTarget {
+  return "/agent/v1/core-turn";
 }
 
 /** Headers forwarded from the browser request to the internal CEE call. */
@@ -492,11 +473,6 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     // user they can name by UUID.
     const bodyString = serialiseProxiedBodyWithoutClaimedIdentity(request.body);
     const internalTarget = resolveProxyInternalTarget(request.headers[AI_MODE_HEADER]);
-    const programRefusal = programOnLegacyRouteRefusal(internalTarget, request, requestId);
-    if (programRefusal !== undefined) {
-      for (const [k, v] of Object.entries(buildCorsHeaders(origin as string))) reply.header(k, v);
-      return reply.code(409).send(programRefusal);
-    }
 
     const injectPromise = app.inject({
       method: "POST",
@@ -565,19 +541,8 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
       }
       // The core route's client reads only its own contract: the same timeout the streamed proxy sends (the turn keeps
       // running and may save; the same turn id later replays its recorded answer).
-      if (internalTarget === "/agent/v1/core-turn") {
-        const turnId = (request.body as { turn_id?: unknown } | null)?.turn_id;
-        return reply.code(504).send(coreTurnStreamTimeout(typeof turnId === "string" && turnId !== "" ? turnId : null));
-      }
-      return reply.code(504).send({
-        error: {
-          code: "PROXY_UPSTREAM_TIMEOUT",
-          message: `The model generation service did not respond within ${Math.round(timeoutMs / 1000)}s. Please try again.`,
-          upstream_duration_ms: duration,
-          source: "proxy",
-          request_id: requestId,
-        },
-      });
+      const turnId = (request.body as { turn_id?: unknown } | null)?.turn_id;
+      return reply.code(504).send(coreTurnStreamTimeout(typeof turnId === "string" && turnId !== "" ? turnId : null));
     }
 
     // 6. Forward response
@@ -601,10 +566,7 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     // Diagnostic: proxy-specific headers
     reply.header("x-proxy-duration-ms", String(duration));
     reply.header("x-proxy-source", "cee-browser-proxy");
-    reply.header(
-      "x-olumi-ai-mode",
-      internalTarget === "/agent/v1/core-turn" ? "core-route" : internalTarget === "/agent/v1/turn" ? "openai" : "conventional",
-    );
+    reply.header("x-olumi-ai-mode", "core-route");
 
     // Security: ensure the service key is NEVER in the response
     reply.removeHeader("x-olumi-assist-key");

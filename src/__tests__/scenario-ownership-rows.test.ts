@@ -430,8 +430,9 @@ for (const [method, path] of routes) it(`R5 malformed id: ${method} ${path} cann
     const r = await real.inject({ method, url, headers: { 'x-request-id': 'row', authorization: `Bearer ${tokenB}`, origin: 'https://staging--olumi.netlify.app' }, ...(method === 'POST' ? { payload: { ...spellingPayload(path, 'not-a-uuid'), turn_id: RID, scenario_id: 'not-a-uuid' } } : {}) });
     expect(session.readRecent).not.toHaveBeenCalled(); expect(session.loadGraphAndBriefText).not.toHaveBeenCalled(); expect(session.loadGraph).not.toHaveBeenCalled(); expect(collab.createModelVersion).not.toHaveBeenCalled(); expect(versions.saveVersion).not.toHaveBeenCalled(); expect(state.writes).not.toHaveBeenCalled();
     if (path.includes(':round_id') || path.includes(':record_id')) expect(r.statusCode).toBe(403); // The malformed shadow body id has no authority over a derived entity.
-    else if (path.endsWith('/stream')) { expect(r.statusCode).toBe(200); expect(r.payload).toContain('INGRESS_CONTRACT_VIOLATION'); }
-    else expect(r.statusCode).toBe(path === '/collab/v1/rounds' || path.includes('/decision-records') ? 400 : path === '/orchestrate/v2/turn' || path === '/proxy/v5/turn' ? 422 : 404);
+    // F1b: both browser proxies forward to the core route, whose ownership hook refuses the malformed id (as `/agent/v1/core-turn`'s row).
+    else if (path.endsWith('/stream')) { expect(r.statusCode).toBe(200); expect(r.payload).toContain('"status_code":404,"payload":{"error":"NOT_FOUND"'); }
+    else expect(r.statusCode).toBe(path === '/collab/v1/rounds' || path.includes('/decision-records') ? 400 : path === '/orchestrate/v2/turn' ? 422 : 404);
   } finally { await real.close(); }
 });
 it('R5 central denial emits exactly one ownership-refusal event without credentials', async () => {
