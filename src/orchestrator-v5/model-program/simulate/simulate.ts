@@ -399,13 +399,13 @@ const U = Number.EPSILON;
 /**
  * Within what it can be (spec §3.7), up to rounding: finite, and no further outside an end than its own rounding bound `e`
  * plus the end's. So £0.10 + £0.20 is on a ceiling of £0.30, and 100000000 + 0.3 − 100000000 (0.29999999701976776) is on a
- * floor of 0.3, while £1,000,000,000,500 is above a ceiling of £1,000,000,000,000. A bound `e` that is not finite (NaN, or
- * an overflow near 1e308) bounds nothing, so a value against a finite end with it is never within (Codex r3).
+ * floor of 0.3, while £1,000,000,000,500 is above a ceiling of £1,000,000,000,000. A value within its ends needs no allowance;
+ * one outside an end is excused only by a finite one (an overflow near 1e308 excuses nothing: Codex r3, r4).
  */
 const inside = (v: number, e: number, lo: number, hi: number): boolean =>
   Number.isFinite(v)
-  && (lo === -Infinity || (Number.isFinite(e) && v >= lo - e - U * Math.abs(lo)))
-  && (hi === Infinity || (Number.isFinite(e) && v <= hi + e + U * Math.abs(hi)));
+  && (v >= lo || (Number.isFinite(e) && v >= lo - e - U * Math.abs(lo)))
+  && (v <= hi || (Number.isFinite(e) && v <= hi + e + U * Math.abs(hi)));
 
 /** A period in draw d: a whole number, or the strict ceil of the timing quantity's one draw; below 0 or NaN is NaN (invalid). */
 function periodOf(t: Timing, c: Compiled, inputs: Inputs, d: number): number {

@@ -1158,6 +1158,20 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const free = huge(null).executable!;
     expect(simulate(free, { seed: 7, draws: 3 }).options[0]!.per_goal[0]).toEqual({ goal_id: 'small', chance: 0, precision_95: [0, 0] });
     expect(exactInitialValues(free).get('share')).toBe(1e308);
+    // Codex r4: a value inside its ends needs no allowance, so an overflowed one never withholds it. (1e308 − 1e308) × 1e308 is 0
+    // with an Infinity allowance; plus 0 against [0, 1] it is within, in every draw and as an initial value.
+    const zeroed = compile(model({
+      question: 'Is the share within one?', period: 'month',
+      quantities: [person('a', '1', 1e308, 'a huge figure'), person('b', '1', 1e308, 'the same huge figure'), derived('cancel', '1'), derived('wide', '1'),
+        person('none', '1', 0, 'none yet'), qty('one', '1', { kind: 'coefficient', value: 1, quote: 'one for one' }),
+        { ...derived('share', '1'), floor: 0, ceiling: 1 }, person('two', '1', 2, 'at most two'), person('one_month', 'month', 1, 'this month')],
+      relations: [def('cancel_rel', 'cancel', 'difference', ['a', 'b']), def('wide_rel', 'wide', 'product', ['cancel', 'a']), eff('share_rel', 'share', 'none', [['wide', 'one']])],
+      goals: [goal('small', 'share', '<=', 'two', 'end', 'one_month', 'at most two')],
+      options: [option('as_is', 'Carry on', [], 'carry on')],
+    }));
+    expect(zeroed.errors).toEqual([]);
+    expect(simulate(zeroed.executable!, { seed: 7, draws: 3 }).options[0]!.per_goal[0]).toEqual({ goal_id: 'small', chance: 1, precision_95: [1, 1] });
+    expect(exactInitialValues(zeroed.executable!).get('share')).toBe(0);
   });
 
   it('Codex r2 numbers#2 (4), spec §3.7: a window length given outside Olumi\'s reading of it is asked again before any Run on that window; reversed bounds on it withhold; never run for the given length', () => {
