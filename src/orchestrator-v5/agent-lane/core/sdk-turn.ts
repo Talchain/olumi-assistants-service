@@ -26,10 +26,12 @@
  * that cannot hold the id stops the turn (`CoreStateUnavailableError`): never a Conversation the next turn could not find.
  */
 import { createHash, randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   Agent, extractAllTextOutput, MaxTurnsExceededError, OpenAIResponsesModel, run, RunState, setTracingDisabled,
-  startOpenAIConversationsSession, ToolCallError, withTrace, type AgentInputItem, type RunToolApprovalItem, type Tool,
+  ToolCallError, withTrace, type AgentInputItem, type RunToolApprovalItem, type Tool,
 } from '@openai/agents';
+import { APIConnectionError, APIError, APIUserAbortError, type OpenAI } from 'openai-v7';
 import { getRuntimeEnv } from '../../../config/env-resolver.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
 import { currentStageEmitter, emitAgentPhase } from '../../../cee/unified-pipeline/stage-stream-context.js';
@@ -127,6 +129,69 @@ async function scenarioConversation(scenarioId: string, store: ConversationIdSto
   if (typeof winner !== 'string' || winner === '') throw new CoreStateUnavailableError('id_not_saved');
   // A concurrent first turn saved its own Conversation first: continue that one (ours is left unused).
   return { id: winner, created: winner === created };
+}
+
+/** Attempts at a scenario's empty Conversation create, in all, and the wait before each further one (ms). */
+export const CONVERSATION_CREATE_ATTEMPTS = 3;
+export const CONVERSATION_CREATE_BACKOFF_MS: readonly number[] = [500, 1_000];
+
+/** What fetch itself threw beneath the client's error: present only when there was no answer at all. */
+const thrownByFetch = (err: unknown): unknown => (err instanceof APIConnectionError ? err.cause : undefined);
+const isAbort = (err: unknown): boolean => err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
+
+/**
+ * A create worth sending again: no answer at all (fetch threw, and not because it was aborted) or a 5xx. A cancellation of
+ * the turn, the client's own timeout (its fetch aborted), a 429 and every other 4xx are answers or decisions: never repeated.
+ */
+function createFailureIsTransient(err: unknown): boolean {
+  if (err instanceof APIUserAbortError) return false;
+  if (err instanceof APIConnectionError) return !isAbort(thrownByFetch(err));
+  return err instanceof APIError && typeof err.status === 'number' && err.status >= 500 && err.status <= 599;
+}
+
+/** A failed attempt as its log line names it: the HTTP status, else the name (and system code) of what was thrown. Never a message. */
+function createFailureOf(err: unknown): { readonly status: number } | { readonly error: string; readonly error_code?: string } {
+  if (err instanceof APIError && typeof err.status === 'number') return { status: err.status };
+  const thrown = thrownByFetch(err) ?? err;
+  const code = (thrown as { cause?: { code?: unknown }; code?: unknown } | null)?.cause?.code ?? (thrown as { code?: unknown } | null)?.code;
+  // The client's own errors are all named "Error": their class says which (an abort is `APIUserAbortError`).
+  const name = thrown instanceof Error ? (thrown.name !== 'Error' ? thrown.name : thrown.constructor.name) : typeof thrown;
+  return { error: name, ...(typeof code === 'string' ? { error_code: code } : {}) };
+}
+
+/**
+ * ⭐ A SCENARIO'S EMPTY CONVERSATION IS CREATED IN AT MOST THREE ATTEMPTS (served staging 26 Oct, 04:57:12Z twice and 07:44:06Z:
+ * a scenario's first conversation turn, the approval after its first draft, failed in about 3 s on "503 upstream connect error
+ * or disconnect/reset before headers … Connection refused", with 0 AI calls and nothing saved, and the next turn on the same
+ * board went through). The request is the one the SDK's `startOpenAIConversationsSession` sends (`{ items: [] }`, its id
+ * returned), sent here so it carries the turn's signal. Only this create is tried again, because a repeat cannot double
+ * anything: it sends no reply and writes nothing of the model, so the worst a lost result leaves is an unused empty
+ * Conversation (the store's claim keeps the id it saved).
+ * - Tried again only on no answer (fetch threw, not an abort) or a 5xx (`createFailureIsTransient`); the last failure is
+ *   thrown as it would have been from the one attempt before, so the turn fails as it did.
+ * - The turn's signal goes with each attempt and each wait: an abort stops it at once, with no further attempt.
+ * - Conversation-bound Responses calls and item writes keep `maxRetries: 0` (`ledgeredAgentsClient`); the client's generic
+ *   retries, which also repeat a 429, stay off here too, and neither the store's claim nor the turn is repeated.
+ * - ONE log line per attempt at this non-model boundary (path, status or what fetch threw, attempt, ms): no body, no key, no
+ *   Conversation id. A create is not a model call, so it takes no `_provider_calls` row (the ledger records `/responses` only).
+ */
+async function createScenarioConversation(client: OpenAI, scenarioId: string, signal: AbortSignal | undefined): Promise<string> {
+  const path = `${new URL(client.baseURL).pathname.replace(/\/+$/, '')}/conversations`;
+  for (let attempt = 1; ; attempt += 1) {
+    const t0 = Date.now();
+    try {
+      const { data, response } = await client.conversations.create({ items: [] }, { maxRetries: 0, ...(signal !== undefined ? { signal } : {}) }).withResponse();
+      log.info({ event: 'core_turn.conversation_create', scenario_id: scenarioId, path, attempt, status: response.status, duration_ms: Date.now() - t0 },
+        'core-turn: conversation create');
+      return data.id;
+    } catch (err) {
+      const retry = attempt < CONVERSATION_CREATE_ATTEMPTS && createFailureIsTransient(err);
+      log.warn({ event: 'core_turn.conversation_create', scenario_id: scenarioId, path, attempt, ...createFailureOf(err), duration_ms: Date.now() - t0, retry },
+        'core-turn: conversation create');
+      if (!retry) throw err;
+    }
+    await delay(CONVERSATION_CREATE_BACKOFF_MS[attempt - 1] ?? CONVERSATION_CREATE_BACKOFF_MS.at(-1)!, undefined, signal !== undefined ? { signal } : {});
+  }
 }
 
 const callIdOf = (item: RunToolApprovalItem): string | undefined => {
@@ -362,7 +427,8 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
     now: new Date(startedAt), briefText: undefined, conversation: [],
     canonicalState: stateContext.facts, runFactsUse: stateContext.use,
   }).map(turnContextText).filter((t) => t !== '').join('\n\n');
-  const conversation = await scenarioConversation(input.ctx.scenario_id, input.conversationStore, () => startOpenAIConversationsSession(client));
+  const conversation = await scenarioConversation(input.ctx.scenario_id, input.conversationStore,
+    () => createScenarioConversation(client, input.ctx.scenario_id, input.signal));
   /**
    * After the turn's new input: the full state block, then this turn's guidance. Sent on every request until a
    * response the provider ACCEPTED carried them (Codex r1 #3656: a first request refused before anything was accepted is
