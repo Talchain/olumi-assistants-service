@@ -46,6 +46,20 @@ export const PROGRAM_TURN_GUIDANCE = 'This scenario\'s model is a model program:
   + 'Olumi\'s drafter writes a change in request, and the card shows every change. Explanations and questions need no proposal. '
   + 'A turn shows one card; the person approves it, and apply_change then saves the model with a new Run.';
 
+/** The tools a reply the AI writes after the host's own work (a first draft, a Run press) may not call: it explains only. */
+export const HOST_REPLY_WITHHELD_TOOLS: readonly string[] = ['build_model_from_brief', 'propose_change', 'apply_change', 'run_analysis'];
+/**
+ * T1 (Paul 26 Oct, "concise, science-grounded, bulleted, action-oriented coaching"): the AI writes the reply to a first draft
+ * and to a Run press, from the model and Run in its state block. The host has already drafted, saved and run the model.
+ */
+export const DRAFT_REPLY_GUIDANCE = 'Olumi has just drafted this model from the person\'s brief, saved it and run it once; a card asks them to confirm or change Olumi\'s reading of their brief. '
+  + 'Reply as their reasoning partner in a few short bullets: what the model shows for each option, by the Run\'s own facts, and the one thing it rests on most; '
+  + 'what Olumi assumed or added that they should check; and the one question or check that would most change the result. '
+  + 'End by asking them to confirm the reading on the card or say what to change. Plain words, each thing said once.';
+export const RUN_REPLY_GUIDANCE = 'The person pressed Run; the Run in the state block is the one just shown to them. '
+  + 'Reply as their reasoning partner in a few short bullets: each option\'s result by the Run\'s own facts, what it rests on, what would change it, '
+  + 'and one next step that would test the assumption it rests on most. Plain words, each thing said once.';
+
 /**
  * AN ANSWER to a listed question (DL 24 Oct): the figure it answers, declared by the AI with the canonical model's own fields,
  * its status and whose it is, as the AI declares them (the host never assigns them; strip, Paul 26 Oct): known, their
@@ -64,20 +78,36 @@ export const ProgramChangeParams = z.object({
 }).strict();
 export type ProgramChangeArgs = z.input<typeof ProgramChangeParams>;
 
+type ViewDriverEnd = { readonly value?: unknown; readonly display?: unknown };
+type ViewOption = { option_id: string; cell: { kind: string; face?: string; why?: string; display?: string; detail?: { precision_95?: readonly number[] } };
+  main_driver?: { kind?: string; driver?: { quantity?: unknown; low?: ViewDriverEnd; middle?: ViewDriverEnd; high?: ViewDriverEnd } } };
+const pct = (x: number): number => Math.round(x * 1000) / 10;
+const driverEnd = (e: ViewDriverEnd | undefined) => (e === undefined ? null : { value: e.value ?? null, chance: e.display ?? null });
+
 /**
- * What the agent may report of a Run: each option's own sentence, the Run's `goal_chance` block UNCHANGED (its notes,
- * each limit, the unchecked limits, and with several goals each goal's own chance and the joint), and which option is most
- * likely to achieve the goal, or why none is named, in the view's own words (`leader`, W6). A Run shown as not current
- * (`current` false) is read as the reopen shows it, so it names no leader (W6 review B3).
+ * What the agent may report of a Run (T1, Paul 26 Oct: the AI speaks, from the engine's facts): each option's chance as the
+ * Run shows it (`chance`, its simulation `precision_95` in %), or why none is shown; the input its chance is most sensitive
+ * to, with the chance at that input's low, middle and high values (`driver`); the option's full sentence (`words`), which
+ * says what the chance rests on; the Run's `goal_chance` block UNCHANGED; and which option is most likely to achieve the goal,
+ * or why none is named (`leader`, W6). A Run shown as not current (`current` false) is read as the reopen shows it, so it
+ * names no leader (W6 review B3).
  */
 function runWords(run: StoredRun | null, shown: { readonly current: boolean; readonly updated: boolean } = { current: true, updated: false }): Rec | null {
   if (run === null) return null;
-  const v = (shown.current ? run.result.canonical_analysis_view : shownView(run, false, shown.updated)) as { options?: { option_id: string; cell: { kind: string; face?: string; why?: string } }[];
-    goal_chance?: unknown; leader?: { licence?: unknown; words?: unknown } } | null;
+  const v = (shown.current ? run.result.canonical_analysis_view : shownView(run, false, shown.updated)) as { options?: ViewOption[];
+    goal_chance?: unknown; leader?: { licence?: unknown; words?: unknown; goal_chance_leader?: unknown } } | null;
   const leader = v?.leader;
-  return { run_id: run.run_id, options: (v?.options ?? []).map((o) => ({ option_id: o.option_id, shown: o.cell.kind === 'figure', words: o.cell.face ?? o.cell.why ?? null })),
+  return { run_id: run.run_id, options: (v?.options ?? []).map((o) => {
+    const figure = o.cell.kind === 'figure';
+    const p = o.cell.detail?.precision_95;
+    const d = o.main_driver?.kind === 'available' ? o.main_driver.driver : undefined;
+    return { option_id: o.option_id, shown: figure, words: o.cell.face ?? o.cell.why ?? null,
+      ...(figure ? { chance: o.cell.display ?? null, ...(p?.length === 2 ? { precision_95: [pct(p[0]!), pct(p[1]!)] } : {}) } : {}),
+      ...(d !== undefined ? { driver: { quantity: d.quantity ?? null, low: driverEnd(d.low), middle: driverEnd(d.middle), high: driverEnd(d.high) } } : {}) };
+  }),
     ...(v?.goal_chance !== undefined ? { goal_chance: v.goal_chance } : {}),
-    ...(typeof leader?.words === 'string' && leader.words.trim() !== '' ? { leader: { licence: leader.licence, words: leader.words } } : {}) };
+    ...(typeof leader?.words === 'string' && leader.words.trim() !== ''
+      ? { leader: { licence: leader.licence, option_id: leader.goal_chance_leader ?? null, words: leader.words } } : {}) };
 }
 
 /** The saved program and the read it came from, or the outcome that says why there is none. */

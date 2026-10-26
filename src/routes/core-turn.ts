@@ -73,7 +73,7 @@ import { CONVERSATION_ROWS_READ } from './assist.v1.scenario-graph.js';
 import { runModelProgramTurn } from '../orchestrator-v5/model-program-turn/turn.js';
 import { isProgramGraph, programReadOf, reopenProgram, savedProgramOf, sourceTextOf, unreadableWords } from '../orchestrator-v5/model-program-turn/program-store.js';
 import { compile } from '../orchestrator-v5/model-program/compile.js';
-import { applyCanvasFigure, PROGRAM_TURN_GUIDANCE, readProgramContext } from '../orchestrator-v5/model-program-turn/program-tools.js';
+import { applyCanvasFigure, DRAFT_REPLY_GUIDANCE, HOST_REPLY_WITHHELD_TOOLS, PROGRAM_TURN_GUIDANCE, readProgramContext, RUN_REPLY_GUIDANCE } from '../orchestrator-v5/model-program-turn/program-tools.js';
 import { log } from '../utils/telemetry.js';
 
 export const CORE_TURN_PATH = '/agent/v1/core-turn';
@@ -597,6 +597,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
        * the core route's own.
        */
       let programPayload: { readonly canonical_analysis_view: unknown; readonly model_program: Record<string, unknown> } | undefined;
+      /** The AI wrote this host turn's reply (T1), so it is already in the scenario's Conversation. */
+      let aiReplied = false;
       const programTurn = async (): Promise<AgentTurnResult> => {
         const t0 = Date.now();
         const out = await runModelProgramTurn({ scenarioId, turnId, message, saved: { graph: saved.graph, identity: saved.identity }, dispatch: countingDispatch,
@@ -615,30 +617,56 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       } else {
         // The agent's view, read only for its turn: the program's own.
         const canonical = modelProgram ? undefined : await readProgramContext({ dispatch: readingDispatch, proposals }, { scenario_id: scenarioId, authenticated_user_id: userId });
+        // One budget for every call (DL 22 Oct, M4): a press at the typed turn's effort reads the typed turns' cached prefix. The
+        // standing instructions are the same bytes on every call of every scenario (the cached prefix); this turn's own guidance
+        // follows its state block in the turn's input.
+        const agentTurn = () => ({
+          ctx: coreCtx, message, budget: coreBudget(), userId,
+          calls: seen,
+          tools: programTurnTools({ ctx: coreCtx, mode: MODE, dispatch: countingDispatch, proposals, onVerifiedSave: () => { verifiedSave = true; } }),
+          instructions: programInstructions(),
+          // A pause must name a card this scenario holds, awaiting approval (`sdk-turn.ts`).
+          isPendingCard: (id: string) => proposals.outstanding(coreCtx.scenario_id, coreCtx.authenticated_user_id).some((p) => p.proposal_id === id),
+          ...coreTurnStores(store),
+        });
         try {
-          result = modelProgram ? await programTurn() : await runCoreTurn({
-            // One budget for every call (DL 22 Oct, M4): a press at the typed turn's effort reads the typed turns' cached prefix.
-            ctx: coreCtx, message, budget: coreBudget(), userId,
-            calls: seen,
-            tools: programTurnTools({ ctx: coreCtx, mode: MODE, dispatch: countingDispatch, proposals, onVerifiedSave: () => { verifiedSave = true; } }),
-            // The standing instructions, the same bytes on every call of every scenario (the cached prefix); this turn's own
-            // guidance (how the program's tools work, a Challenge's note) follows its state block in the turn's input.
-            instructions: programInstructions(),
-            turnGuidance: [PROGRAM_TURN_GUIDANCE, ...(challenge === null ? [] : [challenge.note])],
-            briefText: saved.briefText,
-            // A program's first agent turn opens its Conversation with the turns before it, the host-written draft reply included.
-            ...(program ? { earlierTurns } : {}),
-            canonicalState: canonical?.status === 'ok' ? canonical.data : undefined,
-            // A press carries no consent to Run (a Run press is the host's own, above).
-            withheldTools: chip !== null ? ['run_analysis'] : [],
-            // A program board has no note tool, so the AI answers a Challenge's note (in turnGuidance) in words.
-            ...(coreCardOnly && press !== undefined ? { firstTool: APPLY_CHANGE } : {}),
-            ...(press !== undefined ? { press } : {}),
-            // A pause must name a card this scenario holds, awaiting approval (`sdk-turn.ts`).
-            isPendingCard: (id) => proposals.outstanding(coreCtx.scenario_id, coreCtx.authenticated_user_id).some((p) => p.proposal_id === id),
-            ...(saved.revision !== null ? { traceMeta: { revision: saved.revision, ...(saved.run?.run_id != null ? { run_id: saved.run.run_id } : {}) } } : {}),
-            ...coreTurnStores(store),
-          });
+          if (modelProgram) {
+            result = await programTurn();
+            // T1 (Paul 26 Oct): once the host has drafted and run the model, or run it on a press, the AI writes the reply from
+            // the model and Run as saved, as it does on every typed turn; it may not draft, propose, apply or run. The host's own
+            // words stay only if that reply cannot be written.
+            const fresh = programPayload?.canonical_analysis_view == null ? null
+              : await readProgramContext({ dispatch: readingDispatch, proposals }, { scenario_id: scenarioId, authenticated_user_id: userId });
+            if (fresh?.status === 'ok') {
+              try {
+                const reply = await runCoreTurn({ ...agentTurn(),
+                  turnGuidance: [PROGRAM_TURN_GUIDANCE, runPress ? RUN_REPLY_GUIDANCE : DRAFT_REPLY_GUIDANCE],
+                  briefText: saved.graph === null ? undefined : saved.briefText,
+                  canonicalState: fresh.data, withheldTools: [...HOST_REPLY_WITHHELD_TOOLS] });
+                if (reply.assistant_text.trim() !== '') {
+                  result = { ...result, assistant_text: reply.assistant_text, sdk: reply.sdk, hops: result.hops + reply.hops,
+                    timing: { ...result.timing, provider_calls: providerCallsMade() ?? result.timing.provider_calls + reply.timing.provider_calls } };
+                  aiReplied = true;
+                }
+              } catch (err) {
+                log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: the AI reply after the host turn failed; the host reply stands');
+              }
+            }
+          } else {
+            result = await runCoreTurn({ ...agentTurn(),
+              turnGuidance: [PROGRAM_TURN_GUIDANCE, ...(challenge === null ? [] : [challenge.note])],
+              briefText: saved.briefText,
+              // A program's first agent turn opens its Conversation with the turns before it, the host-written draft reply included.
+              ...(program ? { earlierTurns } : {}),
+              canonicalState: canonical?.status === 'ok' ? canonical.data : undefined,
+              // A press carries no consent to Run (a Run press is the host's own, above).
+              withheldTools: chip !== null ? ['run_analysis'] : [],
+              // A program board has no note tool, so the AI answers a Challenge's note (in turnGuidance) in words.
+              ...(coreCardOnly && press !== undefined ? { firstTool: APPLY_CHANGE } : {}),
+              ...(press !== undefined ? { press } : {}),
+              ...(saved.revision !== null ? { traceMeta: { revision: saved.revision, ...(saved.run?.run_id != null ? { run_id: saved.run.run_id } : {}) } } : {}),
+            });
+          }
         } catch (err) {
           log.error({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: the turn failed');
           // A core call whose provider delivery is unknown keeps its claim: Olumi wrote nothing, but the call may still be running.
@@ -737,7 +765,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         }
         durability = 'recorded';
         // C12: a reply the host wrote (a program's Run press, or a draft) joins the agent's Conversation once it has one.
-        if (modelProgram) await addHostTurnToConversation({ scenarioId, userText: message, assistantText, ...coreTurnStores(store) });
+        if (modelProgram && !aiReplied) await addHostTurnToConversation({ scenarioId, userText: message, assistantText, ...coreTurnStores(store) });
       } catch (err) {
         if (err instanceof ModelWriteOwnershipRefused) {
           const released = await releaseUnwrittenTurnClaim();

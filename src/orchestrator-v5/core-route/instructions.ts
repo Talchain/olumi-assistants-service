@@ -211,13 +211,14 @@ export const CORE_REPLY_RULES_LIVING_MODEL = `${CORE_COACH_RULES}\n\n${CORE_TOOL
  * unchanged (S2's present). Results are reported only in those recorded words: each option's, EACH goal's own with each
  * option's display, and the joint's (PL review, 13:2xZ); never a figure of the agent's own. Existing contracts only.
  */
-const RUN_WORDS_RULE = 'Report results only in the Run’s recorded words: each option’s words (run.options[].words; where shown is false, they say why no chance is shown); '
+const RUN_WORDS_RULE = 'Report results only from the Run’s own facts: each option’s chance as run.options[].chance gives it (with run.options[].precision_95, in %, only if asked how exact it is); '
+  + 'what that chance rests on, in a few plain words, or, where shown is false, why none is shown: both are in run.options[].words; the input it is most sensitive to with the chance at that input’s low, middle and high values (run.options[].driver); '
   + 'each goal’s own words with each option’s display for it (run.goal_chance.targets.per_target[].words and its options[].display); '
   + 'for meeting every goal together, run.goal_chance.targets.joint.words, or its line saying why that waits (run.goal_chance.targets.joint.line); '
   + 'and run.goal_chance.notes, limits[].words with each option’s display, and unchecked_limits[].words. '
-  + 'Quote them; never a figure, chance, rounding, combination or ranking of your own. '
+  + 'Use those figures exactly as given; never a figure, chance, rounding, combination or ranking of your own. Say each figure once, in plain words and units the person uses; never repeat a recorded sentence whole. '
   // W6: the agent can say on a later turn which option is most likely to achieve the goal, in the Run's own words only.
-  + 'When the person asks which option is most likely to achieve the goal, say run.leader.words as given: they name that option as a finding in this model, or say why none is named; with no run.leader, say this Run names none; never pick, rank or advise on an option yourself.';
+  + 'Which option is most likely to achieve the goal is run.leader: name run.leader.option_id’s option as the one most likely to achieve the goal in this model, a finding, never advice; with no option_id, say why none is named, from run.leader.words; with no run.leader, say this Run names none; never pick, rank or advise on an option yourself.';
 export const PROGRAM_TOOL_DESCRIPTIONS = {
   read_canonical_context:
     'Read the saved model program: its revision; model, the canonical model exactly as authored (its question and period; each quantity with its unit, status, author, words, basis and range, '
