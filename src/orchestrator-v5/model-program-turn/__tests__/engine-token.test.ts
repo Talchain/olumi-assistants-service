@@ -24,7 +24,7 @@ describe('the engine token is the engine modules\' bytes (R11)', () => {
     expect(engineFilesBeside(HERE).map((f) => f.path).sort()).toEqual([
       'agent-lane/say-figure.ts', 'goal-target/goal-chance-display.ts', 'goal-target/goal-chance-driver.ts', 'goal-target/goal-target-basis.ts',
       'goal-target/goal-targets-joint.ts', 'model-program-turn/evaluate.ts', 'model-program/canonical.ts', 'model-program/compile.ts',
-      'model-program/executable.ts', 'model-program/links.ts', 'model-program/present/present.ts', 'model-program/project.ts', 'model-program/simulate/prng.ts',
+      'model-program/executable.ts', 'model-program/links.ts', 'model-program/present/present.ts', 'model-program/present/tipping.ts', 'model-program/project.ts', 'model-program/simulate/prng.ts',
       'model-program/simulate/range-law.ts', 'model-program/simulate/result.ts', 'model-program/simulate/simulate.ts', 'model-program/units.ts',
     ]);
     expect(ENGINE_VERSIONS.engine).toMatch(/^mp-[0-9a-f]{12}$/);

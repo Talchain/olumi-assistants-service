@@ -86,9 +86,13 @@ const Z95 = 1.959963984540054;
 
 /** Wilson score interval at 95% for k successes in n draws: the SIMULATION precision of a chance. */
 export function wilson95(k: number, n: number): [number, number] {
-  const p = k / n, z2 = Z95 * Z95, denom = 1 + z2 / n;
+  return wilson(k, n, Z95);
+}
+/** The Wilson score interval for k successes in n draws at the normal quantile z (z = Z95 is `wilson95`). */
+export function wilson(k: number, n: number, z: number): [number, number] {
+  const p = k / n, z2 = z * z, denom = 1 + z2 / n;
   const centre = (p + z2 / (2 * n)) / denom;
-  const half = (Z95 * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / denom;
+  const half = (z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / denom;
   return [Math.max(0, centre - half), Math.min(1, centre + half)];
 }
 
