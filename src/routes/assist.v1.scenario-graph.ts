@@ -14,7 +14,7 @@ import type { FastifyInstance } from "fastify";
 
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
 import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
-import { deriveNotModelledManifest } from "../cee/context-integrity/not-modelled-manifest.js";
+import { deriveNotModelledManifest, deriveProgramNotModelledManifest } from "../cee/context-integrity/not-modelled-manifest.js";
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeAnalysisAffectingGraphHash } from "../orchestrator-v5/context/graph-hash.js";
 import { proposalRecord, proposalFieldsWire, heldProposalId, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalIssuingRow } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
@@ -135,6 +135,19 @@ export interface ConversationTurnRead {
   readonly user_message: string | null;
   readonly assistant_message: string | null;
   readonly suggested_actions?: readonly SuggestedAction[];
+}
+
+/** The ids of the cards the saved graph draws (a program manifest ties a figure to its record only when the board shows it). */
+function drawnNodeIds(graph: unknown): ReadonlySet<string> {
+  const nodes = graph !== null && typeof graph === "object" ? (graph as { nodes?: unknown }).nodes : undefined;
+  return new Set(Array.isArray(nodes) ? nodes.flatMap((n) => (typeof (n as { id?: unknown })?.id === "string" ? [(n as { id: string }).id] : [])) : []);
+}
+
+/** The goals and limits the shown Run's chance leaves out (no measure yet), by id, as its stored compile outcome says. */
+function runLeavesOut(run: { readonly result: { readonly compile: unknown } } | null): string[] {
+  const compile = run?.result.compile as { joint?: { leaves_out?: unknown }; within_limits?: { leaves_out?: unknown } } | null | undefined;
+  return [compile?.joint?.leaves_out, compile?.within_limits?.leaves_out]
+    .flatMap((ids) => (Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : []));
 }
 
 function wantsConversationTurns(body: unknown): boolean {
@@ -663,10 +676,13 @@ export default async function route(app: FastifyInstance) {
         // `status: "unavailable"` with `quantities: null`, never a zero tally:
         // on a scenario we know nothing about, "0 dropped" would be a new lie
         // carrying the authority of a measurement.
-        not_modelled: deriveNotModelledManifest(
-          briefText,
-          graphPresent ? graph : null,
-        ),
+        // A program scenario's is its canonical model's (`deriveProgramNotModelledManifest`), never the GraphV3 scan.
+        not_modelled: program !== undefined
+          ? deriveProgramNotModelledManifest(briefText, program.program.canonical, drawnNodeIds(graph), runLeavesOut(program.run))
+          : deriveNotModelledManifest(
+            briefText,
+            graphPresent ? graph : null,
+          ),
         // ROADMAP 2.1271 — see §5 above. `null` on either means "this leg did
         // not answer", never a state: a consumer must leave what it already
         // believed standing, and in particular must NOT read a null or a

@@ -2250,6 +2250,85 @@ export function deriveNotModelledManifest(
   };
 }
 
+/** The canonical records a program read derives its manifest from (the saved `living_model.canonical`, structurally). */
+export interface ProgramManifestRecords {
+  readonly quantities: readonly { readonly id: string; readonly label: string; readonly author: string; readonly quote: string | null;
+    readonly status: string; readonly value: number | null; readonly low: number | null; readonly high: number | null }[];
+  readonly limits: readonly { readonly id: string; readonly label: string; readonly measure: { readonly bound: string | null } | null }[];
+  readonly goals: readonly { readonly id: string; readonly label: string }[];
+  readonly left_out: readonly { readonly text: string }[];
+}
+
+/**
+ * THE MANIFEST OF A PROGRAM SCENARIO, FROM ITS CANONICAL MODEL (graph workstream, 27 Oct: on a program read the GraphV3
+ * scan matched the brief's figures against the projected graph — european said "All 4 figures are in the model" while
+ * its horizon was still asked, tied "£500k" to a structural zero, reported no exclusions over a stated `left_out`, and
+ * listed the model's own structure as Olumi's inferences).
+ *
+ * The brief's figures are still found by the same extractor (they are the person's exact words, by offset). Each is in
+ * the model only when a person's canonical quantity whose quote covers it holds a figure; it is matched to that record,
+ * by id, when the board draws it. What the model leaves out is the model's own `left_out`, then each goal or limit the
+ * newest Run's chance leaves out (`leavesOut`, by id). Olumi's inferences are the quantities Olumi gave a figure. Pure.
+ */
+export function deriveProgramNotModelledManifest(
+  briefText: string | null | undefined,
+  records: ProgramManifestRecords,
+  drawn: ReadonlySet<string>,
+  leavesOut: readonly string[],
+): NotModelledManifest {
+  if (typeof briefText !== "string" || briefText.trim().length === 0) return UNAVAILABLE("no_brief_text");
+  const holds = (q: ProgramManifestRecords["quantities"][number]) =>
+    q.status !== "asked" && (q.value !== null || (q.low !== null && q.high !== null));
+  const spans = records.quantities.flatMap((q) => {
+    const at = q.author === "person" && typeof q.quote === "string" && q.quote.length > 0 ? briefText.indexOf(q.quote) : -1;
+    return at < 0 ? [] : [{ q, at, end: at + q.quote!.length }];
+  });
+  const bounds = new Set(records.limits.flatMap((l) => (l.measure?.bound ? [l.measure.bound] : [])));
+  const tally = Object.fromEntries(STATED_KINDS.map((k) => [k, 0])) as Record<StatedKind, number>;
+  const found = extractStatedQuantities(briefText);
+  const items: NotModelledItem[] = [];
+  let inModel = 0;
+  let anchored = 0;
+  for (const f of found) {
+    const covering = spans.filter((s) => s.at <= f.at && f.at + f.literal.length <= s.end).map((s) => s.q);
+    const holder = covering.find(holds);
+    const matched = holder !== undefined && drawn.has(holder.id) ? holder.id : null;
+    if (holder !== undefined) inModel += 1;
+    if (matched !== null) anchored += 1;
+    if (items.length < MAX_ITEMS) {
+      const statedKind: StatedKind = covering.some((q) => bounds.has(q.id)) ? "constraint" : "figure";
+      tally[statedKind] += 1;
+      items.push({ literal: f.literal, kind: f.kind, char_offset: f.at, verdict: holder !== undefined ? "in_model" : "absent",
+        matched_node_id: matched, stated_kind: statedKind });
+    }
+  }
+  const label = new Map([...records.goals, ...records.limits].map((r) => [r.id, r.label] as const));
+  const excluded = [...records.left_out.map((l) => l.text), ...leavesOut.flatMap((id) => (label.has(id) ? [label.get(id)!] : []))];
+  return {
+    schema: NOT_MODELLED_SCHEMA,
+    status: "derived",
+    unavailable_reason: null,
+    scope: { ...SCOPE, model_surface: ["the canonical model's quantities: whose words each figure is, and whether it holds one"] },
+    quantities: {
+      total: found.length,
+      in_model: inModel,
+      in_model_anchored: anchored,
+      in_model_unanchored: inModel - anchored,
+      prose_only: 0,
+      absent: found.length - inModel,
+      truncated: found.length > items.length,
+      items,
+    },
+    stated_kinds: { status: "derived", tally, sourced: SOURCED_STATED_KINDS, unsourced: UNSOURCED_STATED_KINDS, producers: STATED_KIND_PRODUCERS },
+    declared_exclusions: { status: excluded.length > 0 ? "reported" : "none_reported", items: excluded },
+    inferred_factors: {
+      status: "derived",
+      items: records.quantities.filter((q) => q.author === "olumi" && (q.status === "known" || q.status === "estimated") && holds(q) && drawn.has(q.id)).map((q) => ({ node_id: q.id, label: q.label })),
+    },
+    not_tracked: NOT_TRACKED_CLASSES,
+  };
+}
+
 
 // ── the ROLE axis reaching the NODE, not just the manifest ──────────────────
 
