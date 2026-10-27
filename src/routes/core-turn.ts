@@ -409,8 +409,13 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       try { pending = await store.readMostRecentPendingActions?.(scenarioId, { validation: 'strict' }) ?? []; } catch { pending = []; }
       const paused = await store.readOpenAiPausedRun?.(scenarioId).catch(() => undefined);
       const outcome = recordedOutcomeOf(prior.request_hash);
+      // C7: a replay says what this turn saved with each version's receipt, as its live answer did: found by the operations its
+      // saves ran under (its first draft or Run, keyed by this turn; the card it approved). None found, none said.
+      const ownVersion = (key: string) => findOperationVersion(dispatch, scenarioId, programOperationId(scenarioId, key)).catch(() => null);
+      const [turnSave, cardSave] = await Promise.all([ownVersion(`turn:${turnId}`), approvedProposal !== undefined ? ownVersion(`proposal:${approvedProposal}`) : null]);
+      const receiptsOf = (v: Rec | null, by: 'olumi' | 'person') => (v === null ? [] : collectTurnReceipts([{ model_version: v }]).map((r) => ({ ...r, authorised_by: by })));
       return send(200, coreTurnContract({
-        turnId, durability: 'replayed', assistantText: outcome === undefined || outcome === 'reply_empty' ? prior.assistant_message ?? '' : '',
+        turnId, durability: 'replayed', receipts: [...receiptsOf(turnSave, runPress ? 'person' : 'olumi'), ...receiptsOf(cardSave, 'person')], assistantText: outcome === undefined || outcome === 'reply_empty' ? prior.assistant_message ?? '' : '',
         revision: now.revision, scenarioRevision: now.identity, graph: appliedGraphWire(now.graph),
         cards: await heldCardsOf(store, scenarioId, pending, now),
         // In the live reply's program shape (F7): today's stored Run and the program's own view, as the UI adopts them.

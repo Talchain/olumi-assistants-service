@@ -910,6 +910,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(j.assistant_text).toBe(first.assistant_text);
     expect(calls, 'no second provider call').toHaveLength(1);
     expect(registered).toHaveLength(0);
+    // CONTRAST (C7): a turn that saved nothing replays with no receipt.
+    expect(j.receipts).toEqual([]);
     expect(storedRuns()).toBe(1);
     // CONTRAST: the same id with different words is refused, and nothing runs.
     const reused = await typed('A different question.', turnId);
@@ -1061,6 +1063,24 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(registered).toHaveLength(1);
     });
 
+    it('C7: a first draft saved before its reply failed, resent under the same turn id, replays with that draft’s own receipt (Olumi’s), no write', async () => {
+      // A new scenario with no model yet, so the first send drafts (as the row above does for its second case).
+      SCENARIO = randomUUID(); persisted = null; registered.length = 0;
+      canonicalDraft = JSON.stringify(bakery());
+      outputs = [[{ type: 'refuse' }]];
+      const turnId = randomUUID();
+      const send = () => app.inject({ method: 'POST', url: '/agent/v1/core-turn',
+        payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BAKERY_BRIEF, source: 'composer' } });
+      const lost = await send();
+      expect(lost.statusCode, lost.body).toBe(502);
+      const again = await send();
+      expect(again.statusCode, again.body).toBe(200);
+      expect(again.json()).toMatchObject({ durability: 'replayed', error: { code: 'REPLY_NOT_DELIVERED', nothing_saved: false } });
+      expect(idsOf((again.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      expect((again.json() as Json).receipts[0].source_turn_id).toBe(registrationTurnId(SCENARIO, programOperationId(SCENARIO, `turn:${turnId}`)));
+      expect(registered).toHaveLength(1);
+    });
+
     it('after that saved press, the same press resent replays its outcome with no call and no write, and the card pressed again finds its own saved receipt: never a second revision', async () => {
       const press = await propose();
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'refuse' }]];
@@ -1071,6 +1091,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(again.statusCode, again.body).toBe(200);
       expect(again.json()).toMatchObject({ durability: 'replayed', error: { code: 'REPLY_NOT_DELIVERED', message: SAVED_LOST, retry_safe: false, nothing_saved: false } });
       expect(calls.length, 'a replay calls no model').toBe(callsBefore);
+      // C7: the replay says the save it kept with that version's receipt, the press's own (proposal:<id> operation), as the
+      // first answer did; the UI then reads it as saved, never unknown.
+      expect(idsOf((again.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'person']]);
       // The card pressed again, as a new send: its apply looks up this operation's own version first, so it finds that save.
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_again' }], [{ type: 'message', text: 'That change was already saved.' }]];
       const repress = await post({ ...press, turn_id: randomUUID() });
