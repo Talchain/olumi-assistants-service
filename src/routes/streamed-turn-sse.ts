@@ -94,7 +94,12 @@ import {
 import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { SSE_HEARTBEAT_INTERVAL_MS } from "../config/timeouts.js";
 import { config } from "../config/index.js";
-import { coreTurnStreamTimeout } from "../orchestrator-v5/core-route/contract.js";
+import { coreTurnStreamTimeout, type CoreTurnReceipt } from "../orchestrator-v5/core-route/contract.js";
+import type { InternalDispatch } from "../orchestrator-v5/core-route/internal-dispatch.js";
+import { isChiplessRetry } from "../orchestrator-v5/core-route/turn-request.js";
+import { collectTurnReceipts } from "../orchestrator-v5/agent-lane/turn-receipts.js";
+import { programOperationId } from "../orchestrator-v5/model-program-turn/program-save.js";
+import { findOperationVersion } from "../orchestrator-v5/path-b/tools/core-write.js";
 
 /**
  * The buffered turn both streamed routes forward to. Single source of truth.
@@ -121,6 +126,28 @@ function turnIdOfPayload(payload: string): string | null {
     const id = (JSON.parse(payload) as { turn_id?: unknown } | null)?.turn_id;
     return typeof id === "string" && id !== "" ? id : null;
   } catch { return null; }
+}
+
+/**
+ * C7 (27 Oct): what a core turn that outlived the stream already saved under its OWN operation (`turn:<turn id>`: its first
+ * draft, Olumi's; a Run press's new Run, the person's), found as its replay finds it, so the timeout says that save with its
+ * receipt. Asked only once the stream carried the turn's GRAPH_READY, the frame a saved draft or Run sends. None found, or a
+ * chipless retry that cannot say whose the save was: none said, and the outcome stays unknown.
+ */
+async function ownTurnSave(app: FastifyInstance, headers: Record<string, string>, payload: string): Promise<CoreTurnReceipt[]> {
+  let body: Record<string, unknown>;
+  try { body = JSON.parse(payload) as Record<string, unknown>; } catch { return []; }
+  const scenarioId = typeof body.scenario_id === "string" ? body.scenario_id : "";
+  const turnId = turnIdOfPayload(payload);
+  const chip = body.chip !== null && typeof body.chip === "object" ? body.chip as Record<string, unknown> : null;
+  const by = isChiplessRetry(body) ? null : chip === null ? "olumi" as const : chip.action_type === "run_analysis" ? "person" as const : null;
+  if (scenarioId === "" || turnId === null || by === null) return [];
+  const dispatch: InternalDispatch = async (path, b) => {
+    const res = await app.inject({ method: "POST", url: path, headers, payload: b as Record<string, unknown> });
+    try { return { status: res.statusCode, json: res.json() as Record<string, unknown> }; } catch { return { status: res.statusCode, json: {} }; }
+  };
+  const own = await findOperationVersion(dispatch, scenarioId, programOperationId(scenarioId, `turn:${turnId}`)).catch(() => null);
+  return own === null ? [] : collectTurnReceipts([{ model_version: own }]).map((r) => ({ ...r, authorised_by: by }));
 }
 
 const EVENT_STREAM = "text/event-stream";
@@ -347,7 +374,8 @@ export async function streamTurnAsStagedSse(opts: StagedTurnStreamOptions): Prom
       writeStage("COMPLETE", {
         status_code: 504,
         // The core route's client reads its own contract: the same timeout, said in it (the turn may still save).
-        payload: internalTarget === "/agent/v1/core-turn" ? coreTurnStreamTimeout(turnIdOfPayload(opts.payload)) : {
+        payload: internalTarget === "/agent/v1/core-turn" ? coreTurnStreamTimeout(turnIdOfPayload(opts.payload),
+          graphReadyAtMs === null ? [] : await ownTurnSave(app, internalHeaders, opts.payload)) : {
           schema: "error.v1",
           code: "UPSTREAM_TIMEOUT",
           message: "The turn did not complete within the stream budget.",

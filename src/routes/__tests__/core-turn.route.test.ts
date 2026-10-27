@@ -2045,5 +2045,52 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
         store.getScenarioOwner = owner;
       }
     });
+
+    it('C7: a streamed first draft that saved, then outlived the stream before its reply: the stream’s COMPLETE says it was saved, with the draft’s own receipt (Olumi’s); the turn then finishes with no second write', async () => {
+      const { streamTurnAsStagedSse } = await import('../streamed-turn-sse.js');
+      const { config } = await import('../../config/index.js');
+      persisted = null;
+      canonicalDraft = JSON.stringify(bakery());
+      let release!: () => void;
+      // The draft's reply call is held: the draft is saved and the reply has not come.
+      holdProvider = new Promise<void>((resolve) => { release = resolve; });
+      const turnId = randomUUID();
+      const writes: string[] = [];
+      const reply = { raw: { destroyed: false, writableEnded: false, setHeader: () => {}, writeHead: () => {},
+        write(chunk: string) { writes.push(chunk); return true; }, end() { this.writableEnded = true; } }, getHeaders: () => ({}) };
+      // The stream's budget timer (a distinct budget, so it is the one caught) fires once the draft has streamed its saved graph.
+      const kept = config.proxy.browserProxyTimeoutMs;
+      const budget = 98_765;
+      config.proxy.browserProxyTimeoutMs = budget;
+      const realSetTimeout = globalThis.setTimeout;
+      let fire: (() => void) | undefined;
+      const timers = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
+        (ms === budget && fire === undefined ? (fire = fn, realSetTimeout(() => {}, 0)) : realSetTimeout(fn, ms, ...rest))) as never);
+      try {
+        const streamed = streamTurnAsStagedSse({ app, reply: reply as never, requestId: 'req-stream', internalHeaders: { 'content-type': 'application/json' },
+          payload: JSON.stringify({ kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BAKERY_BRIEF, source: 'composer' }),
+          featureVersion: 'test', endpoint: '/proxy/v5/turn/stream', internalTarget: '/agent/v1/core-turn' });
+        await vi.waitFor(() => expect(writes.some((w) => w.includes('"stage":"GRAPH_READY"'))).toBe(true));
+        fire!();
+        await streamed;
+      } finally {
+        timers.mockRestore();
+        config.proxy.browserProxyTimeoutMs = kept;
+      }
+      const frames = writes.filter((w) => w.startsWith('event: stage')).map((w) => JSON.parse(w.slice(w.indexOf('data: ') + 6)) as Json);
+      expect(frames.map((f) => f.stage)).toEqual(['DRAFTING', 'GRAPH_READY', 'COMPLETE']);
+      const complete = frames.at(-1)!;
+      expect(complete.status_code).toBe(504);
+      expect(complete.payload).toMatchObject({ turn_id: turnId, durability: 'unknown', error: { code: 'TURN_STILL_RUNNING', retry_safe: false, nothing_saved: false } });
+      expect(registered).toHaveLength(1);
+      // The draft's own version, found by its own operation (turn:<turn id>), as a replay finds it.
+      expect(idsOf(complete.payload.receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      expect(complete.payload.receipts[0].source_turn_id).toBe(registrationTurnId(SCENARIO, programOperationId(SCENARIO, `turn:${turnId}`)));
+      expect(UI_CORE_TURN.safeParse(complete.payload).success).toBe(true);
+      // The turn runs on to its own answer, and writes nothing again.
+      release();
+      await vi.waitFor(() => expect(turnRows.has(turnId)).toBe(true));
+      expect(registered).toHaveLength(1);
+    });
   });
 });

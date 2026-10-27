@@ -133,10 +133,11 @@ export function coreTurnFailure(turnId: string | null, error: CoreTurnError,
 
 /**
  * The stream ended before the turn did (`streamed-turn-sse.ts`'s budget). The turn keeps running and may still save; its
- * answer row is the record, so the same turn id later replays it and never runs it again. Nothing here is known.
+ * answer row is the record, so the same turn id later replays it and never runs it again. Nothing here is known, except a save
+ * the turn's own operation already shows: its `receipts` (C7, 27 Oct).
  */
-export function coreTurnStreamTimeout(turnId: string | null): CoreTurnContract {
+export function coreTurnStreamTimeout(turnId: string | null, receipts: readonly CoreTurnReceipt[] = []): CoreTurnContract {
   return coreTurnFailure(turnId, { code: 'TURN_STILL_RUNNING',
     message: 'The reply did not arrive in time. Olumi may still be finishing this turn; reload to see the current model before sending it again.',
-    retry_safe: false, nothing_saved: false }, 'unknown');
+    retry_safe: false, nothing_saved: false }, 'unknown', { receipts });
 }
