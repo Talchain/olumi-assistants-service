@@ -3089,7 +3089,7 @@ describe('the model-program turn on the real core route', () => {
     // The drafter's update removes the item they answered (its repairs the same).
     replies = Array.from({ length: 3 }, () => savedWith((d) => { d.quantities = d.quantities.filter((x) => x.id !== 'oven_price'); }));
     const out = await proposeProgramChange(deps, ctx, ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request: 'Add a delivery van.', remove: [], answers: [answer] })) as Json;
-    expect(out.status, JSON.stringify(out)).toBe('refused');
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'refused', reason: 'omitted_record', data: { ids: ['oven_price'] } });
     expect(JSON.stringify(out)).not.toContain('the change removed what you answered');
     expect(registered).toHaveLength(1);
   });
@@ -3136,6 +3136,34 @@ describe('the model-program turn on the real core route', () => {
     expect((await readProgramContext(deps, { ...ctx, authenticated_user_id: 'someone-else' }) as Json).data.awaiting_approval).toEqual([]);
     expect(await applyProgramChange(deps, ctx, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     expect((await readProgramContext(deps, ctx) as Json).data.awaiting_approval).toEqual([]);
+  });
+
+  it('C12 (review on #3848): a held card that no longer applies to the saved model is not read as awaiting approval; the reading card says it is one', async () => {
+    replies = [JSON.stringify(bakery())];
+    const first = (await turn({ message: BRIEF })).json();
+    expect(first.model_program.saved).toBe(true);
+    const words = 'The oven costs £2,500.', other = 'Actually the oven costs £2,600.';
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctxOf = (w: string) => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [w], user_turn_text: w });
+    const card = (w: string, value: number) => proposeProgramChange(deps, ctxOf(w), ProgramChangeParams.parse({ public_label: w, basis: 'their answer', request: '', remove: [],
+      answers: [{ id: 'oven_price', value, low: null, high: null, range_kind: null, party: null, quote: w.slice(0, -1), basis: null, status: 'known', author: 'person' }] })) as Promise<Json>;
+    const a = await card(words, 2500), b = await card(other, 2600);
+    expect([a.status, b.status]).toEqual(['ok', 'ok']);
+    expect((await readProgramContext(deps, ctxOf(words)) as Json).data.awaiting_approval.map((x: Json) => x.proposal_id).sort()).toEqual([a.data.proposal_id, b.data.proposal_id].sort());
+    // Applying one moves the figure the other changes from: the other no longer applies, so it is not awaiting approval.
+    expect(await applyProgramChange(deps, ctxOf(words), a.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+    expect((await readProgramContext(deps, ctxOf(words)) as Json).data.awaiting_approval).toEqual([]);
+    // A reading card held on the saved model is read as one (confirming it adds nothing the model does not hold); a change
+    // card is not marked.
+    const held = { dispatch, proposals: new ProposalStore() };
+    const now = (await readProgramContext(held, ctxOf(words)) as Json).data.revision;
+    const savedNow = (programReadOf(persisted!) as { program: Parameters<typeof holdProgramCard>[2]['program'] }).program;
+    const r = holdProgramCard(held.proposals, { scenarioId: SCENARIO, userId: null, graphHash: now.graph_hash, identity: now.graph_identity_hash, base: savedNow },
+      { label: 'Your situation as I understood it', basis: 'their brief', program: savedNow, changes: [], reading: true });
+    const c = await proposeProgramChange(held, ctxOf(other), ProgramChangeParams.parse({ public_label: other, basis: 'their answer', request: '', remove: [],
+      answers: [{ id: 'oven_price', value: 2600, low: null, high: null, range_kind: null, party: null, quote: other.slice(0, -1), basis: null, status: 'known', author: 'person' }] })) as Json;
+    const marks = ((await readProgramContext(held, ctxOf(words)) as Json).data.awaiting_approval as Json[]).map((x) => [x.proposal_id, x.reading ?? null]);
+    expect(marks.sort()).toEqual([[r.proposal_id, true], [c.data.proposal_id, null]].sort());
   });
 
   it('words#5, one model, one period 0: the first draft\'s day is kept with the saved program, and an update on a later day counts a stated date from THAT day, naming both; a program saved before it counts from today as before, and reopens and rewrites exactly as stored', async () => {
@@ -3348,8 +3376,8 @@ describe('the model-program turn on the real core route', () => {
     const held = (deps.proposals.get(p.data.proposal_id)!.living_model as { canonical: CanonicalModelT }).canonical;
     expect(held.quantities.find((x) => x.id === 'oven_price')).toMatchObject(price);
     expect(held.goals.map((g) => g.id)).toEqual(['more_loaves', 'stretch']);
-    // C4 (alpha spec §3; B27 and B19 stay removed): the answers are set again on the drafter's merged model, so its other
-    // records pass as it wrote them, and a removal it makes is refused only by the validator's own removal check.
+    // C4 (alpha spec §3, 27 Oct) restores B27's re-set of the answers on the drafter's merged model. B27's own refusals and
+    // B19 stay removed: a removal it makes is refused only by the validator's own removal check.
     const savedOven = (programReadOf(persisted!) as { program: { canonical: CanonicalModelT } }).program.canonical.quantities.find((x) => x.id === 'oven_price')!;
     const mixed = (reply: string) => {
       replies = [reply]; sent.length = 0;
@@ -3385,7 +3413,7 @@ describe('the model-program turn on the real core route', () => {
       d.quantities = d.quantities.filter((x) => x.id !== 'oven_price');
       d.relations = d.relations.filter((r) => r.id !== 'spend_rel');
     }));
-    expect(removed.status, JSON.stringify(removed)).toBe('refused');
+    expect(removed, JSON.stringify(removed)).toMatchObject({ status: 'refused', reason: 'omitted_record' });
     expect(JSON.stringify(removed)).not.toContain('the change removed what you answered');
   });
 
