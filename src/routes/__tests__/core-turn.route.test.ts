@@ -30,7 +30,7 @@ import type { CanonicalQuantityT } from '../../orchestrator-v5/model-program/can
 import { DRAFTING_INSTRUCTIONS } from '../../orchestrator-v5/model-program-turn/prompt.js';
 import type { LivingModelT } from '../../schemas/living-model.js';
 import { seedOf } from '../../orchestrator-v5/model-program-turn/evaluate.js';
-import { withNewRun } from '../../orchestrator-v5/model-program-turn/program-save.js';
+import { programOperationId, withNewRun } from '../../orchestrator-v5/model-program-turn/program-save.js';
 import { MODEL_PROGRAM, savedProgramOf } from '../../orchestrator-v5/model-program-turn/program-store.js';
 import { PROGRAM_TURN_GUIDANCE } from '../../orchestrator-v5/model-program-turn/program-tools.js';
 import { coreBudget } from '../../orchestrator-v5/agent-lane/model-budgets.js';
@@ -776,6 +776,78 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect((await post(approve)).statusCode).toBe(200);
     expect(figure('oven_price')).toBe(2500);
     expect(registered).toHaveLength(1);
+  });
+
+  describe('C7 (27 Oct): a change saved before its reply failed is said as saved, with its own receipt; a failure before the write says nothing was saved', () => {
+    const SAVED_LOST = 'The saved change is kept, but the reply didn’t arrive. Send a new message to continue.';
+    /** A receipt by its identity: the saved version, its mutation and who authorised it. */
+    const idsOf = (receipts: Json[]) => receipts.map((x) => [x.version_id, x.mutation_id, x.authorised_by]);
+    const draft = () => app.inject({ method: 'POST', url: '/agent/v1/core-turn',
+      payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: BAKERY_BRIEF, source: 'composer' } });
+
+    it('a press whose change commits and whose reply then fails: the 502 says the change was saved and carries its receipt, the person’s; one revision', async () => {
+      const press = await propose();
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'refuse' }]];
+      const r = await post(press);
+      expect(r.statusCode, r.body).toBe(502);
+      const j = r.json() as Json;
+      expect(j.error).toEqual({ code: 'UPSTREAM_ERROR', message: SAVED_LOST, retry_safe: false, nothing_saved: false });
+      expect(registered.map((b) => b.operation_id), 'the one write is this card’s own operation').toEqual([programOperationId(SCENARIO, `proposal:${preparedId}`)]);
+      expect(idsOf(j.receipts)).toEqual([['v_1', 'm_1', 'person']]);
+      expect(UI_CORE_TURN.safeParse(j).success).toBe(true);
+      expect(figure('oven_price')).toBe(2500);
+    });
+
+    it('NEGATIVE: the same press failing before its change is written says nothing was saved, carries no receipt, and may be sent again', async () => {
+      const press = await propose();
+      outputs = [[{ type: 'refuse' }]];
+      const r = await post(press);
+      expect(r.statusCode, r.body).toBe(502);
+      const j = r.json() as Json;
+      expect(j.error).toEqual({ code: 'UPSTREAM_ERROR', message: 'The reply didn’t arrive. Any changes already saved are kept. Send a new message to continue.',
+        retry_safe: true, nothing_saved: true });
+      expect(j.receipts).toEqual([]);
+      expect([registered.length, figure('oven_price')]).toEqual([0, null]);
+    });
+
+    it('a first draft saved, then its reply fails, or the read of it for the reply fails: each failure carries the draft’s receipt, Olumi’s, never "nothing saved"', async () => {
+      persisted = null;
+      canonicalDraft = JSON.stringify(bakery());
+      outputs = [[{ type: 'refuse' }]];
+      const lost = await draft();
+      expect(lost.statusCode, lost.body).toBe(502);
+      expect((lost.json() as Json).error).toEqual({ code: 'UPSTREAM_ERROR', message: SAVED_LOST, retry_safe: false, nothing_saved: false });
+      expect(idsOf((lost.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      // A new scenario whose draft saves, then the model cannot be read back for the reply.
+      SCENARIO = randomUUID(); persisted = null; registered.length = 0;
+      program.read.mockResolvedValueOnce({ status: 'unavailable', reason: 'model_read_failed', write: 'none' });
+      const unread = await draft();
+      expect(unread.statusCode, unread.body).toBe(503);
+      expect((unread.json() as Json).error).toEqual({ code: 'MODEL_READ_FAILED', message: 'Your model could not be read just now.', retry_safe: false, nothing_saved: false });
+      expect(idsOf((unread.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      expect(registered).toHaveLength(1);
+    });
+
+    it('after that saved press, the same press resent replays its outcome with no call and no write, and the card pressed again finds its own saved receipt: never a second revision', async () => {
+      const press = await propose();
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'refuse' }]];
+      expect((await post(press)).statusCode).toBe(502);
+      const runs = storedRuns();
+      const callsBefore = calls.length;
+      const again = await post(press);
+      expect(again.statusCode, again.body).toBe(200);
+      expect(again.json()).toMatchObject({ durability: 'replayed', error: { code: 'REPLY_NOT_DELIVERED', message: SAVED_LOST, retry_safe: false, nothing_saved: false } });
+      expect(calls.length, 'a replay calls no model').toBe(callsBefore);
+      // The card pressed again, as a new send: its apply looks up this operation's own version first, so it finds that save.
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_again' }], [{ type: 'message', text: 'That change was already saved.' }]];
+      const repress = await post({ ...press, turn_id: randomUUID() });
+      expect(repress.statusCode, repress.body).toBe(200);
+      const r = repress.json() as Json;
+      expect(r.receipts).toEqual([{ version: 1, version_id: 'v_1', mutation_id: 'm_1',
+        source_turn_id: registrationTurnId(SCENARIO, programOperationId(SCENARIO, `proposal:${preparedId}`)), authorised_by: 'person' }]);
+      expect(r.error).toBeNull();
+      expect([registered.length, storedRuns(), figure('oven_price')]).toEqual([1, runs, 2500]);
+    });
   });
 
   it('two turns at once: the second waits on the scenario’s slot and starts from what the first saved', async () => {

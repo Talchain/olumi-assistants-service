@@ -121,9 +121,13 @@ export function coreTurnContract(i: CoreTurnContractInput): CoreTurnContract {
   };
 }
 
-/** A body that carries only an error: a refusal before or around the turn, with nothing else known about the scenario. */
+/**
+ * A body that carries an error: a refusal before or around the turn, with nothing else known about the scenario except, on a
+ * turn that failed after it saved, the saved versions' `receipts` (C7, 27 Oct: a saved change whose reply then failed stays
+ * distinguishable from an unknown outcome, which has none).
+ */
 export function coreTurnFailure(turnId: string | null, error: CoreTurnError,
-  durability: CoreTurnDurability = 'not_recorded', extra: Pick<CoreTurnContractInput, 'agent' | 'providerCalls'> = {}): CoreTurnContract {
+  durability: CoreTurnDurability = 'not_recorded', extra: Pick<CoreTurnContractInput, 'agent' | 'providerCalls' | 'receipts'> = {}): CoreTurnContract {
   return coreTurnContract({ turnId, durability, error, ...extra });
 }
 

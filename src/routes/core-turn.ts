@@ -254,8 +254,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
     const scenarioId = str(body.scenario_id) ?? '';
     const turnId = str(body.turn_id);
     const send = (status: number, contract: CoreTurnContract) => reply.code(status).send(contract);
-    const fail = (status: number, error: CoreTurnError, durability: CoreTurnDurability = 'not_recorded') =>
-      send(status, coreTurnFailure(turnId, error, durability, { providerCalls: recordedProviderCalls() }));
+    const fail = (status: number, error: CoreTurnError, durability: CoreTurnDurability = 'not_recorded', receipts: readonly CoreTurnReceipt[] = []) =>
+      send(status, coreTurnFailure(turnId, error, durability, { providerCalls: recordedProviderCalls(), receipts }));
     // The core lane runs where `laneModeFor` runs it (staging, local, test): never in production, never on a read-only preview.
     if (laneModeFor(baseMode, AI_CORE_MODE, getRuntimeEnv()) !== MODE) {
       return fail(404, { code: 'CORE_ROUTE_UNAVAILABLE', message: 'This route is not served here.', retry_safe: false, nothing_saved: true });
@@ -599,6 +599,11 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       let programPayload: { readonly canonical_analysis_view: unknown; readonly model_program: Record<string, unknown> } | undefined;
       /** The AI wrote this host turn's reply (T1), so it is already in the scenario's Conversation. */
       let aiReplied = false;
+      /** The host's own turn (a draft, or a Run press), once it has run: what it saved stands whatever its reply then does (C7). */
+      let hostTurn: AgentTurnResult | undefined;
+      /** Each saved version these calls reported, with who authorised it: a drafted first model's is Olumi's, every other the person's. */
+      const turnReceipts = (calls: Pick<AgentTurnResult, 'tool_calls' | 'tool_results'>): CoreTurnReceipt[] => (programPayload === undefined ? receiptsOf(calls)
+        : collectTurnReceipts(calls.tool_results).map((r) => ({ ...r, authorised_by: programPayload!.model_program['turn'] === 'draft' ? 'olumi' as const : 'person' as const })));
       const programTurn = async (): Promise<AgentTurnResult> => {
         const t0 = Date.now();
         const out = await runModelProgramTurn({ scenarioId, turnId, message, saved: { graph: saved.graph, identity: saved.identity }, dispatch: countingDispatch,
@@ -606,9 +611,10 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         if (out.verifiedSave) verifiedSave = true;
         programPayload = out.payload;
         const ms = Date.now() - t0;
-        return { assistant_text: out.assistantText, items: [], tool_calls: out.toolCalls.map((c) => ({ ...c, mutated: c.mutated ?? out.mutated })),
+        hostTurn = { assistant_text: out.assistantText, items: [], tool_calls: out.toolCalls.map((c) => ({ ...c, mutated: c.mutated ?? out.mutated })),
           tool_results: out.toolResults, mutated: out.mutated, hops: 0, stopped_reason: 'answered',
           timing: { total_ms: ms, provider_ms: 0, tool_ms: ms, overhead_ms: 0, tool_provider_ms: 0, provider_calls: providerCallsMade() ?? 0, tool_calls: 1, hops: 0 } };
+        return hostTurn;
       };
       if (declinedCardOnly !== undefined) {
         proposals.discard(declinedCardOnly);
@@ -689,19 +695,22 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           const nothingSaved = writesDispatched === 0 && !verifiedSave;
           // A released claim runs again; a recorded continuation replays; otherwise this outcome is not known to a resend.
           const durable: CoreTurnDurability = released ? 'not_recorded' : continuationRecorded ? 'recorded' : 'unknown';
+          // C7 (27 Oct): what this turn saved before it failed (its readback, or the AI's reply after a save) is said with each
+          // saved version's receipt, as on a turn that answered; a save whose outcome is unknown has none.
+          const savedReceipts = turnReceipts(hostTurn ?? seen);
           if (err instanceof ModelReadFailedError) {
-            return fail(503, { code: 'MODEL_READ_FAILED', message: 'Your model could not be read just now.', retry_safe: released, nothing_saved: nothingSaved }, durable);
+            return fail(503, { code: 'MODEL_READ_FAILED', message: 'Your model could not be read just now.', retry_safe: released, nothing_saved: nothingSaved }, durable, savedReceipts);
           }
           if (isRevisionConflict(err)) {
             return fail(409, { code: 'REVISION_CONFLICT', message: 'Your model changed while this turn ran. Reload to see it, then send your message again.',
-              retry_safe: released, nothing_saved: nothingSaved }, durable);
+              retry_safe: released, nothing_saved: nothingSaved }, durable, savedReceipts);
           }
           if (err instanceof CoreStateUnavailableError) {
-            return fail(503, { code: err.code, message: 'Olumi could not keep this conversation’s state, so it did not run the turn.', retry_safe: released, nothing_saved: nothingSaved }, durable);
+            return fail(503, { code: err.code, message: 'Olumi could not keep this conversation’s state, so it did not run the turn.', retry_safe: released, nothing_saved: nothingSaved }, durable, savedReceipts);
           }
           // A lost delivery is reported with ITS cause, never Olumi's own code as if the provider had sent it.
           const failure = providerFailureOf(deliveryUnknown ? (err as CoreDeliveryUnknownError).cause : err);
-          return fail(502, { code: String(failure.error), message: RECORDED[lost].error.message, retry_safe: released, nothing_saved: nothingSaved }, durable);
+          return fail(502, { code: String(failure.error), message: RECORDED[lost].error.message, retry_safe: released, nothing_saved: nothingSaved }, durable, savedReceipts);
         }
       }
       summary = { result };
@@ -786,8 +795,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         // A held change card is the person's next step (it may hold their answer), so the goal's question is not asked beside it.
         notes: cards.some((c) => c.reading !== true) ? [] : withheldGoalNote(after.graph, programPayload?.model_program['turn']),
         run: programRunOf(after.graph, newestRunId(programRead)), analysisState: after.analysisState, ...(ranThisTurn ? { analysisResult: after.analysisResult } : {}),
-        receipts: programPayload === undefined ? receiptsOf(result)
-          : collectTurnReceipts(result.tool_results).map((r) => ({ ...r, authorised_by: programPayload!.model_program['turn'] === 'draft' ? 'olumi' as const : 'person' as const })),
+        receipts: turnReceipts(result),
         // A program scenario's analysis is its newest STORED Run as the scenario read serves it (never a recompute), on every turn.
         ...(programPayload !== undefined || isProgramGraph(after.graph) ? { modelProgram: {
           canonical_analysis_view: reopenProgram(after.graph)?.view ?? programPayload?.canonical_analysis_view ?? null,
