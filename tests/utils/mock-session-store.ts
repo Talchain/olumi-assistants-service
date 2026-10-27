@@ -118,6 +118,8 @@ export function createMockSessionStore(
     // ROADMAP 2.171: benign default = NOT post-Stop, so every suite keeps the
     // ordinary coach copy unless it seeds the tombstone deliberately.
     wasLatestScenarioTurnStopped: async () => false,
+    // C14: benign default = this turn was NOT stopped, so every suite runs its turn as today.
+    isTurnStopped: async () => false,
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
     readRecentAppliedMutationFactsFor: async () => [],

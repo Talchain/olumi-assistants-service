@@ -102,6 +102,12 @@ const RECORDED: Readonly<Record<RecordedOutcome, { readonly said?: string; reado
   reply_lost: { said: REPLY_LOST, error: { code: 'REPLY_NOT_DELIVERED', message: REPLY_LOST, retry_safe: false, nothing_saved: false } },
   reply_empty: { error: { code: 'REPLY_INCOMPLETE', message: 'Olumi didn’t finish its reply. Anything already saved is kept; reload to see your model, then send a new message.',
     retry_safe: false, nothing_saved: false } },
+  // C14 (27 Oct): the person stopped the turn (its fence's tombstone). Before any write was sent, nothing changed; after one, it
+  // may have saved (its receipt says so) and is never said to be undone. The row keeps whatever words it had.
+  stopped: { error: { code: 'TURN_STOPPED', message: 'You stopped this turn before it changed anything. Nothing in your model was changed.',
+    retry_safe: false, nothing_saved: true } },
+  stopped_after_write: { error: { code: 'TURN_STOPPED', message: 'You stopped this turn. Anything it had already saved is kept; reload to see your model.',
+    retry_safe: false, nothing_saved: false } },
 };
 
 /** A saved scenario that is not a model program: out of the alpha, refused on every kind of turn (inventory F1b). */
@@ -429,7 +435,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       const receiptsOf = (v: Rec | null, by: 'olumi' | 'person' | null) => (v === null || by === null ? []
         : collectTurnReceipts([{ model_version: v }]).map((r) => ({ ...r, authorised_by: by })));
       return send(200, coreTurnContract({
-        turnId, durability: 'replayed', receipts: [...receiptsOf(turnSave, turnSaveBy), ...receiptsOf(cardSave, 'person')], assistantText: outcome === undefined || outcome === 'reply_empty' ? prior.assistant_message ?? '' : '',
+        turnId, durability: 'replayed', receipts: [...receiptsOf(turnSave, turnSaveBy), ...receiptsOf(cardSave, 'person')], assistantText: outcome === undefined || RECORDED[outcome].said === undefined ? prior.assistant_message ?? '' : '',
         revision: now.revision, scenarioRevision: now.identity, graph: appliedGraphWire(now.graph),
         cards: await heldCardsOf(store, scenarioId, pending, now),
         // In the live reply's program shape (F7): today's stored Run and the program's own view, as the UI adopts them.
@@ -500,6 +506,9 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
      */
     let fence: TurnFenceHandle | undefined;
     const fenced = <T>(write: () => Promise<T>): Promise<T> => (fence === undefined ? write() : runWithTurnFence(fence, write));
+    /** C14: the person has stopped THIS turn (its fence row's tombstone). Unreadable reads as not stopped: its writes stay fenced. */
+    const turnStopped = async (): Promise<boolean> => fence !== undefined && typeof store.isTurnStopped === 'function'
+      && await store.isTurnStopped(scenarioId, String(turnId)).catch(() => false);
     const readingDispatch: InternalDispatch = readCache.dispatch;
     const countingDispatch: InternalDispatch = async (path, b) => {
       const sendIt = async () => promoteRevisionConflictResponse(await readingDispatch(path, b));
@@ -746,6 +755,10 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       const after = savedScenarioOf(await readingDispatch(graphPath, { ...FRESH_READ }));
       const paused = result.sdk?.paused;
       const noReply = result.assistant_text.trim() === '' && paused === undefined && declinedCardOnly === undefined;
+      // C14: a stopped turn's outcome is typed on its row as every other is, so a resend replays it; a write it had sent keeps
+      // nothing_saved false (saved, with its receipt, or unknown), never "nothing changed".
+      const stopped: RecordedOutcome | undefined = await turnStopped() ? (writesDispatched === 0 && !verifiedSave ? 'stopped' : 'stopped_after_write') : undefined;
+      const recordedNow: RecordedOutcome | undefined = stopped ?? (noReply ? 'reply_empty' : undefined);
       // The model's text exactly as returned (Codex r1 on #3650: " \n" became ""); only whether it says anything is decided here.
       const assistantText = result.assistant_text;
       let latestPending: readonly PendingAction[] = heldAtStart;
@@ -785,7 +798,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             offeredChipIds: new Set(durablePending.map((p) => p.chip_id)),
             onReconciled: (write) => { rowPending = write.pending_actions ?? []; return write; } },
           write: { scenario_id: scenarioId, turn_id: turnId, turn_class: 'direct_answer', handler_id: null,
-            request_hash: noReply ? withRecordedOutcome(requestHash, 'reply_empty') : requestHash,
+            request_hash: recordedNow !== undefined ? withRecordedOutcome(requestHash, recordedNow) : requestHash,
             response_emitted: true, llm_calls_used: providerCallsMade() ?? result.hops + 1, duration_ms: Date.now() - startedAt, handler_facts: [],
             userMessage: message, assistantMessage: assistantText,
             ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}) } });
@@ -829,7 +842,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           canonical_analysis_view: reopenProgram(after.graph)?.view ?? programPayload?.canonical_analysis_view ?? null,
           model_program: programPayload?.model_program ?? { turn: 'agent' } } } : {}),
         paused: paused !== undefined ? { proposal_id: paused.proposal_id } : null,
-        error: noReply ? RECORDED.reply_empty.error : null,
+        error: recordedNow !== undefined ? RECORDED[recordedNow].error : null,
         // A refused or unavailable call names its typed reason (DL 22 Oct: which of Class 3's offers fired was not on the wire).
         agent: { mode: MODE, stopped_reason: result.stopped_reason, tool_calls: toolCallsOf(result), ...(result.sdk !== undefined ? { sdk: result.sdk } : {}) },
         providerCalls: recordedProviderCalls(),

@@ -117,6 +117,9 @@ describe('the PRODUCTION store implements the optional fence methods', () => {
     //     silent regression, which is precisely the concern in this file's
     //     header, applied to the newest optional method.
     expect(typeof proto.turnFenceRowExists).toBe('function');
+    // C14 (27 Oct): the core turn's own-Stop read. Optional on the interface (doubles read "not stopped"), but without it in
+    // production a stopped core turn would run its reply call and answer untyped again.
+    expect(typeof proto.isTurnStopped).toBe('function');
   });
 });
 

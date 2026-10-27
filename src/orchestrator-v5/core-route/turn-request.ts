@@ -89,7 +89,7 @@ const CHIP_HASH_SEP = '#chip:';
  * answer carries none, so its row and its replay are exactly as before.
  */
 const OUTCOME_SEP = '#outcome:';
-export const RECORDED_OUTCOMES = ['reply_lost_saved', 'reply_lost_may_finish', 'reply_lost', 'reply_empty'] as const;
+export const RECORDED_OUTCOMES = ['reply_lost_saved', 'reply_lost_may_finish', 'reply_lost', 'reply_empty', 'stopped', 'stopped_after_write'] as const;
 export type RecordedOutcome = (typeof RECORDED_OUTCOMES)[number];
 export const withRecordedOutcome = (requestHash: string, outcome: RecordedOutcome): string => `${requestHash}${OUTCOME_SEP}${outcome}`;
 export function recordedOutcomeOf(stored: string): RecordedOutcome | undefined {

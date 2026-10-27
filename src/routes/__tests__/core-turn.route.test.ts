@@ -129,6 +129,8 @@ const store = {
     fenceRows.set(`${sid}:${tid}`, { generation: row?.generation ?? ++fenceGeneration, stopped_at: '2026-10-23T10:00:00.000Z' });
     return { stopped: true, claimed: row !== undefined, alreadyCommitted: false };
   }),
+  /** This turn's own fence row carries a Stop's tombstone (`v5_turn_fence.stopped_at`). */
+  isTurnStopped: vi.fn(async (sid: string, tid: string) => (fenceRows.get(`${sid}:${tid}`)?.stopped_at ?? null) !== null),
 };
 vi.mock('../../orchestrator-v5/session/index.js', () => ({ getSessionStore: () => store, resetSessionStoreForTests: () => {}, SessionReadError: class SessionReadError extends Error {} }));
 vi.mock('../../orchestrator/user-identity.js', async (original) => ({
@@ -449,6 +451,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     const OUTCOME_UNKNOWN = { code: 'TURN_OUTCOME_UNKNOWN', retry_safe: false, nothing_saved: false,
       message: 'This message is already being handled, or an earlier attempt ran and its reply was not recorded. Nothing was run again; reload to see the current model.' };
     const STOPPED_REPLY = 'That change was stopped before it was saved.';
+    /** A stopped turn that had sent a write: it may have saved (its receipt says so), and is never said to be undone. */
+    const STOPPED_AFTER_WRITE = { code: 'TURN_STOPPED', message: 'You stopped this turn. Anything it had already saved is kept; reload to see your model.',
+      retry_safe: false, nothing_saved: false };
     /** A press whose first provider call is held, then stopped there: admitted, nothing written yet. */
     const stoppedBeforeWrite = async () => {
       const press = await propose();
@@ -488,16 +493,16 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(stop.json()).toEqual({ stopped: true, claimed: true, already_committed: false, scenario_id: SCENARIO, turn_id: press.turn_id, request_id: 'req-stop' });
       expect(turn.statusCode, turn.body).toBe(200);
       const t = turn.json() as Json;
-      // Today the stopped turn answers as a recorded turn with no error of its own; the refused write is typed on its tool call,
-      // and the reply is the AI's words, untouched.
-      expect(t).toMatchObject({ durability: 'recorded', error: null, receipts: [], assistant_text: STOPPED_REPLY });
+      // C14 (27 Oct): the stopped turn's answer is typed TURN_STOPPED. Its apply was sent (the fence refused it), so it keeps
+      // nothing_saved false with no receipt: unknown, never "nothing changed". The refused write is typed on its tool call.
+      expect(t).toMatchObject({ durability: 'recorded', error: STOPPED_AFTER_WRITE, receipts: [], assistant_text: STOPPED_REPLY });
       expect(t._agent.tool_calls).toEqual([{ name: 'apply_change', outcome: 'refused', refusal: 'registration_refused' }]);
       expect(told).toEqual([expect.objectContaining({ status: 'refused', reason: 'registration_refused', data: { code: 'TURN_STOPPED', written: false } })]);
       expect([registered.length, figure('oven_price')]).toEqual([0, null]);
       const callsBefore = calls.length;
       const again = await post(press);
       expect(again.statusCode, again.body).toBe(200);
-      expect(again.json()).toMatchObject({ durability: 'replayed', error: null, receipts: [], assistant_text: STOPPED_REPLY });
+      expect(again.json()).toMatchObject({ durability: 'replayed', error: STOPPED_AFTER_WRITE, receipts: [], assistant_text: STOPPED_REPLY });
       expect([calls.length, registered.length], 'a resend calls no model and writes nothing').toEqual([callsBefore, 0]);
       // The Stop ended that turn only: the card is still held, and a new press applies it once, with the person's receipt.
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_again' }], [{ type: 'message', text: 'Saved.' }]];
@@ -562,14 +567,15 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(fenceRows.get(`${SCENARIO}:${press.turn_id}`)?.stopped_at, 'the tombstone').not.toBeNull();
       expect(turn.statusCode, turn.body).toBe(200);
       const t = turn.json() as Json;
-      expect(t).toMatchObject({ durability: 'recorded', error: null, assistant_text: 'Saved: the oven costs £2,500.' });
+      // C14 (27 Oct): typed as stopped, and never said to be undone: the saved change is kept, with its own receipt.
+      expect(t).toMatchObject({ durability: 'recorded', error: STOPPED_AFTER_WRITE, assistant_text: 'Saved: the oven costs £2,500.' });
       expect(t.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', mutation_id: 'm_1', authorised_by: 'person' })]);
       expect([registered.length, storedRuns(), figure('oven_price')], 'the committed change stands: one revision, its own Run').toEqual([1, runs, 2500]);
       const callsBefore = calls.length;
       const again = await post(press);
       expect(again.statusCode, again.body).toBe(200);
       // A replay's receipts are an open item (ALPHA-PLAN C14 (8), order 4): not pinned here.
-      expect(again.json()).toMatchObject({ durability: 'replayed', error: null, assistant_text: 'Saved: the oven costs £2,500.' });
+      expect(again.json()).toMatchObject({ durability: 'replayed', error: STOPPED_AFTER_WRITE, assistant_text: 'Saved: the oven costs £2,500.' });
       expect([calls.length, registered.length], 'a resend calls no model and writes nothing').toEqual([callsBefore, 1]);
       // CONTRAST, on the RPC's derivation: once the turn's own answer row exists, a Stop reads already_committed true.
       expect((await stopAsTheRpcDerives(String(press.turn_id))).json()).toMatchObject({ stopped: true, claimed: true, already_committed: true });
@@ -2091,6 +2097,30 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       release();
       await vi.waitFor(() => expect(turnRows.has(turnId)).toBe(true));
       expect(registered).toHaveLength(1);
+    });
+
+    it('C14: a typed turn stopped while its call runs answers with the typed Stop outcome (TURN_STOPPED, nothing saved), recorded on its row, and a resend replays it with no call or write; an unstopped turn answers with none', async () => {
+      let release!: () => void;
+      holdProvider = new Promise<void>((resolve) => { release = resolve; });
+      outputs = [[{ type: 'message', text: 'The model holds the oven price as a question.' }]];
+      const turnId = randomUUID();
+      const pending = typed('What does the model hold for the oven?', turnId);
+      await vi.waitFor(() => expect(calls).toHaveLength(1));
+      const stop = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn/stop', payload: { scenario_id: SCENARIO, turn_id: turnId } });
+      expect(stop.json()).toMatchObject({ stopped: true, claimed: true });
+      release();
+      const r = await pending;
+      expect(r.statusCode, r.body).toBe(200);
+      const STOPPED = { code: 'TURN_STOPPED', message: 'You stopped this turn before it changed anything. Nothing in your model was changed.', retry_safe: false, nothing_saved: true };
+      expect(r.json()).toMatchObject({ durability: 'recorded', error: STOPPED, receipts: [] });
+      expect(UI_CORE_TURN.safeParse(r.json()).success).toBe(true);
+      expect(registered).toHaveLength(0);
+      const again = await typed('What does the model hold for the oven?', turnId);
+      expect(again.json()).toMatchObject({ durability: 'replayed', error: STOPPED, receipts: [] });
+      expect([calls.length, registered.length], 'a resend calls no model and writes nothing').toEqual([1, 0]);
+      // CONTRAST: the same turn not stopped answers with no error.
+      outputs = [[{ type: 'message', text: 'Still a question.' }]];
+      expect((await typed('What does the model hold for the oven?')).json()).toMatchObject({ durability: 'recorded', error: null });
     });
   });
 });
