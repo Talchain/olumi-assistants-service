@@ -14,6 +14,14 @@
  *  · Cells are the Run's own displays (`stressChancesOf`): a figure or range through the goal-chance gate, or withheld with
  *    why. The raw percentage is never returned.
  *  · Built on a model that has since changed (`base_graph_hash`), or not a core scenario: refused with its reason.
+ *
+ * ON A MODEL PROGRAM (HC5, Paul D10: A, the existing lens on the same draws; `runProgramWhatIf`): the same request and the same
+ * result, run in CEE's own engine, no PLoT call. A card's figure (`factor_value_edit`, as the program's canvas edit takes it,
+ * routes/core-turn.ts) is applied with the save path's own postimage (`canvasFigurePostimage`) to a copy of the program;
+ * other gestures are refused one by one, by name. The saved model and the what-if are evaluated on the scenario's seed with
+ * each draw kept: every figure is drawn from its own stream keyed by (seed, id) (prng.ts), so each draw index is the same
+ * world in both, and each option's gap is the paired difference on those draws (paired.ts, Newcombe method 10).
+ * "Beyond ordinary variation" is said where that gap's 95% precision is clear of 0 (`separated`). Nothing is saved.
  */
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
@@ -26,6 +34,15 @@ import type { StressChance } from '../path-b/tools/stress-tool.js';
 import { NOISE_BAND_SE_MULTIPLE } from '../coaching/win-probability-noise-band.js';
 import { displayedPctAt, type GoalChanceDisplayRounding } from '../goal-target/goal-chance-display.js';
 import { runVariant, type StressVariantParams, type VariantRun } from './stress-variant-run.js';
+import type { CanonicalModelT } from '../model-program/canonical.js';
+import type { PresentCell } from '../model-program/present/present.js';
+import { pairedDifference, separated, type PairedDifference } from '../model-program/simulate/paired.js';
+import { isWithheld, type Chance } from '../model-program/simulate/result.js';
+import { restsOn } from '../model-program/simulate/simulate.js';
+import { evaluateCanonical, type Evaluation } from '../model-program-turn/evaluate.js';
+import { programRevisionOf } from '../model-program-turn/program-card.js';
+import { programReadOf, sourceTextOf, unreadableWords, type SavedProgram } from '../model-program-turn/program-store.js';
+import { canvasFigurePostimage } from '../model-program-turn/program-tools.js';
 
 /** The value gestures a what-if holds. Structural edits, renames, goal and status changes are not what-ifs. */
 export const WHAT_IF_KINDS: ReadonlySet<string> = new Set(['factor_value_edit', 'edge_strength_edit', 'option_intervention_edit', 'prior_range_edit']);
@@ -44,18 +61,23 @@ export const VARIATION_WORDS: Readonly<Record<WhatIfVariation, string>> = {
 
 export interface WhatIfVariant {
   readonly change_index: number | 'all';
-  /** The what-if and the saved model drew the same samples (PLoT's seed echoes are equal). Else not like-for-like. */
+  /** The what-if and the saved model drew the same samples (PLoT's seed echoes are equal; on a program, the same seed and
+   *  draws, every figure on its own stream). Else not like-for-like. */
   readonly paired: boolean;
   readonly options: readonly {
     readonly option_id: string; readonly saved: Cell; readonly what_if: Cell;
     /** CEE's judgement and its sentence (`variationOf`); the UI renders the words and composes none. */
     readonly variation: WhatIfVariation; readonly variation_words: string;
+    /** On a program only: what-if minus saved on the same draws, with its paired 95% precision; null where either is not shown. */
+    readonly paired_difference?: { readonly difference: number; readonly precision_95: readonly [number, number] } | null;
   }[];
 }
 
+/** `words`, on a program: the save path's own sentence for why that figure cannot be set (CEE composes it, the UI none). */
+type RefusedChange = { readonly index: number; readonly reason: string; readonly words?: string };
 export type WhatIfResult =
   | {
-    readonly kind: 'refused'; readonly reason: string; readonly changes_refused?: readonly { readonly index: number; readonly reason: string }[];
+    readonly kind: 'refused'; readonly reason: string; readonly changes_refused?: readonly RefusedChange[];
     /** A model the Run cannot analyse: the Run's own next step and questions, so the canvas can say why and what to add. */
     readonly next_step?: string; readonly readiness_questions?: readonly string[];
   }
@@ -63,7 +85,7 @@ export type WhatIfResult =
     readonly kind: 'ran';
     readonly persisted: false;
     readonly changes_applied: readonly { readonly index: number; readonly target: WhatIfTarget }[];
-    readonly changes_refused: readonly { readonly index: number; readonly reason: string }[];
+    readonly changes_refused: readonly RefusedChange[];
     readonly variants: readonly WhatIfVariant[];
   };
 
@@ -146,6 +168,13 @@ export async function runWhatIf(
 ): Promise<WhatIfResult> {
   const run = deps.run ?? runVariant;
   const stored = (await deps.loadSaved(p.payload.scenario_id)).graph;
+  const read = programReadOf(stored);
+  if (read.kind === 'unreadable') return { kind: 'refused', reason: 'program_unreadable', next_step: unreadableWords(read.reason) };
+  if (read.kind === 'program') {
+    const claimed = [p.baseGraphHash, ...p.changes.map((c) => c.base_graph_hash)].filter((h): h is string => typeof h === 'string');
+    if (claimed.some((h) => h !== programRevisionOf(stored))) return { kind: 'refused', reason: 'stale_base' };
+    return runProgramWhatIf(read.program, p.changes, p.crux);
+  }
   const view = livingViewOf(stored);
   if (view === undefined || !('withheld' in view)) return { kind: 'refused', reason: 'not_a_core_scenario' };
   const saved = view.living_model as LivingModelT;
@@ -205,4 +234,95 @@ export async function runWhatIf(
     kind: 'ran', persisted: false, variants, changes_refused: refused,
     changes_applied: applied.map(({ index, edit }) => ({ index, target: targetOf(edit) })),
   };
+}
+
+/** On a program, a what-if holds a card's figure; these the program's canvas edit does not take either (routes/core-turn.ts). */
+const PROGRAM_NOT_A_FIGURE = 'not_a_figure_on_this_model';
+const numberOf = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+
+/** A cell as the lens shows it: the view's own display or its why; `provisional` where the chance rests on Olumi's estimate. */
+function programCell(e: Evaluation, optionId: string): Cell {
+  const cell = (e.view.options as readonly { readonly option_id: string; readonly cell: PresentCell }[]).find((o) => o.option_id === optionId)?.cell;
+  if (cell === undefined) return NOT_SHOWN;
+  if (cell.kind === 'withheld') return { display: null, provisional: false, not_shown: cell.why };
+  const x = e.compiled.executable!;
+  const roots = [...x.goals.flatMap((g) => [g.quantity, g.target, ...(g.per !== undefined ? [g.per] : [])]), ...x.limits.flatMap((l) => [l.quantity, l.bound, ...(l.per !== undefined ? [l.per] : [])])];
+  const behind = restsOn(x, roots, optionId);
+  const olumis = x.quantities.some((q) => behind.has(q.id) && q.dist !== undefined
+    && (q.dist.kind === 'fixed' ? q.dist.author === 'olumi' : q.dist.basis === 'olumi_estimate'));
+  return { display: cell.display, provisional: olumis, not_shown: null };
+}
+
+/** What-if minus saved for one option on the same draws, or null where either side shows no figure. */
+function programGap(saved: Evaluation, whatIf: Evaluation, optionId: string): PairedDifference | null {
+  const at = (e: Evaluation) => e.sim?.per_draw?.options.find((o) => o.option_id === optionId);
+  const chance = (e: Evaluation) => e.sim?.options.find((o) => o.option_id === optionId)?.joint_within_limits;
+  const a = at(whatIf), b = at(saved), ca = chance(whatIf), cb = chance(saved);
+  if (a === undefined || b === undefined || ca === undefined || cb === undefined || isWithheld(ca) || isWithheld(cb)) return null;
+  if (programCell(saved, optionId).display === null || programCell(whatIf, optionId).display === null) return null;
+  const exact = (c: Chance) => c.precision_95[0] === c.precision_95[1];
+  return pairedDifference(a.joint_within_limits, b.joint_within_limits, exact(ca) && exact(cb));
+}
+
+/** The words a refused saved or what-if evaluation gives: the first option's own why. */
+const whyOf = (e: Evaluation): { next_step?: string } => {
+  const c = (e.view.options as readonly { readonly cell: PresentCell }[])[0]?.cell;
+  return c !== undefined && c.kind === 'withheld' ? { next_step: c.why } : {};
+};
+
+export function runProgramWhatIf(program: SavedProgram, changes: readonly Rec[], crux: boolean): WhatIfResult {
+  const brief = program.person_words[0] !== undefined ? { brief: program.person_words[0] } : {};
+  const evaluate = (canonical: CanonicalModelT, typed: readonly string[]): Evaluation =>
+    evaluateCanonical(canonical, { sourceText: sourceTextOf([...program.person_words, ...typed]), seed: program.seed, perDraw: true, ...brief });
+  /** One figure, applied to `on` with the save path's own postimage; the same figure as saved is applied as no change. */
+  const figure = (on: SavedProgram, c: Rec): { readonly ok: true; readonly model: CanonicalModelT; readonly words: readonly string[] } | { readonly ok: false; readonly refused: Omit<RefusedChange, 'index'> } => {
+    const value = numberOf(c.raw_value ?? c.value);
+    if (c.kind !== 'factor_value_edit' || typeof c.target_id !== 'string' || value === undefined) return { ok: false, refused: { reason: PROGRAM_NOT_A_FIGURE } };
+    const built = canvasFigurePostimage(on, { target: { quantity_id: c.target_id }, value }, null);
+    if (built.ok) return { ok: true, model: built.model, words: [built.words] };
+    return built.code === 'no_change' ? { ok: true, model: on.canonical, words: [] } : { ok: false, refused: { reason: built.code ?? 'not_applied', words: built.reason } };
+  };
+
+  const applied: { readonly index: number; readonly change: Rec }[] = [];
+  const refused: RefusedChange[] = [];
+  let all = program, typed: string[] = [];
+  changes.forEach((c, index) => {
+    const out = figure(all, c);
+    if (!out.ok) { refused.push({ index, ...out.refused }); return; }
+    typed = [...typed, ...out.words];
+    all = { ...all, canonical: out.model, person_words: [...all.person_words, ...out.words] };
+    applied.push({ index, change: c });
+  });
+  if (applied.length === 0) return { kind: 'refused', reason: 'no_change_applied', changes_refused: refused };
+
+  const saved = evaluate(program.canonical, []);
+  if (saved.sim === null) return { kind: 'refused', reason: saved.too_large === true ? 'saved_too_large' : 'saved_not_analysable', ...whyOf(saved) };
+  const plan: { readonly change_index: number | 'all'; readonly model: CanonicalModelT; readonly typed: readonly string[] }[] = [
+    { change_index: 'all', model: all.canonical, typed },
+    ...(crux && applied.length > 1 ? applied.flatMap(({ index, change }) => {
+      const out = figure(program, change);
+      return out.ok ? [{ change_index: index, model: out.model, typed: out.words }] : [];
+    }) : []),
+  ];
+  const variants: WhatIfVariant[] = [];
+  for (const { change_index, model, typed: words } of plan) {
+    const whatIf = evaluate(model, words);
+    if (whatIf.sim === null || whatIf.compiled.errors.length > 0) {
+      if (change_index === 'all') return { kind: 'refused', reason: whatIf.too_large === true ? 'what_if_too_large' : 'what_if_not_analysable', changes_refused: refused, ...whyOf(whatIf) };
+      continue;
+    }
+    const ids = [...new Set([...saved.view.options.map((o) => o.option_id), ...whatIf.view.options.map((o) => o.option_id)])];
+    variants.push({
+      change_index, paired: true,
+      options: ids.map((option_id) => {
+        const gap = programGap(saved, whatIf, option_id);
+        const variation: WhatIfVariation = gap !== null && separated(gap) ? 'beyond_ordinary_variation' : 'not_judged';
+        return { option_id, saved: programCell(saved, option_id), what_if: programCell(whatIf, option_id), variation, variation_words: VARIATION_WORDS[variation],
+          paired_difference: gap === null || gap.kind === 'withheld' ? null
+            : { difference: gap.difference, precision_95: gap.kind === 'exact' ? [gap.difference, gap.difference] : gap.precision_95 } };
+      }),
+    });
+  }
+  return { kind: 'ran', persisted: false, variants, changes_refused: refused,
+    changes_applied: applied.map(({ index, change }) => ({ index, target: { node_id: change.target_id as string } })) };
 }
