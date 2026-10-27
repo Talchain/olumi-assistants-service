@@ -544,7 +544,16 @@ function terciles(inputs: Inputs, draws: number): { low: Int32Array; high: Int32
 
 /** One condition's tally over the draws: met per draw, its aggregated values, nonfinite draws, and whether it is exact. */
 /** The most specific cause wins (result.ts `OutsideCause`): what a value did itself, then not finite, then follows. */
-const CAUSE_RANK: Readonly<Record<OutsideCause, number>> = { below: 0, above: 0, divided_by_zero: 0, not_finite: 1, follows: 2 };
+const CAUSE_RANK: Readonly<Record<OutsideCause, number>> = { below: 0, above: 0, divided_by_zero: 0, not_finite: 1, follows: 2, outside: 0, mixed: 0 };
+const EDGE: ReadonlySet<OutsideCause> = new Set(['below', 'above', 'outside']);
+/** Two draws' causes for one quantity: the same one; else below and above are `outside`, two that could not be worked out
+ *  are `not_finite` (whose words cover both), and anything else is `mixed`. Never one draw's direction for another's. */
+export function combineCauses(a: OutsideCause, b: OutsideCause): OutsideCause {
+  if (a === b) return a;
+  if (a === 'mixed' || b === 'mixed') return 'mixed';
+  if (EDGE.has(a) && EDGE.has(b)) return 'outside';
+  return EDGE.has(a) || EDGE.has(b) ? 'mixed' : 'not_finite';
+}
 
 class Tally {
   readonly met: Uint8Array;
@@ -574,18 +583,21 @@ class Tally {
       this.agg[d] = NaN;
       // Where a value left its domain, that is what happened to it (first, so a quantity that left its floor is never also
       // said to be "not a number" because its own reading then is); elsewhere, why the condition could not be read.
-      // Named in the same order as ever; a quantity's cause is the most specific seen (CAUSE_RANK): what it did itself, then
-      // "not a finite number", then "follows" (unreadable only because a value it rests on left its domain in this draw).
+      // Named in the same order as ever. Within this draw, a quantity's cause is the most specific (CAUSE_RANK): what it did
+      // itself, then "not a finite number", then "follows" (unreadable only because a value it rests on left its domain).
+      // Across draws they combine (`combineCauses`), so a direction is kept only where every draw went that way.
+      const now = new Map<string, OutsideCause>();
       const named = (id: string, cause: OutsideCause) => {
         this.badIds.add(id);
-        const was = this.causes.get(id);
-        if (was === undefined || CAUSE_RANK[cause] < CAUSE_RANK[was]) this.causes.set(id, cause);
+        const was = now.get(id);
+        if (was === undefined || CAUSE_RANK[cause] < CAUSE_RANK[was]) now.set(id, cause);
       };
       const unread: OutsideCause = left.some((q) => reach.has(q)) ? 'follows' : 'not_finite';
       if (top === null || (a === null && bottom !== null && bottom !== 0)) named(ids[k.q]!, unread);
       if (k.per !== undefined && (bottom === null || bottom === 0)) named(ids[k.per.q]!, bottom === 0 ? 'divided_by_zero' : unread);
       if (!Number.isFinite(target)) named(ids[k.ref]!, unread);
       for (const q of left) if (reach.has(q)) named(ids[q]!, why[q] === 1 ? 'below' : why[q] === 2 ? 'above' : 'not_finite');
+      for (const [id, cause] of now) { const was = this.causes.get(id); this.causes.set(id, was === undefined ? cause : combineCauses(was, cause)); }
       return -1;
     }
     this.lo = Math.min(this.lo, a); this.hi = Math.max(this.hi, a); this.tLo = Math.min(this.tLo, target); this.tHi = Math.max(this.tHi, target);
@@ -720,10 +732,9 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
   };
   const invalid = (bad: number, quantities: Iterable<string>): WithheldChance =>
     ({ withheld: { reason: 'invalid_domain', count: bad, quantities: [...new Set(quantities)] } });
-  /** What happened to each quantity named, over every goal and limit: what it did itself (below, above, divided by zero) over
-   *  "not a finite number", and that over "follows" (said only where certain in every tally that names it). */
+  /** What happened to each quantity named, over every goal and limit, combined as across draws (`combineCauses`). */
   const outside: Record<string, OutsideCause> = {};
-  for (const t of [...goals, ...limits]) for (const [id, cause] of t.causes) if (outside[id] === undefined || CAUSE_RANK[cause] < CAUSE_RANK[outside[id]!]) outside[id] = cause;
+  for (const t of [...goals, ...limits]) for (const [id, cause] of t.causes) outside[id] = outside[id] === undefined ? cause : combineCauses(outside[id]!, cause);
   const exactGoal = goals.map((t, i) => t.constant && !p.goalRisky[i]);
   const exactLimit = limits.map((t, i) => t.constant && !p.limitRisky[i]);
   const goalIds = goals.flatMap((t) => [...t.badIds]), limitIds = limits.flatMap((t) => [...t.badIds]);
