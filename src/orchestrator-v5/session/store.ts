@@ -301,6 +301,12 @@ export interface SessionTurnWrite {
    * Same undefined/null convention as `expectedGraphIdentityHash`.
    */
   readonly expectedGraphAnalysisHash?: string | null;
+  /**
+   * W5 (DL 27 Oct): a MODEL PROGRAM's save, carried from the register route (`programSave`: CEE's own core write of a program
+   * graph). Its compare-and-set is the identity and revision CAS in the commit RPC, so the store's app-side A3 hook, which
+   * decides by the legacy analysis projection, does not run for it. Absent on every other write.
+   */
+  readonly programSave?: true;
   /** Present only for an accepted persisted semantic graph mutation. */
   readonly modelVersion?: AtomicCommittedModelVersionWrite;
 }

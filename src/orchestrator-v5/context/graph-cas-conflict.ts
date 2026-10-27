@@ -208,6 +208,22 @@ export function computeExpectedGraphCasHashes(persistedGraph: unknown): Expected
   }
 }
 
+/**
+ * The identity half of `computeExpectedGraphCasHashes`, alone, for a MODEL PROGRAM's save (W5, DL 27 Oct). Its compare-and-set
+ * is the identity and revision CAS, so the legacy analysis projection is not computed for its base: it can neither decide the
+ * save nor, by throwing, null the identity (the shared `try` above maps any fault to `{ null, null }`). Same trusted-base rule
+ * and the same mapping: absent, unparseable or identity-empty is `null`. Never throws.
+ */
+export function computeExpectedGraphIdentityHash(persistedGraph: unknown): string | null {
+  try {
+    if (persistedGraph === null || persistedGraph === undefined) return null;
+    const parsed = GraphStateIngressSchema.safeParse(persistedGraph);
+    return parsed.success ? computeGraphIdentityHash(parsed.data)?.value ?? null : null;
+  } catch {
+    return null;
+  }
+}
+
 function evaluation(
   category: GraphCasConflictCategory,
   reason: GraphCasConflictReason,

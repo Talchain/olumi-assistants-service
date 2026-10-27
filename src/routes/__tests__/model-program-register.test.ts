@@ -268,11 +268,12 @@ describe('a model program\'s postimage through the real /graph/register', () => 
     const applied = await applyProgramChange({ dispatch, proposals }, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: 'press-1' }, card.proposal_id) as Rec;
     expect(applied, JSON.stringify(applied)).toMatchObject({ status: 'ok', data: { saved: true } });
     expect(append).toHaveBeenCalledTimes(2);
-    // The commit's own CAS is on the base the card was made on (the read route's identity, the stored bytes' analysis hash, the store's
-    // revision). The read serves the program's revision as its graph_hash (inventory F7); the store's CAS is unchanged.
+    // The commit's own CAS is on the base the card was made on (the read route's identity and the store's revision; W5 Option A, DL
+    // 27 Oct: a program save computes no legacy analysis hash for its base, and carries the mark that skips the store's A3 hook).
+    // The read serves the program's revision as its graph_hash (inventory F7).
     const written = append.mock.calls[1]![0] as Rec;
-    expect([written.expectedGraphIdentityHash, written.expectedGraphAnalysisHash, written.expectedRevision])
-      .toEqual([base.identity, computeAnalysisAffectingGraphHash(base.graph as never), 7]);
+    expect([written.expectedGraphIdentityHash, written.expectedGraphAnalysisHash, written.expectedRevision, written.programSave])
+      .toEqual([base.identity, null, 7, true]);
     expect(base.graphHash).toBe(first.run.receipt.revision_digest);
     // Unknown figures are valid program state: the same transaction carries its version, without inventing a value.
     expect(written.modelVersion).toMatchObject({ creation_kind: 'committed_mutation' });
@@ -361,10 +362,11 @@ describe('a model program\'s postimage through the real /graph/register', () => 
       // Nothing is written: only the commit's own CAS reaches the append, and its transaction refuses.
       expect([name, append.mock.calls.length]).toEqual([name, name === 'stale base (the commit\'s own CAS)' ? 1 : 0]);
       if (name === 'stale base (the commit\'s own CAS)') {
-        // It refused on THESE expectations: the stored base's identity and analysis hash, and the revision the base read gave.
+        // It refused on THESE expectations: the stored base's identity and the revision the base read gave (W5 Option A: no legacy
+        // analysis hash for a program save's base; the program mark carried).
         const w = append.mock.calls[0]![0] as Rec;
-        expect([w.expectedGraphIdentityHash, w.expectedGraphAnalysisHash, w.expectedRevision])
-          .toEqual([computeGraphIdentityHash(first.graph as never)!.value, computeAnalysisAffectingGraphHash(first.graph as never), 7]);
+        expect([w.expectedGraphIdentityHash, w.expectedGraphAnalysisHash, w.expectedRevision, w.programSave])
+          .toEqual([computeGraphIdentityHash(first.graph as never)!.value, null, 7, true]);
         expect(w.expectedGraphIdentityHash).not.toBe(computeGraphIdentityHash(graph as never)!.value);
       }
     }
