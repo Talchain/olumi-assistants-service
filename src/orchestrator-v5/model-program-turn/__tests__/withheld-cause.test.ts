@@ -6,6 +6,7 @@
  * divisor of 0, a value not a finite number, or one unreadable only because a value it rests on left its domain.
  */
 import { describe, expect, it } from 'vitest';
+import { combineCauses } from '../../model-program/simulate/simulate.js';
 import { evaluateCanonical } from '../evaluate.js';
 import { club, CLUB_BRIEF } from './bakery.fixture.js';
 
@@ -15,6 +16,12 @@ type Json = Record<string, any>;
 function floored() {
   const m = club();
   m.quantities = m.quantities.map((x) => (x.id === 'joins' ? { ...x, floor: 0 } : x.id === 'promo_effect' ? { ...x, value: -10, low: -40, high: 7 } : x));
+  return m;
+}
+/** Joins within 0 to 40 a month, and Olumi's promotion effect −40 to 40 around 0: below 0 in some draws, above 40 in others. */
+function bothWays() {
+  const m = club();
+  m.quantities = m.quantities.map((x) => (x.id === 'joins' ? { ...x, floor: 0, ceiling: 40 } : x.id === 'promo_effect' ? { ...x, value: 0, low: -40, high: 40 } : x));
   return m;
 }
 const cellOf = (v: Json, id: string) => (v.options as Json[]).find((o) => o.option_id === id)!.cell;
@@ -31,6 +38,23 @@ describe('a withheld chance says what happened in the draws it is withheld for',
     expect(cell.why).toBe(`In ${count.toLocaleString('en-GB')} of 10,000 simulated draws ‘joins’ fell below what it can be (never below 0 member / month), `
       + 'and then ‘members’ could not be worked out, so this model cannot give the chance yet.');
     expect(cell.why).not.toMatch(/division by zero/);
+  });
+
+  it('buddy on #3836: below in some draws and above in others is said as outside what it can be, never one direction against every draw', () => {
+    const e = evaluateCanonical(bothWays(), { sourceText: CLUB_BRIEF, seed: 7 });
+    const promotion = e.sim!.options.find((o) => o.option_id === 'promotion')!;
+    expect(promotion.outside).toEqual({ joins: 'outside', members: 'follows' });
+    const count = (promotion.joint_within_limits as { withheld: { count: number } }).withheld.count;
+    const why = cellOf(e.view as Json, 'promotion').why as string;
+    expect(why).toBe(`In ${count.toLocaleString('en-GB')} of 10,000 simulated draws ‘joins’ went outside what it can be (0 member / month to 40 member / month), `
+      + 'and then ‘members’ could not be worked out, so this model cannot give the chance yet.');
+    expect(why).not.toMatch(/fell below|rose above/);
+  });
+
+  it('causes combine across draws: a direction only where every draw went that way', () => {
+    expect([combineCauses('below', 'below'), combineCauses('below', 'above'), combineCauses('outside', 'below'), combineCauses('below', 'not_finite'),
+      combineCauses('follows', 'not_finite'), combineCauses('divided_by_zero', 'follows'), combineCauses('mixed', 'below'), combineCauses('divided_by_zero', 'above')])
+      .toEqual(['below', 'outside', 'outside', 'mixed', 'not_finite', 'not_finite', 'mixed', 'mixed']);
   });
 
   it('contrast: the other option, which never touches the floor, keeps its chance, with nothing outside its domain; a division by 0 keeps its own words (present.test.ts, Revenue per seat)', () => {

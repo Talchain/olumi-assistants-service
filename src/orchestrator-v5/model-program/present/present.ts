@@ -516,9 +516,13 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   };
   const whatHappened = (o: OptionResult, ids: readonly string[]): string => {
     const named = (cause: string) => ids.filter((id) => (o.outside[id] ?? 'not_finite') === cause).map((id) => q(label(id) ?? id));
-    const edges = [...ids.filter((id) => o.outside[id] === 'below' || o.outside[id] === 'above').map((id) =>
-      `${q(label(id) ?? id)} ${o.outside[id] === 'below' ? 'fell below' : 'rose above'} what it can be (${canBe(id, byId.get(id)?.unit ?? '', domainOf(id))})`),
-    ...named('divided_by_zero').map((n) => `${n} was 0 where a figure is divided by it`)];
+    // A direction only where every draw went that way (`combineCauses`): below in some draws and above in others is
+    // "went outside", and outside in some and not worked out in others says both.
+    const DID = { below: 'fell below', above: 'rose above', outside: 'went outside', mixed: 'went outside' } as const;
+    const edges = [...ids.filter((id) => o.outside[id] !== undefined && o.outside[id]! in DID).map((id) => {
+      const cause = o.outside[id] as keyof typeof DID;
+      return `${q(label(id) ?? id)} ${DID[cause]} what it can be (${canBe(id, byId.get(id)?.unit ?? '', domainOf(id))})${cause === 'mixed' ? ' or could not be worked out' : ''}`;
+    }), ...named('divided_by_zero').map((n) => `${n} was 0 where a figure is divided by it`)];
     // A value unreadable only because one it rests on left its domain follows from that: "and then … could not be worked out".
     const follows = edges.length > 0 ? named('follows') : [];
     const unknown = [...named('not_finite'), ...(edges.length > 0 ? [] : named('follows'))];
