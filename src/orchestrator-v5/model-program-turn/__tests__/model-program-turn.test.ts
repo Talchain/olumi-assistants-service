@@ -3073,6 +3073,50 @@ describe('the model-program turn on the real core route', () => {
     expect(registered).toHaveLength(1);
   });
 
+  it('C4 (alpha spec §3): a mixed turn keeps their exact answer after the structural merge: the drafter returning the answered figure as its own estimate leaves their figure, status, author and quote on the card and on the model it would write', async () => {
+    replies = [JSON.stringify(bakery())];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const words = 'The oven costs £2,500, and add a third option: rent an oven.';
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
+    const answer = { id: 'oven_price', value: 2500, low: null, high: null, range_kind: null, party: null, quote: 'The oven costs £2,500', basis: null, status: 'known', author: 'person' };
+    // The drafter's update adds the option and also returns the answered figure, rewritten as Olumi's estimate.
+    replies = [savedWith((d) => {
+      setQ(d, 'oven_price', { status: 'estimated', author: 'olumi', value: 3000, low: 2500, high: 3500, range_kind: 'plausible', quote: null, question: null, basis: 'A typical oven price.' });
+      d.options.push({ ...d.options[0]!, id: 'rent_oven', label: 'Rent an oven', sets: [], quote: 'rent an oven' });
+    })];
+    sent.length = 0;
+    const out = await proposeProgramChange(deps, ctx, ProgramChangeParams.parse({ public_label: 'Their answer and a new option', basis: 'their answer',
+      request: 'Add an option: rent an oven.', remove: [], answers: [answer] })) as Json;
+    expect(out.status, JSON.stringify(out)).toBe('ok');
+    expect(drafterCalls()).toHaveLength(1);
+    const held = (deps.proposals.get(out.data.proposal_id)!.living_model as { canonical: CanonicalModelT }).canonical;
+    expect(held.quantities.find((x) => x.id === 'oven_price')).toMatchObject({ status: 'known', author: 'person', value: 2500, low: null, high: null, range_kind: null,
+      party: null, quote: 'The oven costs £2,500', basis: null, question: null });
+    // The structural change stands beside it (contrast: the drafter's records are merged), and the card shows the final change.
+    expect(held.options.map((o) => o.id)).toEqual(['second_oven', 'keep_one', 'rent_oven']);
+    expect(out.data.changes.map((c: Json) => [c.id, c.action, c.author])).toEqual([['oven_price', 'change', 'person'], ['rent_oven', 'add', 'person']]);
+    expect(out.data.changes.find((c: Json) => c.id === 'oven_price').after).toContain('in your words "The oven costs £2,500"');
+  });
+
+  it('C12 (alpha spec §3): every continuation reads the held card: read_canonical_context names the program card held for this person, its label, every change and its base revision; another person\'s read names none, and once applied it is gone', async () => {
+    replies = [JSON.stringify(bakery())];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const words = 'The oven costs £2,500.';
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
+    expect((await readProgramContext(deps, ctx) as Json).data.awaiting_approval).toEqual([]);
+    const p = await proposeProgramChange(deps, ctx, ProgramChangeParams.parse({ public_label: 'The oven costs £2,500', basis: 'their answer', request: '', remove: [],
+      answers: [{ id: 'oven_price', value: 2500, low: null, high: null, range_kind: null, party: null, quote: words.slice(0, -1), basis: null, status: 'known', author: 'person' }] })) as Json;
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    const read = await readProgramContext(deps, { ...ctx, turn_id: randomUUID() }) as Json;
+    expect(read.data.awaiting_approval).toEqual([{ proposal_id: p.data.proposal_id, public_label: 'The oven costs £2,500', changes: p.data.changes, base_revision: p.data.base_revision }]);
+    expect(read.data.awaiting_approval[0].base_revision).toBe(read.data.revision.graph_hash);
+    expect((await readProgramContext(deps, { ...ctx, authenticated_user_id: 'someone-else' }) as Json).data.awaiting_approval).toEqual([]);
+    expect(await applyProgramChange(deps, ctx, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+    expect((await readProgramContext(deps, ctx) as Json).data.awaiting_approval).toEqual([]);
+  });
+
   it('words#5, one model, one period 0: the first draft\'s day is kept with the saved program, and an update on a later day counts a stated date from THAT day, naming both; a program saved before it counts from today as before, and reopens and rewrites exactly as stored', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
@@ -3283,8 +3327,8 @@ describe('the model-program turn on the real core route', () => {
     const held = (deps.proposals.get(p.data.proposal_id)!.living_model as { canonical: CanonicalModelT }).canonical;
     expect(held.quantities.find((x) => x.id === 'oven_price')).toMatchObject(price);
     expect(held.goals.map((g) => g.id)).toEqual(['more_loaves', 'stretch']);
-    // Strip (Paul 26 Oct; B27 and B19 removed): the answers are not set again on the drafter's model; its records pass as it
-    // wrote them, and a removal it makes is refused only by the validator's own removal check.
+    // C4 (alpha spec §3; B27 and B19 stay removed): the answers are set again on the drafter's merged model, so its other
+    // records pass as it wrote them, and a removal it makes is refused only by the validator's own removal check.
     const savedOven = (programReadOf(persisted!) as { program: { canonical: CanonicalModelT } }).program.canonical.quantities.find((x) => x.id === 'oven_price')!;
     const mixed = (reply: string) => {
       replies = [reply]; sent.length = 0;
@@ -3304,7 +3348,7 @@ describe('the model-program turn on the real core route', () => {
     // The drafter's update did not return that record, so the merge keeps the one it was given: the answer, set once.
     expect(savedOven.value).not.toBe(2500);
     expect(dropped.data.changes.map((c: Json) => [c.id, c.action, c.author]).sort()).toEqual([['oven_price', 'change', 'person'], ['stretch', 'add', 'person'], ['stretch_target', 'add', 'person']]);
-    // And one that writes another figure on the item they answered.
+    // And one that writes another figure on the item they answered: their answer stands on it (C4).
     const overwritten = await mixed(savedWith((d) => {
       setQ(d, 'oven_price', { ...price, value: 3000 });
       d.quantities.push(q('stretch_target', 'loaf/week', { value: 400, quote: 'reach 400 loaves a week' }));
@@ -3313,7 +3357,7 @@ describe('the model-program turn on the real core route', () => {
     expect(overwritten.status, JSON.stringify(overwritten)).toBe('ok');
     expect(sent).toHaveLength(1);
     expect((deps.proposals.get(overwritten.data.proposal_id)!.living_model as { canonical: CanonicalModelT }).canonical.quantities.find((x) => x.id === 'oven_price'))
-      .toMatchObject({ ...price, value: 3000 });
+      .toMatchObject({ ...price, low: null, high: null, range_kind: null });
     expect(overwritten.data.changes.find((c: Json) => c.id === 'oven_price')).toMatchObject({ action: 'change', author: 'person' });
     // A drafter that removes the item they answered: refused by the validator's removal check, never by B19's sentence.
     const removed = await mixed(savedWith((d) => {
