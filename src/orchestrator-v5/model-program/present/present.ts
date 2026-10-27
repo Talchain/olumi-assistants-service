@@ -505,9 +505,30 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   });
   const uncheckedLine = uncheckedWords.length > 0 ? `Not yet checked: ${uncheckedWords.join('; ')}` : undefined;
   /** "‘Customer cost’ is at most £1,100 at 1 month from the start of this model: about 81%", one per limit, for one option. */
+  /**
+   * WHAT HAPPENED in the draws a chance is withheld for (DL 27 Oct, Paul's hiring test: a defect rate that fell below 0 was
+   * said to have "could not be worked out (for example a division by zero)"). From simulate's `outside`: a value below its
+   * floor or above its ceiling is said so, with what it can be; one that is not a finite number could not be worked out.
+   */
+  const domainOf = (id: string): Domain | undefined => {
+    const d = byId.get(id)?.domain;
+    return model.risks.some((r) => r.occurrence === id) ? { min: Math.max(0, d?.min ?? 0), max: Math.min(1, d?.max ?? 1) } : d;
+  };
+  const whatHappened = (o: OptionResult, ids: readonly string[]): string => {
+    const named = (cause: string) => ids.filter((id) => (o.outside[id] ?? 'not_finite') === cause).map((id) => q(label(id) ?? id));
+    const edges = [...ids.filter((id) => o.outside[id] === 'below' || o.outside[id] === 'above').map((id) =>
+      `${q(label(id) ?? id)} ${o.outside[id] === 'below' ? 'fell below' : 'rose above'} what it can be (${canBe(id, byId.get(id)?.unit ?? '', domainOf(id))})`),
+    ...named('divided_by_zero').map((n) => `${n} was 0 where a figure is divided by it`)];
+    // A value unreadable only because one it rests on left its domain follows from that: "and then … could not be worked out".
+    const follows = edges.length > 0 ? named('follows') : [];
+    const unknown = [...named('not_finite'), ...(edges.length > 0 ? [] : named('follows'))];
+    return [listWords(edges), follows.length > 0 ? `then ${listWords(follows)} could not be worked out` : '',
+      unknown.length > 0 ? `${listWords(unknown)} could not be worked out (for example a division by zero)` : '']
+      .filter((x) => x !== '').reduce((all, x, i) => (i === 0 ? x : `${all}, and ${x}`), '');
+  };
   const limitShown = (o: OptionResult, l: Limit): string => {
     const pl = o.per_limit.find((x) => x.limit_id === l.id)!;
-    return shown(pl, result.draws)?.display ?? `not shown, as ${isWithheld(pl) ? pl.withheld.count.toLocaleString('en-GB') : 0} simulated draws could not be worked out`;
+    return shown(pl, result.draws)?.display ?? (isWithheld(pl) ? `not shown, as in ${pl.withheld.count.toLocaleString('en-GB')} simulated draws ${whatHappened(o, pl.withheld.quantities)}` : 'not shown');
   };
   const limitLines = (o: OptionResult): string[] => model.limits.map((l, i) => `${limitWords[i] ?? q(l.label)}: ${limitShown(o, l)}`);
   /** A limit by what it measures, never its bound: an option can move the bound (Codex r2 #3719), and a label can hold one. */
@@ -532,9 +553,9 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       : [{ code: 'words_not_sayable', message: null }],
   });
   /** DL ruling 3: a chance a nonfinite draw touched is withheld, typed, with its count and quantities; never a figure. */
-  const outsideCell = (w: WithheldChance): PresentCell => ({
+  const outsideCell = (w: WithheldChance, o: OptionResult): PresentCell => ({
     kind: 'withheld', face: NOT_SHOWN_FACE,
-    why: `In ${w.withheld.count.toLocaleString('en-GB')} of ${result.draws.toLocaleString('en-GB')} simulated draws ${listWords(w.withheld.quantities.map((id) => q(label(id) ?? id)))} could not be worked out (for example a division by zero), so this model cannot give the chance yet.`,
+    why: `In ${w.withheld.count.toLocaleString('en-GB')} of ${result.draws.toLocaleString('en-GB')} simulated draws ${whatHappened(o, w.withheld.quantities)}, so this model cannot give the chance yet.`,
     reasons: [{ code: 'invalid_domain', message: `${w.withheld.count} draws; ${w.withheld.quantities.join(', ')}` }],
   });
   /**
@@ -632,7 +653,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     }
     if (waiting.length > 0 || jointWords === undefined) return { option_id: o.option_id, cell: withheldCell(), main_driver: notRecorded };
     const headline = o.joint_within_limits;
-    if (isWithheld(headline)) return { option_id: o.option_id, cell: outsideCell(headline), main_driver: notRecorded };
+    if (isWithheld(headline)) return { option_id: o.option_id, cell: outsideCell(headline, o), main_driver: notRecorded };
     const s = shown(headline, result.draws)!;
     const why = headline.precision_95[0] === headline.precision_95[1] ? fixedWhy(o, headline.chance === 1) : undefined;
     const cell: PresentCell = { kind: 'figure', display: s.display,
@@ -652,7 +673,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   };
   const notes: string[] = [
     ...result.options.flatMap((o) => o.per_goal.flatMap((g) => (isWithheld(g)
-      ? [`${q(allGoals.find((x) => x.goal_id === g.goal_id)?.label ?? g.goal_id)} with ${q(optionLabel.get(o.option_id) ?? o.option_id)} is not shown: in ${g.withheld.count.toLocaleString('en-GB')} of ${result.draws.toLocaleString('en-GB')} simulated draws ${listWords(g.withheld.quantities.map((id) => q(label(id) ?? id)))} could not be worked out.`]
+      ? [`${q(allGoals.find((x) => x.goal_id === g.goal_id)?.label ?? g.goal_id)} with ${q(optionLabel.get(o.option_id) ?? o.option_id)} is not shown: in ${g.withheld.count.toLocaleString('en-GB')} of ${result.draws.toLocaleString('en-GB')} simulated draws ${whatHappened(o, g.withheld.quantities)}.`]
       : []))),
     ...waiting.map((g) => stop(`${q(g.label)} ${goalWaits(g)}`)),
     // The 11 Oct decision (:74): what the chance covers (the measured aims it uses) and what it leaves out (aims with no

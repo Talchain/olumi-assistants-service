@@ -66,7 +66,7 @@ import type { Aggregation, Cmp, ExecutableModel, Goal, Limit, Option, OptionSet,
 import { pairedDifference, wilson95, type PairedDifference } from './paired.js';
 import { standardNormals, uniforms } from './prng.js';
 import { fromStandardNormal, fromUniform, rangeLaw, truncatedStandardNormal, type RangeDist, type SpreadReading } from './range-law.js';
-import type { Chance, ChanceOrWithheld, OptionResult, PerDraw, PerDrawCondition, PerDrawOption, RecordedDraw, SimResult, WithheldChance, WithheldChanceEntry } from './result.js';
+import type { Chance, ChanceOrWithheld, OptionResult, OutsideCause, PerDraw, PerDrawCondition, PerDrawOption, RecordedDraw, SimResult, WithheldChance, WithheldChanceEntry } from './result.js';
 
 /** A range's law as range-law.ts reads it; `lower` and `upper` are where its draws are conditioned (±Infinity: not). */
 type NormalLaw = SpreadReading;
@@ -543,6 +543,9 @@ function terciles(inputs: Inputs, draws: number): { low: Int32Array; high: Int32
 }
 
 /** One condition's tally over the draws: met per draw, its aggregated values, nonfinite draws, and whether it is exact. */
+/** The most specific cause wins (result.ts `OutsideCause`): what a value did itself, then not finite, then follows. */
+const CAUSE_RANK: Readonly<Record<OutsideCause, number>> = { below: 0, above: 0, divided_by_zero: 0, not_finite: 1, follows: 2 };
+
 class Tally {
   readonly met: Uint8Array;
   /** Each draw's aggregated value; NaN in a draw outside the domain. */
@@ -551,6 +554,8 @@ class Tally {
   readonly target?: Float64Array;
   bad = 0;
   readonly badIds = new Set<string>();
+  /** What happened to each quantity named in badIds, the first time (result.ts `OutsideCause`). */
+  readonly causes = new Map<string, OutsideCause>();
   private lo = Infinity; private hi = -Infinity; private tLo = Infinity; private tHi = -Infinity;
   constructor(draws: number, keepTarget = false) {
     this.met = new Uint8Array(draws); this.agg = new Float64Array(draws);
@@ -559,7 +564,7 @@ class Tally {
   /** Records draw d; returns 1 met, 0 not met, -1 outside the domain. `left`: the values that left their domain at any time in
    *  this draw; one the condition rests on (`reach`) makes the whole draw outside the domain for it, however the value
    *  later recovers (spec §3.7), and is named. */
-  add(k: Check, vals: Float64Array, n: number, d: number, ids: readonly string[], left: readonly number[], reach: ReadonlySet<number>): number {
+  add(k: Check, vals: Float64Array, n: number, d: number, ids: readonly string[], left: readonly number[], reach: ReadonlySet<number>, why: Uint8Array): number {
     const top = aggregate(k, vals, n), bottom = k.per === undefined ? 1 : aggregate(k, vals, n, k.per);
     const ratio = top === null || bottom === null || bottom === 0 ? null : top / bottom;
     const a = ratio !== null && Number.isFinite(ratio) ? ratio : null, target = vals[k.last * n + k.ref]!;
@@ -567,10 +572,20 @@ class Tally {
     if (a === null || !Number.isFinite(target) || left.some((q) => reach.has(q))) {
       this.bad++;
       this.agg[d] = NaN;
-      if (top === null || (a === null && bottom !== null && bottom !== 0)) this.badIds.add(ids[k.q]!);
-      if (k.per !== undefined && (bottom === null || bottom === 0)) this.badIds.add(ids[k.per.q]!);
-      if (!Number.isFinite(target)) this.badIds.add(ids[k.ref]!);
-      for (const q of left) if (reach.has(q)) this.badIds.add(ids[q]!);
+      // Where a value left its domain, that is what happened to it (first, so a quantity that left its floor is never also
+      // said to be "not a number" because its own reading then is); elsewhere, why the condition could not be read.
+      // Named in the same order as ever; a quantity's cause is the most specific seen (CAUSE_RANK): what it did itself, then
+      // "not a finite number", then "follows" (unreadable only because a value it rests on left its domain in this draw).
+      const named = (id: string, cause: OutsideCause) => {
+        this.badIds.add(id);
+        const was = this.causes.get(id);
+        if (was === undefined || CAUSE_RANK[cause] < CAUSE_RANK[was]) this.causes.set(id, cause);
+      };
+      const unread: OutsideCause = left.some((q) => reach.has(q)) ? 'follows' : 'not_finite';
+      if (top === null || (a === null && bottom !== null && bottom !== 0)) named(ids[k.q]!, unread);
+      if (k.per !== undefined && (bottom === null || bottom === 0)) named(ids[k.per.q]!, bottom === 0 ? 'divided_by_zero' : unread);
+      if (!Number.isFinite(target)) named(ids[k.ref]!, unread);
+      for (const q of left) if (reach.has(q)) named(ids[q]!, why[q] === 1 ? 'below' : why[q] === 2 ? 'above' : 'not_finite');
       return -1;
     }
     this.lo = Math.min(this.lo, a); this.hi = Math.max(this.hi, a); this.tLo = Math.min(this.tLo, target); this.tHi = Math.max(this.tHi, target);
@@ -606,8 +621,9 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
   /** The headline per draw (1, 0, −1 outside the domain), kept for the paired gaps (SC2); each risk's firing only when asked (SC0). */
   const headline = new Int8Array(draws);
   const firedIn = keep ? c.risks.map(() => new Int8Array(draws)) : undefined;
-  /** The values that left their domain in this draw, once each (`off` marks them). */
-  const off = new Uint8Array(n), left: number[] = [];
+  /** The values that left their domain in this draw, once each (`off` marks them), and how (`why`: 1 below its floor, 2 above
+   *  its ceiling, 3 not a finite number). */
+  const off = new Uint8Array(n), why = new Uint8Array(n), left: number[] = [];
   let jointBad = 0, withinBad = 0, bothBad = 0;
 
   for (let d = 0; d < draws; d++) {
@@ -655,7 +671,7 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
         // recovers. A NaN `e` is a value NaN because something it reads is (or a timing or a risk's chance outside its
         // domain, as before): it is named where it left, not again here.
         if (!inside(v, e, c.lo[q]!, c.hi[q]!)) {
-          if ((Number.isFinite(v) || !Number.isNaN(e)) && off[q] === 0) { off[q] = 1; left.push(q); }
+          if ((Number.isFinite(v) || !Number.isNaN(e)) && off[q] === 0) { off[q] = 1; why[q] = !Number.isFinite(v) ? 3 : v < c.lo[q]! ? 1 : 2; left.push(q); }
           v = NaN; e = NaN;
         }
         vals[row + q] = v;
@@ -675,8 +691,8 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
     }
 
     let allGoals = 1, allLimits = 1, badGoal = false, badLimit = false;
-    c.goals.forEach((g, i) => { const m = goals[i]!.add(g, vals, n, d, c.ids, left, p.goalReach[i]!); if (m < 0) badGoal = true; else allGoals &= m; });
-    c.limits.forEach((l, i) => { const m = limits[i]!.add(l, vals, n, d, c.ids, left, p.limitReach[i]!); if (m < 0) badLimit = true; else allLimits &= m; });
+    c.goals.forEach((g, i) => { const m = goals[i]!.add(g, vals, n, d, c.ids, left, p.goalReach[i]!, why); if (m < 0) badGoal = true; else allGoals &= m; });
+    c.limits.forEach((l, i) => { const m = limits[i]!.add(l, vals, n, d, c.ids, left, p.limitReach[i]!, why); if (m < 0) badLimit = true; else allLimits &= m; });
     if (badGoal) jointBad++;
     if (badLimit) withinBad++;
     if (badGoal || badLimit) bothBad++;
@@ -704,6 +720,10 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
   };
   const invalid = (bad: number, quantities: Iterable<string>): WithheldChance =>
     ({ withheld: { reason: 'invalid_domain', count: bad, quantities: [...new Set(quantities)] } });
+  /** What happened to each quantity named, over every goal and limit: what it did itself (below, above, divided by zero) over
+   *  "not a finite number", and that over "follows" (said only where certain in every tally that names it). */
+  const outside: Record<string, OutsideCause> = {};
+  for (const t of [...goals, ...limits]) for (const [id, cause] of t.causes) if (outside[id] === undefined || CAUSE_RANK[cause] < CAUSE_RANK[outside[id]!]) outside[id] = cause;
   const exactGoal = goals.map((t, i) => t.constant && !p.goalRisky[i]);
   const exactLimit = limits.map((t, i) => t.constant && !p.limitRisky[i]);
   const goalIds = goals.flatMap((t) => [...t.badIds]), limitIds = limits.flatMap((t) => [...t.badIds]);
@@ -735,6 +755,7 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
       joint_if_low: meanOver(both, thirds[slot]!.low),
       joint_if_high: meanOver(both, thirds[slot]!.high),
     })),
+    outside,
   };
 }
 
