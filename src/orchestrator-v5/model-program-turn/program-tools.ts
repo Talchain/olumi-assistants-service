@@ -2,11 +2,11 @@
  * THE CORE AGENT'S TOOLS ON A PROGRAM SCENARIO (alpha). The agent keeps its native SDK chat and its tool names; on a scenario
  * whose saved model is a program, each tool works on the canonical model:
  *  · read_canonical_context: the program as the agent reads it (quantities with their status and who gave them, the
- *    questions still open, the stored Run's words);
+ *    questions still open, the stored Run's words, the cards held for approval);
  *  · propose_change: an ANSWER to a listed question is set on the item it answers, exactly as the AI declared it (`answered`,
  *    the same builder as the canvas edit; no AI call); a structural change or an answer in words, in request with the ids to
  *    remove, has Olumi's drafter return only the records it changes or adds, merged by id onto the saved model
- *    (`proposePostimage`), and the drafter's records pass as it wrote them. The one validator checks either exactly (`validatePostimage`), and it is compiled
+ *    (`proposePostimage`), and the drafter's records pass as it wrote them, the answers set again on them. The one validator checks either exactly (`validatePostimage`), and it is compiled
  *    and evaluated now, so the card the person approves holds the exact model, EVERY change on it, and the Run it would
  *    store; nothing is saved;
  *  · apply_change: on the person's approval of THAT proposal, its model and Run (today's engine's, when the card's is from
@@ -143,6 +143,10 @@ export async function readProgramContext(deps: ProgramToolDeps, ctx: Ctx): Promi
     ...(Array.isArray(compile['blockers']) ? { blockers: compile['blockers'] }
       : { open_questions: Array.isArray(compile['asks']) ? compile['asks'] : [], coaching: Array.isArray(compile['coaching']) ? compile['coaching'] : [] }),
     run: shown === undefined ? null : { ...runWords(shown.run, { current: shown.current && shown.engine_current, updated: shown.updated }), current: shown.current, engine_current: shown.engine_current },
+    // The program cards held for this person's approval, newest first, as each card shows them (C12, alpha spec §3): every
+    // continuation reads the held proposal it would apply.
+    awaiting_approval: deps.proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id).map((o) => deps.proposals.get(o.proposal_id)).filter(isProgramProposal)
+      .map((p) => ({ proposal_id: p.proposal_id, public_label: p.public_label, changes: p.changes ?? [], base_revision: p.base_graph_identity_hash })),
   });
 }
 
@@ -194,8 +198,13 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
     // A call that threw: its typed fields only (status, type, code, request id), never its message (W9: the cause was lost).
     ...(a.provider_error !== undefined ? { provider_error: a.provider_error } : {}) })) }, 'model-program: update drafted');
   if (drafted.model === null) return refused('no_model_back', 'Olumi could not write the updated model just now; nothing changed.');
-  // The drafter's model passes as it wrote it: no answer is set again on it and no record re-stamped (strip, Paul 26 Oct).
-  const v = validatePostimage(program.canonical, drafted.model, { removals: args.remove, words, fresh, approver: ctx.authenticated_user_id });
+  // Mixed turns keep the exact answers after the structural merge (C4, alpha spec §3): a record the drafter returns replaces
+  // the one it was given by id, so each answer is set again, with the same builder, on its item where the change kept it (one
+  // it left out is the validator's removal check to refuse). No other record is re-stamped (strip, Paul 26 Oct).
+  const merged = drafted.model;
+  const final = answered(merged, answers.filter((a) => merged.quantities.some((x) => x.id === a.id)));
+  if (typeof final === 'string') return refused('not_an_answer', final);
+  const v = validatePostimage(program.canonical, final.model, { removals: args.remove, words, fresh, approver: ctx.authenticated_user_id });
   if (!v.ok) return refused(v.code, v.reason, { ids: v.ids, ...(v.check ? { check: v.check } : {}) });
   // The compiler's errors first (the same compile the Run makes), before anything is projected: the display drew a range
   // with one end as a TypeError, which reached the person as a 502 (DoD-I qualitative-r5). Every sentence goes back, as the
