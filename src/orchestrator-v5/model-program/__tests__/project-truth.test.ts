@@ -17,6 +17,9 @@ import { CanonicalModel, withDeclaredTiming, type CanonicalModelT } from '../can
 import { compile } from '../compile.js';
 import { project } from '../project.js';
 import { readingOf } from '../../model-program-turn/postimage.js';
+import { withNewRun } from '../../model-program-turn/program-save.js';
+import { MODEL_PROGRAM } from '../../model-program-turn/program-store.js';
+import { seedOf } from '../../model-program-turn/evaluate.js';
 import { at, club, CLUB_BRIEF, q } from '../../model-program-turn/__tests__/bakery.fixture.js';
 
 type Rec = Record<string, any>;
@@ -192,5 +195,32 @@ describe('W3b 4 · each review row says its family, structure as structure, and 
     m.dissent.push({ id: 'partner_doubts', holder: 'my business partner', position: 'The promotion will not bring anyone in.', concerns: ['promo_effect'], author: 'person', quote: 'my business partner thinks the promotion will not work', ...at });
     const d = rows(m, `${CLUB_BRIEF} But my business partner thinks the promotion will not work.`).get('partner_doubts')!;
     expect([d.kind, d.family, d.label]).toEqual(['record', 'dissent', 'my business partner']);
+  });
+});
+
+describe('graph = model (alpha, 27 Oct): a card says the record came from the brief only when its words are in the brief', () => {
+  // Served capacity witness 20261027T002540Z-4f0a93d4-fd3da3fd: the person's later turn added "Staff absence" (the record and the
+  // sum's third part below are copied from its saved model). The card drew "From your brief" beside its own "User edited"
+  // figure: the record's origin mark ignored the brief rule its figure already follows.
+  const ANSWER = 'I\'m not sure yet. Keep that open for now, and tell me what you would need from me to pin it down.';
+  const ADDED = 'Add a factor called "Staff absence" that reduces weekly support capacity by about 10 tickets per week, between 5 and 15.';
+  it('capacity: the later "Staff absence" is the person\'s as added (user_set), on the saved graph; brief records stay the brief\'s, Olumi\'s stay Olumi\'s', () => {
+    const s = saved('capacity-s4.saved.json');
+    const m = structuredClone(s.model);
+    m.quantities.push(q('staff_absence', 'ticket/week', { label: 'Staff absence', value: 10, low: 5, high: 15, range_kind: 'bounds', floor: 0, quote: ADDED }));
+    const total = m.relations.find((r) => r.id === 'total_capacity_definition')!;
+    if (total.form !== 'definition' || total.op !== 'sum') throw new Error('the fixture must be a sum');
+    total.parts.push({ id: 'staff_absence', sign: -1 });
+    // The real save path of a structural change (`program-tools.ts`: the person's words appended, then a new Run and its graph).
+    const { graph } = withNewRun({ model_program: MODEL_PROGRAM, canonical: m, seed: seedOf('graph-is-model'), person_words: [s.brief, ANSWER, ADDED], runs: [] });
+    const nodes = graph.nodes as Rec[];
+    const absence = nodes.find((n) => n.id === 'staff_absence')!;
+    expect([absence.provenance, absence.observed_state.source, absence.source_quote]).toEqual(['user_set', 'user_override', ADDED]);
+    // Contrast (right before, unchanged): every other card, by id, as the model holds it.
+    expect(nodes.filter((n) => n.id !== 'staff_absence').map((n) => [n.id, n.provenance ?? null])).toEqual([
+      ['mp:decision', null], ['support_capacity_goal', 'from_brief'], ['keep_current_staffing', 'from_brief'], ['add_one_specialist', 'from_brief'],
+      ['existing_capacity', 'from_brief'], ['additional_specialists', 'from_brief'], ['zero_additional_capacity', null],
+      ['additional_capacity', 'ai_inferred'], ['weekly_support_capacity', 'from_brief'],
+    ]);
   });
 });

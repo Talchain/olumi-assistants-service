@@ -78,8 +78,6 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const xr = new Set(x?.risks.map((r) => r.id) ?? []);
   const notCompiling = compiled.errors.length > 0;
   const whoOf = (rec: { author: string }, _id: string): DisplayAuthor => (rec.author === 'olumi' ? 'olumi' : rec.author === 'structure' ? 'structure' : 'person');
-  /** The canvas's origin vocabulary; a structural constant has none (it is nobody's figure, never "AI inferred"). */
-  const provenanceOf = (who: DisplayAuthor) => (who === 'structure' ? {} : { provenance: who === 'person' ? 'from_brief' : 'ai_inferred' });
   const quoteOf = (rec: { author: string; quote: string | null }, id: string) => (whoOf(rec, id) === 'person' && has(rec.quote) ? { source_quote: rec.quote } : {});
   /** In the analysis (`included`): what the calculation uses now, or will once its questions are answered; only what is
    *  genuinely left out (a note, a preference, an aim with no measure, a figure that is unknown or unsupported, a model that
@@ -92,6 +90,16 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const why = (inCalc: boolean, reason: string) => (inCalc ? null : notCompiling ? 'The model does not compile yet.' : reason);
   const plain = (t: string) => t.toLowerCase().replace(/\s+/g, ' ').trim();
   const fromBrief = (quote: string | null) => opts.brief === undefined || (has(quote) && plain(opts.brief).includes(plain(quote)));
+  /**
+   * Who put the record on the board, in the canvas's origin vocabulary, by the same brief rule as its figure (`figureSource`):
+   * the person's record whose words are not in their brief (an answer or a change they approved, a figure they typed) is
+   * theirs as added (`user_set`), never "From your brief" (capacity, 27 Oct: "Staff absence", added in a later turn, was
+   * marked "From your brief" beside its own "User edited" figure). Olumi's is Olumi's; a structural constant has none.
+   */
+  const provenanceOf = (rec: { author: string; quote: string | null }) => {
+    const who = whoOf(rec, '');
+    return who === 'structure' ? {} : { provenance: who === 'olumi' ? 'ai_inferred' : has(rec.quote) && !fromBrief(rec.quote) ? 'user_set' : 'from_brief' };
+  };
   /** Whose figure it is, in the canvas's value vocabulary: none claimed for a structural constant. */
   const figureSource = (q: CanonicalQuantityT): Rec => {
     const who = whoOf(q, q.id);
@@ -292,7 +300,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const metricUnit = metric?.unit;
     const goalUnit = g.measure?.frame === 'change_rel' ? metricUnit : target?.unit;
     nodes.push({
-      id: g.id, kind: 'goal', label: g.label, ...provenanceOf(who), ...quoteOf(g, g.id), ...participation(inCalc || (has(g.measure) && kept(per))),
+      id: g.id, kind: 'goal', label: g.label, ...provenanceOf(g), ...quoteOf(g, g.id), ...participation(inCalc || (has(g.measure) && kept(per))),
       ...(g.measure ? { goal_direction: g.measure.cmp, goal_threshold_frame: g.measure.frame, ...(g.measure.frame === 'level' ? {} : { quantity_frame: 'level' }),
         ...(target ? { goal_threshold_unit: g.measure.frame === 'change_rel' ? (metricUnit ?? '1') : target.unit, display_value: `${g.measure.cmp} ${display(target)}` } : {}),
         ...(point !== null && target ? goalTarget(point, target, g.measure.frame) : {}) } : {}),
@@ -321,7 +329,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       if (to) interventions[s.quantity] = { value: to.value, unit: to.unit, display: display(to), from_period: s.starts_after_periods, ...settingSource(to, o) };
     }
     nodes.push({
-      id: o.id, kind: 'option', label: o.label, ...provenanceOf(who), ...quoteOf(o, o.id), ...participation(inCalc || (o.status === 'live' && kept(per))),
+      id: o.id, kind: 'option', label: o.label, ...provenanceOf(o), ...quoteOf(o, o.id), ...participation(inCalc || (o.status === 'live' && kept(per))),
       ...(o.sets.length === 0 ? { is_baseline: true } : {}), ...(Object.keys(interventions).length ? { interventions } : {}),
       ...(o.author === 'olumi' ? { proposed_by: 'olumi' } : {}),
     });
@@ -363,7 +371,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       continue;
     }
     nodes.push({
-      id: q.id, kind: q.status === 'derived' ? 'outcome' : 'factor', label: q.label, ...provenanceOf(who), ...quoteOf(q, q.id),
+      id: q.id, kind: q.status === 'derived' ? 'outcome' : 'factor', label: q.label, ...provenanceOf(q), ...quoteOf(q, q.id),
       ...participation(inCalc || (!notCompiling && inModel.has(q.id) && !OUT_OF_ANALYSIS.has(q.status))),
       ...(q.status !== 'derived' ? { category: controlled.has(q.id) ? 'controllable' : 'observable' } : {}),
       ...observedOf(q),
@@ -449,7 +457,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     } else {
       // A guardrail with no measure yet, or one whose figure is not given: a text card, never an invented scale.
       const id = `mp:limit:${l.id}`;
-      nodes.push({ id, kind: 'action', label: `Limit: ${l.label}`, description: lm ? `${l.label} (its figure is not given yet).` : `${l.label} (no measure yet, so the result does not cover it).`, ...provenanceOf(who), ...quoteOf(l, l.id), ...participation(inCalc || (has(lm) && kept(per))) });
+      nodes.push({ id, kind: 'action', label: `Limit: ${l.label}`, description: lm ? `${l.label} (its figure is not given yet).` : `${l.label} (no measure yet, so the result does not cover it).`, ...provenanceOf(l), ...quoteOf(l, l.id), ...participation(inCalc || (has(lm) && kept(per))) });
       items.push({ record_id: l.id, family: 'limit', shown_as: { node: id }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: l.approval });
     }
   }
@@ -499,7 +507,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const occ = Q.get(k.occurrence);
     const sev = Q.get(k.severity);
     nodes.push({
-      id: k.id, kind: 'risk', label: k.label, ...provenanceOf(who), ...quoteOf(k, k.id), ...participation(inCalc || (!notCompiling && inModel.has(k.effect_on))),
+      id: k.id, kind: 'risk', label: k.label, ...provenanceOf(k), ...quoteOf(k, k.id), ...participation(inCalc || (!notCompiling && inModel.has(k.effect_on))),
       ...eventRiskOf(occ),
       description: `Chance: ${occ ? display(occ) : 'not given'}. If it happens: ${k.mode === 'add' ? 'adds' : 'multiplies by'} ${sev ? display(sev) : 'not given'}, ${typeof k.starts_after_periods === 'number' ? (k.starts_after_periods === 0 ? 'from the start' : `after ${k.starts_after_periods} ${model.period}s`) : `from "${Q.get(k.starts_after_periods)?.label ?? k.starts_after_periods}"`}.`,
     });
