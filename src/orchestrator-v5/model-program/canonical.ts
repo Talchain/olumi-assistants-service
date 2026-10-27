@@ -236,7 +236,7 @@ export const CanonicalGoal = z.object({
     aggregation,
     window: CanonicalWindow.nullable().describe('Null for a static level with no deadline ("keep the margin above 20 %"). A level that changes over time needs a window.'),
     measure_by: z.enum(AUTHORS).describe('person when they named the measure; olumi when the aim had none and this is Olumi\'s suggested measure (the aim stays theirs and the measure is a suggestion, never their definition of success; every figure they did not give stays asked).'),
-    assumptions: ids.describe('Ids of the assumption records this reading of the goal rests on (for a change from now: "carrying on leaves it unchanged" unless the model says otherwise).'),
+    assumptions: ids.describe('Ids of the assumption records this reading of the goal rests on (never "carrying on leaves it unchanged" unless they said so: what carrying on does to it is otherwise asked or estimated, like any quantity). [] when it rests on none.'),
     exclusions: ids.describe('Ids of left_out records for parts of the aim this measure does not cover ("the café\'s cosy feel is not in this chance"). [] when it covers the whole aim.'),
   }).strict().nullable().describe('Null for an aim with no measure yet ("keep the regulars happy"; "a smooth opening night" with no metric): VALID, left out of the chance and asked about. Where one can, Olumi suggests it instead (measure_by olumi).'),
   question: z.string().nullable().describe('When the measure is null: the one plain question that would give it a measure ("How would you tell the regulars are happy: repeat visits a week?"). When the window is null but the level changes over time: "By when?". Null otherwise.'),
