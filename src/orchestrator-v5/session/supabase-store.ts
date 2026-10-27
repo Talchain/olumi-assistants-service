@@ -1056,6 +1056,19 @@ export class SupabaseSessionStore implements SessionStore {
    * with RLS on and this client IS the service role; the RPCs exist for
    * write-path atomicity, which a single read does not need. No migration.
    */
+  async turnFenceRowExists(scenarioId: string, turnId: string): Promise<boolean> {
+    const { data, error } = await this.client
+      .from('v5_turn_fence')
+      .select('generation')
+      .eq('scenario_id', scenarioId)
+      .eq('turn_id', turnId)
+      .maybeSingle();
+    if (error) {
+      throw new Error(`v5_turn_fence existence read failed: ${errMsg(error)}`);
+    }
+    return data !== null;
+  }
+
   /**
    * C14 — this turn's own Stop: one primary-key read of its fence row's
    * tombstone, as {@link turnFenceRowExists} reads its generation. Best-effort
@@ -1081,19 +1094,6 @@ export class SupabaseSessionStore implements SessionStore {
         'V5 turn fence — this turn\'s Stop read threw; treating as not stopped');
       return false;
     }
-  }
-
-  async turnFenceRowExists(scenarioId: string, turnId: string): Promise<boolean> {
-    const { data, error } = await this.client
-      .from('v5_turn_fence')
-      .select('generation')
-      .eq('scenario_id', scenarioId)
-      .eq('turn_id', turnId)
-      .maybeSingle();
-    if (error) {
-      throw new Error(`v5_turn_fence existence read failed: ${errMsg(error)}`);
-    }
-    return data !== null;
   }
 
   /**

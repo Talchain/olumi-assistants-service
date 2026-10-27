@@ -61,8 +61,8 @@ import { appliedGraphWire, coreTurnStores, graphReadyEmitter, programTurnTools }
 import { programInstructions } from '../orchestrator-v5/core-route/instructions.js';
 import {
   AGENT_TURN_CLAIM_WAIT, agentTurnRequestHash, challengeTargetOf, chipOperationOf, claimHashFor, claimTurnIdOf, isChiplessRetry,
-  recordedOutcomeOf, recordedRunPress, recordedWithChip, requestHashOfAnswer, RUN_PRESS_HASH_TAG, requestHashOfClaim, sameAgentTurnRequest, typedRowProof, withChipOperation, withRecordedOutcome,
-  type RecordedOutcome,
+  recordedOutcomeOf, recordedRunPress, recordedRunsOf, recordedWithChip, requestHashOfAnswer, RUN_PRESS_HASH_TAG, requestHashOfClaim, sameAgentTurnRequest, typedRowProof, withChipOperation,
+  withinOwnSaveRead, withRecordedOutcome, withRecordedRuns, type RecordedOutcome,
 } from '../orchestrator-v5/core-route/turn-request.js';
 import { stableStringify } from '../orchestrator/context/stable-stringify.js';
 import {
@@ -109,6 +109,9 @@ const RECORDED: Readonly<Record<RecordedOutcome, { readonly said?: string; reado
   stopped_after_write: { error: { code: 'TURN_STOPPED', message: 'You stopped this turn. Anything it had already saved is kept; reload to see your model.',
     retry_safe: false, nothing_saved: false } },
 };
+
+/** The register's codes for a write the turn fence refused: nothing was written (`assist.v1.scenario-graph-register.ts`). */
+const FENCE_REFUSED: ReadonlySet<unknown> = new Set(['TURN_STOPPED', 'TURN_SUPERSEDED']);
 
 /** A saved scenario that is not a model program: out of the alpha, refused on every kind of turn (inventory F1b). */
 const LEGACY_SCENARIO = 'This scenario was saved before the current Olumi model and cannot be opened on this route. Nothing was changed.';
@@ -308,7 +311,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
     const claimTurnId = claimTurnIdOf(turnId);
     let claimAppendSucceeded = false;
     const takeClaim = async (forRequest: string, chipless: boolean, alsoAccepts?: string): Promise<{ readonly held: 'mine'; readonly claimHash: string }
-      | { readonly held: 'same' } | { readonly held: 'refused'; readonly sent: unknown }> => {
+      | { readonly held: 'same'; readonly recorded: string } | { readonly held: 'refused'; readonly sent: unknown }> => {
       const claimHash = claimHashFor(forRequest, randomUUID());
       let owner: CommittedTurnRecord | null;
       try {
@@ -334,7 +337,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       if (owner.request_hash === claimHash) return { held: 'mine', claimHash };
       const held = requestHashOfClaim(owner.request_hash);
       return sameAgentTurnRequest(held, forRequest, chipless) || (alsoAccepts !== undefined && sameAgentTurnRequest(held, alsoAccepts, chipless))
-        ? { held: 'same' } : { held: 'refused', sent: reused() };
+        ? { held: 'same', recorded: held } : { held: 'refused', sent: reused() };
     };
 
     if (canvasEdit) {
@@ -413,6 +416,28 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       || (untaggedRunHash !== undefined && sameAgentTurnRequest(stored, untaggedRunHash, chiplessRetry));
 
     /**
+     * C7: what this turn saved, with each version's receipt, as its live answer said it: found by the operations its saves ran
+     * under (its first draft or Run, keyed by this turn; each Run the AI started, recorded on its answer row; the card it
+     * approved). `recorded`: the turn's request as stored (its answer row's hash, or its claim's while it still runs). None
+     * found, none said.
+     */
+    const ownSaves = async (recorded: string): Promise<CoreTurnReceipt[]> => {
+      const operationVersion = (operationId: string) => findOperationVersion(dispatch, scenarioId, operationId).catch(() => null);
+      const ownVersion = (key: string) => operationVersion(programOperationId(scenarioId, key));
+      const [turnSave, cardSave, ...ranSaves] = await Promise.all([ownVersion(`turn:${turnId}`),
+        approvedProposal !== undefined ? ownVersion(`proposal:${approvedProposal}`) : null, ...recordedRunsOf(recorded).map(operationVersion)]);
+      // Who authorised the turn: save, from the recorded press, never this resend's envelope: a request matched exactly says it
+      // (a Run press's re-save is the person's; a first draft, Olumi's); for the UI's chipless retry, the recorded hash does: a
+      // Run press is tagged (RUN_PRESS_HASH_TAG), a typed turn that saved was its draft. Any other recorded chip press (one
+      // recorded before the tag) cannot say which chip it was, so that save is not claimed. A Run the AI started is Olumi's.
+      const turnSaveBy = !chiplessRetry ? (runPress ? 'person' : 'olumi')
+        : recordedRunPress(recorded) ? 'person' : recordedWithChip(recorded) ? null : 'olumi';
+      const receiptsOf = (v: Rec | null, by: 'olumi' | 'person' | null) => (v === null || by === null ? []
+        : collectTurnReceipts([{ model_version: v }]).map((r) => ({ ...r, authorised_by: by })));
+      return [...receiptsOf(turnSave, turnSaveBy), ...ranSaves.flatMap((v) => receiptsOf(v, 'olumi')), ...receiptsOf(cardSave, 'person')];
+    };
+
+    /**
      * A replay: the recorded reply, byte for byte, on today's saved state. No model call and no Run. A row whose outcome is
      * recorded (typed on its hash) replays that outcome: a lost reply as its error with no words, an empty one with its own.
      */
@@ -422,20 +447,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       try { pending = await store.readMostRecentPendingActions?.(scenarioId, { validation: 'strict' }) ?? []; } catch { pending = []; }
       const paused = await store.readOpenAiPausedRun?.(scenarioId).catch(() => undefined);
       const outcome = recordedOutcomeOf(prior.request_hash);
-      // C7: a replay says what this turn saved with each version's receipt, as its live answer did: found by the operations its
-      // saves ran under (its first draft or Run, keyed by this turn; the card it approved). None found, none said.
-      const ownVersion = (key: string) => findOperationVersion(dispatch, scenarioId, programOperationId(scenarioId, key)).catch(() => null);
-      const [turnSave, cardSave] = await Promise.all([ownVersion(`turn:${turnId}`), approvedProposal !== undefined ? ownVersion(`proposal:${approvedProposal}`) : null]);
-      // Who authorised the turn: save, from the recorded press, never this resend's envelope: a request matched exactly says it
-      // (a Run press's re-save is the person's; a first draft, Olumi's); for the UI's chipless retry, the recorded hash does: a
-      // Run press is tagged (RUN_PRESS_HASH_TAG), a typed turn that saved was its draft. Any other recorded chip press (one
-      // recorded before the tag) cannot say which chip it was, so that save is not claimed.
-      const turnSaveBy = !chiplessRetry ? (runPress ? 'person' : 'olumi')
-        : recordedRunPress(prior.request_hash) ? 'person' : recordedWithChip(prior.request_hash) ? null : 'olumi';
-      const receiptsOf = (v: Rec | null, by: 'olumi' | 'person' | null) => (v === null || by === null ? []
-        : collectTurnReceipts([{ model_version: v }]).map((r) => ({ ...r, authorised_by: by })));
       return send(200, coreTurnContract({
-        turnId, durability: 'replayed', receipts: [...receiptsOf(turnSave, turnSaveBy), ...receiptsOf(cardSave, 'person')], assistantText: outcome === undefined || RECORDED[outcome].said === undefined ? prior.assistant_message ?? '' : '',
+        turnId, durability: 'replayed', receipts: await ownSaves(prior.request_hash), assistantText: outcome === undefined || RECORDED[outcome].said === undefined ? prior.assistant_message ?? '' : '',
         revision: now.revision, scenarioRevision: now.identity, graph: appliedGraphWire(now.graph),
         cards: await heldCardsOf(store, scenarioId, pending, now),
         // In the live reply's program shape (F7): today's stored Run and the program's own view, as the UI adopts them.
@@ -466,8 +479,10 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         await new Promise((r) => setTimeout(r, AGENT_TURN_CLAIM_WAIT.everyMs));
       }
       log.warn({ scenario_id: scenarioId, turn_id: turnId }, 'core-turn: turn claimed but no answer recorded; outcome unknown, not re-run');
+      // C7 (27 Oct): what the turn has saved so far is said with each version's receipt, as its replay would (bounded: a slow
+      // read says none). The outcome stays unknown: it may still save more.
       return fail(409, { code: 'TURN_OUTCOME_UNKNOWN', message: 'This message is already being handled, or an earlier attempt ran and its reply was not recorded. Nothing was run again; reload to see the current model.',
-        retry_safe: false, nothing_saved: false }, 'unknown');
+        retry_safe: false, nothing_saved: false }, 'unknown', await withinOwnSaveRead(ownSaves(claim.recorded), []));
     }
     const { claimHash } = claim;
 
@@ -509,12 +524,21 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
     /** C14: the person has stopped THIS turn (its fence row's tombstone). Unreadable reads as not stopped: its writes stay fenced. */
     const turnStopped = async (): Promise<boolean> => fence !== undefined && typeof store.isTurnStopped === 'function'
       && await store.isTurnStopped(scenarioId, String(turnId)).catch(() => false);
+    /** C14: the writes the fence refused (the register's 409 TURN_STOPPED / TURN_SUPERSEDED): by the commit's word, nothing written. */
+    let fenceRefusedWrites = 0;
+    /** C7: the operation each version this turn's writes minted was saved under (its register request's `operation_id`). */
+    const mintedBy = new Map<string, string>();
     const readingDispatch: InternalDispatch = readCache.dispatch;
     const countingDispatch: InternalDispatch = async (path, b) => {
       const sendIt = async () => promoteRevisionConflictResponse(await readingDispatch(path, b));
       if (path.endsWith('/graph/register')) {
         writesDispatched += 1;
-        return undoRefusedWrite(() => fenced(sendIt));
+        const res = await undoRefusedWrite(() => fenced(sendIt));
+        if (res.status === 409 && FENCE_REFUSED.has((res.json.details as { code?: unknown } | undefined)?.code)) fenceRefusedWrites += 1;
+        const minted = (res.json.model_version as { version_id?: unknown } | undefined)?.version_id;
+        const operationId = isRec(b) ? b.operation_id : undefined;
+        if (res.status === 200 && typeof minted === 'string' && typeof operationId === 'string') mintedBy.set(minted, operationId);
+        return res;
       }
       return readingDispatch(path, b);
     };
@@ -640,6 +664,9 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       /** Each saved version these calls reported, with who authorised it: a drafted first model's is Olumi's, every other the person's. */
       const turnReceipts = (calls: Pick<AgentTurnResult, 'tool_calls' | 'tool_results'>): CoreTurnReceipt[] => (programPayload === undefined ? receiptsOf(calls)
         : collectTurnReceipts(calls.tool_results).map((r) => ({ ...r, authorised_by: programPayload!.model_program['turn'] === 'draft' ? 'olumi' as const : 'person' as const })));
+      /** C7: each Run the AI started that saved (its own receipt, Olumi's), by the operation its write ran under, for the answer row. */
+      const ranOperations = (calls: Pick<AgentTurnResult, 'tool_calls' | 'tool_results'>): string[] => (programPayload !== undefined ? []
+        : receiptsOf(calls).flatMap((r) => { const op = r.authorised_by === 'olumi' ? mintedBy.get(r.version_id) : undefined; return op === undefined ? [] : [op]; }));
       const programTurn = async (): Promise<AgentTurnResult> => {
         const t0 = Date.now();
         const out = await runModelProgramTurn({ scenarioId, turnId, message, saved: { graph: saved.graph, identity: saved.identity }, dispatch: countingDispatch,
@@ -652,10 +679,12 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           timing: { total_ms: ms, provider_ms: 0, tool_ms: ms, overhead_ms: 0, tool_provider_ms: 0, provider_calls: providerCallsMade() ?? 0, tool_calls: 1, hops: 0 } };
         return hostTurn;
       };
+      /** An answer that made no call and ran no tool. */
+      const noCallAnswer = (): AgentTurnResult => ({ assistant_text: '', items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
+        timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } });
       if (declinedCardOnly !== undefined) {
         proposals.discard(declinedCardOnly);
-        result = { assistant_text: '', items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
-          timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
+        result = noCallAnswer();
       } else {
         // The agent's view, read only for its turn: the program's own.
         const canonical = modelProgram ? undefined : await readProgramContext({ dispatch: readingDispatch, proposals }, { scenario_id: scenarioId, authenticated_user_id: userId });
@@ -698,6 +727,9 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
                 aiReplied = true;
               }
             }
+          } else if (await turnStopped()) {
+            // C14: a turn the person stopped before the agent's first call makes none; its outcome is typed below (a card stays held).
+            result = noCallAnswer();
           } else {
             result = await runCoreTurn({ ...agentTurn(),
               turnGuidance: [PROGRAM_TURN_GUIDANCE, ...(challenge === null ? [] : [challenge.note])],
@@ -726,7 +758,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             try {
               await appendCheckedGraphWrite({ store, writesGraph: false, source: 'agent_turn',
                 heldProposals: { isHeld: isHeldProposal, seenByThisRequest: new Set<string>() },
-                write: { scenario_id: scenarioId, turn_id: turnId, turn_class: 'direct_answer', handler_id: null, request_hash: withRecordedOutcome(requestHash, lost),
+                write: { scenario_id: scenarioId, turn_id: turnId, turn_class: 'direct_answer', handler_id: null, request_hash: withRecordedOutcome(withRecordedRuns(requestHash, ranOperations(seen)), lost),
                   response_emitted: false, llm_calls_used: providerCallsMade() ?? 0, duration_ms: Date.now() - startedAt, handler_facts: [],
                   userMessage: message, assistantMessage: RECORDED[lost].said } });
               continuationRecorded = true;
@@ -761,10 +793,13 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       const after = savedScenarioOf(await readingDispatch(graphPath, { ...FRESH_READ }));
       const paused = result.sdk?.paused;
       const noReply = result.assistant_text.trim() === '' && paused === undefined && declinedCardOnly === undefined;
-      // C14: a stopped turn's outcome is typed on its row as every other is, so a resend replays it; a write it had sent keeps
-      // nothing_saved false (saved, with its receipt, or unknown), never "nothing changed".
-      const stopped: RecordedOutcome | undefined = await turnStopped() ? (writesDispatched === 0 && !verifiedSave ? 'stopped' : 'stopped_after_write') : undefined;
+      // C14: a stopped turn's outcome is typed on its row as every other is, so a resend replays it. A write the fence refused
+      // wrote nothing (by the commit's word); any other write it had sent keeps nothing_saved false (saved, with its receipt, or
+      // unknown), never "nothing changed".
+      const stopped: RecordedOutcome | undefined = await turnStopped()
+        ? (writesDispatched - fenceRefusedWrites === 0 && !verifiedSave ? 'stopped' : 'stopped_after_write') : undefined;
       const recordedNow: RecordedOutcome | undefined = stopped ?? (noReply ? 'reply_empty' : undefined);
+      const answerHash = withRecordedRuns(requestHash, ranOperations(result));
       // The model's text exactly as returned (Codex r1 on #3650: " \n" became ""); only whether it says anything is decided here.
       const assistantText = result.assistant_text;
       let latestPending: readonly PendingAction[] = heldAtStart;
@@ -804,7 +839,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             offeredChipIds: new Set(durablePending.map((p) => p.chip_id)),
             onReconciled: (write) => { rowPending = write.pending_actions ?? []; return write; } },
           write: { scenario_id: scenarioId, turn_id: turnId, turn_class: 'direct_answer', handler_id: null,
-            request_hash: recordedNow !== undefined ? withRecordedOutcome(requestHash, recordedNow) : requestHash,
+            request_hash: recordedNow !== undefined ? withRecordedOutcome(answerHash, recordedNow) : answerHash,
             response_emitted: true, llm_calls_used: providerCallsMade() ?? result.hops + 1, duration_ms: Date.now() - startedAt, handler_facts: [],
             userMessage: message, assistantMessage: assistantText,
             ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}) } });

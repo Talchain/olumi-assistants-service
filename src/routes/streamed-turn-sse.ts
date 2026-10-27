@@ -96,7 +96,7 @@ import { SSE_HEARTBEAT_INTERVAL_MS } from "../config/timeouts.js";
 import { config } from "../config/index.js";
 import { coreTurnStreamTimeout, type CoreTurnReceipt } from "../orchestrator-v5/core-route/contract.js";
 import type { InternalDispatch } from "../orchestrator-v5/core-route/internal-dispatch.js";
-import { isChiplessRetry } from "../orchestrator-v5/core-route/turn-request.js";
+import { isChiplessRetry, withinOwnSaveRead } from "../orchestrator-v5/core-route/turn-request.js";
 import { collectTurnReceipts } from "../orchestrator-v5/agent-lane/turn-receipts.js";
 import { programOperationId } from "../orchestrator-v5/model-program-turn/program-save.js";
 import { findOperationVersion } from "../orchestrator-v5/path-b/tools/core-write.js";
@@ -132,7 +132,8 @@ function turnIdOfPayload(payload: string): string | null {
  * C7 (27 Oct): what a core turn that outlived the stream already saved under its OWN operation (`turn:<turn id>`: its first
  * draft, Olumi's; a Run press's new Run, the person's), found as its replay finds it, so the timeout says that save with its
  * receipt. Asked only once the stream carried the turn's GRAPH_READY, the frame a saved draft or Run sends. None found, or a
- * chipless retry that cannot say whose the save was: none said, and the outcome stays unknown.
+ * chipless retry that cannot say whose the save was: none said, and the outcome stays unknown. Bounded (`withinOwnSaveRead`): a
+ * slow read says none, so the stream always ends with its terminal frame.
  */
 async function ownTurnSave(app: FastifyInstance, headers: Record<string, string>, payload: string): Promise<CoreTurnReceipt[]> {
   let body: Record<string, unknown>;
@@ -375,7 +376,7 @@ export async function streamTurnAsStagedSse(opts: StagedTurnStreamOptions): Prom
         status_code: 504,
         // The core route's client reads its own contract: the same timeout, said in it (the turn may still save).
         payload: internalTarget === "/agent/v1/core-turn" ? coreTurnStreamTimeout(turnIdOfPayload(opts.payload),
-          graphReadyAtMs === null ? [] : await ownTurnSave(app, internalHeaders, opts.payload)) : {
+          graphReadyAtMs === null ? [] : await withinOwnSaveRead(ownTurnSave(app, internalHeaders, opts.payload), [])) : {
           schema: "error.v1",
           code: "UPSTREAM_TIMEOUT",
           message: "The turn did not complete within the stream budget.",
