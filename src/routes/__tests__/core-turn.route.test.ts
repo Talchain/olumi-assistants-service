@@ -1992,4 +1992,29 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       )).toHaveLength(2);
     });
   });
+
+  describe('C7 + C14 core outcomes (alpha, 27 Oct): what a turn saved stays said, and a Stop is typed', () => {
+    const SAVED_LOST = 'The saved change is kept, but the reply didn’t arrive. Send a new message to continue.';
+    /** A receipt by its identity: the saved version, its mutation and who authorised it. */
+    const idsOf = (receipts: Json[]) => receipts.map((x) => [x.version_id, x.mutation_id, x.authorised_by]);
+    /** The bakery's stored Run as an earlier engine computed it, so a Run now evaluates and saves a new one. */
+    const staleEngine = () => {
+      const engine = String((persisted!.living_model.runs as Json[]).at(-1)!.receipt.versions.engine);
+      persisted = JSON.parse(JSON.stringify(persisted).split(engine).join('mp-a04e2cebf944')) as Json;
+    };
+
+    it('C7: a typed turn whose Run the AI started saves a new Run, then its reply fails: the 502 says it was saved, with that Run’s own receipt (Olumi’s); one write', async () => {
+      staleEngine();
+      const runs = storedRuns();
+      outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run', args: { reason: 'they asked for it' } }], [{ type: 'refuse' }]];
+      const r = await typed('Run the analysis again, please.');
+      expect(r.statusCode, r.body).toBe(502);
+      const j = r.json() as Json;
+      expect([registered.length, storedRuns()], 'the Run was saved, once').toEqual([1, runs + 1]);
+      expect(j.error).toEqual({ code: 'UPSTREAM_ERROR', message: SAVED_LOST, retry_safe: false, nothing_saved: false });
+      // The Run's own version (the one write's version and mutation): never a later or unrelated receipt.
+      expect(idsOf(j.receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      expect(UI_CORE_TURN.safeParse(j).success).toBe(true);
+    });
+  });
 });

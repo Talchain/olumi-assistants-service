@@ -179,11 +179,11 @@ async function heldCardsOf(store: ReturnType<typeof getSessionStore>, scenarioId
   return [...(wire?.proposals ?? [])];
 }
 
-/** Each saved version this turn's tools reported, with who authorised it: an approved card is the person's. */
+/** Each saved version this turn's tools reported, with who authorised it: an approved card is the person's; a Run the AI started, Olumi's. */
 function receiptsOf(result: Pick<AgentTurnResult, 'tool_calls' | 'tool_results'>): CoreTurnReceipt[] {
   const byVersion = new Map<string, CoreTurnReceipt>();
   result.tool_calls.forEach((call, i) => {
-    const by: AuthorisedBy | undefined = call.name === APPLY_CHANGE ? 'person' : undefined;
+    const by: AuthorisedBy | undefined = call.name === APPLY_CHANGE ? 'person' : call.name === 'run_analysis' ? 'olumi' : undefined;
     if (by === undefined) return;
     // A core writer's receipt is the register's `model_version` (`version_number`), read as the collector reads that shape.
     const own = (result.tool_results[i] as { receipts?: readonly unknown[] } | undefined)?.receipts ?? [];
