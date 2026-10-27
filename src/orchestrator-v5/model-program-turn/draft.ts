@@ -80,7 +80,7 @@ export const repairMessage = (errors: readonly CompileError[], prefix = REPAIR_P
 type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'period' | 'history'>;
 const FAMILIES = Object.keys(CanonicalModel.shape).filter((k) => !['version', 'question', 'period', 'history'].includes(k)) as Family[];
 /**
- * THE HOST'S FIELDS ON A DRAFT (Paul 26 Oct: no unnecessary AI work). The drafter is never sent approval or author_id
+ * THE HOST'S FIELDS ON A DRAFT (Paul 26 Oct: no unnecessary AI work). The drafter is never sent approval, approved_by or author_id
  * (`prompt.ts`), so before its JSON is read, every record, every link in a relation and every history entry takes the
  * host's values: proposed, approved by no one. Nothing else in the draft changes, and a shape the schema refuses stays
  * refused. The saved form is set later, as before (`postimage.ts` asDrafted, accepted).
@@ -88,10 +88,10 @@ const FAMILIES = Object.keys(CanonicalModel.shape).filter((k) => !['version', 'q
 export function withHostFields(json: unknown): unknown {
   const isRec = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
   if (!isRec(json)) return json;
-  const host = (r: unknown): unknown => (isRec(r) ? { ...r, approval: 'proposed', author_id: null } : r);
+  const host = (r: unknown): unknown => (isRec(r) ? { ...r, approval: 'proposed', approved_by: null, author_id: null } : r);
   const record = (r: unknown): unknown => { const x = host(r); return isRec(x) && Array.isArray(x['terms']) ? { ...x, terms: x['terms'].map(host) } : x; };
   return { ...json, ...Object.fromEntries(FAMILIES.filter((f) => Array.isArray(json[f])).map((f) => [f, (json[f] as unknown[]).map(record)])),
-    ...(Array.isArray(json['history']) ? { history: json['history'].map((h) => (isRec(h) ? { ...h, author_id: null } : h)) } : {}) };
+    ...(Array.isArray(json['history']) ? { history: json['history'].map((h) => (isRec(h) ? { ...h, author_id: null, approved_by: null } : h)) } : {}) };
 }
 /**
  * AN UPDATE, MERGED BY ID onto the saved model (DL 24 Oct, DoD-G classes 12 and 4): in each family a returned id replaces

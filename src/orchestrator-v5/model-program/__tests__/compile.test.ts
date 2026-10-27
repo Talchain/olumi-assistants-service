@@ -30,7 +30,7 @@ import { revisionDigest } from '../../model-program-turn/run-receipt.js';
 import { evaluateCanonical } from '../../model-program-turn/evaluate.js';
 
 // ── builders ───────────────────────────────────────────────────────────────────────────────────────────────────────────
-const base = { party: null, approval: 'proposed' as const, author_id: null };
+const base = { party: null, approval: 'proposed' as const, approved_by: null, author_id: null };
 const qty = (id: string, unit: string, f: Partial<CanonicalQuantityT>): CanonicalQuantityT => ({
   id, label: id.replace(/_/g, ' '), unit, kind: 'fact', value: null, low: null, high: null, range_kind: null, status: 'known', question: null, basis: null, direction: null, floor: null, ceiling: null, author: 'person', quote: null, ...base, ...f,
 });
