@@ -77,8 +77,8 @@ export function draftRequestBody(input: readonly InputMessage[], update: boolean
 /** The repair turn: the compiler's sentences, one per line. */
 export const repairMessage = (errors: readonly CompileError[], prefix = REPAIR_PREFIX): string => `${prefix}\n${errors.map((e) => `- ${e.message}`).join('\n')}`;
 
-type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'period' | 'history'>;
-const FAMILIES = Object.keys(CanonicalModel.shape).filter((k) => !['version', 'question', 'period', 'history'].includes(k)) as Family[];
+type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'title' | 'period' | 'coaching_questions' | 'history'>;
+const FAMILIES = Object.keys(CanonicalModel.shape).filter((k) => !['version', 'question', 'title', 'period', 'coaching_questions', 'history'].includes(k)) as Family[];
 /**
  * THE HOST'S FIELDS ON A DRAFT (Paul 26 Oct: no unnecessary AI work). The drafter is never sent approval, approved_by or author_id
  * (`prompt.ts`), so before its JSON is read, every record and every link in a relation takes the host's values: proposed,

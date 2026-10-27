@@ -38,7 +38,7 @@ function scenario(): CanonicalModelT {
     options: [{ id: 'increase', label: 'Make the change', status: 'live', developed_from: null, ...record, author: 'person', quote: 'Make the change.',
       sets: [{ quantity: 'switch', to: 'one', value: null, low: null, high: null, range_kind: null, question: null,
         starts_after_periods: 0, author: 'person', quote: 'Make the change.' }] }],
-    limits: [], preferences: [], risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [],
+    limits: [], preferences: [], risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [], title: null, coaching_questions: [],
   };
 }
 function projected(model: CanonicalModelT) {

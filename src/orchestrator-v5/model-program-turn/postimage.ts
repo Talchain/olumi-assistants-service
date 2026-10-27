@@ -23,7 +23,7 @@ import { norm } from '../model-program/compile.js';
 import { linkTargets } from '../model-program/links.js';
 
 type Rec = Record<string, unknown>;
-type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'period' | 'history'>;
+type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'title' | 'period' | 'coaching_questions' | 'history'>;
 const FAMILIES: readonly (readonly [Family, ProposalChange['kind']])[] = [
   ['quantities', 'quantity'], ['relations', 'relation'], ['goals', 'goal'], ['limits', 'record'], ['preferences', 'record'], ['options', 'option'],
   ['risks', 'risk'], ['claims', 'record'], ['evidence', 'record'], ['assumptions', 'record'], ['dissent', 'record'], ['conditions', 'record'], ['left_out', 'left_out'],

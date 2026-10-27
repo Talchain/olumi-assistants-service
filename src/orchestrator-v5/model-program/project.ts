@@ -298,7 +298,11 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   };
 
   // ── the question, goals, options ───────────────────────────────────────────────────────────────────────────────────
-  nodes.push({ id: DECISION_NODE_ID, kind: 'decision', label: model.question });
+  // The board's name is Olumi's short title, the question beneath it; a model saved before titles draws its question as
+  // before. Olumi's coaching questions ride on it, at most the three the first screen shows (Paul 27 Oct).
+  const title = has(model.title) && model.title.trim() !== '' ? model.title : null;
+  nodes.push({ id: DECISION_NODE_ID, kind: 'decision', label: title ?? model.question, ...(title !== null ? { description: model.question } : {}),
+    ...(model.coaching_questions.length > 0 ? { coaching_questions: model.coaching_questions.slice(0, 3) } : {}) });
   for (const g of model.goals) {
     const per = compiled.perGoal.find((p) => p.goal_id === g.id);
     const inCalc = xg.has(g.id);
@@ -309,7 +313,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const metricUnit = metric?.unit;
     const goalUnit = g.measure?.frame === 'change_rel' ? metricUnit : target?.unit;
     nodes.push({
-      id: g.id, kind: 'goal', label: g.label, ...provenanceOf(g), ...quoteOf(g, g.id), ...participation(inCalc || (has(g.measure) && kept(per))),
+      // Its label is a short title; beneath it, the person's own words (their quote), or nothing for Olumi's.
+      id: g.id, kind: 'goal', label: g.label, ...(who === 'person' && has(g.quote) ? { description: g.quote } : {}), ...provenanceOf(g), ...quoteOf(g, g.id),
+      ...participation(inCalc || (has(g.measure) && kept(per))),
       ...(g.measure ? { goal_direction: g.measure.cmp, goal_threshold_frame: g.measure.frame, ...(g.measure.frame === 'level' ? {} : { quantity_frame: 'level' }),
         ...(target ? { goal_threshold_unit: g.measure.frame === 'change_rel' ? (metricUnit ?? '1') : target.unit, display_value: `${g.measure.cmp} ${display(target)}` } : {}),
         ...(point !== null && target ? goalTarget(point, target, g.measure.frame) : {}) } : {}),

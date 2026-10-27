@@ -1430,7 +1430,11 @@ describe('the model-program turn on the real core route', () => {
       }
     };
     const shape = CanonicalModel.shape as Record<string, z.ZodType>;
-    const families = Object.keys(shape).filter((k) => defOf(shape[k]!).type === 'array' && k !== 'history');
+    const ROOT_EXEMPT: Record<string, string> = { version: 'one fixed value: the format allows no other', history: 'host-owned: appended by the host, never compared',
+      // Titles and coaching questions (Paul, approved 27 Oct): the first draft's framing; an update never returns them.
+      title: 'the first draft\'s: an update never returns it (CanonicalUpdate omits it), so no change carries it',
+      coaching_questions: 'the first draft\'s: an update never returns them (CanonicalUpdate omits them), so no change carries them' };
+    const families = Object.keys(shape).filter((k) => defOf(shape[k]!).type === 'array' && ROOT_EXEMPT[k] === undefined);
     expect(families.sort()).toEqual(Object.keys(GROUPS).sort());
     const unsaid = (family: string, schema: z.ZodType) => fields(schema).filter((p) => GROUPS[family as keyof typeof GROUPS][p] === undefined && exemptAs(p) === undefined);
     const element = (family: string): z.ZodType => defOf(shape[family]!).element;
@@ -1444,7 +1448,6 @@ describe('the model-program turn on the real core route', () => {
     expect(unsaid('quantities', (element('quantities') as z.ZodObject).extend({ new_field: z.string() }))).toEqual(['new_field']);
     // The model's own fields (Codex #3742): each is a record family above, one the card says as its own entry, or exempt.
     const ROOT_SAID = ['question', 'period'];
-    const ROOT_EXEMPT: Record<string, string> = { version: 'one fixed value: the format allows no other', history: 'host-owned: appended by the host, never compared' };
     const unsaidRoot = (keys: readonly string[]) => keys.filter((k) => !families.includes(k) && !ROOT_SAID.includes(k) && ROOT_EXEMPT[k] === undefined);
     expect(unsaidRoot(Object.keys(shape))).toEqual([]);
     expect(Object.keys(ROOT_EXEMPT).filter((k) => !(k in shape))).toEqual([]);

@@ -18,6 +18,8 @@ export const DRAFTING_INSTRUCTIONS = [
   '4. Frame: where the request presumes its answer ("how do we make X happen?"), X stays theirs, and the aim behind it (what X is for) is Olumi\'s working aim or question, so options that serve that aim another way are compared with X.',
   '',
   '- Faithful: keep their figures, units, goals, deadlines and options. Every figure, relation, goal, limit and option of theirs is author "person"; its quote is their words copied exactly, one unbroken stretch, never reworded or joined. What Olumi adds is author "olumi", quote null, never presented as theirs. A record of theirs holds only what they said: Olumi\'s reading of it (a unit, a window, what it excludes, a qualifier) is Olumi\'s own record that concerns it.',
+  '- Titles: title is a short title of a few words for the whole situation ("Second oven or wholesale?"); question stays the one plain sentence. Every goal, limit and risk label is a short title of a few words for its card, never a sentence; their words stay in its quote.',
+  '- Coaching questions: at most three, each one plain question to the person that tests their reasoning: the aim behind the request, an alternative they have not weighed, or the assumption the result leans on most. Never a request for a figure (that is asked on its own item), never leading, never answerable yes or no.',
   '- Every number is a named quantity, except an option\'s own inline value. An exact constant the form needs (0 or 1 to switch an option off or on, 12 month/year) is author "structure": known, one figure, no range. So are the starting level of a setting only the options change, when they gave none (0, an Olumi division\'s share included), and a whole such as 100 %: never asked.',
   '- A relation they state keeps its form: "profit is takings minus costs" is a definition (a signed sum: takings +1, costs -1; or a product of parts with powers 1 or -1); "each extra X adds about Y" is an effect term whose coefficient is their figure (and range, if given).',
   '- Facts (kind "fact"): what they know or decide: current levels, prices, costs, budgets and how they split them, headcount, dates, durations, targets. A fact they did not give is status "asked": every figure null, author "person", and one plain question in their words. Never estimate a fact, and never ask for the result itself.',
@@ -64,10 +66,11 @@ export const UPDATE_REPAIR_PREFIX = 'The compiler found these errors in the mode
 /**
  * AN UPDATE'S OUTPUT (DL 24 Oct, DoD-G classes 12 and 4), derived from the canonical schema, never a second copy: in each
  * family only the records the update changes or adds, each in its family's own record schema; the question and the time
- * step null unless the change is to them; the ids it removes in remove; no history (the host's). The host merges it onto the
+ * step null unless the change is to them; the ids it removes in remove; no history (the host's); no title or coaching questions
+ * (the first draft's, kept as drafted). The host merges it onto the
  * saved model by id (`draft.ts` mergeUpdate). The families' "every ..." descriptions are a first draft's, so they are left off.
  */
-export const CanonicalUpdate = CanonicalModel.omit({ history: true }).extend({
+export const CanonicalUpdate = CanonicalModel.omit({ history: true, title: true, coaching_questions: true }).extend({
   question: CanonicalModel.shape.question.nullable().describe('Null unless the change is to the question: then the new question, in one plain sentence.'),
   period: CanonicalModel.shape.period.nullable().describe('Null unless the change is to the time step: then the new one.'),
   goals: z.array(CanonicalModel.shape.goals.element),

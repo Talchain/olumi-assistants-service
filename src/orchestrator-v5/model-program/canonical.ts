@@ -218,7 +218,7 @@ const per = id.nullable().describe('For a rate over the window ("no-shows per bo
 
 export const CanonicalGoal = z.object({
   id,
-  label: z.string().describe("The aim in the person's own words (\"keep weekly profit over £900\"); for Olumi's working aim, a short plain label. Never empty."),
+  label: z.string().describe('A short title of a few words for the aim, for its card ("Weekly profit over £900"); the person\'s own words stay in quote. Never empty.'),
   measure: z.object({
     quantity: id.describe('The quantity the aim is about. Never an asked quantity: that would ask for the result itself.'),
     per,
@@ -248,7 +248,7 @@ export type CanonicalMeasureT = NonNullable<CanonicalGoalT['measure']>;
 
 export const CanonicalLimit = z.object({
   id,
-  label: z.string().describe("The condition in the person's own words. Never empty."),
+  label: z.string().describe('A short title of a few words for the condition, for its card ("Running costs cap"); the person\'s own words stay in quote. Never empty.'),
   measure: z.object({
     quantity: id,
     per,
@@ -281,6 +281,7 @@ const timing = z.union([z.number().int(), id]).describe(`${STARTS_AFTER_PERIODS}
 /** The old fields, mapped ONCE, where a saved model is read (program-store): `from_period` k is `starts_after_periods` k, the
  *  same count under its old name. Missing quantity direction and physical bounds read as null, without inferring them, and
  *  so does a missing approved_by on a record, a link or a history entry (C6): an earlier approver stays where it was saved.
+ *  A model saved before titles reads with no title (null) and no coaching questions ([]).
  *  A model that has both timing names, or neither, is left for the schema to judge. */
 export function withDeclaredTiming(raw: unknown): unknown {
   const rec = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -289,7 +290,8 @@ export function withDeclaredTiming(raw: unknown): unknown {
   const declaredQuantity = (x: unknown) => (rec(x) ? { direction: null, floor: null, ceiling: null, ...x } : x);
   const approver = (x: unknown): unknown => (Array.isArray(x) ? x.map(approver) : !rec(x) ? x
     : Object.fromEntries([...Object.entries(x).map(([k, v]) => [k, approver(v)] as const), ...('approval' in x && !('approved_by' in x) ? [['approved_by', null] as const] : [])]));
-  const read = { ...raw, ...(Array.isArray(raw['quantities']) ? { quantities: raw['quantities'].map(declaredQuantity) } : {}),
+  const read = { ...raw, ...('title' in raw ? {} : { title: null }), ...('coaching_questions' in raw ? {} : { coaching_questions: [] }),
+    ...(Array.isArray(raw['quantities']) ? { quantities: raw['quantities'].map(declaredQuantity) } : {}),
     options: raw['options'].map((o) => (rec(o) && Array.isArray(o['sets']) ? { ...o, sets: o['sets'].map(renamed) } : o)), risks: raw['risks'].map(renamed) };
   return Object.fromEntries(Object.entries(read).map(([k, v]) => [k, !Array.isArray(v) ? v : k === 'history'
     ? v.map((h) => (rec(h) && !('approved_by' in h) ? { ...h, approved_by: null } : h)) : approver(v)]));
@@ -321,7 +323,7 @@ export type CanonicalOptionT = z.infer<typeof CanonicalOption>;
 
 export const CanonicalRisk = z.object({
   id,
-  label: z.string().describe('An event that may or may not happen ("the oven breaks down"). Never something already true.'),
+  label: z.string().describe('A short title of a few words for an event that may or may not happen, for its card ("Oven breaks down"); the person\'s own words stay in quote. Never something already true.'),
   occurrence: id.describe('A quantity in unit "1" (or "%"): the chance it happens at least once over the whole model horizon.'),
   severity: id.describe('A quantity: what it does IF it happens, drawn only when it does. In the affected quantity\'s unit for add; unit "1" for multiply.'),
   effect_on: id.describe('The quantity it changes.'),
@@ -393,6 +395,7 @@ export const PERIOD_UNITS = ['week', 'month', 'year'] as const;
 export const CanonicalModel = z.object({
   version: z.enum([CANONICAL_VERSION]),
   question: z.string().describe('What is being reasoned about, in one plain sentence.'),
+  title: z.string().nullable().describe('A short title of a few words for the situation, the name on its board ("Second oven or wholesale?"). Never empty; the question stays the one plain sentence.'),
   period: z.enum(PERIOD_UNITS).describe('The model\'s time step, which windows and stocks count in. Period 0 is now.'),
   quantities: z.array(CanonicalQuantity),
   relations: z.array(CanonicalRelation),
@@ -407,6 +410,8 @@ export const CanonicalModel = z.object({
   dissent: z.array(CanonicalDissent),
   conditions: z.array(CanonicalCondition),
   left_out: z.array(CanonicalLeftOut),
+  coaching_questions: z.array(z.string()).describe(
+    'Olumi\'s own questions for the first screen, at most three, each ONE plain question to the person that tests their reasoning: the aim behind the request, an alternative they have not weighed, or the assumption the result leans on most. Never a request for a figure (a missing figure is asked on its own item\'s question), never leading, never answerable with yes or no. [] when none would help.'),
   history: z.array(CanonicalHistoryEntry).describe('Kept by Olumi\'s host: [] in a first draft.'),
 }).strict();
 export type CanonicalModelT = z.infer<typeof CanonicalModel>;

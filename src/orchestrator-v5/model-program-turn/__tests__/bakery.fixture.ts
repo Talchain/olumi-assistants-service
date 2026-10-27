@@ -37,6 +37,7 @@ export function bakery(): CanonicalModelT {
       { id: 'keep_one', label: 'Keep our one oven', sets: [], status: 'live', developed_from: null, author: 'person', quote: 'keep our one oven', ...at },
     ],
     risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [],
+    title: null, coaching_questions: [],
   };
 }
 /** The same bakery with one draft defect the compiler names: Olumi's estimate given without its range. */
@@ -93,6 +94,7 @@ export function club(): CanonicalModelT {
       { id: 'carry_on', label: 'Carry on as now', sets: [], status: 'live', developed_from: null, author: 'person', quote: 'carry on as now', ...at },
     ],
     risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [],
+    title: null, coaching_questions: [],
   };
 }
 
@@ -102,7 +104,7 @@ export function club(): CanonicalModelT {
  * and time step only when they change.
  */
 export function updateOf(saved: CanonicalModelT, whole: CanonicalModelT): Record<string, unknown> {
-  const { version, question, period, history: _history, ...families } = whole;
+  const { version, question, period, history: _history, title: _title, coaching_questions: _coaching, ...families } = whole;
   const remove: string[] = [];
   const out: Record<string, unknown> = { version, question: question === saved.question ? null : question, period: period === saved.period ? null : period };
   for (const [f, rs] of Object.entries(families) as [keyof typeof families, { id: string }[]][]) {

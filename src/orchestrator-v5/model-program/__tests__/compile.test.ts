@@ -67,7 +67,7 @@ const limit = (id: string, label: string, quantity: string, cmp: '>=' | '<=' | '
 const model = (over: Partial<CanonicalModelT>): CanonicalModelT => ({
   version: 'canonical.v1', question: 'Should the bakery buy a second oven?', period: 'week',
   quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [],
-  claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [], ...over,
+  claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [], title: null, coaching_questions: [], ...over,
 });
 const codes = (r: ReturnType<typeof compile>) => r.errors.map((e) => e.code);
 /**
