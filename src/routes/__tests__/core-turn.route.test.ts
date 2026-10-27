@@ -1228,6 +1228,25 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(input.filter((i) => i.role === 'user').map((i) => String(i.content))).toEqual(['About £2,500 for the oven.']);
     });
 
+    it('C2 (alpha spec §7, 27 Oct): the first reply\'s guidance, as SENT, asks for what the calculation leaves out and why, only when the model holds any, beside the left_out record it reads', async () => {
+      const m = bakery();
+      m.left_out.push({ id: 'shop_feel', text: 'How the shop feels to the regulars', why: 'It has no measure in this model.', question: null, concerns: [],
+        author: 'olumi', quote: null, party: null, approval: 'proposed', author_id: null });
+      SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(m); calls.length = 0;
+      outputs = [[{ type: 'message', text: 'Here is your model.' }]];
+      expect((await typed(BAKERY_BRIEF)).statusCode).toBe(200);
+      const reply = calls.find((c) => c.text?.format?.name !== 'canonical_model')!;
+      const system = ((reply.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content));
+      // The record the reply may name is in its state block, by id and its own words (no source change needed for this).
+      const state = system.find((s) => s.startsWith(STATE_BLOCK_PREFIX))!;
+      for (const words of ['"shop_feel"', 'How the shop feels to the regulars', 'It has no measure in this model.']) expect(state).toContain(words);
+      // The guidance asks for it, spelled here (never read from the module): one draft-reply item carries these exact words.
+      const guidance = system.filter((s) => s.startsWith('Olumi has just drafted this model'));
+      expect(guidance).toHaveLength(1);
+      expect(guidance[0]).toContain('what Olumi assumed or added that they should check; what the calculation leaves out and why, briefly, '
+        + 'only when the model\'s left_out holds any (say nothing of it otherwise); and the one question or check that would most change the result. ');
+    });
+
     it('S3 (DL 23 Oct): on a program turn the provider receives the PROGRAM tool descriptions, read included, and the read it gets back carries the Run\'s goal_chance block unchanged', async () => {
       // Two goals, so the block has each goal's own line and the joint.
       const m = club();
