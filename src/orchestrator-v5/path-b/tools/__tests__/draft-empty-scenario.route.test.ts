@@ -367,7 +367,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     ['read-identity', { check: 'hash_mismatch', field: 'ack_identity', actual: 'a'.repeat(12) }],
     ['recomputed-identity', { check: 'hash_mismatch', field: 'read_identity', expected: 'a'.repeat(12) }],
     ['revision', { check: 'revision_mismatch', field: 'graph_hash', expected: 'a'.repeat(12) }],
-    ['analysis-hash', { check: 'hash_mismatch', field: 'analysis_hash', actual: 'a'.repeat(12) }],
+    // No 'analysis-hash' row: #3851 removed the analysis-hash comparison (see the row after this one).
     ['postimage', { check: 'postimage_diff', keys: ['nodes'] }],
     ['readback', { check: 'readback_unavailable', code: 'read_failed' }],
   ].map(([fault, diagnostic]) => ({ brief, fault: String(fault), diagnostic: diagnostic as Json }))))(
@@ -375,12 +375,10 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       briefArg = brief; proofFault = fault; readUnavailable = fault === 'readback'; versionsUnavailable = true;
       const body = await turn();
       const identity = computeGraphIdentityHash(saved as never)!.value.slice(0, 12);
-      const analysis = computeAnalysisAffectingGraphHashSha256(saved as never)!.slice(0, 12);
       const revision = computeAnalysisAffectingGraphHash(saved as never)!.slice(0, 12);
       const defaults = fault === 'receipt-hash' || fault === 'read-identity' ? { expected: identity }
         : fault === 'ack' || fault === 'recomputed-identity' ? { actual: identity }
-        : fault === 'revision' ? { actual: revision }
-        : fault === 'analysis-hash' ? { expected: analysis } : {};
+        : fault === 'revision' ? { actual: revision } : {};
       const reason = ['ack-status', 'operation-reused'].includes(fault) ? 'not_confirmed' : 'not_verified';
       // Lane-base SDK output and reply bytes; diagnostics may not change either.
       expect(toolOutputs.find((o) => o.call_id === 'draft_call')?.output).toBe(JSON.stringify({
@@ -392,6 +390,21 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       expect(body._agent.receipts).toEqual([]);
       expect(draftCall(body).draft_verification).toEqual({ ...defaults, ...diagnostic });
     });
+
+  // #3851 (W5, 27 Oct) removed the save's legacy analysis-hash comparison from core-write.ts. The receipt's
+  // analysis_affecting_hash is a projection of the same graph that the identity hash already binds to the acknowledgement, the
+  // receipt and the read-back; the program's identity and its Run proof never read receipt.analysis_affecting_hash; and
+  // computing it loaded the retired readiness code onto the alpha path. So a receipt carrying a different one is now saved on
+  // that identity proof (this row was the 'analysis-hash' first-failed-check row). Every other row above still refuses.
+  it.each([BRIEF, OTHER_BRIEF])('#3851: a receipt whose analysis_affecting_hash differs is saved on its identity proof (%s)', async (brief) => {
+    briefArg = brief; proofFault = 'analysis-hash'; versionsUnavailable = true;
+    const body = await turn();
+    expect(draftOutcome()).toMatchObject({ status: 'ok', mutated: true, data: { save_outcome: 'VERIFIED_SAVED', model_version: { version_id: 'v_1', version_number: 1 } } });
+    expect(body.assistant_text).toBe('Here is the first model I built.');
+    expect(draftCall(body)).toMatchObject({ ok: true, mutated: true });
+    expect(draftCall(body)).not.toHaveProperty('draft_verification');
+    expect(registered).toHaveLength(1); expect(drafterCalls).toBe(0); expect(runs).toBe(0);
+  });
 
   it('L26B first failure wins; a later unrelated mismatch cannot replace it or leak content', async () => {
     proofFault = 'receipt-invalid'; readUnavailable = true;
