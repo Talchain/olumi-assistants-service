@@ -423,6 +423,208 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(a.receipts).toEqual([]);
   });
 
+  describe('C14 clauses 7–9 (alpha spec §7, 27 Oct): a Stop before and after a possible save, and a resend that never freezes', () => {
+    /** A provider call made after a tool ran: the reply call, once the press's change has committed. */
+    const afterTool = (body: Json): boolean => Array.isArray(body.input) && (body.input as Json[]).some((i) => i.type === 'function_call_output');
+    const stopTurn = (turnId: string) => app.inject({ method: 'POST', url: '/orchestrate/v2/turn/stop', payload: { scenario_id: SCENARIO, turn_id: turnId } });
+    /**
+     * A Stop answered as `v5_mark_turn_stopped` derives it (migration 20260731120000, lines 238–241): `already_committed` is whether a
+     * conversation row with THIS turn id exists. The store double's own answer is always false.
+     */
+    const stopAsTheRpcDerives = (turnId: string) => {
+      store.markTurnStopped.mockImplementationOnce(async (sid: string, tid: string) => {
+        const row = fenceRows.get(`${sid}:${tid}`);
+        fenceRows.set(`${sid}:${tid}`, { generation: row?.generation ?? ++fenceGeneration, stopped_at: row?.stopped_at ?? '2026-10-27T10:00:00.000Z' });
+        return { stopped: true, claimed: row !== undefined, alreadyCommitted: turnRows.has(tid) };
+      });
+      return stopTurn(turnId);
+    };
+    /** The claim wait, shortened through the object the route reads (`turn-request.ts` AGENT_TURN_CLAIM_WAIT, as the agent-turn-replay rows do), then restored. */
+    const withShortClaimWait = async (run: () => Promise<void>): Promise<void> => {
+      const { AGENT_TURN_CLAIM_WAIT } = await import('../../orchestrator-v5/core-route/turn-request.js');
+      const kept = { ...AGENT_TURN_CLAIM_WAIT };
+      Object.assign(AGENT_TURN_CLAIM_WAIT, { totalMs: 50, everyMs: 5 });
+      try { await run(); } finally { Object.assign(AGENT_TURN_CLAIM_WAIT, kept); }
+    };
+    const OUTCOME_UNKNOWN = { code: 'TURN_OUTCOME_UNKNOWN', retry_safe: false, nothing_saved: false,
+      message: 'This message is already being handled, or an earlier attempt ran and its reply was not recorded. Nothing was run again; reload to see the current model.' };
+    const STOPPED_REPLY = 'That change was stopped before it was saved.';
+    /** A press whose first provider call is held, then stopped there: admitted, nothing written yet. */
+    const stoppedBeforeWrite = async () => {
+      const press = await propose();
+      let release!: () => void;
+      holdProvider = new Promise<void>((resolve) => { release = resolve; });
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: STOPPED_REPLY }]];
+      const before = calls.length;
+      const pending = post(press);
+      await vi.waitFor(() => expect(calls.length).toBe(before + 1));
+      const stop = await stopAsTheRpcDerives(String(press.turn_id));
+      release();
+      const turn = await pending;
+      // What the AI read of its own apply after the Stop: the tool answer on the reply call.
+      const told = ((calls.at(-1)!.input ?? []) as Json[]).filter((i) => i.type === 'function_call_output' && i.call_id === 'apply')
+        .map((i) => JSON.parse(String(i.output)) as Json);
+      return { press, stop, turn, told };
+    };
+    /** A press whose change has committed (one register) and whose reply call is held, then stopped there. */
+    const stoppedAfterCommit = async () => {
+      const press = await propose();
+      let release!: () => void;
+      holdProvider = new Promise<void>((resolve) => { release = resolve; });
+      holdWhen = afterTool;
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved: the oven costs £2,500.' }]];
+      const pending = post(press);
+      await vi.waitFor(() => expect(registered).toHaveLength(1));
+      const runs = storedRuns();
+      const stop = await stopAsTheRpcDerives(String(press.turn_id));
+      release();
+      return { press, stop, runs, turn: await pending };
+    };
+
+    it('C14 (7): a Stop while the press’s first call runs, before any write: its typed answer; the AI’s apply is refused TURN_STOPPED, written false; the turn writes nothing and claims no receipt; a resend replays with no call or write; the card stays held and a new press applies it once', async () => {
+      // The fence half (tombstone, nothing committed) is the row above (DL 93d79c3e 09:40Z); this row pins the turn's own outcome.
+      const { press, stop, turn, told } = await stoppedBeforeWrite();
+      expect(stop.statusCode, stop.body).toBe(200);
+      expect(stop.json()).toEqual({ stopped: true, claimed: true, already_committed: false, scenario_id: SCENARIO, turn_id: press.turn_id, request_id: 'req-stop' });
+      expect(turn.statusCode, turn.body).toBe(200);
+      const t = turn.json() as Json;
+      // Today the stopped turn answers as a recorded turn with no error of its own; the refused write is typed on its tool call,
+      // and the reply is the AI's words, untouched.
+      expect(t).toMatchObject({ durability: 'recorded', error: null, receipts: [], assistant_text: STOPPED_REPLY });
+      expect(t._agent.tool_calls).toEqual([{ name: 'apply_change', outcome: 'refused', refusal: 'registration_refused' }]);
+      expect(told).toEqual([expect.objectContaining({ status: 'refused', reason: 'registration_refused', data: { code: 'TURN_STOPPED', written: false } })]);
+      expect([registered.length, figure('oven_price')]).toEqual([0, null]);
+      const callsBefore = calls.length;
+      const again = await post(press);
+      expect(again.statusCode, again.body).toBe(200);
+      expect(again.json()).toMatchObject({ durability: 'replayed', error: null, receipts: [], assistant_text: STOPPED_REPLY });
+      expect([calls.length, registered.length], 'a resend calls no model and writes nothing').toEqual([callsBefore, 0]);
+      // The Stop ended that turn only: the card is still held, and a new press applies it once, with the person's receipt.
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_again' }], [{ type: 'message', text: 'Saved.' }]];
+      const repress = await post({ ...press, turn_id: randomUUID() });
+      expect(repress.statusCode, repress.body).toBe(200);
+      expect((repress.json() as Json).receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
+      expect([registered.length, figure('oven_price')]).toEqual([1, 2500]);
+    });
+
+    // FINDING (C14 (7), not fixed here): after a Stop the AI reads SAVE_REFUSED_AFTER_APPROVAL (program-tools.ts:255-256), said for
+    // every registration refusal, whose last sentence is "Pressing the card again would be refused the same way." The row above
+    // shows a new press applies the card. it.fails turns red once a TURN_STOPPED refusal stops telling the AI so.
+    it.fails('FINDING C14 (7): after a Stop, the AI is never told that pressing the card again would be refused', async () => {
+      const { told } = await stoppedBeforeWrite();
+      expect(told).toHaveLength(1);
+      expect(String(told[0]!.detail)).not.toContain('Pressing the card again would be refused');
+    });
+
+    it('C14 (7): a Stop while the press waits on the scenario’s slot, before its fence claim (taken after the slot and the start reads), is refused "That turn could not be stopped." with no tombstone and never says it cancelled; the press then runs and saves once, with its receipt', async () => {
+      const press = await propose();
+      let release!: () => void;
+      holdProvider = new Promise<void>((resolve) => { release = resolve; });
+      outputs = [[{ type: 'message', text: 'First answer.' }], [{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved.' }]];
+      const before = calls.length;
+      const first = typed('First question.');
+      await vi.waitFor(() => expect(calls.length).toBe(before + 1));
+      const waiting = post(press);
+      // The press holds its claim and waits on the slot the first turn holds: it has no place in the fence yet.
+      await vi.waitFor(() => expect(turnRows.has(`${press.turn_id}:claim`)).toBe(true));
+      expect(fenceRows.has(`${SCENARIO}:${press.turn_id}`)).toBe(false);
+      const stop = await stopTurn(String(press.turn_id));
+      expect(stop.statusCode, stop.body).toBe(404);
+      expect(stop.json()).toEqual({ error: { code: 'TURN_STOP_UNKNOWN_SCENARIO', message: 'That turn could not be stopped.', source: 'cee', request_id: 'req-stop' } });
+      expect(fenceRows.has(`${SCENARIO}:${press.turn_id}`), 'no tombstone was recorded').toBe(false);
+      release();
+      const [a, b] = await Promise.all([first, waiting]);
+      expect([a.statusCode, b.statusCode]).toEqual([200, 200]);
+      expect(b.json()).toMatchObject({ durability: 'recorded', error: null });
+      expect((b.json() as Json).receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
+      expect([registered.length, figure('oven_price')]).toEqual([1, 2500]);
+    });
+
+    it('C14 (8): a Stop after the press’s change committed, while its reply is written: the tombstone is recorded and nothing is rolled back or said to be; the turn’s answer carries its own receipt, one revision; a resend replays with no call or write; once the answer row exists a Stop reads already_committed true', async () => {
+      const { press, stop, runs, turn } = await stoppedAfterCommit();
+      expect(stop.statusCode, stop.body).toBe(200);
+      // The Stop says what it recorded, and nothing else (its already_committed: the FINDING below).
+      expect(Object.keys(stop.json())).toEqual(['stopped', 'claimed', 'already_committed', 'scenario_id', 'turn_id', 'request_id']);
+      expect(stop.json()).toMatchObject({ stopped: true, claimed: true, turn_id: press.turn_id });
+      expect(fenceRows.get(`${SCENARIO}:${press.turn_id}`)?.stopped_at, 'the tombstone').not.toBeNull();
+      expect(turn.statusCode, turn.body).toBe(200);
+      const t = turn.json() as Json;
+      expect(t).toMatchObject({ durability: 'recorded', error: null, assistant_text: 'Saved: the oven costs £2,500.' });
+      expect(t.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', mutation_id: 'm_1', authorised_by: 'person' })]);
+      expect([registered.length, storedRuns(), figure('oven_price')], 'the committed change stands: one revision, its own Run').toEqual([1, runs, 2500]);
+      const callsBefore = calls.length;
+      const again = await post(press);
+      expect(again.statusCode, again.body).toBe(200);
+      // A replay's receipts are an open item (ALPHA-PLAN C14 (8), order 4): not pinned here.
+      expect(again.json()).toMatchObject({ durability: 'replayed', error: null, assistant_text: 'Saved: the oven costs £2,500.' });
+      expect([calls.length, registered.length], 'a resend calls no model and writes nothing').toEqual([callsBefore, 1]);
+      // CONTRAST, on the RPC's derivation: once the turn's own answer row exists, a Stop reads already_committed true.
+      expect((await stopAsTheRpcDerives(String(press.turn_id))).json()).toMatchObject({ stopped: true, claimed: true, already_committed: true });
+    });
+
+    // FINDING (C14 (8), not fixed here): `already_committed` is whether a conversation row with the Stop's own turn id exists. A core
+    // press commits its change under its registration id (`registrationTurnId(scenario, operation)`) and writes its own answer row only
+    // after the reply, so a Stop between the two reads false, which Docs/v5/turn-fence.md:63 words as "It was cancelled before it was
+    // saved." (the UI's own mapping is not checked here). it.fails turns red once that Stop says the change was already saved.
+    it.fails('FINDING C14 (8): a Stop after the press’s change committed says it was already committed', async () => {
+      const { stop } = await stoppedAfterCommit();
+      expect(registered).toHaveLength(1);
+      expect(stop.json()).toMatchObject({ already_committed: true });
+    });
+
+    it('C14 (8, 9): a resend of the same press while the original still holds its claim past the wait: 409 TURN_OUTCOME_UNKNOWN, durability unknown, never "nothing saved", answered while the original still runs; the original then records its one write, and a later resend replays it', async () => {
+      await withShortClaimWait(async () => {
+        const press = await propose();
+        let release!: () => void;
+        holdProvider = new Promise<void>((resolve) => { release = resolve; });
+        holdWhen = afterTool;
+        outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved: the oven costs £2,500.' }]];
+        let originalAnswered = false;
+        const original = post(press).then((r) => { originalAnswered = true; return r; });
+        await vi.waitFor(() => expect(registered).toHaveLength(1));
+        const callsBefore = calls.length;
+        const resend = await post(press);
+        expect(originalAnswered, 'no freeze: the resend answers while the original still runs').toBe(false);
+        expect(resend.statusCode, resend.body).toBe(409);
+        expect(resend.json()).toMatchObject({ durability: 'unknown', receipts: [], error: OUTCOME_UNKNOWN });
+        expect([calls.length, registered.length], 'the resend runs nothing again').toEqual([callsBefore, 1]);
+        release();
+        const o = await original;
+        expect(o.statusCode, o.body).toBe(200);
+        expect((o.json() as Json).receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
+        expect((await post(press)).json()).toMatchObject({ durability: 'replayed', error: null });
+        expect(registered, 'one write for that turn id').toHaveLength(1);
+      });
+    });
+
+    it('C14 (8) + C7: the change committed, its reply failed, and the failed continuation could not be recorded: 502, durability unknown, the saved receipt, never "nothing saved"; a resend writes nothing again and calls no model (409 TURN_OUTCOME_UNKNOWN)', async () => {
+      await withShortClaimWait(async () => {
+        const press = await propose();
+        outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'refuse' }]];
+        const append = store.append.getMockImplementation()!;
+        // Only the failed continuation's own row (its turn id, response_emitted false: core-turn.ts's catch) cannot be written.
+        store.append.mockImplementation(async (write: Json) => {
+          if (write.turn_id === press.turn_id && write.response_emitted === false) throw new Error('store down');
+          return append(write);
+        });
+        let r!: Awaited<ReturnType<typeof post>>;
+        try { r = await post(press); } finally { store.append.mockImplementation(append); }
+        expect(r.statusCode, r.body).toBe(502);
+        const j = r.json() as Json;
+        expect(j).toMatchObject({ durability: 'unknown', error: { code: 'UPSTREAM_ERROR', retry_safe: false, nothing_saved: false,
+          message: 'The saved change is kept, but the reply didn’t arrive. Send a new message to continue.' } });
+        expect(j.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', mutation_id: 'm_1', authorised_by: 'person' })]);
+        // CONTRAST: the claim stands and no answer row was written (with one, the resend replays REPLY_NOT_DELIVERED: the C7 row below).
+        expect([turnRows.has(`${press.turn_id}:claim`), turnRows.has(String(press.turn_id))]).toEqual([true, false]);
+        const callsBefore = calls.length;
+        const again = await post(press);
+        expect(again.statusCode, again.body).toBe(409);
+        expect(again.json()).toMatchObject({ durability: 'unknown', receipts: [], error: OUTCOME_UNKNOWN });
+        expect([calls.length, registered.length, figure('oven_price')], 'nothing run or written again').toEqual([callsBefore, 1, 2500]);
+      });
+    });
+  });
+
   describe('DL 93d79c3e (marketing on 05745055): a card press applies THAT card, whatever id the AI sends', () => {
     /** A second card on the same item, held beside the first: their later answer. */
     const LATER = 'Actually it would be £2,700.';
