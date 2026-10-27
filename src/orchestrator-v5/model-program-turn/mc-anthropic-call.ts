@@ -9,11 +9,13 @@
  * line asking for the bare object, and CEE's own parse → compile → repair loop judges the reply exactly as it judges OpenAI's.
  */
 import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai-v7';
 import { assertProviderAllowed, recordProviderAttempt, recordProviderReturnedModel, recordProviderUsage } from '../../adapters/llm/provider-policy.js';
 import type { CallOutput, ResponsesCall } from './draft.js';
 
 export const mcDraftModel = (): string | null =>
-  (process.env['MC_DRAFT_PROVIDER'] === 'anthropic' ? process.env['MC_DRAFT_MODEL'] || 'claude-opus-5-5' : null);
+  (process.env['MC_DRAFT_PROVIDER'] === 'anthropic' ? process.env['MC_DRAFT_MODEL'] || 'claude-opus-5-5'
+    : process.env['MC_DRAFT_PROVIDER'] === 'deepseek' ? process.env['MC_DRAFT_MODEL'] || 'deepseek-v4-pro' : null);
 
 /** MC_OPENAI_MODEL / MC_OPENAI_EFFORT: the OpenAI drafter call with another model or effort (measurement only); unset, unchanged. */
 export function mcOpenAiBody<B extends { model?: unknown; reasoning?: unknown }>(body: B): B {
@@ -74,6 +76,46 @@ export function anthropicResponsesCall(model: string): ResponsesCall {
         // providerErrorOf reads status / type / code / requestID: give it Anthropic's error type as `type`.
         const e = err as { error?: { error?: { type?: string } }; type?: string };
         if (err !== null && typeof err === 'object' && e.type === undefined && e.error?.error?.type) Object.assign(err, { type: e.error.error.type });
+        throw err;
+      }
+    }
+  };
+}
+
+/**
+ * MC_DRAFT_PROVIDER=deepseek: the same drafter call to DeepSeek's OpenAI-compatible Chat Completions (27 Oct). DeepSeek has no
+ * strict json_schema ("This response_format type is unavailable now"), so, as for Claude, the same schema goes as text with
+ * json_object mode, and CEE's parse -> compile -> repair loop judges the reply. Ledgered as a `deepseek` row.
+ */
+export function deepseekResponsesCall(model: string): ResponsesCall {
+  const client = new OpenAI({ apiKey: process.env['DEEPSEEK_API_KEY'], baseURL: 'https://api.deepseek.com', maxRetries: 0, timeout: 600_000 });
+  return async (body): Promise<CallOutput> => {
+    const format = body.text?.format as { name?: string; schema?: Record<string, unknown> } | undefined;
+    const system = `${String(body.instructions)}\n\nReply with ONE JSON object and nothing else (no prose, no code fences). It must conform exactly to this JSON schema "${format?.name ?? 'canonical_model'}" (strict: every property is required, no other properties; use null where the schema allows it):\n${JSON.stringify(format?.schema ?? {})}`;
+    const messages = [{ role: 'system' as const, content: system },
+      ...(body.input as { role: 'user' | 'assistant'; content: string }[]).map((m) => ({ role: m.role, content: m.content }))];
+    for (let tries = 0; ; tries += 1) {
+      const handle = assertProviderAllowed('deepseek' as never, 'model-program.draft', { model, purpose: 'canonical_draft' });
+      try {
+        const r = await client.chat.completions.create({ model, messages, response_format: { type: 'json_object' }, max_tokens: 32_000 });
+        const u = (r.usage ?? {}) as unknown as Record<string, number>;
+        const raw = r.choices[0]?.message?.content ?? '';
+        const bare = raw === '' ? null : bareJson(raw);
+        recordProviderUsage(handle, { input_tokens: u['prompt_tokens'] ?? 0, output_tokens: u['completion_tokens'] ?? 0,
+          input_tokens_details: { cached_tokens: u['prompt_cache_hit_tokens'] ?? 0 }, deepseek_usage: { ...u }, mc_cleanup: bare?.cleanup ?? null });
+        recordProviderReturnedModel(handle, r.model);
+        const stop = r.choices[0]?.finish_reason ?? null;
+        recordProviderAttempt(handle, { transport_status: 200, result: String(stop), outcome: 'success', retry: false });
+        return { text: bare?.text ?? null, status: stop === 'stop' ? 'completed' : String(stop), incomplete: stop === 'length' ? 'max_output_tokens' : null,
+          usage: { ...u, mc_cleanup: bare?.cleanup ?? null } };
+      } catch (err) {
+        const s = (err as { status?: unknown })?.status;
+        if (process.env['MC_DEBUG']) console.error('MC deepseek error:', s, err instanceof Error ? err.message.slice(0, 600) : err);
+        recordProviderUsage(handle, undefined);
+        const again = tries === 0 && (typeof s === 'number' ? s >= 500 : !(typeof s === 'number'));
+        recordProviderAttempt(handle, { transport_status: typeof s === 'number' ? s : null, result: err instanceof Error ? err.name : 'error',
+          outcome: s === 429 ? 'rate_limited' : typeof s === 'number' ? 'http_error' : 'transport_error', retry: again });
+        if (again) continue;
         throw err;
       }
     }

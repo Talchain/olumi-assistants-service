@@ -846,7 +846,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
   };
 
   app.post(CORE_TURN_PATH, { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, (req: FastifyRequest, reply: FastifyReply) =>
-    runWithProviderPolicy({ ...OPENAI_ONLY('agent_core_turn'), ...(process.env['MC_DRAFT_PROVIDER'] === 'anthropic' ? { allowed: new Set(['openai', 'anthropic'] as const) } : {}), request_id: String(req.id),
+    runWithProviderPolicy({ ...OPENAI_ONLY('agent_core_turn'), ...(['anthropic', 'deepseek'].includes(process.env['MC_DRAFT_PROVIDER'] ?? '') ? { allowed: new Set(['openai', process.env['MC_DRAFT_PROVIDER']] as never[]) } : {}), request_id: String(req.id),
       scenario_id: (req.body as { scenario_id?: string })?.scenario_id, turn_id: (req.body as { turn_id?: string })?.turn_id }, () => handle(req, reply)));
 
   log.info({ event: 'agent_lane.core_route_mounted' }, `POST ${CORE_TURN_PATH} mounted`);
