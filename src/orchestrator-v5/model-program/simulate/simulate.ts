@@ -57,12 +57,17 @@
  *   - Drivers: each uncertain quantity the option's goals and limits depend on, in model order, except any quantity an option
  *     sets (a switch is a choice, never an uncertainty: gold-model ruling 5). joint_if_low / joint_if_high are
  *     joint_within_limits over the bottom and top third of that quantity's draws.
+ *   - What a miss looks like (SC7, `missed.ts`), always: per option, of the draws where it misses, how often each aim fails,
+ *     a goal's value where it falls short, and the figures (by those same thirds) and risks that go clearly more with a miss
+ *     than with the draws where it does not miss. Counted from what each draw already holds: no extra run, and nothing new
+ *     held per draw.
  *   - Per-draw results (SC0), only when `perDraw` asks: every draw's own value, target and met for each goal and limit, the
  *     headline per draw, which risks fired, and each ranged input's draws, all on the same draw indices (`result.ts` PerDraw).
  *     They are what the paired comparison, value of information, uncertainty share, failure summaries and a tipping point
  *     read; they never change a result and are never stored with a Run.
  */
 import type { Aggregation, Cmp, ExecutableModel, Goal, Limit, Option, OptionSet, Quantity, Reading, Risk, Window } from '../executable.js';
+import { summariseMisses } from './missed.js';
 import { pairedDifference, wilson95, type PairedDifference } from './paired.js';
 import { standardNormals, uniforms } from './prng.js';
 import { fromStandardNormal, fromUniform, rangeLaw, truncatedStandardNormal, type RangeDist, type SpreadReading } from './range-law.js';
@@ -633,6 +638,9 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
   /** The headline per draw (1, 0, −1 outside the domain), kept for the paired gaps (SC2); each risk's firing only when asked (SC0). */
   const headline = new Int8Array(draws);
   const firedIn = keep ? c.risks.map(() => new Int8Array(draws)) : undefined;
+  /** SC7: each risk's occurrence read and fired, in every draw and in the misses (missed.ts). */
+  const riskRead = new Int32Array(c.risks.length), riskFired = new Int32Array(c.risks.length);
+  const missRead = new Int32Array(c.risks.length), missFired = new Int32Array(c.risks.length);
   /** The values that left their domain in this draw, once each (`off` marks them), and how (`why`: 1 below its floor, 2 above
    *  its ceiling, 3 not a finite number). */
   const off = new Uint8Array(n), why = new Uint8Array(n), left: number[] = [];
@@ -712,6 +720,13 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
     within[d] = allLimits;
     both[d] = allGoals & allLimits;
     headline[d] = badGoal || badLimit ? -1 : both[d]!;
+    // SC7: a risk counts where its occurrence was read inside the domain (fired 0 or 1), overall and where the draw misses.
+    for (let r = 0; r < fired.length; r++) {
+      const f = fired[r]!;
+      if (f !== 0 && f !== 1) continue;
+      riskRead[r]++; riskFired[r] += f;
+      if (both[d] === 0) { missRead[r]++; missFired[r] += f; }
+    }
     // fired: 1 fired, 0 not, −1 never read (beyond the horizon), 2 its chance outside its domain (said as −2).
     if (firedIn !== undefined) c.risks.forEach((_, i) => { firedIn[i]![d] = fired[i] === 2 ? -2 : fired[i]!; });
 
@@ -767,6 +782,13 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
       joint_if_high: meanOver(both, thirds[slot]!.high),
     })),
     outside,
+    when_missed: summariseMisses({ draws, bad: bothBad, both,
+      goals: c.goals.map((g, i) => ({ id: g.id, met: goals[i]!.met, value: goals[i]!.agg, atLeast: g.cmp === '>=' || g.cmp === '>', ratio: g.per !== undefined })),
+      limits: c.limits.map((l, i) => ({ id: l.id, met: limits[i]!.met })),
+      figures: thirds.length === 0 || Math.floor(draws / 3) === 0 ? [] : p.drivers.map((slot) => ({ quantity: c.ids[c.ranged[slot]!.q]!, low: thirds[slot]!.low, high: thirds[slot]!.high })),
+      // Only a risk on what this option's aims rest on: one elsewhere cannot go with a miss.
+      risks: c.risks.flatMap((r, i) => ([...p.goalReach, ...p.limitReach].some((on) => on.has(r.on))
+        ? [{ risk_id: r.id, read: riskRead[i]!, fired: riskFired[i]!, readInMisses: missRead[i]!, firedInMisses: missFired[i]! }] : [])) }),
   };
 }
 
@@ -793,12 +815,15 @@ function withheldList(options: readonly OptionResult[]): WithheldChanceEntry[] {
  * (a calculation or a stock can overflow with no end declared, 1e200 × 1e200; a range's draw can too; a ratio's divisor may be
  * 0; the shape cannot say whether one does) except a figure (finite, compile) with no floor or ceiling, not a risk's chance and
  * with no risk on it: a set gives it another value that is inside its own ends or already outside (Codex, C14, 27 Oct);
- * each set's timing; eight a draw for each risk (its reset, timing, occurrence, chance, uniform and severity); and the sorts (each ranged input's terciles, each
- * condition's quantiles per option); and each pair of options compared once in every draw (SC2's paired differences, k(k−1)/2
+ * each set's timing; ten a draw for each risk (its reset, timing, occurrence, chance, uniform and severity, and SC7's two
+ * counts); a draw's read of each condition's met and two of each ranged input's thirds (the drivers' and SC7's misses); the
+ * sorts (each ranged input's terciles, each condition's quantiles per option, and each goal's values where it falls short,
+ * SC7); and each pair of options compared once in every draw (SC2's paired differences, k(k−1)/2
  * pairs: their work grows with the square of the option count, C14, 27 Oct). `bytes` is what the run holds at once: each ranged input's draws with its terciles
- * (16 per draw, the sort's index included), each risk's uniforms, every option's tallies and kept headline, one quantile copy and one
- * option's values; and, for each condition of each option, 72 for each value that can leave (its badIds and causes entries
- * and the two name lists its chance and summary keep, as measured).
+ * (16 per draw, the sort's index included), each risk's uniforms, every option's tallies and kept headline, one quantile copy (SC7's
+ * values where a goal falls short are fewer, and sorted before it) and one option's values; and, for each condition of each
+ * option, 72 for each value that can leave (its badIds and causes entries and the two name lists its chance and summary keep,
+ * as measured).
  */
 export function costOf(model: ExecutableModel, draws: number): { readonly operations: number; readonly bytes: number } {
   const times = model.periods + 1, options = model.options.length, checks = [...model.goals, ...model.limits];
@@ -811,9 +836,9 @@ export function costOf(model: ExecutableModel, draws: number): { readonly operat
     + (q.stock === undefined ? 0 : 1 + q.stock.inflows.length + q.stock.outflows.length), 0);
   const windows = checks.reduce((s, k) => s + 2 * (k.window.periods + 1), 0);
   const sets = model.options.reduce((s, o) => s + o.sets.length, 0);
-  const sorts = Math.ceil(Math.log2(draws + 1)) * (ranged + options * checks.length);
+  const sorts = Math.ceil(Math.log2(draws + 1)) * (ranged + options * (checks.length + model.goals.length));
   const pairs = (options * (options - 1)) / 2;
-  return { operations: draws * (options * (times * reads + windows + 8 * walks + 8 * model.risks.length) + sets * (times + 1) + sorts + pairs),
+  return { operations: draws * (options * (times * reads + windows + 8 * walks + 10 * model.risks.length + checks.length + 2 * ranged) + sets * (times + 1) + sorts + pairs),
     bytes: draws * (16 * ranged + 8 * model.risks.length + options * (9 * checks.length + 4) + 8) + 8 * times * model.quantities.length + 72 * options * walks };
 }
 

@@ -47,20 +47,22 @@ const tiny = (extra = 0, ranged = 1): ExecutableModel => ({
 describe('the Run admission limit (alpha G11)', () => {
   it('costOf, by hand: every read a visit makes, the windows, the sorts and what the run holds', () => {
     // 10 draws × [1 option × (2 times × 6 reads (a 1, b 1, s 1 + 2 parts, t 1) + window 2 × 2 + the goal's walk 8 × 2 values that
-    // can leave (b's draw and s; the figures a and t have no end and no risk, so cannot)) + sorts ⌈log2 11⌉ = 4 × (1 ranged + 1
-    // condition)] = 10 × 40. Bytes: 10 × (16 × 1 ranged + 1 option × (9 × 1 condition + 4: joint, within, both and the kept
+    // can leave (b's draw and s; the figures a and t have no end and no risk, so cannot) + 1 condition's met + 2 × 1 ranged
+    // input's thirds, the drivers' and SC7's) + sorts ⌈log2 11⌉ = 4 × (1 ranged + 1 option × (1 condition + 1 goal's misses,
+    // SC7))] = 10 × 47. Bytes: 10 × (16 × 1 ranged + 1 option × (9 × 1 condition + 4: joint, within, both and the kept
     // headline, SC2) + 8 quantile copy) + 8 × 2 times × 4 quantities + 72 × 2 values that can leave = 370 + 64 + 144.
-    expect(costOf(tiny(), 10)).toEqual({ operations: 400, bytes: 578 });
+    expect(costOf(tiny(), 10)).toEqual({ operations: 470, bytes: 578 });
     // A sum's parts are work, however few quantities hold them (Codex r1): 1,000 more parts, 2 times × 1,000 more reads a draw.
-    expect(costOf(tiny(1000), 10).operations).toBe(400 + 10 * 2 * 1000);
-    // A risk on s (Codex r2–r3): 8 at each of 2 times and 8 a draw, so 10 × 24 more operations, and its uniforms, 8 bytes a draw.
-    // Its chance `a` can leave [0, 1] (C14, 27 Oct): the goal's walk over it, 8 a draw (10 × 8 more) and 72 bytes.
+    expect(costOf(tiny(1000), 10).operations).toBe(470 + 10 * 2 * 1000);
+    // A risk on s (Codex r2–r3): 8 at each of 2 times and 10 a draw (8, and SC7's two counts), so 10 × 26 more operations, and
+    // its uniforms, 8 bytes a draw. Its chance `a` can leave [0, 1] (C14, 27 Oct): the goal's walk over it, 8 a draw (10 × 8
+    // more) and 72 bytes.
     const risky: ExecutableModel = { ...tiny(), risks: [{ id: 'k', occurrence: 'a', severity: 'a', effect_on: 's', mode: 'add', from_period: 0 }] };
-    expect(costOf(risky, 10)).toEqual({ operations: 400 + 240 + 80, bytes: 578 + 80 + 72 });
+    expect(costOf(risky, 10)).toEqual({ operations: 470 + 260 + 80, bytes: 578 + 80 + 72 });
     // CONTRAST, the same risk on the figure t: t can now leave too (a shock can take it past what a number holds), so the walk
     // covers two more values (a and t), 10 × 16 more and 144 bytes.
     const shocked: ExecutableModel = { ...tiny(), risks: [{ id: 'k', occurrence: 'a', severity: 'a', effect_on: 't', mode: 'add', from_period: 0 }] };
-    expect(costOf(shocked, 10)).toEqual({ operations: 400 + 240 + 160, bytes: 578 + 80 + 144 });
+    expect(costOf(shocked, 10)).toEqual({ operations: 470 + 260 + 160, bytes: 578 + 80 + 144 });
   });
 
   it('the limits by name: 450 ranged inputs pass MAX_BYTES while their work fits; 1,000,000 parts pass MAX_OPERATIONS', () => {
