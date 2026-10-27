@@ -193,6 +193,8 @@ export type StockRelationT = z.infer<typeof StockRelation>;
 // ── Goals, limits and preferences ────────────────────────────────────────────────────────────────────────────────────────
 
 export const CMPS = ['>=', '<=', '>', '<'] as const;
+/** Each comparison in plain words, the one phrase table every card says it with (never an operator on a card). */
+export const CMP_WORDS: Readonly<Record<(typeof CMPS)[number], string>> = { '>=': 'at least', '<=': 'at most', '>': 'more than', '<': 'less than' };
 /** THE QUESTION BINDS THE CALCULATION (plan r3 #1; BATCH0-CHANGE-GOAL-DECISION): a level, or a change from a stated reference. */
 export const GOAL_FRAMES = ['level', 'change_abs', 'change_rel'] as const;
 export const REFERENCE_KINDS = ['now', 'option', 'value'] as const;

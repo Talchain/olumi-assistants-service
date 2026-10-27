@@ -18,7 +18,7 @@
  */
 import { ProposalChangeSchema, type ProposalChange } from '../agent-lane/proposal.js';
 import { readingGroups } from './reading-groups.js';
-import { CanonicalModel, HOST_OWNED_FIELDS, type CanonicalModelT } from '../model-program/canonical.js';
+import { CanonicalModel, CMP_WORDS, HOST_OWNED_FIELDS, type CanonicalModelT } from '../model-program/canonical.js';
 import { norm } from '../model-program/compile.js';
 import { linkTargets } from '../model-program/links.js';
 
@@ -278,8 +278,8 @@ export function readingOf(model: CanonicalModelT, opts: { readonly words: readon
 }
 
 // ── The card's words, rendered from the data (no wording invented) ────────────────────────────────────────────────────
-/** Each value of a field said in plain words: the one phrase table (never an operator or a code on the card). */
-const CMP_WORDS: Record<string, string> = { '>=': 'at least', '<=': 'at most', '>': 'more than', '<': 'less than' };
+/** Each value of a field said in plain words: the one phrase table (never an operator or a code on the card); a
+ *  comparison's words are the model's own table (`CMP_WORDS`), shared with the canvas's limit cards. */
 const RANGE_WORDS: Record<string, string> = { bounds: 'firm ends', plausible: 'a plausible range' };
 /** A link's direction, before the name of what it moves (Paul 24 Oct, "Arrow + words": "↓ lowers Churn"). */
 const DIRECTION_WORDS: Record<string, string> = { raises: '↑ raises', lowers: '↓ lowers' };

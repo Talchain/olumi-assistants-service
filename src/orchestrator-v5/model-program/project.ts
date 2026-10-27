@@ -4,10 +4,13 @@
  * The display shows EVERY record; the calculation is the compiled subset (PL correction 1: hiding meaningful uncalculated
  * content repeats today's error). Each record appears exactly once in `items`, saying where it is drawn, whether it is IN
  * the calculation (and why not), and who authored it:
- *  · quantities are cards (an input is a factor, a derived quantity an outcome), except a quantity whose only use is a
- *    coefficient (drawn on its link), a target, bound or window length (on its goal or limit card), an option's value (on
- *    its option card), or a risk's chance or severity (on its risk card);
- *  · relations and effect terms are links; goals, options and risks are their own cards; limits are `goal_constraints`;
+ *  · quantities are cards (an input is a factor, a derived quantity an outcome, and a coefficient, a mechanism's size, a
+ *    factor whether given or worked out: Paul's test 27 Oct drew three worked-out sizes as outcomes), except a quantity
+ *    whose only use is a coefficient (drawn on its link), a target, bound or window length (on its goal or limit card), an
+ *    option's value (on its option card), or a risk's chance or severity (on its risk card);
+ *  · relations and effect terms are links; goals, options and risks are their own cards; a limit with one figure on a whole
+ *    quantity is a `goal_constraint`, which the canvas draws as the goal card's limit, never also a card (both drew the
+ *    £200,000 budget twice on reopen, 27 Oct); every other limit is its own card, linked from what it measures;
  *  · qualitative records (claims, evidence, assumptions, dissent, conditions, left out) and preferences are not cards: the
  *    canvas draws them by id from the living model (`living_model.canonical`), so their items have no `shown_as` place.
  *    Their `concerns` stay in the manifest, never as links: a GraphV3 link is a causal claim, and a note is not one.
@@ -20,13 +23,14 @@
  * A link carries NO strength (W3b, 26 Oct): the model holds no β for any link, and a bare ±1 drew every link at the canvas's
  * strongest band ("Very strong"). A link's sign is its `effect_direction`, and only where the model gives one; a causal
  * link's size is its coefficient in natural units (`natural_effect`, `coefficient_id`); a definition's part and a goal's
- * measure hold by arithmetic, so they say no size at all.
+ * or limit's measure hold by arithmetic, so they say no size at all. The question's link to an option and an option's link
+ * to what it sets are not causal claims, and the model states no sign for them, so they carry none.
  * The projection is derived, never read back: the canonical model is the one saved meaning.
  */
 import { EventRiskV1 } from '../../schemas/event-risk.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../utils/goal-threshold-cap.js';
 import type { CanonicalModelT, CanonicalQuantityT, QualitativeFamilyT } from './canonical.js';
-import { QUALITATIVE_FAMILIES } from './canonical.js';
+import { CMP_WORDS, QUALITATIVE_FAMILIES } from './canonical.js';
 import { compile, isApproximate, normalise, rangeDistOf, readRange, type CompileResult, type LawReading } from './compile.js';
 import { parseUnit, sameDims } from './units.js';
 import { directionUsed, rateOf as rateOfLink } from './links.js';
@@ -129,8 +133,10 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const uses = new Map<string, Set<string>>();
   const use = (id: string, how: string) => { if (Q.has(id)) uses.set(id, new Set([...(uses.get(id) ?? []), how])); };
   const hostOf = new Map<string, { node?: string; edge?: string }>();
-  /** A window's length or origin timing is consumed into its window, so it is in the calculation exactly when its owner is. */
-  const windowOwner = new Map<string, string>();
+  /** A window's length or origin timing is consumed into its window, so it is in the calculation exactly when one of its
+   *  owners is (a goal and a limit read over the same window both own it: the limit's never replaces the goal's). */
+  const windowOwners = new Map<string, string[]>();
+  const ownWindow = (t: string, owner: string) => windowOwners.set(t, [...(windowOwners.get(t) ?? []), owner]);
   /** A per-unit rate is drawn ONE way, on its driver's link (`links.ts`). */
   const rateOf = (r: CanonicalModelT['relations'][number]) => rateOfLink(r, Q);
   for (const r of model.relations) {
@@ -147,18 +153,20 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     use(g.measure.quantity, 'node');
     if (has(g.measure.per)) use(g.measure.per, 'node');
     for (const t of [g.measure.target, g.measure.window?.periods, g.measure.window?.origin_offset]) if (has(t)) { use(t, 'on_goal'); hostOf.set(t, { node: g.id }); }
-    for (const t of [g.measure.window?.periods, g.measure.window?.origin_offset]) if (has(t)) windowOwner.set(t, g.id);
+    for (const t of [g.measure.window?.periods, g.measure.window?.origin_offset]) if (has(t)) ownWindow(t, g.id);
   }
   for (const l of model.limits) if (l.measure) {
     const lm = l.measure;
     use(lm.quantity, 'node');
     if (has(lm.per)) use(lm.per, 'node');
     for (const t of [lm.bound, lm.window?.periods, lm.window?.origin_offset]) if (has(t)) { use(t, 'on_limit'); hostOf.set(t, { node: lm.quantity }); }
-    for (const t of [lm.window?.periods, lm.window?.origin_offset]) if (has(t)) windowOwner.set(t, l.id);
+    for (const t of [lm.window?.periods, lm.window?.origin_offset]) if (has(t)) ownWindow(t, l.id);
   }
   for (const o of model.options) for (const s of o.sets) { use(s.quantity, 'node'); if (has(s.to)) { use(s.to, 'on_option'); hostOf.set(s.to, { node: o.id }); } }
   for (const k of model.risks) { use(k.effect_on, 'node'); for (const t of [k.occurrence, k.severity]) { use(t, 'on_risk'); hostOf.set(t, { node: k.id }); } }
   const folded = (id: string) => { const u = uses.get(id); return u !== undefined && u.size === 1 && !u.has('node') && hostOf.has(id); };
+  /** A coefficient sizes a mechanism: drawn as one wherever it has a card, given or worked out, never as an outcome. */
+  const isCoefficient = (id: string) => uses.get(id)?.has('coefficient') === true;
 
   /** The shared law's reading: the compiler's disclosure (with the domain) when the quantity is in the run, else the same law
    *  within the same domain (a chance's, a timing's or what the model declares), so a card's spread and centre never change
@@ -216,8 +224,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
         : src === 'cee_inference' ? { threshold_source: 'cee_inference' } : {}) };
   };
 
-  /** What a derived figure is worked out from, by name: its relation's parts, base and drivers, or a stock's start and flows. */
-  const partsOf = new Map(model.relations.map((r) => [r.defines, r.form === 'definition' ? r.parts.map((p) => p.id) : r.form === 'effect' ? [r.base, ...r.terms.map((t) => t.driver)] : [r.start, ...r.inflows, ...r.outflows]] as const));
+  /** What a derived figure is worked out from, by name: its relation's parts, base and drivers, or a stock's start and flows,
+   *  each once (a driver with two terms is still one input: the goal said "Tech leads hired, Tech leads hired", 27 Oct). */
+  const partsOf = new Map(model.relations.map((r) => [r.defines, [...new Set(r.form === 'definition' ? r.parts.map((p) => p.id) : r.form === 'effect' ? [r.base, ...r.terms.map((t) => t.driver)] : [r.start, ...r.inflows, ...r.outflows])]] as const));
   const workedOutWords = (id: string) => {
     const names = (partsOf.get(id) ?? []).map((p) => Q.get(p)?.label ?? p);
     return names.length === 0 ? 'Worked out from its inputs' : `Worked out from ${names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`}`;
@@ -334,8 +343,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       ...(o.author === 'olumi' ? { proposed_by: 'olumi' } : {}),
     });
     items.push({ record_id: o.id, family: 'option', shown_as: { node: o.id }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: o.approval });
-    edges.push({ ...link(DECISION_NODE_ID, o.id, 1, who, inCalc, {}), id: edgeId(DECISION_NODE_ID, o.id) });
-    for (const s of o.sets) if (Q.has(s.quantity)) edges.push({ ...link(o.id, s.quantity, 1, who, inCalc, {}), id: edgeId(o.id, s.quantity) });
+    // Neither link is a causal claim and the model states no sign for either (an option sets a figure, up or down): no sign.
+    edges.push({ ...link(DECISION_NODE_ID, o.id, null, who, inCalc, {}), id: edgeId(DECISION_NODE_ID, o.id) });
+    for (const s of o.sets) if (Q.has(s.quantity)) edges.push({ ...link(o.id, s.quantity, null, who, inCalc, {}), id: edgeId(o.id, s.quantity) });
   }
 
   /**
@@ -360,8 +370,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   // ── quantities ─────────────────────────────────────────────────────────────────────────────────────────────────────
   const controlled = new Set(model.options.flatMap((o) => o.sets.map((s) => s.quantity)));
   for (const q of model.quantities) {
-    const owner = windowOwner.get(q.id);
-    const inCalc = xq.has(q.id) || (owner !== undefined && (xg.has(owner) || xl.has(owner)));
+    const inCalc = xq.has(q.id) || (windowOwners.get(q.id) ?? []).some((owner) => xg.has(owner) || xl.has(owner));
     const who = whoOf(q, q.id);
     const reason = q.status === 'asked' ? `Asked: ${q.question}` : q.status === 'derived' || q.status === 'known' || q.status === 'estimated'
       ? 'Nothing that can be worked out yet uses it.' : `${q.status.replace('_', ' ')}: ${q.basis}`;
@@ -371,7 +380,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       continue;
     }
     nodes.push({
-      id: q.id, kind: q.status === 'derived' ? 'outcome' : 'factor', label: q.label, ...provenanceOf(q), ...quoteOf(q, q.id),
+      id: q.id, kind: q.status === 'derived' && !isCoefficient(q.id) ? 'outcome' : 'factor', label: q.label, ...provenanceOf(q), ...quoteOf(q, q.id),
       ...participation(inCalc || (!notCompiling && inModel.has(q.id) && !OUT_OF_ANALYSIS.has(q.status))),
       ...(q.status !== 'derived' ? { category: controlled.has(q.id) ? 'controllable' : 'observable' } : {}),
       ...observedOf(q),
@@ -439,7 +448,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     items.push({ record_id: r.id, family: 'relation', shown_as: { edge: drawn.join(' ') }, in_calculation: inCalc, why_out: why(inCalc, reason), author: who, approval: r.approval });
   }
 
-  // ── limits: the canvas's goal constraints ──────────────────────────────────────────────────────────────────────────
+  // ── limits: one figure on a whole quantity is a goal constraint; every other limit is its own card ───────────────────
   for (const l of model.limits) {
     const inCalc = xl.has(l.id);
     const who = whoOf(l, l.id);
@@ -447,19 +456,25 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const bound = lm ? Q.get(lm.bound) : undefined;
     const per = compiled.perLimit.find((p) => p.limit_id === l.id);
     const point = bound && has(bound.value) && !(has(bound.low) && bound.low !== bound.high) ? bound.value : null;
-    if (lm && point !== null && !has(lm.per)) {
+    if (lm && bound && point !== null && !has(lm.per)) {
+      // The canvas draws a goal constraint itself, as the goal card's limit: a card as well said it twice on reopen (27 Oct).
       goal_constraints.push({
         constraint_id: l.id, node_id: lm.quantity, operator: lm.cmp.startsWith('>') ? '>=' : '<=', ...(lm.cmp === '<' || lm.cmp === '>' ? { operator_as_stated: lm.cmp } : {}),
-        value: point, label: l.label, unit: bound!.unit, ...(who === 'person' && has(l.quote) ? { source_quote: l.quote.slice(0, 200) } : {}),
+        value: point, label: l.label, unit: bound.unit, ...(who === 'person' && has(l.quote) ? { source_quote: l.quote.slice(0, 200) } : {}),
         provenance: who === 'olumi' ? 'inferred' : 'explicit',
       });
       items.push({ record_id: l.id, family: 'limit', shown_as: { constraint: l.id, on_node: lm.quantity }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: l.approval });
-    } else {
-      // A guardrail with no measure yet, or one whose figure is not given: a text card, never an invented scale.
-      const id = `mp:limit:${l.id}`;
-      nodes.push({ id, kind: 'action', label: `Limit: ${l.label}`, description: lm ? `${l.label} (its figure is not given yet).` : `${l.label} (no measure yet, so the result does not cover it).`, ...provenanceOf(l), ...quoteOf(l, l.id), ...participation(inCalc || (has(lm) && kept(per))) });
-      items.push({ record_id: l.id, family: 'limit', shown_as: { node: id }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: l.approval });
+      continue;
     }
+    // Any other limit is a card, its figure (a range, or a figure per unit) said in the model's own words; never an invented scale.
+    const id = `mp:limit:${l.id}`;
+    const figure = bound && (bound.status === 'known' || bound.status === 'estimated') && (has(bound.value) || (has(bound.low) && has(bound.high))) ? display(bound) : null;
+    const description = !lm ? `${l.label} (no measure yet, so the result does not cover it).` : figure === null ? `${l.label} (its figure is not given yet).`
+      : `${l.label}: ${Q.get(lm.quantity)?.label ?? lm.quantity}${has(lm.per) ? ` per ${Q.get(lm.per)?.label ?? lm.per}` : ''} ${CMP_WORDS[lm.cmp]} ${figure}.`;
+    nodes.push({ id, kind: 'action', label: `Limit: ${l.label}`, description, ...provenanceOf(l), ...quoteOf(l, l.id), ...participation(inCalc || (has(lm) && kept(per))) });
+    // What the limit measures, as a goal's measure is drawn: no size and no sign.
+    if (lm && Q.has(lm.quantity)) edges.push({ ...link(lm.quantity, id, null, who, inCalc, { definitional: true }), id: edgeId(lm.quantity, id) });
+    items.push({ record_id: l.id, family: 'limit', shown_as: { node: id }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: l.approval });
   }
 
   // ── preferences: wishes without a threshold; the canvas draws them from the model ─────────────────────────────────────

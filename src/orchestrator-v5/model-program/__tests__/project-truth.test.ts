@@ -48,11 +48,12 @@ describe('W3b 1 · links say what the model holds: no strength, a sign only wher
   it('capacity-s4: no link carries a strength; each keeps its stated sign; the specialist link keeps its size in tickets', () => {
     const p = draft('capacity-s4.saved.json');
     expect(edgesOf(p).filter((e) => 'strength' in e).map((e) => e.id)).toEqual([]);
-    // Contrast (right before, unchanged): every link's direction, and none on the goal's measure.
+    // Contrast (right before, unchanged): every causal and definitional link's direction, and none on the goal's measure.
+    // The question's and the options' links carry none (27 Oct, Paul's test): the model states no sign for them.
     expect(edgesOf(p).map((e) => [e.id, e.effect_direction ?? null])).toEqual([
       ['weekly_support_capacity__support_capacity_goal', null],
-      ['mp:decision__keep_current_staffing', 'positive'], ['keep_current_staffing__additional_specialists', 'positive'],
-      ['mp:decision__add_one_specialist', 'positive'], ['add_one_specialist__additional_specialists', 'positive'],
+      ['mp:decision__keep_current_staffing', null], ['keep_current_staffing__additional_specialists', null],
+      ['mp:decision__add_one_specialist', null], ['add_one_specialist__additional_specialists', null],
       ['zero_additional_capacity__additional_capacity', 'positive'], ['additional_specialists__additional_capacity', 'positive'],
       ['existing_capacity__weekly_support_capacity', 'positive'], ['additional_capacity__weekly_support_capacity', 'positive'],
     ]);
