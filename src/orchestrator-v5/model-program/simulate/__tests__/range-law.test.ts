@@ -222,6 +222,11 @@ describe('W10: the words say how the range was read, once, and what is assumed a
       expect(free).toContain('‘Figure’ follows Olumi’s provisional reading of your range, 10 to 30, as the range it falls in 8 times out of 10, with 20 as the middle value');
       expect(count(free, EIGHT_IN_TEN_WORDS)).toBe(1);
     });
+    it('T1 (27 Oct): a person\'s hard bounds are read in plain words, never "a bell-shaped spread"', () => {
+      const face = faceOf(range('x', 10, 30, { mode: 20, kind: 'bounds' }), 20);
+      expect(face).toContain('‘Figure’ follows Olumi’s provisional reading of your range, 10 to 30, held within those bounds: values near its middle are likelier than values near its ends');
+      expect(face).not.toContain('bell-shaped');
+    });
   });
 });
 

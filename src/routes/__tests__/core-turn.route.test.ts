@@ -978,7 +978,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('(6) ALPHA (23 Oct) + F1b (26 Oct): a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model is refused before any call', async () => {
       // Pinned from the request bodies the provider received on this route, not from the module that builds them.
-      const PROGRAM_SHA = 'd9836e169d977115ce426a2471307d416264a17479ee14eace51c59ea9cb13ab'; // 26 Oct: integrated review words#7 (the "on Olumi’s reading of …" basis). // 25 Oct: alpha G10 (no threshold sentences). // 25 Oct: alpha G5 (no note_on_item sentence). // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
+      const PROGRAM_SHA = 'ef5655cb40b60676cea666da0195ccd5a73bd907d330f5a67836facc01300c0f'; // 27 Oct: T1, each caveat once per conversation. // 26 Oct: integrated review words#7 (the "on Olumi’s reading of …" basis). // 25 Oct: alpha G10 (no threshold sentences). // 25 Oct: alpha G5 (no note_on_item sentence). // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
       const sha = (c: Json) => createHash('sha256').update(String(c.instructions), 'utf8').digest('hex');
       persisted = postimage(KNOWN_ANSWER);
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
