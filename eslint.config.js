@@ -123,6 +123,24 @@ export default [
         message: 'S7: one admission path. Admit through build-model admitForBuild (inject it), never the raw admitter.' }] }],
     },
   },
+  // W5 (alpha wall, Paul 26 Oct): the model-program path never loads the legacy analysis code. A type import is erased at
+  // build, so it is allowed. Repeats S7's pattern because a later block's no-restricted-imports replaces the earlier one.
+  {
+    files: ['src/orchestrator-v5/model-program/**/*.ts', 'src/orchestrator-v5/model-program-turn/**/*.ts'],
+    ignores: ['src/**/__tests__/**', 'src/**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [
+        { group: ['**/admit-model', '**/admit-model.js'], importNames: ['admitCandidateModel', 'admitOrdinaryCandidateModel'],
+          message: 'S7: one admission path. Admit through build-model admitForBuild (inject it), never the raw admitter.' },
+        { group: ['**/analysis-ready-helper', '**/analysis-ready-helper.js', '**/context/graph-identity', '**/context/graph-identity.js',
+          '**/context/graph-hash', '**/context/graph-hash.js', '**/plot-client', '**/plot-client.js', '**/adapters/isl/**',
+          '**/canonical-analysis-view', '**/canonical-analysis-view.js', '**/selected-run-figures', '**/selected-run-figures.js',
+          '**/delivered-record-licence', '**/delivered-record-licence.js', '**/analysis-admission-projection', '**/analysis-admission-projection.js'],
+          allowTypeImports: true,
+          message: 'W5 alpha wall: model-program code never loads legacy analysis, PLoT or ISL code.' },
+      ] }],
+    },
+  },
   // Structural guard: route-v2.ts must invoke the three shared pre-flight
   // primitives (validateIngress, parseRequestExtensions, preflightEnsureScenario)
   // ONLY via the runPreFlight helper in route-v2-preflight.ts. This keeps the
