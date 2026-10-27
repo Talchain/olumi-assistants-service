@@ -5,7 +5,7 @@
  */
 import type { InternalDispatch } from '../core-route/internal-dispatch.js';
 import { FRESH_READ } from '../agent-lane/turn-read-cache.js';
-import { normaliseGraphForIdentity } from '../context/graph-identity.js';
+import { normaliseGraphForIdentity } from '../context/graph-identity-normalise.js';
 import { refused, unavailable, type ToolOutcome } from '../path-b/tools/outcome.js';
 
 type Rec = Record<string, unknown>;
