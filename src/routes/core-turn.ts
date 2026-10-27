@@ -61,7 +61,7 @@ import { appliedGraphWire, coreTurnStores, graphReadyEmitter, programTurnTools }
 import { programInstructions } from '../orchestrator-v5/core-route/instructions.js';
 import {
   AGENT_TURN_CLAIM_WAIT, agentTurnRequestHash, challengeTargetOf, chipOperationOf, claimHashFor, claimTurnIdOf, isChiplessRetry,
-  recordedOutcomeOf, recordedWithChip, requestHashOfAnswer, requestHashOfClaim, sameAgentTurnRequest, typedRowProof, withChipOperation, withRecordedOutcome,
+  recordedOutcomeOf, recordedRunPress, recordedWithChip, requestHashOfAnswer, RUN_PRESS_HASH_TAG, requestHashOfClaim, sameAgentTurnRequest, typedRowProof, withChipOperation, withRecordedOutcome,
   type RecordedOutcome,
 } from '../orchestrator-v5/core-route/turn-request.js';
 import { stableStringify } from '../orchestrator/context/stable-stringify.js';
@@ -396,7 +396,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       ? JSON.stringify({ ...(approvedProposal !== undefined ? { approve: approvedProposal } : {}), ...(selected !== null ? { selected } : {}) })
       : undefined;
     const requestHash = withChipOperation(agentTurnRequestHash(scenarioId, userId, message, operation),
-      approvedProposal === undefined ? chipOperationOf(body) : undefined);
+      approvedProposal === undefined ? chipOperationOf(body) : undefined, runPress ? RUN_PRESS_HASH_TAG : '');
     const chiplessRetry = isChiplessRetry(body);
 
     /**
@@ -414,9 +414,11 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       const ownVersion = (key: string) => findOperationVersion(dispatch, scenarioId, programOperationId(scenarioId, key)).catch(() => null);
       const [turnSave, cardSave] = await Promise.all([ownVersion(`turn:${turnId}`), approvedProposal !== undefined ? ownVersion(`proposal:${approvedProposal}`) : null]);
       // Who authorised the turn: save, from the recorded press, never this resend's envelope: a request matched exactly says it
-      // (a Run press's re-save is the person's; a first draft, Olumi's), and a recorded typed turn that saved was its draft.
-      // The UI's chipless retry of a recorded chip press cannot say which chip it was, so that save is not claimed.
-      const turnSaveBy = !chiplessRetry ? (runPress ? 'person' : 'olumi') : recordedWithChip(prior.request_hash) ? null : 'olumi';
+      // (a Run press's re-save is the person's; a first draft, Olumi's); for the UI's chipless retry, the recorded hash does: a
+      // Run press is tagged (RUN_PRESS_HASH_TAG), a typed turn that saved was its draft. Any other recorded chip press (one
+      // recorded before the tag) cannot say which chip it was, so that save is not claimed.
+      const turnSaveBy = !chiplessRetry ? (runPress ? 'person' : 'olumi')
+        : recordedRunPress(prior.request_hash) ? 'person' : recordedWithChip(prior.request_hash) ? null : 'olumi';
       const receiptsOf = (v: Rec | null, by: 'olumi' | 'person' | null) => (v === null || by === null ? []
         : collectTurnReceipts([{ model_version: v }]).map((r) => ({ ...r, authorised_by: by })));
       return send(200, coreTurnContract({

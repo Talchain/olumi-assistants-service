@@ -1081,7 +1081,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(registered).toHaveLength(1);
     });
 
-    it('C7: a Run press whose new Run saved, resent with its chip, replays the person’s receipt; resent as the UI’s chipless retry, that save is not claimed (which chip it was is not recorded); neither calls or writes', async () => {
+    it('C7: a Run press whose new Run saved replays the person’s receipt, resent with its chip and as the UI’s chipless retry (its recorded hash is tagged a Run press); neither calls or writes', async () => {
       // A Run stored by an earlier engine, so the press makes and saves a new Run (under its turn: operation).
       const engine = String((persisted!.living_model.runs as Json[]).at(-1)!.receipt.versions.engine);
       persisted = JSON.parse(JSON.stringify(persisted).split(engine).join('mp-a04e2cebf944')) as Json;
@@ -1096,8 +1096,17 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(idsOf((again.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'person']]);
       const retry = await post({ turn_id: press.turn_id, message: press.message, source: 'retry' });
       expect(retry.statusCode, retry.body).toBe(200);
-      expect(retry.json()).toMatchObject({ durability: 'replayed', receipts: [] });
+      expect(retry.json()).toMatchObject({ durability: 'replayed' });
+      expect(idsOf((retry.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'person']]);
       expect([calls.length, registered.length], 'replays call no model and write nothing').toEqual([callsBefore, 1]);
+    });
+
+    it('CONTRAST (C7): a chipless retry of a recorded chip press whose hash carries no Run tag (recorded before it) claims no save: unproven stays unknown', async () => {
+      const { recordedRunPress, recordedWithChip } = await import('../../orchestrator-v5/core-route/turn-request.js');
+      const untagged = 'agent_turn:abc#chip:0123456789abcdef0123456789abcdef';
+      expect([recordedWithChip(untagged), recordedRunPress(untagged)]).toEqual([true, false]);
+      expect(recordedRunPress('agent_turn:abc#chip:run:0123456789abcdef0123456789abcdef#outcome:reply_lost_saved')).toBe(true);
+      expect(recordedRunPress('agent_turn:abc')).toBe(false);
     });
 
     it('C7: a first draft saved before its reply failed, resent as the UI’s chipless retry, replays with that draft’s own receipt (a recorded typed turn that saved was its draft)', async () => {

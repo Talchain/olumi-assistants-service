@@ -137,6 +137,12 @@ export function withChipOperation(requestHash: string, chipOperation: string | u
 }
 /** Whether a recorded turn's request carried a chip (`#chip:` on its stored hash). It does not say which chip. */
 export const recordedWithChip = (stored: string): boolean => requestHashOfAnswer(stored).includes(CHIP_HASH_SEP);
+/**
+ * A Run press's chip tag (as SCI-DEEP's): the press is the person's consent to its Run, so its recorded hash says it was a Run press
+ * and a chipless UI retry's replay can say whose its save was (C7, 27 Oct). Rows recorded before the tag stay unproven.
+ */
+export const RUN_PRESS_HASH_TAG = 'run:';
+export const recordedRunPress = (stored: string): boolean => requestHashOfAnswer(stored).includes(`${CHIP_HASH_SEP}${RUN_PRESS_HASH_TAG}`);
 /** A UI retry: `source: 'retry'` and no chip (the UI drops it on a retry). */
 export function isChiplessRetry(body: Record<string, unknown>): boolean {
   return body['source'] === 'retry' && (body['chip'] === undefined || body['chip'] === null);
