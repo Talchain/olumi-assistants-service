@@ -1043,6 +1043,38 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(again.run).toMatchObject({ run_id: shown!.run_id, run_key: shown!.run_id, state: { kind: 'complete_current' } });
   });
 
+  describe('census 27 Oct: the state block\'s header names the program\'s own newest stored Run, never the legacy read\'s "none"', () => {
+    /** The header line of the state block a provider call received. */
+    const headerOf = (c: Json): string => String(((c.input ?? []) as Json[]).find((i) => i.role === 'system' && String(i.content).startsWith(STATE_BLOCK_PREFIX))!.content).split('\n')[0]!;
+    const newestRun = (): string => savedProgramOf(persisted)!.runs.at(-1)!.run_id;
+
+    it('(1) a typed turn on a program with a stored Run: the header names that Run\'s id and the read\'s revision', async () => {
+      const runId = newestRun();
+      expect(runId).toEqual(expect.any(String));
+      outputs = [[{ type: 'message', text: 'The model holds one question.' }]];
+      expect((await typed('What does the model hold now?')).statusCode).toBe(200);
+      expect(headerOf(calls[0]!)).toBe(`${STATE_BLOCK_PREFIX}: model revision ${hashOf(persisted)}, run ${runId}. It supersedes every earlier state block in this conversation.`);
+    });
+
+    it('(2) a Run press\'s reply call: the header names the fresh program revision and its newest stored Run, never "revision none, run none"', async () => {
+      outputs = [[{ type: 'message', text: 'Each option, by the Run.' }]];
+      const ran = await post({ turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } });
+      expect(ran.statusCode, ran.body).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(headerOf(calls[0]!)).toBe(`${STATE_BLOCK_PREFIX}: model revision ${hashOf(persisted)}, run ${newestRun()}. It supersedes every earlier state block in this conversation.`);
+    });
+
+    it('CONTRAST: a program with no stored Run still says "run none", with its revision', async () => {
+      const bare = JSON.parse(JSON.stringify(persisted)) as Json;
+      bare.living_model.runs = [];
+      persisted = bare;
+      expect(savedProgramOf(persisted)!.runs).toHaveLength(0);
+      outputs = [[{ type: 'message', text: 'No Run yet.' }]];
+      expect((await typed('What does the model hold now?')).statusCode).toBe(200);
+      expect(headerOf(calls[0]!)).toBe(`${STATE_BLOCK_PREFIX}: model revision ${hashOf(persisted)}, run none. It supersedes every earlier state block in this conversation.`);
+    });
+  });
+
   it('T1 + C12: a Run press\'s reply is the AI\'s own, in the scenario\'s Conversation, so the next typed turn continues it; a reply that cannot be written is the turn\'s error, with nothing added in the host\'s words', async () => {
     const press = () => post({ turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } });
     outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
