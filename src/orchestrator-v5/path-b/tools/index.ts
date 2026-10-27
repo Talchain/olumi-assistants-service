@@ -276,7 +276,7 @@ const issueWords = (issues: readonly Issue[], prefix: readonly PropertyKey[] = [
   const branch = i.code === 'invalid_union' ? i.errors?.find((b) => b.length > 0 && !b.some((e) => e.path[0] === 'op')) : undefined;
   return branch !== undefined ? issueWords(branch, path) : [`${path.map(String).join('.') || '(root)'}: ${i.message}`];
 });
-const schemaErrorToModel = (name: string, schema: typeof ProgramChangeParams) => (_ctx: unknown, error: unknown): string => {
+const schemaErrorToModel = (name: string, schema: z.ZodType) => (_ctx: unknown, error: unknown): string => {
   if (!(error instanceof ModelBehaviorError) || error.name !== 'InvalidToolInputError') throw error;
   let fields: string[] = [];
   try {

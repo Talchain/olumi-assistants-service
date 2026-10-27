@@ -24,11 +24,12 @@ const call = async (tools: ReturnType<typeof setup>['tools'], args: Rec): Promis
   JSON.parse(await (tools.find((t) => t.name === 'what_if') as FunctionTool).invoke(new RunContext(), JSON.stringify(args)) as string);
 
 describe('HC5: what_if in the chat on a program board', () => {
-  it('a program board has five tools, what_if last; the Living Model\'s set is unchanged and has no what_if', () => {
+  it('a program board has five tools, what_if last; the Living Model\'s set is unchanged and has no what_if', async () => {
     expect(setup('program').tools.map((t) => t.name)).toEqual(['read_canonical_context', 'propose_change', 'apply_change', 'run_analysis', 'what_if']);
     expect(setup('core').tools.map((t) => t.name)).toEqual(['read_canonical_context', 'build_model_from_brief', 'propose_change', 'apply_change', 'run_analysis', 'note_on_item', 'offer_public_research']);
     const t = setup('program').tools.find((x) => x.name === 'what_if') as FunctionTool;
-    expect([t.strict, t.needsApproval === undefined || typeof t.needsApproval === 'function']).toEqual([true, true]);
+    // It asks no approval: it saves nothing (Codex: called, not just typed).
+    expect([t.strict, await t.needsApproval(new RunContext(), { changes: [], whose: 'x' } as never, 'call_1')]).toEqual([true, false]);
   });
 
   it('a partner\'s figure: each option\'s chance on the saved model and with the what-if, on the same draws, nothing saved', async () => {
