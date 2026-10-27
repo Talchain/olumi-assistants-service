@@ -507,13 +507,13 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect([registered.length, figure('oven_price')]).toEqual([1, 2500]);
     });
 
-    // FINDING (C14 (7), not fixed here): after a Stop the AI reads SAVE_REFUSED_AFTER_APPROVAL (program-tools.ts:255-256), said for
-    // every registration refusal, whose last sentence is "Pressing the card again would be refused the same way." The row above
-    // shows a new press applies the card. it.fails turns red once a TURN_STOPPED refusal stops telling the AI so.
-    it.fails('FINDING C14 (7): after a Stop, the AI is never told that pressing the card again would be refused', async () => {
+    // C14 (7): after a Stop the AI is told the truth the row above shows: nothing was written and the card can be pressed again
+    // (SAVE_STOPPED_AFTER_APPROVAL), never the store-refusal sentence "Pressing the card again would be refused the same way."
+    it('C14 (7): after a Stop, the AI is told the card is still held and can be pressed again, never that a re-press would be refused', async () => {
       const { told } = await stoppedBeforeWrite();
       expect(told).toHaveLength(1);
-      expect(String(told[0]!.detail)).not.toContain('Pressing the card again would be refused');
+      expect(String(told[0]!.detail)).toBe('The person’s approval of this card was received, but they stopped this turn before it saved, so '
+        + 'nothing was written and the saved model is unchanged. The card is still held and can be pressed again.');
     });
 
     it('C14 (7): a Stop while the press waits on the scenario’s slot, before its fence claim (taken after the slot and the start reads), is refused "That turn could not be stopped." with no tombstone and never says it cancelled; the press then runs and saves once, with its receipt', async () => {

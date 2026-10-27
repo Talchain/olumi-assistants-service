@@ -254,6 +254,9 @@ export const isProgramProposal = (p: StructuredProposal | undefined): p is Struc
 
 export const SAVE_REFUSED_AFTER_APPROVAL = 'The person’s approval of this card was received; the save itself was refused by the model store’s check, so nothing '
   + 'was written and the saved model is unchanged. Pressing the card again would be refused the same way.';
+/** A save refused because the person stopped this turn (the fence's TURN_STOPPED): the card stays held, so a new press applies it. */
+export const SAVE_STOPPED_AFTER_APPROVAL = 'The person’s approval of this card was received, but they stopped this turn before it saved, so '
+  + 'nothing was written and the saved model is unchanged. The card is still held and can be pressed again.';
 export async function applyProgramChange(deps: ProgramToolDeps, ctx: Ctx, proposalId: string): Promise<ToolOutcome> {
   const p = deps.proposals.get(proposalId);
   if (!isProgramProposal(p)) return refused(p === undefined ? 'unknown_proposal' : 'not_a_change_proposal');
@@ -298,7 +301,8 @@ export async function applyProgramChange(deps: ProgramToolDeps, ctx: Ctx, propos
     if (write.status === 'unknown') return write.outcome;
     if (write.status === 'stale') return refused('superseded');
     // Authorised, then refused: said so, with the store's code (Paul 25 Oct: told only the code, it blamed his "typed yes").
-    if (write.status === 'refused') return refused('registration_refused', SAVE_REFUSED_AFTER_APPROVAL, { code: write.code, written: false });
+    if (write.status === 'refused') return refused('registration_refused', write.code === 'TURN_STOPPED' ? SAVE_STOPPED_AFTER_APPROVAL : SAVE_REFUSED_AFTER_APPROVAL,
+      { code: write.code, written: false });
     if (write.status === 'already_saved') return alreadySaved(write.receipt);
     deps.proposals.markApplied(p.proposal_id, [write.receipt as never]);
     return ok({ saved: true, receipt: write.receipt, revision: { graph_hash: write.after.graphHash, graph_identity_hash: write.after.identity },
