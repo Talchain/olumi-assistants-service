@@ -69,6 +69,33 @@ describe('HC5: a what-if on a model program, on the same draws, nothing saved', 
     expect(none.result).toMatchObject({ kind: 'refused', reason: 'no_change_applied' });
   });
 
+  it('a real gap on the shared draws that two independent Runs could also show is not called beyond ordinary variation (Codex r1)', async () => {
+    // Joins 20 → 20.01: the promotion needs an effect of 3.323 instead of 3.333, a real gap of a few draws in 10,000 (about
+    // 0.2 points), clear of 0 on the shared draws, yet well inside 2 × (sd A + sd B) ≈ 2 × 2 × √(0.86 × 0.14 / 10,000) = 1.4 points.
+    const { result } = await whatIf(graph(), [joins(20.01)]);
+    const promo = option(result, 'promotion');
+    expect(promo.paired_difference.difference).toBeGreaterThan(0);
+    expect(promo.paired_difference.difference).toBeLessThan(0.005);
+    expect(promo.variation).toBe('not_judged');
+    expect(promo.variation_words).toBe(VARIATION_WORDS.not_judged);
+  });
+
+  it('provisional: a deadline of Olumi\'s makes every cell provisional; the person\'s own, with every figure theirs, none (Codex r1)', async () => {
+    const words = `${CLUB_BRIEF} The promotion brings 5 more joins a month.`;
+    const theirs = (months: 'person' | 'olumi'): Rec => {
+      const m = club();
+      m.quantities = m.quantities.map((x) => x.id === 'promo_effect'
+        ? { ...x, author: 'person', status: 'known', value: 5, low: null, high: null, range_kind: null, basis: null, quote: 'The promotion brings 5 more joins a month' }
+        : x.id === 'months' && months === 'olumi' ? { ...x, author: 'olumi', status: 'estimated', quote: null, basis: 'A quarter is a usual horizon for a membership push.' } : x);
+      return { nodes: [], edges: [], living_model: livingModelOf({ model_program: MODEL_PROGRAM, canonical: m, seed: seedOf(SCENARIO), person_words: [words], runs: [] }) };
+    };
+    const mine = (await whatIf(theirs('person'), [joins(24)])).result, olumis = (await whatIf(theirs('olumi'), [joins(24)])).result;
+    const flags = (r: Rec) => ['carry_on', 'promotion'].flatMap((id) => [option(r, id).saved.provisional, option(r, id).what_if.provisional]);
+    expect(mine.kind).toBe('ran');
+    expect(flags(mine)).toEqual([false, false, false, false]);
+    expect(flags(olumis)).toEqual([true, true, true, true]);
+  });
+
   it('crux: each change is also run alone against the same saved Run', async () => {
     const { result } = await whatIf(graph(), [joins(24), { kind: 'factor_value_edit', target_id: 'leavers', raw_value: 6 }], { crux: true });
     expect(result.variants.map((v: Rec) => v.change_index)).toEqual(['all', 0, 1]);

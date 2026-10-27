@@ -21,7 +21,8 @@
  * other gestures are refused one by one, by name. The saved model and the what-if are evaluated on the scenario's seed with
  * each draw kept: every figure is drawn from its own stream keyed by (seed, id) (prng.ts), so each draw index is the same
  * world in both, and each option's gap is the paired difference on those draws (paired.ts, Newcombe method 10).
- * "Beyond ordinary variation" is said where that gap's 95% precision is clear of 0 (`separated`). Nothing is saved.
+ * "Beyond ordinary variation" is said where that gap's 95% precision is clear of 0 (`separated`) AND it is wider than two
+ * independent Runs could differ by (`programGap`), so the words stay true. Nothing is saved.
  */
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
@@ -240,8 +241,10 @@ export async function runWhatIf(
 const PROGRAM_NOT_A_FIGURE = 'not_a_figure_on_this_model';
 const numberOf = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 
-/** A cell as the lens shows it: the view's own display or its why; `provisional` where the chance rests on Olumi's estimate. */
-function programCell(e: Evaluation, optionId: string): Cell {
+/** A cell as the lens shows it: the view's own display or its why; `provisional` where the chance rests on a figure of
+ *  Olumi's: one upstream of an aim (`restsOn`), or an aim's window length or origin timing (the compiler resolves those into
+ *  the window, so they are read off the canonical model: Codex HC5 r1). */
+function programCell(e: Evaluation, canonical: CanonicalModelT, optionId: string): Cell {
   const cell = (e.view.options as readonly { readonly option_id: string; readonly cell: PresentCell }[]).find((o) => o.option_id === optionId)?.cell;
   if (cell === undefined) return NOT_SHOWN;
   if (cell.kind === 'withheld') return { display: null, provisional: false, not_shown: cell.why };
@@ -250,18 +253,26 @@ function programCell(e: Evaluation, optionId: string): Cell {
   const behind = restsOn(x, roots, optionId);
   const olumis = x.quantities.some((q) => behind.has(q.id) && q.dist !== undefined
     && (q.dist.kind === 'fixed' ? q.dist.author === 'olumi' : q.dist.basis === 'olumi_estimate'));
-  return { display: cell.display, provisional: olumis, not_shown: null };
+  const windows = [...canonical.goals, ...canonical.limits].flatMap((a) => [a.measure?.window?.periods, a.measure?.window?.origin_offset])
+    .filter((id): id is string => typeof id === 'string');
+  const timed = canonical.quantities.some((q) => windows.includes(q.id) && q.author === 'olumi');
+  return { display: cell.display, provisional: olumis || timed, not_shown: null };
 }
 
 /** What-if minus saved for one option on the same draws, or null where either side shows no figure. */
-function programGap(saved: Evaluation, whatIf: Evaluation, optionId: string): PairedDifference | null {
+function programGap(saved: Evaluation, whatIf: Evaluation, optionId: string): { readonly gap: PairedDifference; readonly beyond: boolean } | null {
   const at = (e: Evaluation) => e.sim?.per_draw?.options.find((o) => o.option_id === optionId);
   const chance = (e: Evaluation) => e.sim?.options.find((o) => o.option_id === optionId)?.joint_within_limits;
   const a = at(whatIf), b = at(saved), ca = chance(whatIf), cb = chance(saved);
   if (a === undefined || b === undefined || ca === undefined || cb === undefined || isWithheld(ca) || isWithheld(cb)) return null;
-  if (programCell(saved, optionId).display === null || programCell(whatIf, optionId).display === null) return null;
   const exact = (c: Chance) => c.precision_95[0] === c.precision_95[1];
-  return pairedDifference(a.joint_within_limits, b.joint_within_limits, exact(ca) && exact(cb));
+  const gap = pairedDifference(a.joint_within_limits, b.joint_within_limits, exact(ca) && exact(cb));
+  // "Beyond ordinary run-to-run variation" (VARIATION_WORDS) needs more than a real gap on the shared draws (Codex HC5 r1: 20
+  // → 20.01 joins is a real 0.17-point gap): the gap must also pass the band two independent Runs could differ by, 2 × (sd A +
+  // sd B), each sd at the most variable chance inside its 95% precision (as `variationOf` reads the PLoT path).
+  const sd = (c: Chance, n: number) => { const worst = Math.min(Math.max(0.5, c.precision_95[0]), c.precision_95[1]); return Math.sqrt((worst * (1 - worst)) / n); };
+  const band = NOISE_BAND_SE_MULTIPLE * (sd(ca, whatIf.sim!.draws) + sd(cb, saved.sim!.draws));
+  return { gap, beyond: separated(gap) && gap.kind !== 'withheld' && Math.abs(gap.difference) > band };
 }
 
 /** The words a refused saved or what-if evaluation gives: the first option's own why. */
@@ -315,9 +326,11 @@ export function runProgramWhatIf(program: SavedProgram, changes: readonly Rec[],
     variants.push({
       change_index, paired: true,
       options: ids.map((option_id) => {
-        const gap = programGap(saved, whatIf, option_id);
-        const variation: WhatIfVariation = gap !== null && separated(gap) ? 'beyond_ordinary_variation' : 'not_judged';
-        return { option_id, saved: programCell(saved, option_id), what_if: programCell(whatIf, option_id), variation, variation_words: VARIATION_WORDS[variation],
+        const shown = programCell(saved, program.canonical, option_id), moved = programCell(whatIf, model, option_id);
+        const paired = shown.display === null || moved.display === null ? null : programGap(saved, whatIf, option_id);
+        const gap = paired?.gap ?? null;
+        const variation: WhatIfVariation = paired?.beyond === true ? 'beyond_ordinary_variation' : 'not_judged';
+        return { option_id, saved: shown, what_if: moved, variation, variation_words: VARIATION_WORDS[variation],
           paired_difference: gap === null || gap.kind === 'withheld' ? null
             : { difference: gap.difference, precision_95: gap.kind === 'exact' ? [gap.difference, gap.difference] : gap.precision_95 } };
       }),
