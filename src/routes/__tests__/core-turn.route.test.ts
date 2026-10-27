@@ -1269,7 +1269,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     it('C2 (alpha spec §7, 27 Oct): the first reply\'s guidance, as SENT, asks for what the calculation leaves out and why, only when the model holds any, beside the left_out record it reads', async () => {
       const m = bakery();
       m.left_out.push({ id: 'shop_feel', text: 'How the shop feels to the regulars', why: 'It has no measure in this model.', question: null, concerns: [],
-        author: 'olumi', quote: null, party: null, approval: 'proposed', author_id: null });
+        author: 'olumi', quote: null, party: null, approval: 'proposed', author_id: null, approved_by: null });
       SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(m); calls.length = 0;
       outputs = [[{ type: 'message', text: 'Here is your model.' }]];
       expect((await typed(BAKERY_BRIEF)).statusCode).toBe(200);
