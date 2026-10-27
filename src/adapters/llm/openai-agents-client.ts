@@ -12,7 +12,7 @@
  * (creating the scenario's Conversation) take no row.
  */
 import { createHash } from 'node:crypto';
-import OpenAI from 'openai-v7';
+import OpenAI, { APIConnectionTimeoutError } from 'openai-v7';
 import { config } from '../../config/index.js';
 import {
   assertProviderAllowed, currentProviderPolicy, ForbiddenProviderError, isProviderAllowed, recordProviderAttempt,
@@ -21,6 +21,12 @@ import {
 
 /** Resends the SDK's client makes itself (429, 5xx, connection errors), after the first attempt. */
 export const AGENTS_CLIENT_MAX_RETRIES = 2;
+/**
+ * Each attempt's whole time, from its request to the end of its response: the client's own timeout (its ten-minute default).
+ * The client stops counting at the response's headers, and an idle timeout restarts on every chunk, so a streamed body that
+ * kept trickling never ended (C14); the stream below fails at the same deadline.
+ */
+export const AGENTS_CLIENT_TIMEOUT_MS = OpenAI.DEFAULT_TIMEOUT;
 
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 const toolNamesOf = (tools: unknown): string[] => (Array.isArray(tools) ? tools : [])
@@ -104,6 +110,7 @@ export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
     if (previous !== undefined && !previous.ok && previous.input === input) recordProviderRetry(previous.handle, 'transport');
     const attempt = { handle, input, ok: false };
     previous = attempt;
+    const deadlineAt = Date.now() + AGENTS_CLIENT_TIMEOUT_MS;
     let r: Response;
     try {
       r = await fetch(url, init);
@@ -128,11 +135,13 @@ export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
       const decoder = new TextDecoder();
       let text = '';
       let ended = false;
+      let deadline: ReturnType<typeof setTimeout> | undefined;
       let settle: () => void = () => {};
       ledger.pending?.push(new Promise<void>((resolve) => { settle = resolve; }));
       const end = (how: 'done' | 'stopped' | 'failed', cause?: unknown): void => {
         if (ended) return;
         ended = true;
+        clearTimeout(deadline);
         // An ended call holds nothing: a listener left on the request's signal kept its text, body and turn alive for the
         // life of the process (Node keeps a composite signal with an abort listener until it aborts; CEE staging heap OOM ×3,
         // 21 Oct). Removed here, whichever way the stream ends.
@@ -148,7 +157,9 @@ export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
             return;
           }
           recordProviderAttempt(handle, how === 'failed'
-            ? { transport_status: r.status, result: cause instanceof Error ? cause.name : 'stream_failure', outcome: 'transport_error', retry: false }
+            ? cause instanceof APIConnectionTimeoutError
+              ? { transport_status: r.status, result: 'stream_deadline', outcome: 'timeout', retry: false }
+              : { transport_status: r.status, result: cause instanceof Error ? cause.name : 'stream_failure', outcome: 'transport_error', retry: false }
             : { transport_status: r.status, result: 'stream_without_terminal_event', outcome: 'invalid_response', retry: false });
           if (ledger.conversationBound && !streamCarriedError(text)) {
             ledger.onDeliveryUnknown?.(cause ?? new Error('Conversation response ended without a terminal event'));
@@ -159,6 +170,16 @@ export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
       init?.signal?.addEventListener('abort', onAbort, { once: true });
       const reader = r.body.getReader();
       const passThrough = new globalThis.ReadableStream<Uint8Array>({
+        // At the attempt's deadline the stream fails with the client's own timeout error, as a call cut before its headers
+        // does: the SDK reads a failed call (an abort would read as a stream that simply ended), and the provider's is cancelled.
+        start(controller) {
+          deadline = setTimeout(() => {
+            const err = new APIConnectionTimeoutError();
+            end('failed', err);
+            controller.error(err);
+            reader.cancel(err).catch(() => {});
+          }, Math.max(0, deadlineAt - Date.now()));
+        },
         async pull(controller) {
           try {
             const { done, value } = await reader.read();
@@ -190,5 +211,5 @@ export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
   // No key configured: the request still goes, and OpenAI's 401 becomes an `http_error` row, as `postResponses` does with
   // an empty bearer (the client itself refuses to start without one).
   const apiKey = config.llm.openaiApiKey || 'no-openai-api-key-configured';
-  return new OpenAI({ apiKey, fetch: ledgerFetch, maxRetries: ledger.conversationBound ? 0 : AGENTS_CLIENT_MAX_RETRIES });
+  return new OpenAI({ apiKey, fetch: ledgerFetch, timeout: AGENTS_CLIENT_TIMEOUT_MS, maxRetries: ledger.conversationBound ? 0 : AGENTS_CLIENT_MAX_RETRIES });
 }
