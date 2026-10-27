@@ -11,13 +11,15 @@
  */
 const Z95 = 1.959963984540054;
 
-/** Wilson score interval at 95% for k successes in n draws: the SIMULATION precision of a chance. */
-export function wilson95(k: number, n: number): [number, number] {
-  const p = k / n, z2 = Z95 * Z95, denom = 1 + z2 / n;
+/** Wilson score interval for k successes in n draws at standard Normal quantile z. */
+function wilson(k: number, n: number, z: number): [number, number] {
+  const p = k / n, z2 = z * z, denom = 1 + z2 / n;
   const centre = (p + z2 / (2 * n)) / denom;
-  const half = (Z95 * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / denom;
+  const half = (z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / denom;
   return [Math.max(0, centre - half), Math.min(1, centre + half)];
 }
+/** Wilson score interval at 95% for k successes in n draws: the SIMULATION precision of a chance. */
+export const wilson95 = (k: number, n: number): [number, number] => wilson(k, n, Z95);
 
 export type PairedDifference =
   /** Both results are fixed in every draw (no Monte Carlo interval): the gap is exact. */
@@ -29,9 +31,10 @@ export type PairedDifference =
 
 /**
  * a and b: per draw, 1 met, 0 not, −1 outside the domain (`PerDrawOption.joint_within_limits`, or a condition's `met`), on the
- * SAME draws. `exact`: both results are fixed in every draw (their own precision is a point).
+ * SAME draws. `exact`: both results are fixed in every draw (their own precision is a point). `z`: the interval's standard
+ * Normal quantile (95% unless a caller tests several at once, SC4).
  */
-export function pairedDifference(a: ArrayLike<number>, b: ArrayLike<number>, exact = false): PairedDifference {
+export function pairedDifference(a: ArrayLike<number>, b: ArrayLike<number>, exact = false, z = Z95): PairedDifference {
   if (a.length !== b.length || a.length === 0) throw new Error(`paired results need the same draws, got ${a.length} and ${b.length}`);
   const n = a.length;
   let both = 0, onlyA = 0, onlyB = 0, neither = 0, bad = 0;
@@ -44,7 +47,7 @@ export function pairedDifference(a: ArrayLike<number>, b: ArrayLike<number>, exa
   const difference = (onlyA - onlyB) / n;
   if (exact) return { kind: 'exact', difference };
   const p1 = (both + onlyA) / n, p2 = (both + onlyB) / n;
-  const [l1, u1] = wilson95(both + onlyA, n), [l2, u2] = wilson95(both + onlyB, n);
+  const [l1, u1] = wilson(both + onlyA, n, z), [l2, u2] = wilson(both + onlyB, n, z);
   const den = (both + onlyA) * (onlyB + neither) * (both + onlyB) * (onlyA + neither);
   const phi = den === 0 ? 0 : (both * neither - onlyA * onlyB) / Math.sqrt(den);
   const lo = difference - Math.sqrt(Math.max(0, (p1 - l1) ** 2 - 2 * phi * (p1 - l1) * (u2 - p2) + (u2 - p2) ** 2));

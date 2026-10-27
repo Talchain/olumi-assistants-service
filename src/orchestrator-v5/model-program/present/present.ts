@@ -40,6 +40,10 @@
  *     clearly more with a miss than with the draws that do not miss (or that none does); too few misses are said as too
  *     few. Its basis, once: an association in this model, never a cause (`WHEN_MISSED_BASIS`). The AI reads it as the Run's
  *     facts.
+ *   - WHAT IS MOST WORTH FINDING OUT (SC4): where the leader could be said (every option's chance shown, the Run not known
+ *     to be stale, every limit checked), `goal_chance.worth_knowing` names each figure whose third, known before choosing,
+ *     would meet the goal clearly more often than the option most likely overall (`worth-knowing.ts`), with the option most
+ *     likely in each third. Once, its basis: no cost of finding out is weighed, and it never says which to choose.
  *   - Fields with nothing true to say are absent: no `leader` with one option, a chance not shown or a Run known not to be
  *     current, no `status_quo`, no `historical_figures`. `run` is null and currentness unknown unless the caller passes the Run's facts.
  */
@@ -50,6 +54,7 @@ import type { Aggregation, Cmp, Domain, ExecutableModel, FixedAuthor, Goal, Limi
 import { separated, type PairedDifference } from '../simulate/paired.js';
 import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
 import type { WhenMissed } from '../simulate/missed.js';
+import type { WorthKnowing } from '../simulate/worth-knowing.js';
 import { isWithheld, type Chance, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
 import { costOf, readingOf, restsOn, simulate } from '../simulate/simulate.js';
 
@@ -188,6 +193,8 @@ export interface PresentedAnalysisView {
     readonly waits_on?: readonly PresentBlocker[];
     /** SC7: per option with a chance shown, what a miss looks like in this model, in words and numbers (`missed.ts`). */
     readonly when_missed?: { readonly basis: string; readonly options: readonly { readonly option_id: string; readonly words: readonly string[]; readonly found: WhenMissed }[] };
+    /** SC4: the figures whose third, known before choosing, could change which option is most likely, in words and numbers (`worth-knowing.ts`). */
+    readonly worth_knowing?: { readonly basis: string; readonly figures: readonly { readonly quantity: string; readonly words: string; readonly found: WorthKnowing['figures'][number] }[] };
   };
 }
 
@@ -256,6 +263,8 @@ export const EIGHT_IN_TEN_WORDS = 'the range it falls in 8 times out of 10';
 const TAIL_ROOM = 4;
 /** SC7: said once with what a miss looks like: an association in the model's own draws, never a cause or a forecast. */
 export const WHEN_MISSED_BASIS = 'These describe the misses among this model’s simulated draws: what goes with a miss, not what causes it, and only as far as the model’s figures and links hold.';
+/** SC4: said once with what is worth finding out: a value in this model, weighing no cost, never a choice. */
+export const WORTH_KNOWING_BASIS = 'This weighs no cost of finding out, and holds only as far as the model’s figures and links hold: it says which figures could change which option is most likely, not which to choose.';
 /** W10: once per result, where the chances shown rest on two or more uncertain inputs (each drawn on its own stream, prng.ts). */
 export const INDEPENDENCE_WORDS = 'Olumi treats these figures as varying independently, except where the model links them.';
 const whoseRange = (author: 'person' | 'olumi'): string => (author === 'person' ? '(your range)' : '(Olumi’s estimate)');
@@ -727,6 +736,23 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const w = result.options[at]!.when_missed, words = whenMissedWords(q(optionLabel.get(o.option_id) ?? o.option_id), w);
     return words.length === 0 ? [] : [{ option_id: o.option_id, words, found: w }];
   });
+  // ── What is most worth finding out, in this model (SC4): licensed as the leader is (every option's chance shown, the Run
+  // not known to be stale, every limit checked), since it says which option is most likely in each third of a figure ─────
+  const THIRD_WORDS = { low: 'lowest', middle: 'middle', high: 'highest' } as const;
+  const shownAll = options.length >= 2 && options.every((o) => o.cell.kind === 'figure');
+  const worthAim = `${model.goals.length === 1 ? 'the goal' : 'every goal together'}${model.limits.length === 0 ? '' : ' within the limits'}`;
+  const worth = !shownAll || input.current === false || unchecked.length > 0 ? [] : result.worth_knowing.figures.flatMap((f) => {
+    if (f.gain.kind !== 'sampled') return [];
+    const x = byId.get(f.quantity), whose = x?.dist?.kind === 'range' ? ` ${whoseRange(x.dist.basis === 'person_range' ? 'person' : 'olumi')}` : '';
+    const name = (id: string) => q(optionLabel.get(id) ?? id);
+    const bands = f.bands.map((b) => {
+      const ranked = [...b.met].sort((u, v) => v.met - u.met), top = ranked.find((m) => m.option_id === b.most_likely)!, next = ranked.find((m) => m.option_id !== b.most_likely)!;
+      return `in its ${THIRD_WORDS[b.third]} third, ${name(b.most_likely)} (${pctOf(top.met / b.draws)}, against ${pctOf(next.met / b.draws)} for ${name(next.option_id)})`;
+    });
+    const more = Math.round(f.gain.difference * 100);
+    return [{ quantity: f.quantity, found: f,
+      words: `In this model, knowing which third of its draws ${q(label(f.quantity) ?? f.quantity)}${whose} falls in before choosing, and taking the option most likely there, meets ${worthAim} in about ${more} more of every 100 simulated draws than ${name(f.overall)}, the option most likely overall. Most likely in each third: ${bands.join('; ')}.` }];
+  });
   const goal_chance = {
     ...(jointWords !== undefined && waiting.length === 0 ? { chance_words: `chance of ${jointWords}` } : {}),
     ...(notes.length > 0 ? { notes } : {}),
@@ -744,6 +770,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     ...(unchecked.length > 0 ? { unchecked_limits: unchecked.map((l, i) => ({ limit_id: l.limit_id, words: uncheckedWords[i]! })) } : {}),
     ...((input.blockers ?? []).length > 0 ? { waits_on: input.blockers!.map((b) => ({ ...b, label: inlineWords(b.label) })) } : {}),
     ...(missed.length > 0 ? { when_missed: { basis: WHEN_MISSED_BASIS, options: missed } } : {}),
+    ...(worth.length > 0 ? { worth_knowing: { basis: WORTH_KNOWING_BASIS, figures: worth } } : {}),
   };
   // ── Which option is most likely to achieve the goal, in this model (Paul 6 and 14 Oct: say it; never choose for them) ──
   const leader = ((): PresentedLeader | undefined => {
