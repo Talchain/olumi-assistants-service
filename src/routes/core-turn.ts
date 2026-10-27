@@ -732,10 +732,14 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
               // C14: a turn the person has stopped makes no reply call; what it saved stands, said below with its receipt.
               if (await turnStopped()) result = { ...result, assistant_text: '' };
               else {
+                // The state block's header names the program as just read: its revision and the Run it shows (the newest stored).
+                const freshRevision = isRec(fresh.data.revision) ? str(fresh.data.revision.graph_hash) : null;
+                const freshRun = isRec(fresh.data.run) ? str(fresh.data.run.run_id) : null;
                 const reply = await runCoreTurn({ ...agentTurn(),
                   turnGuidance: [PROGRAM_TURN_GUIDANCE, runPress ? RUN_REPLY_GUIDANCE : DRAFT_REPLY_GUIDANCE],
                   briefText: saved.graph === null ? undefined : saved.briefText,
-                  canonicalState: fresh.data, withheldTools: [...HOST_REPLY_WITHHELD_TOOLS] });
+                  canonicalState: fresh.data, withheldTools: [...HOST_REPLY_WITHHELD_TOOLS],
+                  ...(freshRevision !== null ? { traceMeta: { revision: freshRevision, ...(freshRun !== null ? { run_id: freshRun } : {}) } } : {}) });
                 result = { ...result, assistant_text: reply.assistant_text, sdk: reply.sdk, hops: result.hops + reply.hops,
                   timing: { ...result.timing, provider_calls: providerCallsMade() ?? result.timing.provider_calls + reply.timing.provider_calls } };
                 aiReplied = true;
@@ -756,7 +760,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
               // A program board has no note tool, so the AI answers a Challenge's note (in turnGuidance) in words.
               ...(coreCardOnly && press !== undefined ? { firstTool: APPLY_CHANGE } : {}),
               ...(press !== undefined ? { press } : {}),
-              ...(saved.revision !== null ? { traceMeta: { revision: saved.revision, ...(saved.run?.run_id != null ? { run_id: saved.run.run_id } : {}) } } : {}),
+              // The header's Run is the program's newest stored Run (the one its state block shows), never the legacy read's.
+              ...(saved.revision !== null ? { traceMeta: { revision: saved.revision, ...(newestRunId(programRead) !== null ? { run_id: newestRunId(programRead)! } : {}) } } : {}),
             });
           }
         } catch (err) {
