@@ -507,6 +507,19 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect([registered.length, figure('oven_price')]).toEqual([1, 2500]);
     });
 
+    // C14 (8) LIMIT, pinned at the producer: `already_committed` is whether this turn's conversation row exists, and a core turn
+    // stopped before any write still records its answer row. So a later Stop reads true with nothing saved: on core neither value is
+    // save evidence, which is why the UI says the outcome is unknown there (DGAI #3032). It turns red if the Stop ever reads the save.
+    it('C14 (8) limit: a core turn stopped before any write still records its answer row, so a later Stop reads already_committed true with nothing saved', async () => {
+      const { press, stop, turn } = await stoppedBeforeWrite();
+      expect(stop.json()).toMatchObject({ already_committed: false });
+      expect((turn.json() as Json).receipts).toEqual([]);
+      const later = await stopAsTheRpcDerives(String(press.turn_id));
+      expect(later.statusCode, later.body).toBe(200);
+      expect(later.json()).toMatchObject({ stopped: true, already_committed: true });
+      expect([registered.length, figure('oven_price')], 'nothing was saved').toEqual([0, null]);
+    });
+
     // C14 (7): after a Stop the AI is told the truth the row above shows: nothing was written and the card can be pressed again
     // (SAVE_STOPPED_AFTER_APPROVAL), never the store-refusal sentence "Pressing the card again would be refused the same way."
     it('C14 (7): after a Stop, the AI is told the card is still held and can be pressed again, never that a re-press would be refused', async () => {
