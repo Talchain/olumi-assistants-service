@@ -7,6 +7,9 @@ export type Chance = { chance: number; precision_95: [number, number] };        
 // outside the model's domain, never a failed outcome. That chance (and what contains it) carries no number: it is WITHHELD,
 // typed, with how many draws and which quantities. `no_goals`: a limits-only run has no joint of its goals.
 export type WithheldChance = { withheld: { reason: 'invalid_domain' | 'no_goals'; count: number; quantities: string[] } };
+/** Below its floor, above its ceiling, a divisor that was 0, not a finite number (an overflow, an undefined result), or
+ *  unreadable only because a value it rests on left its domain in that draw (`follows`). */
+export type OutsideCause = 'below' | 'above' | 'divided_by_zero' | 'not_finite' | 'follows';
 export type ChanceOrWithheld = Chance | WithheldChance;
 export const isWithheld = (c: ChanceOrWithheld): c is WithheldChance => 'withheld' in c;
 export type OptionResult = {
@@ -20,6 +23,9 @@ export type OptionResult = {
   // ── Additive (gold-model ruling 3): each limit's own chance, and its quantity's aggregated value (e.g. the cost) over the draws.
   per_limit: (ChanceOrWithheld & { limit_id: string })[];
   limit_outcomes: ({ limit_id: string } & ({ p10: number; p50: number; p90: number } | WithheldChance))[];
+  // ── Additive (DL 27 Oct: say what actually happened): each quantity a withheld chance of this option names, and what
+  // happened to it, so its words never call a value that fell below its floor one that "could not be worked out".
+  outside: Record<string, OutsideCause>;
 };
 /** One chance the simulator withheld, listed once at the top of the result. */
 export type WithheldChanceEntry = { option_id: string; scope: 'goal' | 'limit' | 'joint' | 'within_limits' | 'joint_within_limits'; id?: string }
