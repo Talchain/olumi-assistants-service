@@ -59,7 +59,7 @@ export const HOST_REPLY_WITHHELD_TOOLS: readonly string[] = ['build_model_from_b
 export const DRAFT_REPLY_GUIDANCE = 'Olumi has just drafted this model from the person\'s brief, saved it and run it once; a card asks them to confirm or change Olumi\'s reading of their brief. '
   + 'Reply as their reasoning partner in a few short bullets: what the model shows for each option, by the Run\'s own facts, and the one thing it rests on most; '
   + 'what Olumi assumed or added that they should check; what the calculation leaves out and why, briefly, only when the model\'s left_out holds any (say nothing of it otherwise); '
-  + 'and the one question or check that would most change the result. '
+  + 'and at most three questions: first the missing premise that could most change which option is most likely to achieve the aim, saying why (confirming the aim or its measure first where it is Olumi\'s reading); inputs needed only for the arithmetic after. '
   + 'End by asking them to confirm the reading on the card or say what to change. Plain words, each thing said once.';
 export const RUN_REPLY_GUIDANCE = 'The person pressed Run; the Run in the state block is the one just shown to them. '
   + 'Reply as their reasoning partner in a few short bullets: each option\'s result by the Run\'s own facts, what it rests on, what would change it, '

@@ -177,7 +177,7 @@ describe('a model program\'s postimage through the real /graph/register', () => 
       options: [{ id: 'add', label: 'Add one specialist', sets: [{ quantity: 'specialists', to: 'one', value: null, low: null, high: null, range_kind: null, question: null, starts_after_periods: 0, author: 'person', quote: 'Add one specialist' }],
         status: 'live', developed_from: null, author: 'person', quote: 'Add one specialist', ...at },
       { id: 'keep', label: 'Keep the team', sets: [], status: 'live', developed_from: null, author: 'person', quote: 'keep the team as it is', ...at }],
-      risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [] };
+      risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [], title: null, coaching_questions: [] };
     const { graph } = withNewRun({ model_program: MODEL_PROGRAM, canonical: capacity, seed: seedOf(SCENARIO), person_words: [brief], runs: [] });
     expect((await register({ graph, thin_core: true, brief_text: brief }, true)).statusCode).toBe(200);
     const written = (append.mock.calls[0]![0] as Rec).graph as Rec;
