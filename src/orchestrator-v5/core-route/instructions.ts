@@ -244,6 +244,13 @@ export const PROGRAM_TOOL_DESCRIPTIONS = {
     + 'superseded: the card is out of date because the model changed after it was prepared, so nothing was saved; say so, and ask whether they want that change made again. A refusal or an unknown outcome is not a save: say so, and never claim success or failure the result does not give. ' + RUN_WORDS_RULE,
   run_analysis:
     'Show the Run of the saved model as run: the stored Run when it is current for this model (stored true), otherwise a new Run, worked out and stored (stored false). Use it only when the person asks; a saved change already brings its Run. ' + RUN_WORDS_RULE,
+  // HC5 in the chat (DL 27 Oct): prompt text, reviewed by the PL.
+  what_if:
+    'Only when the person asks what would happen if one or more figures were different (theirs, someone else\'s, or one to test): try them on the saved model, on the same simulated draws. Nothing is saved. '
+    + 'Name each figure by its quantity id from read_canonical_context with the value to try, in that figure\'s own units, and say whose figures they are. '
+    + 'The result, what_if.variants (change_index all: every figure together; a number: that one figure alone), gives for each option its chance on the saved model (saved.display) and with the what-if (what_if.display), or why one is not shown (not_shown), and variation_words, which say whether the what-if moves that chance by more than ordinary run-to-run variation; changes_refused says which figures could not be tried, with words for why. '
+    + 'Say each option\'s two chances as given and its variation_words once, labelled as a what-if, in this model; never a figure, ranking or pick of your own, and never advise on an option. '
+    + 'To keep a figure, the person asks to change the model and approves its card (propose_change); never say a what-if was saved.',
 } as const;
 
 /** Coaching on the canvas (Lenses, #3535 `note_on_item`): one question or challenge beside the item that most deserves attention. */

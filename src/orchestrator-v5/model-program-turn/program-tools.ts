@@ -350,6 +350,47 @@ export async function runProgram(deps: ProgramToolDeps, ctx: Ctx): Promise<ToolO
  * its approval, approved_by and author_id included.
  */
 export type CanvasFigure = { readonly quantity_id: string } | { readonly goal_id: string };
+
+/**
+ * The exact postimage of one canvas figure edit, validated, NOTHING SAVED: what `applyCanvasFigure` saves, and what a what-if
+ * on a program runs (HC5, `program-what-if.ts`), so the two can never apply a figure differently. `code` is the validator's.
+ */
+export function canvasFigurePostimage(program: SavedProgram, edit: { readonly target: CanvasFigure; readonly value: number | null; readonly low?: number | null; readonly high?: number | null },
+  approver: string | null): { readonly ok: true; readonly model: CanonicalModelT; readonly words: string; readonly changes: readonly ProposalChange[] }
+  | { readonly ok: false; readonly reason: string; readonly code?: string } {
+  const goal = 'goal_id' in edit.target ? program.canonical.goals.find((g) => g.id === (edit.target as { goal_id: string }).goal_id) : undefined;
+  const qid = 'quantity_id' in edit.target ? edit.target.quantity_id : goal?.measure?.target;
+  const q = program.canonical.quantities.find((x) => x.id === qid);
+  if (q === undefined) return { ok: false, reason: 'goal_id' in edit.target ? 'That goal has no target to set yet; say it in the chat.' : 'That is not a figure in this model.' };
+  // A figure typed on the person's OWN range (DL 23 Oct): inside it, it is their new most likely figure (the draw's centre)
+  // and the range and its reading stay; outside it, nothing is saved, and the refusal says the range must change with it.
+  const onRange = edit.low == null && edit.high == null && edit.value !== null && q.author === 'person' && q.low !== null && q.high !== null && q.low < q.high;
+  if (onRange) {
+    const n = (x: number) => x.toLocaleString('en-GB');
+    const where = edit.value! < q.low! || edit.value! > q.high! ? 'outside' : edit.value === q.low || edit.value === q.high ? 'at the end of, not inside,' : null;
+    if (where !== null) return { ok: false, reason: `${n(edit.value!)} is ${where} your range of ${n(q.low!)}–${n(q.high!)}, so nothing was saved: change the range with it.` };
+  }
+  const shownAs = onRange ? `${edit.value} ${q.unit}, within ${q.low} to ${q.high}`
+    : edit.low != null && edit.high != null ? `${edit.low} to ${edit.high} ${q.unit}` : `${edit.value} ${q.unit}`;
+  // What the person typed is their words for this figure, so the compiler finds them as theirs.
+  const words = `${goal !== undefined ? `${goal.label} target` : q.label}: ${shownAs}`;
+  // The exact postimage: this ONE figure as theirs, in the words they typed (a goal's target shared with another goal or a
+  // limit first gets its own quantity, so the other keeps its figure). No AI call; the same validator as every change.
+  if (q.status === 'derived') return { ok: false, reason: `"${q.label}" is worked out by its relation; change one of its inputs.` };
+  const [low, high] = onRange ? [q.low, q.high] : [edit.low ?? null, edit.high ?? null];
+  if (edit.value === null && (low === null || high === null)) return { ok: false, reason: 'A figure needs a value, or both ends of a range.' };
+  if (low !== null && high !== null && low > high) return { ok: false, reason: `The low end ${low} is above the high end ${high}.` };
+  const shared = goal !== undefined && (program.canonical.goals.some((x) => x.id !== goal.id && x.measure?.target === q.id) || program.canonical.limits.some((l) => l.measure?.bound === q.id));
+  const id = shared ? `${goal!.id}_target` : q.id;
+  // A typed figure is theirs.
+  const filled: CanonicalQuantityT = { ...q, id, value: edit.value, low, high, range_kind: onRange ? q.range_kind : null, status: 'known', author: 'person', party: null,
+    quote: words, question: null, basis: null, approval: 'approved' };
+  const canonical = figurePostimage(program.canonical, filled, shared ? goal!.id : undefined);
+  const v = validatePostimage(program.canonical, canonical, { removals: [], words: [...program.person_words, words], fresh: [words], approver });
+  if (!v.ok) return { ok: false, reason: v.reason, code: v.code };
+  return { ok: true, model: v.model, words, changes: v.changes };
+}
+
 export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch'>, scenarioId: string, edit: { readonly target: CanvasFigure; readonly value: number | null;
   readonly low?: number | null; readonly high?: number | null; readonly operation_key: string; readonly approver: string | null }): Promise<{ readonly status: 'saved' | 'refused' | 'unknown'; readonly reason?: string; readonly receipt?: unknown;
   readonly changes?: readonly ProposalChange[] }> {
@@ -358,40 +399,12 @@ export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch'>,
   const read = programReadOf(saved.graph);
   if (read.kind !== 'program') return { status: 'refused', reason: read.kind === 'unreadable' ? unreadableWords(read.reason) : 'This scenario is not a model program.' };
   const program: SavedProgram = read.program;
-  const goal = 'goal_id' in edit.target ? program.canonical.goals.find((g) => g.id === (edit.target as { goal_id: string }).goal_id) : undefined;
-  const qid = 'quantity_id' in edit.target ? edit.target.quantity_id : goal?.measure?.target;
-  const q = program.canonical.quantities.find((x) => x.id === qid);
-  if (q === undefined) return { status: 'refused', reason: 'goal_id' in edit.target ? 'That goal has no target to set yet; say it in the chat.' : 'That is not a figure in this model.' };
-  // A figure typed on the person's OWN range (DL 23 Oct): inside it, it is their new most likely figure (the draw's centre)
-  // and the range and its reading stay; outside it, nothing is saved, and the refusal says the range must change with it.
-  const onRange = edit.low == null && edit.high == null && edit.value !== null && q.author === 'person' && q.low !== null && q.high !== null && q.low < q.high;
-  if (onRange) {
-    const n = (x: number) => x.toLocaleString('en-GB');
-    const where = edit.value! < q.low! || edit.value! > q.high! ? 'outside' : edit.value === q.low || edit.value === q.high ? 'at the end of, not inside,' : null;
-    if (where !== null) return { status: 'refused', reason: `${n(edit.value!)} is ${where} your range of ${n(q.low!)}–${n(q.high!)}, so nothing was saved: change the range with it.` };
-  }
-  const shownAs = onRange ? `${edit.value} ${q.unit}, within ${q.low} to ${q.high}`
-    : edit.low != null && edit.high != null ? `${edit.low} to ${edit.high} ${q.unit}` : `${edit.value} ${q.unit}`;
-  // What the person typed is their words for this figure, so the compiler finds them as theirs.
-  const words = `${goal !== undefined ? `${goal.label} target` : q.label}: ${shownAs}`;
-  // The exact postimage: this ONE figure as theirs, in the words they typed (a goal's target shared with another goal or a
-  // limit first gets its own quantity, so the other keeps its figure). No AI call; the same validator as every change.
-  if (q.status === 'derived') return { status: 'refused', reason: `"${q.label}" is worked out by its relation; change one of its inputs.` };
-  const [low, high] = onRange ? [q.low, q.high] : [edit.low ?? null, edit.high ?? null];
-  if (edit.value === null && (low === null || high === null)) return { status: 'refused', reason: 'A figure needs a value, or both ends of a range.' };
-  if (low !== null && high !== null && low > high) return { status: 'refused', reason: `The low end ${low} is above the high end ${high}.` };
-  const shared = goal !== undefined && (program.canonical.goals.some((x) => x.id !== goal.id && x.measure?.target === q.id) || program.canonical.limits.some((l) => l.measure?.bound === q.id));
-  const id = shared ? `${goal!.id}_target` : q.id;
-  // A typed figure is theirs.
-  const filled: CanonicalQuantityT = { ...q, id, value: edit.value, low, high, range_kind: onRange ? q.range_kind : null, status: 'known', author: 'person', party: null,
-    quote: words, question: null, basis: null, approval: 'approved' };
-  const canonical = figurePostimage(program.canonical, filled, shared ? goal!.id : undefined);
-  const v = validatePostimage(program.canonical, canonical, { removals: [], words: [...program.person_words, words], fresh: [words], approver: edit.approver });
-  if (!v.ok) return { status: 'refused', reason: v.reason };
-  const next = withNewRun({ ...program, canonical: v.model, person_words: [...program.person_words, words] });
+  const built = canvasFigurePostimage(program, edit, edit.approver);
+  if (!built.ok) return { status: 'refused', reason: built.reason };
+  const next = withNewRun({ ...program, canonical: built.model, person_words: [...program.person_words, built.words] });
   if (next.evaluation.compiled.errors.length > 0) return { status: 'refused', reason: `That figure does not fit the model: ${next.evaluation.compiled.errors[0]!.message}` };
   const { write } = await savePostimage(deps.dispatch, { scenarioId, operationId: programOperationId(scenarioId, `card:${edit.operation_key}`), expectedIdentity: saved.identity },
     next.graph);
-  return isSaved(write) ? { status: 'saved', receipt: 'receipt' in write ? write.receipt : undefined, changes: v.changes }
+  return isSaved(write) ? { status: 'saved', receipt: 'receipt' in write ? write.receipt : undefined, changes: built.changes }
     : { status: write.status === 'unknown' ? 'unknown' : 'refused', reason: write.status === 'stale' ? 'Your model changed meanwhile; reload to see it.' : 'That change could not be saved.' };
 }

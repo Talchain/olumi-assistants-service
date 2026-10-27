@@ -973,7 +973,8 @@ describe('the model-program turn on the real core route', () => {
     const rule = 'Which option is most likely to achieve the goal is run.leader: name run.leader.option_id\u2019s option as the one most likely to achieve the goal in this model, a finding, never advice; '
       + 'with no option_id, say why none is named, from run.leader.words; with no run.leader, say this Run names none; never pick, rank or advise on an option yourself.';
     for (const [name, text] of Object.entries(PROGRAM_TOOL_DESCRIPTIONS)) {
-      expect(text.split(rule), name).toHaveLength(2);
+      // HC5: what_if returns a what-if, never a Run, so it carries no Run rule; it keeps the no-choosing words.
+      if (name !== 'what_if') expect(text.split(rule), name).toHaveLength(2);
       for (const banned of ['recommend', 'best', 'winner', 'you should']) expect(text.toLowerCase(), `${name}: ${banned}`).not.toContain(banned);
     }
   });

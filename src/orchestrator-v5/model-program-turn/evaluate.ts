@@ -33,10 +33,14 @@ export const RUN_DRAWS = 10_000;
 export const MAX_OPERATIONS = 150_000_000;
 export const MAX_BYTES = 64 * 1024 * 1024;
 
-/** Whether a Run of `x` is admitted (alpha G11), or which limit it would pass. */
-export function admission(x: ExecutableModel, draws: number = RUN_DRAWS): { readonly ok: true; readonly operations: number } | { readonly ok: false; readonly over: 'operations' | 'bytes' } {
+/** Whether a Run of `x` is admitted (alpha G11), or which limit it would pass. `perDraw` (a what-if, HC5): the per-draw results
+ *  the run then keeps (result.ts PerDraw: each condition's value, against and met, each option's headline and each risk's
+ *  firing, and each ranged input's draws) count against the bytes too. */
+export function admission(x: ExecutableModel, draws: number = RUN_DRAWS, perDraw = false): { readonly ok: true; readonly operations: number } | { readonly ok: false; readonly over: 'operations' | 'bytes' } {
   const c = costOf(x, draws);
-  return c.operations > MAX_OPERATIONS ? { ok: false, over: 'operations' } : c.bytes > MAX_BYTES ? { ok: false, over: 'bytes' } : { ok: true, operations: c.operations };
+  const kept = !perDraw ? 0 : draws * (x.options.length * (17 * (x.goals.length + x.limits.length) + 1 + x.risks.length)
+    + 8 * x.quantities.filter((q) => q.dist?.kind === 'range').length);
+  return c.operations > MAX_OPERATIONS ? { ok: false, over: 'operations' } : c.bytes + kept > MAX_BYTES ? { ok: false, over: 'bytes' } : { ok: true, operations: c.operations };
 }
 
 /** The scenario's seed: fixed per scenario (its id's sha256, first 32 bits), saved with the model. */
@@ -49,6 +53,8 @@ export type Evaluation = {
   readonly sim: SimResult | null;
   readonly view: PresentedAnalysisView | WaitingView;
   readonly projection: Projection;
+  /** Set where admission refused the Run (alpha G11), so a caller tells "too large" from a model that waits on something. */
+  readonly too_large?: true;
 };
 /** The view when no executable model exists yet: every option withheld with what it waits on. */
 export type WaitingView = {
@@ -107,7 +113,9 @@ function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: Execut
 }
 
 /** `brief`: the person's first words, so the display tells their brief's figures from the ones they gave later. */
-export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourceText: string; readonly seed: number; readonly draws?: number; readonly brief?: string }): Evaluation {
+export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourceText: string; readonly seed: number; readonly draws?: number; readonly brief?: string;
+  /** A what-if (HC5): keep each draw's results (`sim.per_draw`), to pair this Run with another on the same draws. */
+  readonly perDraw?: boolean }): Evaluation {
   const compiled = compile(model);
   const projection = project(model, compiled, opts.brief !== undefined ? { brief: opts.brief } : {});
   const read = normalise(model);
@@ -130,9 +138,9 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   if (x === null) {
     return { compiled, sim: null, projection, view: waitingView(model, compiled, goals, blockers) };
   }
-  const draws = opts.draws ?? RUN_DRAWS, admitted = admission(x, draws);
-  if (!admitted.ok) return { compiled, sim: null, projection, view: waitingView(model, compiled, goals, blockers, tooLarge(x, admitted.over)) };
-  const sim = simulate(x, { seed: opts.seed, draws });
+  const draws = opts.draws ?? RUN_DRAWS, admitted = admission(x, draws, opts.perDraw === true);
+  if (!admitted.ok) return { compiled, sim: null, projection, view: waitingView(model, compiled, goals, blockers, tooLarge(x, admitted.over)), too_large: true };
+  const sim = simulate(x, { seed: opts.seed, draws, ...(opts.perDraw === true ? { perDraw: true } : {}) });
   // A limit, option or risk left out of this run is said by S2's present itself (S1's `executable.withheld`, r3).
   // R8: each goal and limit is read with its own record and its window's figures (a structural one is nobody's).
   const aims = Object.fromEntries([...read.goals, ...read.limits].map((a) => {
@@ -142,7 +150,8 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x, records), goals, asks, blockers, leaves_out, aims,
     limit_premises: Object.fromEntries(compiled.perLimit.map((l) => [l.limit_id, premisesFor(l.rests_on)])),
     option_premises: Object.fromEntries(compiled.perOption.map((o) => [o.option_id, premisesFor(o.rests_on)])),
-    left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })), sweep: admitted.operations + driverSweepOperations(x, draws) <= MAX_OPERATIONS });
+    left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })), sweep: admitted.operations + driverSweepOperations(x, draws) <= MAX_OPERATIONS,
+    risk_labels: Object.fromEntries(read.risks.map((r) => [r.id, r.label] as const)) });
   return { compiled, sim, projection, view };
 }
 

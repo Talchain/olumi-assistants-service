@@ -146,7 +146,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
 
   it('ALPHA (S3 contract as emitted at 2b419138, DL-3.md 15:0xZ): the program tools\u2019 descriptions, which S3 imports: results only in the Run\u2019s recorded words at their actual paths, per option, per goal and joint; every edit op described', () => {
     const { PROGRAM_TOOL_DESCRIPTIONS: d } = coreInstructions;
-    expect(Object.keys(d)).toEqual(['read_canonical_context', 'propose_change', 'apply_change', 'run_analysis']);
+    expect(Object.keys(d)).toEqual(['read_canonical_context', 'propose_change', 'apply_change', 'run_analysis', 'what_if']);
     // Spelled out, not imported: the PL's per-goal + joint permission at the emitted paths, and never a figure of the agent's own.
     // T1 (Paul 26 Oct): the AI writes results from the Run's own facts, each figure exactly as given and said once.
     const words = 'Report results only from the Run\u2019s own facts: each option\u2019s chance as run.options[].chance gives it (with run.options[].precision_95, in %, only if asked how exact it is); '
@@ -158,7 +158,12 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // The run block as S3 emits it: { run_id, options[{ option_id, shown, words }], goal_chance: the Run's own block }.
     const PATHS = ['run.options[].words', 'run.options[].chance', 'run.options[].precision_95', 'run.options[].driver', 'run.goal_chance.targets.per_target[].words', 'run.goal_chance.targets.joint.words',
       'run.goal_chance.targets.joint.line', 'run.goal_chance.notes, limits[].words with', 'and unchecked_limits[].words'];
-    for (const [name, text] of Object.entries(d)) {
+    // HC5 (DL 27 Oct): what_if returns a what-if, never a Run: it carries no Run words, says nothing is saved and never advises.
+    const { what_if: whatIf, ...runs } = d;
+    expect(whatIf).toContain('Nothing is saved.');
+    expect(whatIf).toContain('never say a what-if was saved');
+    for (const banned of ['recommend', 'best', 'winner', 'you should', 'run.options[]']) expect(whatIf.toLowerCase(), `what_if: ${banned}`).not.toContain(banned);
+    for (const [name, text] of Object.entries(runs)) {
       expect(text.split(words), name).toHaveLength(2);
       for (const path of PATHS) expect(count(text, path), `${name}: ${path}`).toBe(1);
       // The paths S3 no longer emits (14:2xZ): no description names them.
