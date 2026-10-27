@@ -789,9 +789,10 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             response_emitted: true, llm_calls_used: providerCallsMade() ?? result.hops + 1, duration_ms: Date.now() - startedAt, handler_facts: [],
             userMessage: message, assistantMessage: assistantText,
             ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}) } });
+        // C7: a refusal of the answer row after a save still says what was saved, with each version's receipt.
         if (outcome.priorTurnConflict === true) {
           return fail(409, { code: 'TURN_ID_REUSED', message: 'That turn id was already used for a different message. This reply was not recorded.',
-            retry_safe: false, nothing_saved: writesDispatched === 0 && !verifiedSave });
+            retry_safe: false, nothing_saved: writesDispatched === 0 && !verifiedSave }, 'not_recorded', turnReceipts(result));
         }
         if (outcome.replayedPriorTurn === true) {
           const first = await readTurn(scenarioId, turnId);
@@ -805,7 +806,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           const released = await releaseUnwrittenTurnClaim();
           const refusalBody = MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[err.reason];
           return fail(403, { code: refusalBody.error, message: refusalBody.message, retry_safe: released,
-            nothing_saved: readSuccessfulDoorEntries() === 0 && writesDispatched === 0 });
+            nothing_saved: readSuccessfulDoorEntries() === 0 && writesDispatched === 0 }, 'not_recorded', turnReceipts(result));
         }
         // The answer is real and the writes already happened: it is returned, flagged as not recorded.
         log.error({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: answer could not be recorded; the claim stands, so a resend reports an unknown outcome and never re-runs');

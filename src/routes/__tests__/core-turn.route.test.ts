@@ -2016,5 +2016,34 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(idsOf(j.receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
       expect(UI_CORE_TURN.safeParse(j).success).toBe(true);
     });
+
+    it('C7: a press whose change committed, then whose answer row is refused (another answer holds the turn id; the ownership read fails): each refusal carries that change’s own receipt, never "nothing saved"', async () => {
+      const append = store.append.getMockImplementation()!;
+      const owner = store.getScenarioOwner;
+      try {
+        const press = await propose();
+        outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved.' }]];
+        // The answer row (this turn id, response_emitted) meets another answer already recorded under it.
+        store.append.mockImplementation(async (write: Json) => (write.turn_id === press.turn_id && write.response_emitted === true
+          ? { id: 'row-other', priorTurnConflict: true as const } : append(write)));
+        const conflict = await post(press);
+        expect(conflict.statusCode, conflict.body).toBe(409);
+        expect((conflict.json() as Json).error).toMatchObject({ code: 'TURN_ID_REUSED', retry_safe: false, nothing_saved: false });
+        expect(idsOf((conflict.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'person']]);
+        store.append.mockImplementation(append);
+        // A second change on the same model: its save commits, then the owner read for its answer row fails.
+        const second = await propose('Make the oven £3,000.', answer(3000, '£3,000'));
+        outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_2' }], [{ type: 'message', text: 'Saved.' }]];
+        store.getScenarioOwner = async () => { if (registered.length === 2) throw new Error('owner read down'); return null; };
+        const refused = await post(second);
+        expect(refused.statusCode, refused.body).toBe(403);
+        expect((refused.json() as Json).error).toMatchObject({ retry_safe: false, nothing_saved: false });
+        expect(idsOf((refused.json() as Json).receipts)).toEqual([['v_2', 'm_2', 'person']]);
+        expect([registered.length, figure('oven_price')], 'each change was saved once').toEqual([2, 3000]);
+      } finally {
+        store.append.mockImplementation(append);
+        store.getScenarioOwner = owner;
+      }
+    });
   });
 });
