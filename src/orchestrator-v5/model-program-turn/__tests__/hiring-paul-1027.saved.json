@@ -1,0 +1,1132 @@
+{
+ "source": "The saved read of Paul's manual test, 27 Oct 2026 (scenario 6bd4201f, served CEE 4f0a93d4, row updated 01:00:32Z): graph.living_model.canonical as stored, and the brief as person_words[0]. Its projection at 4f0a93d4 equals the stored graph's nodes, edges and goal_constraints.",
+ "brief": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.",
+ "canonical": {
+  "goals": [
+   {
+    "id": "increase_productivity",
+    "label": "Increase productivity by at least 10%",
+    "party": null,
+    "quote": "increase productivity by at least 10%",
+    "author": "person",
+    "measure": {
+     "cmp": ">=",
+     "per": null,
+     "frame": "change_rel",
+     "target": "productivity_target",
+     "window": {
+      "start": 0,
+      "periods": "launch_window",
+      "origin_event": null,
+      "origin_offset": null
+     },
+     "quantity": "productivity",
+     "reference": {
+      "kind": "now",
+      "option": null,
+      "quantity": null
+     },
+     "exclusions": [],
+     "measure_by": "person",
+     "aggregation": "end",
+     "assumptions": [
+      "unchanged_baseline",
+      "short_window_effects",
+      "productivity_interpretation"
+     ]
+    },
+    "approval": "approved",
+    "question": null,
+    "author_id": null
+   }
+  ],
+  "risks": [],
+  "claims": [
+   {
+    "id": "leadership_gap",
+    "text": "The current team lacks leadership.",
+    "party": null,
+    "quote": "we're lacking leadership",
+    "author": "person",
+    "approval": "approved",
+    "concerns": [
+     "lead_productivity_gain",
+     "lead_relative_defect_effect",
+     "developer_relative_defect_effect"
+    ],
+    "author_id": null
+   },
+   {
+    "id": "urgent_launch",
+    "text": "The launch deadline makes near-term contribution more important than eventual staffing capacity.",
+    "party": null,
+    "quote": "We have an urgent launch date in the next three months.",
+    "author": "person",
+    "approval": "approved",
+    "concerns": [
+     "launch_window",
+     "developer_realisation",
+     "lead_onboarding_burden",
+     "developer_onboarding_burden"
+    ],
+    "author_id": null
+   }
+  ],
+  "limits": [
+   {
+    "id": "maintain_code_quality",
+    "label": "Maintaining code quality",
+    "party": null,
+    "quote": "while maintaining code quality",
+    "author": "person",
+    "measure": {
+     "cmp": "<=",
+     "per": null,
+     "bound": "current_defect_rate",
+     "window": {
+      "start": 0,
+      "periods": "launch_window",
+      "origin_event": null,
+      "origin_offset": null
+     },
+     "quantity": "defect_rate",
+     "aggregation": "every"
+    },
+    "approval": "approved",
+    "question": null,
+    "author_id": null
+   },
+   {
+    "id": "stay_within_budget",
+    "label": "Our budget is £200,000",
+    "party": null,
+    "quote": "Our budget is £200,000",
+    "author": "person",
+    "measure": {
+     "cmp": "<=",
+     "per": null,
+     "bound": "hiring_budget",
+     "window": null,
+     "quantity": "total_spend",
+     "aggregation": "end"
+    },
+    "approval": "approved",
+    "question": null,
+    "author_id": null
+   }
+  ],
+  "period": "month",
+  "dissent": [],
+  "history": [],
+  "options": [
+   {
+    "id": "hire_tech_lead",
+    "sets": [
+     {
+      "to": "hire_tech_lead__tech_leads_added",
+      "low": null,
+      "high": null,
+      "quote": "hire a Tech lead",
+      "value": null,
+      "author": "person",
+      "quantity": "tech_leads_added",
+      "question": null,
+      "range_kind": null,
+      "starts_after_periods": 0
+     }
+    ],
+    "label": "Hire a tech lead",
+    "party": null,
+    "quote": "hire a Tech lead",
+    "author": "person",
+    "status": "live",
+    "approval": "approved",
+    "author_id": null,
+    "developed_from": null
+   },
+   {
+    "id": "hire_two_developers",
+    "sets": [
+     {
+      "to": "hire_two_developers__developers_added",
+      "low": null,
+      "high": null,
+      "quote": "two developers",
+      "value": null,
+      "author": "person",
+      "quantity": "developers_added",
+      "question": null,
+      "range_kind": null,
+      "starts_after_periods": 0
+     }
+    ],
+    "label": "Hire two developers",
+    "party": null,
+    "quote": "two developers",
+    "author": "person",
+    "status": "live",
+    "approval": "approved",
+    "author_id": null,
+    "developed_from": null
+   }
+  ],
+  "version": "canonical.v1",
+  "evidence": [],
+  "left_out": [
+   {
+    "id": "broader_code_quality",
+    "why": "These dimensions need separate technical assessment; the defect-rate calculation cannot establish that code quality as a whole is maintained.",
+    "text": "Maintainability, architecture, security and review quality are not captured by the production-defect proxy.",
+    "party": null,
+    "quote": null,
+    "author": "olumi",
+    "approval": "approved",
+    "concerns": [
+     "maintain_code_quality",
+     "quality_proxy"
+    ],
+    "question": null,
+    "author_id": null
+   }
+  ],
+  "question": "Should you hire a tech lead or two developers to raise productivity by at least 10% within three months, while maintaining code quality and staying within £200,000?",
+  "relations": [
+   {
+    "id": "define_full_developer_contribution",
+    "op": "product",
+    "form": "definition",
+    "parts": [
+     {
+      "id": "productivity_now",
+      "power": 1
+     },
+     {
+      "id": "current_developers",
+      "power": -1
+     }
+    ],
+    "party": null,
+    "quote": null,
+    "author": "olumi",
+    "defines": "full_developer_contribution",
+    "approval": "approved",
+    "author_id": null
+   },
+   {
+    "id": "define_developer_productivity_gain",
+    "op": "product",
+    "form": "definition",
+    "parts": [
+     {
+      "id": "full_developer_contribution",
+      "power": 1
+     },
+     {
+      "id": "developer_realisation",
+      "power": 1
+     }
+    ],
+    "party": null,
+    "quote": null,
+    "author": "olumi",
+    "defines": "developer_productivity_gain",
+    "approval": "approved",
+    "author_id": null
+   },
+   {
+    "id": "hiring_productivity_effect",
+    "base": "productivity_now",
+    "form": "effect",
+    "party": null,
+    "quote": null,
+    "terms": [
+     {
+      "party": null,
+      "quote": null,
+      "author": "olumi",
+      "driver": "tech_leads_added",
+      "approval": "approved",
+      "author_id": null,
+      "coefficient": "lead_productivity_gain"
+     },
+     {
+      "party": null,
+      "quote": null,
+      "author": "olumi",
+      "driver": "tech_leads_added",
+      "approval": "approved",
+      "author_id": null,
+      "coefficient": "lead_onboarding_burden"
+     },
+     {
+      "party": null,
+      "quote": null,
+      "author": "olumi",
+      "driver": "developers_added",
+      "approval": "approved",
+      "author_id": null,
+      "coefficient": "developer_productivity_gain"
+     },
+     {
+      "party": null,
+      "quote": null,
+      "author": "olumi",
+      "driver": "developers_added",
+      "approval": "approved",
+      "author_id": null,
+      "coefficient": "developer_onboarding_burden"
+     }
+    ],
+    "author": "olumi",
+    "defines": "productivity",
+    "approval": "approved",
+    "author_id": null
+   },
+   {
+    "id": "define_lead_defect_effect",
+    "op": "product",
+    "form": "definition",
+    "parts": [
+     {
+      "id": "current_defect_rate",
+      "power": 1
+     },
+     {
+      "id": "lead_relative_defect_effect",
+      "power": 1
+     }
+    ],
+    "party": null,
+    "quote": null,
+    "author": "olumi",
+    "defines": "lead_defect_effect",
+    "approval": "approved",
+    "author_id": null
+   },
+   {
+    "id": "define_developer_defect_effect",
+    "op": "product",
+    "form": "definition",
+    "parts": [
+     {
+      "id": "current_defect_rate",
+      "power": 1
+     },
+     {
+      "id": "developer_relative_defect_effect",
+      "power": 1
+     }
+    ],
+    "party": null,
+    "quote": null,
+    "author": "olumi",
+    "defines": "developer_defect_effect",
+    "approval": "approved",
+    "author_id": null
+   },
+   {
+    "id": "hiring_quality_effect",
+    "base": "current_defect_rate",
+    "form": "effect",
+    "party": null,
+    "quote": null,
+    "terms": [
+     {
+      "party": null,
+      "quote": null,
+      "author": "olumi",
+      "driver": "tech_leads_added",
+      "approval": "approved",
+      "author_id": null,
+      "coefficient": "lead_defect_effect"
+     },
+     {
+      "party": null,
+      "quote": null,
+      "author": "olumi",
+      "driver": "developers_added",
+      "approval": "approved",
+      "author_id": null,
+      "coefficient": "developer_defect_effect"
+     }
+    ],
+    "author": "olumi",
+    "defines": "defect_rate",
+    "approval": "approved",
+    "author_id": null
+   },
+   {
+    "id": "define_lead_spend",
+    "op": "product",
+    "form": "definition",
+    "parts": [
+     {
+      "id": "tech_leads_added",
+      "power": 1
+     },
+     {
+      "id": "tech_lead_cost",
+      "power": 1
+     }
+    ],
+    "party": null,
+    "quote": null,
+    "author": "olumi",
+    "defines": "lead_spend",
+    "approval": "approved",
+    "author_id": null
+   },
+   {
+    "id": "define_developer_spend",
+    "op": "product",
+    "form": "definition",
+    "parts": [
+     {
+      "id": "developers_added",
+      "power": 1
+     },
+     {
+      "id": "developer_cost",
+      "power": 1
+     }
+    ],
+    "party": null,
+    "quote": null,
+    "author": "olumi",
+    "defines": "developer_spend",
+    "approval": "approved",
+    "author_id": null
+   },
+   {
+    "id": "define_total_spend",
+    "op": "sum",
+    "form": "definition",
+    "parts": [
+     {
+      "id": "lead_spend",
+      "sign": 1
+     },
+     {
+      "id": "developer_spend",
+      "sign": 1
+     }
+    ],
+    "party": null,
+    "quote": null,
+    "author": "olumi",
+    "defines": "total_spend",
+    "approval": "approved",
+    "author_id": null
+   }
+  ],
+  "conditions": [
+   {
+    "id": "hiring_availability",
+    "kind": "prerequisite",
+    "text": "The comparison assumes suitable hires can start promptly; recruitment delays or notice periods could remove much of their contribution before launch.",
+    "party": null,
+    "quote": null,
+    "author": "olumi",
+    "approval": "approved",
+    "concerns": [
+     "hire_tech_lead",
+     "hire_two_developers",
+     "launch_window",
+     "short_window_effects"
+    ],
+    "author_id": null
+   },
+   {
+    "id": "launch_readiness_not_guaranteed",
+    "kind": "challenge",
+    "text": "A productivity improvement does not by itself establish that the launch scope can be completed by the deadline.",
+    "party": null,
+    "quote": null,
+    "author": "olumi",
+    "approval": "approved",
+    "concerns": [
+     "increase_productivity",
+     "urgent_launch"
+    ],
+    "author_id": null
+   }
+  ],
+  "quantities": [
+   {
+    "id": "current_developers",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "developer",
+    "basis": null,
+    "floor": 0,
+    "label": "Current mid-weight developers",
+    "party": null,
+    "quote": "We currently have six mid-weight developers",
+    "value": 6,
+    "author": "person",
+    "status": "known",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "productivity_now",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "1",
+    "basis": "Current team productivity is normalised to one so the stated percentage improvement does not require an absolute output figure.",
+    "floor": 0,
+    "label": "Current team productivity index",
+    "party": null,
+    "quote": null,
+    "value": 1,
+    "author": "structure",
+    "status": "known",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "tech_leads_added",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "tech_lead",
+    "basis": "The additional tech-lead hiring setting starts switched off.",
+    "floor": 0,
+    "label": "Tech leads hired",
+    "party": null,
+    "quote": null,
+    "value": 0,
+    "author": "structure",
+    "status": "known",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "developers_added",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "developer",
+    "basis": "The additional developer hiring setting starts switched off.",
+    "floor": 0,
+    "label": "Developers hired",
+    "party": null,
+    "quote": null,
+    "value": 0,
+    "author": "structure",
+    "status": "known",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "launch_window",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "month",
+    "basis": null,
+    "floor": 0,
+    "label": "Time available before launch",
+    "party": null,
+    "quote": "in the next three months",
+    "value": 3,
+    "author": "person",
+    "status": "known",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "productivity_target",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "%",
+    "basis": null,
+    "floor": null,
+    "label": "Minimum productivity improvement",
+    "party": null,
+    "quote": "increase productivity by at least 10%",
+    "value": 10,
+    "author": "person",
+    "status": "known",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "hiring_budget",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "GBP",
+    "basis": null,
+    "floor": 0,
+    "label": "Hiring budget",
+    "party": null,
+    "quote": "Our budget is £200,000",
+    "value": 200000,
+    "author": "person",
+    "status": "known",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "tech_lead_cost",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "GBP/tech_lead",
+    "basis": null,
+    "floor": 0,
+    "label": "Total cost per tech lead through launch",
+    "party": null,
+    "quote": null,
+    "value": null,
+    "author": "person",
+    "status": "asked",
+    "ceiling": null,
+    "approval": "approved",
+    "question": "What would hiring a tech lead cost over the next three months, including recruitment and employer costs?",
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "developer_cost",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "GBP/developer",
+    "basis": null,
+    "floor": 0,
+    "label": "Total cost per developer through launch",
+    "party": null,
+    "quote": null,
+    "value": null,
+    "author": "person",
+    "status": "asked",
+    "ceiling": null,
+    "approval": "approved",
+    "question": "What would each additional developer cost over the next three months, including recruitment and employer costs?",
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "current_defect_rate",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "%",
+    "basis": null,
+    "floor": 0,
+    "label": "Current share of shipped changes causing production defects",
+    "party": null,
+    "quote": null,
+    "value": null,
+    "author": "person",
+    "status": "asked",
+    "ceiling": 100,
+    "approval": "approved",
+    "question": "Using last month's release and incident records, what percentage of shipped changes caused a production defect?",
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "full_developer_contribution",
+    "low": null,
+    "high": null,
+    "kind": "coefficient",
+    "unit": "1/developer",
+    "basis": null,
+    "floor": 0,
+    "label": "Current average productivity contribution per developer",
+    "party": null,
+    "quote": null,
+    "value": null,
+    "author": "olumi",
+    "status": "derived",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "developer_realisation",
+    "low": 0.15,
+    "high": 0.85,
+    "kind": "coefficient",
+    "unit": "1",
+    "basis": "Over a short launch window, onboarding and unfamiliarity can leave a new developer contributing substantially less than an established teammate; the range allows very different ramp-up speeds.",
+    "floor": 0,
+    "label": "New developer contribution realised before launch",
+    "party": null,
+    "quote": null,
+    "value": 0.5,
+    "author": "olumi",
+    "status": "estimated",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": "plausible"
+   },
+   {
+    "id": "developer_productivity_gain",
+    "low": null,
+    "high": null,
+    "kind": "coefficient",
+    "unit": "1/developer",
+    "basis": null,
+    "floor": 0,
+    "label": "Added productivity per new developer before onboarding burden",
+    "party": null,
+    "quote": null,
+    "value": null,
+    "author": "olumi",
+    "status": "derived",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "lead_productivity_gain",
+    "low": 0.04,
+    "high": 0.35,
+    "kind": "coefficient",
+    "unit": "1/tech_lead",
+    "basis": "A hands-on lead may recover a modest to substantial share of a six-person team's time through decisions, coordination and unblocking, but the brief does not establish how much work is currently blocked.",
+    "floor": 0,
+    "label": "Productivity gained through technical leadership",
+    "party": null,
+    "quote": null,
+    "value": 0.15,
+    "author": "olumi",
+    "status": "estimated",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": "plausible"
+   },
+   {
+    "id": "lead_onboarding_burden",
+    "low": -0.07,
+    "high": -0.005,
+    "kind": "coefficient",
+    "unit": "1/tech_lead",
+    "basis": "Introducing a lead consumes existing developers' time and can temporarily disrupt decisions, with the burden especially material during a three-month launch window.",
+    "floor": null,
+    "label": "Productivity lost while onboarding a tech lead",
+    "party": null,
+    "quote": null,
+    "value": -0.025,
+    "author": "olumi",
+    "status": "estimated",
+    "ceiling": 0,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": "plausible"
+   },
+   {
+    "id": "developer_onboarding_burden",
+    "low": -0.06,
+    "high": -0.005,
+    "kind": "coefficient",
+    "unit": "1/developer",
+    "basis": "Mentoring, reviews and coordination for each new developer can consume a small but meaningful fraction of the existing team's output during the launch window.",
+    "floor": null,
+    "label": "Existing-team productivity lost per new developer",
+    "party": null,
+    "quote": null,
+    "value": -0.025,
+    "author": "olumi",
+    "status": "estimated",
+    "ceiling": 0,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": "plausible"
+   },
+   {
+    "id": "lead_relative_defect_effect",
+    "low": -0.45,
+    "high": -0.03,
+    "kind": "coefficient",
+    "unit": "1/tech_lead",
+    "basis": "Clearer technical decisions and stronger reviews can reduce escaped defects, although a new lead has limited time to establish those practices before launch.",
+    "floor": null,
+    "label": "Relative defect-rate change from technical leadership",
+    "party": null,
+    "quote": null,
+    "value": -0.2,
+    "author": "olumi",
+    "status": "estimated",
+    "ceiling": 0,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": "plausible"
+   },
+   {
+    "id": "developer_relative_defect_effect",
+    "low": 0.005,
+    "high": 0.2,
+    "kind": "coefficient",
+    "unit": "1/developer",
+    "basis": "Unfamiliar contributors and extra review demand may raise escaped defects when leadership is already lacking; the wide range allows strong existing safeguards to make this effect small.",
+    "floor": 0,
+    "label": "Relative defect-rate increase during developer onboarding",
+    "party": null,
+    "quote": null,
+    "value": 0.05,
+    "author": "olumi",
+    "status": "estimated",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": "plausible"
+   },
+   {
+    "id": "lead_defect_effect",
+    "low": null,
+    "high": null,
+    "kind": "coefficient",
+    "unit": "%/tech_lead",
+    "basis": null,
+    "floor": null,
+    "label": "Defect-rate change per tech lead",
+    "party": null,
+    "quote": null,
+    "value": null,
+    "author": "olumi",
+    "status": "derived",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "developer_defect_effect",
+    "low": null,
+    "high": null,
+    "kind": "coefficient",
+    "unit": "%/developer",
+    "basis": null,
+    "floor": 0,
+    "label": "Defect-rate change per new developer",
+    "party": null,
+    "quote": null,
+    "value": null,
+    "author": "olumi",
+    "status": "derived",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "productivity",
+    "low": null,
+    "high": null,
+    "kind": "derived",
+    "unit": "1",
+    "basis": null,
+    "floor": 0,
+    "label": "Team productivity index before launch",
+    "party": null,
+    "quote": null,
+    "value": null,
+    "author": "olumi",
+    "status": "derived",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "defect_rate",
+    "low": null,
+    "high": null,
+    "kind": "derived",
+    "unit": "%",
+    "basis": null,
+    "floor": 0,
+    "label": "Share of shipped changes causing production defects",
+    "party": null,
+    "quote": null,
+    "value": null,
+    "author": "olumi",
+    "status": "derived",
+    "ceiling": 100,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "lead_spend",
+    "low": null,
+    "high": null,
+    "kind": "derived",
+    "unit": "GBP",
+    "basis": null,
+    "floor": 0,
+    "label": "Tech-lead hiring cost through launch",
+    "party": null,
+    "quote": null,
+    "value": null,
+    "author": "olumi",
+    "status": "derived",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "developer_spend",
+    "low": null,
+    "high": null,
+    "kind": "derived",
+    "unit": "GBP",
+    "basis": null,
+    "floor": 0,
+    "label": "Developer hiring cost through launch",
+    "party": null,
+    "quote": null,
+    "value": null,
+    "author": "olumi",
+    "status": "derived",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "total_spend",
+    "low": null,
+    "high": null,
+    "kind": "derived",
+    "unit": "GBP",
+    "basis": null,
+    "floor": 0,
+    "label": "Total additional hiring cost through launch",
+    "party": null,
+    "quote": null,
+    "value": null,
+    "author": "olumi",
+    "status": "derived",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "hire_tech_lead__tech_leads_added",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "tech_lead",
+    "basis": null,
+    "floor": null,
+    "label": "Hire a tech lead: Tech leads hired",
+    "party": null,
+    "quote": "hire a Tech lead",
+    "value": 1,
+    "author": "person",
+    "status": "known",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   },
+   {
+    "id": "hire_two_developers__developers_added",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "developer",
+    "basis": null,
+    "floor": null,
+    "label": "Hire two developers: Developers hired",
+    "party": null,
+    "quote": "two developers",
+    "value": 2,
+    "author": "person",
+    "status": "known",
+    "ceiling": null,
+    "approval": "approved",
+    "question": null,
+    "author_id": null,
+    "direction": null,
+    "range_kind": null
+   }
+  ],
+  "assumptions": [
+   {
+    "id": "unchanged_baseline",
+    "text": "Without either hire, productivity and the production-defect rate remain at their current levels through the launch window.",
+    "party": null,
+    "quote": null,
+    "author": "olumi",
+    "applied": true,
+    "approval": "approved",
+    "concerns": [
+     "productivity_now",
+     "current_defect_rate",
+     "increase_productivity",
+     "maintain_code_quality"
+    ],
+    "author_id": null
+   },
+   {
+    "id": "productivity_interpretation",
+    "text": "Productivity means total team delivery throughput for comparable work, not output per employee.",
+    "party": null,
+    "quote": null,
+    "author": "olumi",
+    "applied": true,
+    "approval": "approved",
+    "concerns": [
+     "productivity",
+     "increase_productivity",
+     "full_developer_contribution"
+    ],
+    "author_id": null
+   },
+   {
+    "id": "short_window_effects",
+    "text": "Hiring effects represent contribution during the short launch window, including incomplete ramp-up, and are treated as constant rather than as a detailed monthly ramp.",
+    "party": null,
+    "quote": null,
+    "author": "olumi",
+    "applied": true,
+    "approval": "approved",
+    "concerns": [
+     "hiring_productivity_effect",
+     "hiring_quality_effect",
+     "increase_productivity"
+    ],
+    "author_id": null
+   },
+   {
+    "id": "quality_proxy",
+    "text": "No increase in the percentage of shipped changes causing production defects is Olumi's provisional quality proxy, not the person's stated definition of code quality.",
+    "party": null,
+    "quote": null,
+    "author": "olumi",
+    "applied": true,
+    "approval": "approved",
+    "concerns": [
+     "current_defect_rate",
+     "defect_rate",
+     "maintain_code_quality",
+     "broader_code_quality"
+    ],
+    "author_id": null
+   },
+   {
+    "id": "budget_scope",
+    "text": "The budget is provisionally treated as additional hiring expenditure through launch, including recruitment and employer costs, rather than annual commitments or existing payroll.",
+    "party": null,
+    "quote": null,
+    "author": "olumi",
+    "applied": true,
+    "approval": "approved",
+    "concerns": [
+     "hiring_budget",
+     "tech_lead_cost",
+     "developer_cost",
+     "stay_within_budget"
+    ],
+    "author_id": null
+   },
+   {
+    "id": "comparable_developer_hires",
+    "text": "The two developer hires are assumed to have similar costs and established productivity potential to the current mid-weight developers.",
+    "party": null,
+    "quote": null,
+    "author": "olumi",
+    "applied": true,
+    "approval": "approved",
+    "concerns": [
+     "developer_cost",
+     "full_developer_contribution",
+     "developer_realisation",
+     "hire_two_developers"
+    ],
+    "author_id": null
+   }
+  ],
+  "preferences": [
+   {
+    "id": "prefer_lower_spend",
+    "party": null,
+    "quote": "we'd like to spend less",
+    "author": "person",
+    "approval": "approved",
+    "quantity": "total_spend",
+    "author_id": null,
+    "direction": "lower"
+   }
+  ]
+ }
+}
