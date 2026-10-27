@@ -96,7 +96,7 @@ export const UNIT_RULES = 'The unit in singular words: a currency as GBP, USD or
  */
 export const RANGE_KINDS = ['bounds', 'plausible'] as const;
 const RANGE_KIND = z.enum(RANGE_KINDS).nullable().describe(
-  'For a range only. bounds: the words fix hard ends ("between 80 and 150", "no more than", "at least"), so it cannot fall outside them. plausible: a rough span ("about", "roughly", "likely", "somewhere around"); Olumi\'s own estimates are plausible. Null when there is no range, or when the person\'s words do not say which (it is then asked).');
+  'For a range with endpoints only. bounds: hard ends. plausible: a rough span, including Olumi\'s supported coefficient estimates. An approximate single figure supplies no endpoints: value holds that figure, low/high/range_kind stay null, and basis preserves its approximate status. Null also when a stated range\'s meaning is unresolved (then asked).');
 
 export const CanonicalQuantity = z.object({
   id,
@@ -110,7 +110,7 @@ export const CanonicalQuantity = z.object({
   ceiling: z.number().nullable().describe('Olumi\'s reading of the highest physically possible value, in this quantity\'s unit. Null when no upper bound is justified. Not the person\'s stated range.'),
   kind: z.enum(QUANTITY_KINDS).describe(
     'fact: a figure about the person\'s own situation (their price, costs, headcount, members today, dates, targets): only they can give it, so a missing fact is asked, never estimated. '
-    + 'coefficient: the size of a mechanism (each extra oven adds so many loaves; the share of visitors who join; a rate): Olumi may estimate it, labelled, with low and high; a link\'s size stays a coefficient even when it is worked out by a relation. '
+    + 'coefficient: a causal response per unit of driver; estimate only with a supported scale, otherwise unknown. An observed share, mix or allocation in their situation is a fact, asked when missing, even when used as a multiplier. A link\'s size stays a coefficient when derived. '
     + 'derived: worked out by its relation and not a link\'s size (profit, total members): its status is derived. A structural constant is a fact.'),
   status: z.enum(QUANTITY_STATUSES).describe(
     'known: a figure in hand that is not an estimate: the person\'s (quoted), a structural constant (author structure), or Olumi\'s reading of a stated calendar date as a window\'s whole number of periods (basis names the date). '
@@ -122,7 +122,7 @@ export const CanonicalQuantity = z.object({
     + 'unsupported: the person stated it but these forms cannot express it: every figure null, basis says what is missing.'),
   question: z.string().nullable().describe('For asked: the one plain question to the person that would give this figure, in their words, never internal terms. Null otherwise.'),
   basis: z.string().nullable().describe(
-    'For estimated: one plain sentence on what the estimate rests on. For structure: what the constant is ("12 months in a year"). For unknown, not_applicable or unsupported: why. Null otherwise.'),
+    `For a person's approximate single figure, exactly: "${APPROXIMATE_FIGURE}". For estimated: what supports the numerical scale. For structure: what the constant is ("12 months in a year"). For unknown, not_applicable or unsupported: why and what would resolve it. Null otherwise.`),
   direction: z.enum(['raises', 'lowers']).nullable().describe(
     'For a link\'s size (a coefficient), used only when no figure is given (no most likely figure, and no range or one that spans zero): raises when more of the driver means more of what it moves, lowers when it means less; null when no one can say which. Null for every other quantity.'),
   author: z.enum(QUANTITY_AUTHORS).describe(
@@ -218,7 +218,7 @@ const per = id.nullable().describe('For a rate over the window ("no-shows per bo
 
 export const CanonicalGoal = z.object({
   id,
-  label: z.string().describe("The aim in the person's own words (\"keep weekly profit over £900\"); for Olumi's working aim, a short plain label. Never empty."),
+  label: z.string().describe('A short title of a few words for the aim, for its card ("Weekly profit over £900"); the person\'s own words stay in quote. Never empty.'),
   measure: z.object({
     quantity: id.describe('The quantity the aim is about. Never an asked quantity: that would ask for the result itself.'),
     per,
@@ -236,7 +236,7 @@ export const CanonicalGoal = z.object({
     aggregation,
     window: CanonicalWindow.nullable().describe('Null for a static level with no deadline ("keep the margin above 20 %"). A level that changes over time needs a window.'),
     measure_by: z.enum(AUTHORS).describe('person when they named the measure; olumi when the aim had none and this is Olumi\'s suggested measure (the aim stays theirs and the measure is a suggestion, never their definition of success; every figure they did not give stays asked).'),
-    assumptions: ids.describe('Ids of the assumption records this reading of the goal rests on (for a change from now: "carrying on leaves it unchanged" unless the model says otherwise).'),
+    assumptions: ids.describe('Ids of the assumption records this reading of the goal rests on (never "carrying on leaves it unchanged" unless they said so: what carrying on does to it is otherwise asked or estimated, like any quantity). [] when it rests on none.'),
     exclusions: ids.describe('Ids of left_out records for parts of the aim this measure does not cover ("the café\'s cosy feel is not in this chance"). [] when it covers the whole aim.'),
   }).strict().nullable().describe('Null for an aim with no measure yet ("keep the regulars happy"; "a smooth opening night" with no metric): VALID, left out of the chance and asked about. Where one can, Olumi suggests it instead (measure_by olumi).'),
   question: z.string().nullable().describe('When the measure is null: the one plain question that would give it a measure ("How would you tell the regulars are happy: repeat visits a week?"). When the window is null but the level changes over time: "By when?". Null otherwise.'),
@@ -248,7 +248,7 @@ export type CanonicalMeasureT = NonNullable<CanonicalGoalT['measure']>;
 
 export const CanonicalLimit = z.object({
   id,
-  label: z.string().describe("The condition in the person's own words. Never empty."),
+  label: z.string().describe('A short title of a few words for the condition, for its card ("Running costs cap"); the person\'s own words stay in quote. Never empty.'),
   measure: z.object({
     quantity: id,
     per,
@@ -281,6 +281,7 @@ const timing = z.union([z.number().int(), id]).describe(`${STARTS_AFTER_PERIODS}
 /** The old fields, mapped ONCE, where a saved model is read (program-store): `from_period` k is `starts_after_periods` k, the
  *  same count under its old name. Missing quantity direction and physical bounds read as null, without inferring them, and
  *  so does a missing approved_by on a record, a link or a history entry (C6): an earlier approver stays where it was saved.
+ *  A model saved before titles reads with no title (null) and no coaching questions ([]).
  *  A model that has both timing names, or neither, is left for the schema to judge. */
 export function withDeclaredTiming(raw: unknown): unknown {
   const rec = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -289,7 +290,8 @@ export function withDeclaredTiming(raw: unknown): unknown {
   const declaredQuantity = (x: unknown) => (rec(x) ? { direction: null, floor: null, ceiling: null, ...x } : x);
   const approver = (x: unknown): unknown => (Array.isArray(x) ? x.map(approver) : !rec(x) ? x
     : Object.fromEntries([...Object.entries(x).map(([k, v]) => [k, approver(v)] as const), ...('approval' in x && !('approved_by' in x) ? [['approved_by', null] as const] : [])]));
-  const read = { ...raw, ...(Array.isArray(raw['quantities']) ? { quantities: raw['quantities'].map(declaredQuantity) } : {}),
+  const read = { ...raw, ...('title' in raw ? {} : { title: null }), ...('coaching_questions' in raw ? {} : { coaching_questions: [] }),
+    ...(Array.isArray(raw['quantities']) ? { quantities: raw['quantities'].map(declaredQuantity) } : {}),
     options: raw['options'].map((o) => (rec(o) && Array.isArray(o['sets']) ? { ...o, sets: o['sets'].map(renamed) } : o)), risks: raw['risks'].map(renamed) };
   return Object.fromEntries(Object.entries(read).map(([k, v]) => [k, !Array.isArray(v) ? v : k === 'history'
     ? v.map((h) => (rec(h) && !('approved_by' in h) ? { ...h, approved_by: null } : h)) : approver(v)]));
@@ -304,7 +306,7 @@ export const CanonicalOptionSet = z.object({
   range_kind: RANGE_KIND,
   question: z.string().nullable().describe('With to null and no figure: the one question to the person for this option\'s value. Null otherwise.'),
   starts_after_periods: timing,
-  author: z.enum(QUANTITY_AUTHORS).describe('Who gave the inline value: person, olumi, or structure (a switch: 1 for on).'),
+  author: z.enum(QUANTITY_AUTHORS).describe('Who proposed this setting, with either to or an inline value. Olumi\'s proposed option settings are olumi, quote null, even when to names the person\'s figure. structure only for a mathematical off/on switch.'),
   quote: attribution.quote,
 }).strict().describe('What the option changes, and to what: a quantity id in to, or the option\'s own inline value (value, or low and high), with who gave it. An inline value compiles into a named quantity of its own.');
 export type CanonicalOptionSetT = z.infer<typeof CanonicalOptionSet>;
@@ -321,7 +323,7 @@ export type CanonicalOptionT = z.infer<typeof CanonicalOption>;
 
 export const CanonicalRisk = z.object({
   id,
-  label: z.string().describe('An event that may or may not happen ("the oven breaks down"). Never something already true.'),
+  label: z.string().describe('A short title of a few words for an event that may or may not happen, for its card ("Oven breaks down"); the person\'s own words stay in quote. Never something already true.'),
   occurrence: id.describe('A quantity in unit "1" (or "%"): the chance it happens at least once over the whole model horizon.'),
   severity: id.describe('A quantity: what it does IF it happens, drawn only when it does. In the affected quantity\'s unit for add; unit "1" for multiply.'),
   effect_on: id.describe('The quantity it changes.'),
@@ -393,6 +395,7 @@ export const PERIOD_UNITS = ['week', 'month', 'year'] as const;
 export const CanonicalModel = z.object({
   version: z.enum([CANONICAL_VERSION]),
   question: z.string().describe('What is being reasoned about, in one plain sentence.'),
+  title: z.string().nullable().describe('A short title of a few words for the situation, the name on its board ("Second oven or wholesale?"). Never empty; the question stays the one plain sentence.'),
   period: z.enum(PERIOD_UNITS).describe('The model\'s time step, which windows and stocks count in. Period 0 is now.'),
   quantities: z.array(CanonicalQuantity),
   relations: z.array(CanonicalRelation),
@@ -407,6 +410,8 @@ export const CanonicalModel = z.object({
   dissent: z.array(CanonicalDissent),
   conditions: z.array(CanonicalCondition),
   left_out: z.array(CanonicalLeftOut),
+  coaching_questions: z.array(z.string()).describe(
+    'Olumi\'s own questions for the first screen, at most three, each ONE plain question to the person that tests their reasoning: the aim behind the request, an alternative they have not weighed, or the assumption the result leans on most. Never a request for a figure (a missing figure is asked on its own item\'s question), never leading, never answerable with yes or no. [] when none would help.'),
   history: z.array(CanonicalHistoryEntry).describe('Kept by Olumi\'s host: [] in a first draft.'),
 }).strict();
 export type CanonicalModelT = z.infer<typeof CanonicalModel>;

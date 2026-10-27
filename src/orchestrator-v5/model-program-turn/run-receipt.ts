@@ -81,7 +81,11 @@ export function revisionDigest(canonical: CanonicalModelT, personWords: readonly
   // approver is part of the revision.
   const lean = (v: unknown): unknown => (Array.isArray(v) ? v.map(lean)
     : isRec(v) ? Object.fromEntries(Object.entries(v).filter(([k, x]) => !(k === 'approved_by' && x == null)).map(([k, x]) => [k, lean(x)])) : v);
-  return createHash('sha256').update(stableStringify({ canonical: lean({ ...canonical, quantities }), person_words: personWords }), 'utf8').digest('hex');
+  // A title that reads as null and no coaching questions (a model saved before them) leave the digest as it was; a title or
+  // a question is part of the revision.
+  const { title, coaching_questions: coaching, ...rest } = canonical;
+  const named = { ...rest, ...(title === null || title === undefined ? {} : { title }), ...(coaching === undefined || coaching.length === 0 ? {} : { coaching_questions: coaching }) };
+  return createHash('sha256').update(stableStringify({ canonical: lean({ ...named, quantities }), person_words: personWords }), 'utf8').digest('hex');
 }
 
 export function newRun(args: { canonical: CanonicalModelT; personWords: readonly string[]; seed: number; draws: number | null; result: StoredRun['result'];

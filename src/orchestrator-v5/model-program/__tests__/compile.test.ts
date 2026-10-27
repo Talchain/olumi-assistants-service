@@ -67,7 +67,7 @@ const limit = (id: string, label: string, quantity: string, cmp: '>=' | '<=' | '
 const model = (over: Partial<CanonicalModelT>): CanonicalModelT => ({
   version: 'canonical.v1', question: 'Should the bakery buy a second oven?', period: 'week',
   quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [],
-  claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [], ...over,
+  claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [], title: null, coaching_questions: [], ...over,
 });
 const codes = (r: ReturnType<typeof compile>) => r.errors.map((e) => e.code);
 /**
@@ -542,7 +542,8 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(xq(compile(figure)).get('costs')!.dist).toEqual({ kind: 'fixed', value: 600, author: 'person' });
     const schemaText = JSON.stringify(z.toJSONSchema(CanonicalModel));
     expect(schemaText).not.toContain('A derived or structural quantity is a fact');
-    expect(schemaText).toContain('a link\'s size stays a coefficient even when it is worked out by a relation'); // contrast: the new rule is said
+    // Round 1 (27 Oct, the PL's candidate wording): the coefficient description is shortened; the rule is unchanged.
+    expect(schemaText).toContain('A link\'s size stays a coefficient when derived.'); // contrast: the new rule is said
   });
 
   it('phase 0b fix 6: a preference is shown and reported, never a goal or a limit', () => {

@@ -14,7 +14,7 @@ import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
 import { APPROXIMATE_FIGURE, CanonicalModel, withDeclaredTiming, type CanonicalModelT, type CanonicalQuantityT } from '../../model-program/canonical.js';
-import { compile, normalise } from '../../model-program/compile.js';
+import { compile, isApproximate, normalise } from '../../model-program/compile.js';
 import { CORE_ALIGNED_INSTRUCTIONS, PROGRAM_TOOL_DESCRIPTIONS } from '../../core-route/instructions.js';
 import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
@@ -25,11 +25,11 @@ import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgra
 import { draftCanonicalModel, proposePostimage, withHostFields } from '../draft.js';
 import { applyCanvasFigure, applyProgramChange, holdProgramCard, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
 import { log as staticLog } from '../../../utils/telemetry.js';
-import { GROUPS, readingOf, validatePostimage, withoutHost } from '../postimage.js';
+import { asDrafted, GROUPS, readingOf, validatePostimage, withoutHost } from '../postimage.js';
 import { proposalPendingAction } from '../../agent-lane/durable-proposal.js';
 import { agentProposalOf, proposalFieldsWire, proposalRecord } from '../../agent-lane/proposal-object/record.js';
 import { ProposalChangeSchema, ProposalStore, type ProposalChange } from '../../agent-lane/proposal.js';
-import { savePostimage, withNewRun } from '../program-save.js';
+import { postimageOf, savePostimage, withNewRun } from '../program-save.js';
 import { programRevisionOf } from '../program-card.js';
 import { projectCorePostimageForPersistence } from '../../persisted-graph-projection.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
@@ -1430,7 +1430,11 @@ describe('the model-program turn on the real core route', () => {
       }
     };
     const shape = CanonicalModel.shape as Record<string, z.ZodType>;
-    const families = Object.keys(shape).filter((k) => defOf(shape[k]!).type === 'array' && k !== 'history');
+    const ROOT_EXEMPT: Record<string, string> = { version: 'one fixed value: the format allows no other', history: 'host-owned: appended by the host, never compared',
+      // Titles and coaching questions (Paul, approved 27 Oct): the first draft's framing; an update never returns them.
+      title: 'the first draft\'s: an update never returns it (CanonicalUpdate omits it), so no change carries it',
+      coaching_questions: 'the first draft\'s: an update never returns them (CanonicalUpdate omits them), so no change carries them' };
+    const families = Object.keys(shape).filter((k) => defOf(shape[k]!).type === 'array' && ROOT_EXEMPT[k] === undefined);
     expect(families.sort()).toEqual(Object.keys(GROUPS).sort());
     const unsaid = (family: string, schema: z.ZodType) => fields(schema).filter((p) => GROUPS[family as keyof typeof GROUPS][p] === undefined && exemptAs(p) === undefined);
     const element = (family: string): z.ZodType => defOf(shape[family]!).element;
@@ -1444,7 +1448,6 @@ describe('the model-program turn on the real core route', () => {
     expect(unsaid('quantities', (element('quantities') as z.ZodObject).extend({ new_field: z.string() }))).toEqual(['new_field']);
     // The model's own fields (Codex #3742): each is a record family above, one the card says as its own entry, or exempt.
     const ROOT_SAID = ['question', 'period'];
-    const ROOT_EXEMPT: Record<string, string> = { version: 'one fixed value: the format allows no other', history: 'host-owned: appended by the host, never compared' };
     const unsaidRoot = (keys: readonly string[]) => keys.filter((k) => !families.includes(k) && !ROOT_SAID.includes(k) && ROOT_EXEMPT[k] === undefined);
     expect(unsaidRoot(Object.keys(shape))).toEqual([]);
     expect(Object.keys(ROOT_EXEMPT).filter((k) => !(k in shape))).toEqual([]);
@@ -2483,6 +2486,36 @@ describe('the model-program turn on the real core route', () => {
     // Contrast: the ends in their own words are their range, read as theirs, and no range is asked for.
     const ranged = answered({ value: null, low: 2250, high: 2750, range_kind: 'bounds', quote: 'between £2,250 and £2,750' });
     expect(compile(ranged, { sourceText: `${BRIEF}\nbetween £2,250 and £2,750` }).blockers.some((b) => b.id === 'oven_price')).toBe(false);
+  });
+
+  it('round 1 (DL 27 Oct): a FIRST DRAFT that marks a rough figure of theirs with APPROXIMATE_FIGURE is kept end to end (normalise, compile, asDrafted, validatePostimage, postimageOf, the real turn): their figure, used for now, never stripped or refused as the host\'s mark', async () => {
+    // "A second oven adds about 100 loaves a week": the drafter writes it as the prompt's approximate single figure.
+    const drafted = bakery();
+    setQ(drafted, 'extra_per_oven', { basis: APPROXIMATE_FIGURE });
+    const mark = { status: 'known', value: 100, low: null, high: null, range_kind: null, author: 'person', quote: 'adds about 100 loaves a week', basis: APPROXIMATE_FIGURE };
+    const ofIt = (m: CanonicalModelT) => m.quantities.find((x) => x.id === 'extra_per_oven')!;
+    const read = normalise(drafted);
+    expect(ofIt(read)).toMatchObject(mark);
+    expect(isApproximate(ofIt(read))).toBe(true);
+    const compiled = compile(read, { sourceText: BRIEF });
+    expect(compiled.errors).toEqual([]);
+    expect(compiled.executable!.quantities.find((x) => x.id === 'extra_per_oven')!.dist).toEqual({ kind: 'fixed', value: 100, author: 'person' }); // a point, no invented range
+    const saved = asDrafted(read);
+    expect(ofIt(saved)).toMatchObject(mark);
+    // A postimage that only adds the mark is a change the card shows, never refused.
+    const marking = validatePostimage(asDrafted(normalise(bakery())), saved, { removals: [], words: [BRIEF], fresh: [] });
+    expect(marking, JSON.stringify(marking)).toMatchObject({ ok: true, changes: [{ id: 'extra_per_oven', action: 'change', before: 'no basis given', after: `based on "${APPROXIMATE_FIGURE}"`, author: 'person' }] });
+    const shown = JSON.stringify(postimageOf({ model_program: MODEL_PROGRAM, canonical: saved, person_words: [BRIEF], seed: 7, runs: [] } as Parameters<typeof postimageOf>[0]));
+    expect(shown).toContain('for now — you said “adds about 100 loaves a week”');
+    // The real first-draft turn saves and runs it as drafted.
+    replies = [JSON.stringify(drafted)];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    expect(ofIt(persisted!.living_model.canonical as CanonicalModelT)).toMatchObject(mark);
+    expect(JSON.stringify(persisted)).toContain('for now — you said “adds about 100 loaves a week”');
+    expect(JSON.stringify(persisted!.living_model.runs[0].result.canonical_analysis_view)).toContain('for now — you said ‘adds about 100 loaves a week’');
+    // Contrast: the same draft without the mark is their exact figure, never "for now".
+    const plain = JSON.stringify(postimageOf({ model_program: MODEL_PROGRAM, canonical: asDrafted(normalise(bakery())), person_words: [BRIEF], seed: 7, runs: [] } as Parameters<typeof postimageOf>[0]));
+    expect(plain).not.toContain('for now — you said');
   });
 
   it('the agent\'s context after a cold reopen is the model AS AUTHORED: relations, coefficient basis and range kind, goal windows, option timing, the qualitative records, and the Run\'s goal_chance unchanged', async () => {

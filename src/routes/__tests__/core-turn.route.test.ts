@@ -1539,7 +1539,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('(6) ALPHA (23 Oct) + F1b (26 Oct): a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model is refused before any call', async () => {
       // Pinned from the request bodies the provider received on this route, not from the module that builds them.
-      const PROGRAM_SHA = 'ef5655cb40b60676cea666da0195ccd5a73bd907d330f5a67836facc01300c0f'; // 27 Oct: T1, each caveat once per conversation. // 26 Oct: integrated review words#7 (the "on Olumi’s reading of …" basis). // 25 Oct: alpha G10 (no threshold sentences). // 25 Oct: alpha G5 (no note_on_item sentence). // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
+      const PROGRAM_SHA = 'e1e01c5e5848dafb2c195afd4ac742b42367bfc674a2ddf70b9976f2e970e41f'; // 27 Oct: round 1, first-model questions lead with the premise that could change the comparison. 27 Oct: T1, each caveat once per conversation. // 26 Oct: integrated review words#7 (the "on Olumi’s reading of …" basis). // 25 Oct: alpha G10 (no threshold sentences). // 25 Oct: alpha G5 (no note_on_item sentence). // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
       const sha = (c: Json) => createHash('sha256').update(String(c.instructions), 'utf8').digest('hex');
       persisted = postimage(KNOWN_ANSWER);
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
@@ -1805,7 +1805,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const guidance = system.filter((s) => s.startsWith('Olumi has just drafted this model'));
       expect(guidance).toHaveLength(1);
       expect(guidance[0]).toContain('what Olumi assumed or added that they should check; what the calculation leaves out and why, briefly, '
-        + 'only when the model\'s left_out holds any (say nothing of it otherwise); and the one question or check that would most change the result. ');
+        + 'only when the model\'s left_out holds any (say nothing of it otherwise); and at most three questions: first the missing premise that could most change which option is most likely '
+        + 'to achieve the aim, saying why (confirming the aim or its measure first where it is Olumi\'s reading); inputs needed only for the arithmetic after. ');
     });
 
     it('S3 (DL 23 Oct): on a program turn the provider receives the PROGRAM tool descriptions, read included, and the read it gets back carries the Run\'s goal_chance block unchanged', async () => {

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
 import { CanonicalModel, withDeclaredTiming } from '../../model-program/canonical.js';
@@ -189,5 +190,57 @@ describe('C6: a model saved before approved_by (27 Oct 2026)', () => {
     // Contrast: a named approver is part of the revision.
     const named = { ...m, quantities: m.quantities.map((q) => (q.id === 'base_loaves' ? { ...q, approved_by: 'owner' } : q)) };
     expect(revisionDigest(named, said)).not.toBe(digest);
+  });
+});
+
+describe('titles and coaching questions (Paul, approved 27 Oct 2026): a model saved before them', () => {
+  // Paul's saved hiring model, stored before titles (no title, no coaching_questions).
+  const stored = () => JSON.parse(readFileSync(new URL('./hiring-paul-1027.saved.json', import.meta.url), 'utf8')) as { brief: string; canonical: Record<string, unknown> };
+  /** The revision digest as it was computed before this change, written out independently of run-receipt.ts. */
+  const digestBefore = (canonical: Record<string, any>, personWords: readonly string[]): string => {
+    const quantities = (canonical['quantities'] as Record<string, unknown>[]).map(({ direction, floor, ceiling, ...q }) => ({ ...q,
+      ...(direction == null ? {} : { direction }), ...(floor == null ? {} : { floor }), ...(ceiling == null ? {} : { ceiling }) }));
+    const lean = (v: unknown): unknown => (Array.isArray(v) ? v.map(lean) : v !== null && typeof v === 'object'
+      ? Object.fromEntries(Object.entries(v).filter(([k, x]) => !(k === 'approved_by' && x == null)).map(([k, x]) => [k, lean(x)])) : v);
+    return createHash('sha256').update(stableStringify({ canonical: lean({ ...canonical, quantities }), person_words: personWords }), 'utf8').digest('hex');
+  };
+
+  it('opens with title null and no coaching questions, its revision digest unchanged and its stored Run current, without changing its saved bytes', () => {
+    const s = stored();
+    expect(['title' in s.canonical, 'coaching_questions' in s.canonical]).toEqual([false, false]);
+    const said = [s.brief];
+    // The model as it read before this change: today's reading, less the two new fields.
+    const { title: _t, coaching_questions: _c, ...readBefore } = CanonicalModel.parse(withDeclaredTiming(s.canonical));
+    const digest = digestBefore(readBefore, said);
+    const run: StoredRun = {
+      run_id: 'mp_run_saved_before_titles', computed_at: '2026-10-27T10:00:00.000Z',
+      receipt: { revision_digest: digest, versions: priorVersions, seed: 7, draws: 200 },
+      result: { canonical_analysis_view: { marker: 'stored result, never recomputed',
+        run: { run_id: 'mp_run_saved_before_titles', graph_hash_at_run: 'old-graph', computed_at: '2026-10-27T10:00:00.000Z' }, staleness: { stale: false, reason: 'graph_hash_match' } },
+        chances: null, compile: null },
+    };
+    const before = JSON.stringify({ living_model: { model_program: MODEL_PROGRAM, canonical: s.canonical, person_words: said, seed: 7, runs: [run] } });
+    const cold = JSON.parse(before);
+    const opened = reopenProgram(cold, priorVersions)!;
+    expect(opened).toBeDefined();
+    expect([opened.program.canonical.title, opened.program.canonical.coaching_questions]).toEqual([null, []]);
+    expect(revisionDigest(opened.program.canonical, said)).toBe(digest);
+    expect([opened.current, opened.engine_current]).toEqual([true, true]);
+    expect(opened.run).toEqual(run);
+    expect(JSON.stringify(cold)).toBe(before);
+  });
+
+  it('invariance: title null and coaching questions [] digest byte-equal to the model without the fields; a title or a question is part of the revision', () => {
+    const s = stored();
+    const read = CanonicalModel.parse(withDeclaredTiming(s.canonical));
+    const { title: _t, coaching_questions: _c, ...without } = read;
+    const said = [s.brief];
+    expect([read.title, read.coaching_questions]).toEqual([null, []]);
+    expect(revisionDigest(read, said)).toBe(revisionDigest(without as typeof read, said));
+    // Contrast: each named field changes the revision, and so does a different one.
+    const titled = { ...read, title: 'Tech lead or two developers?' };
+    const coached = { ...read, coaching_questions: ['What would a 10% gain in productivity let the team do?'] };
+    const digests = [revisionDigest(read, said), revisionDigest(titled, said), revisionDigest(coached, said), revisionDigest({ ...titled, title: 'Hire for the launch?' }, said)];
+    expect(new Set(digests).size).toBe(4);
   });
 });
