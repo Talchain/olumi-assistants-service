@@ -16,8 +16,9 @@
  *    asks in its own words (simplify v1 A4). An asked fact is NEVER removed or given a value by the compiler: finite numerical
  *    agreement cannot prove cancellation or its domain (the buddy's BLOCK, upheld by the DL). Cancellation may only ever be
  *    PROVEN from the canonical forms with its domain conditions, and only after a PL review: not built.
- *  · WITHHELD goals rest on a quantity that is `unknown` or `unsupported`, a range the ruled law holds, or a window or timing
- *    that is a range; the reason says which. Withheld items are echoed in `executable.withheld` and `coverage`.
+ *  · WITHHELD goals rest on a quantity that is `unknown` or `unsupported`, a range the ruled law holds, a window or timing
+ *    that is a range, or a start time worked out by a relation; the reason says which. Withheld items are echoed in
+ *    `executable.withheld` and `coverage`.
  *  · Authorship and provenance are the AI's alone (S1 strip, Paul 26 Oct): an item is drawn as its author says, quoted or
  *    not; `unverified` stays [] for stored Runs' shape.
  *
@@ -45,7 +46,7 @@ export type CompileErrorCode =
   | 'olumi_no_range' | 'missing_quote' | 'range_order' | 'no_relation' | 'relation_on_figure' | 'two_relations'
   | 'relation_shape' | 'cycle' | 'goal_and_limit' | 'goal_shape' | 'asks_for_result' | 'window' | 'timing' | 'option_shape'
   | 'set_derived' | 'option_reaches_no_goal' | 'set_reaches_nothing' | 'risk_shape' | 'not_applicable_used'
-  | 'after_horizon' | 'fact_estimated' | 'coefficient_kind' | 'structure_value' | 'label' | 'range_kind' | 'asked_no_question';
+  | 'fact_estimated' | 'coefficient_kind' | 'structure_value' | 'label' | 'range_kind' | 'asked_no_question';
 export type CompileError = { code: CompileErrorCode; message: string; items: string[] };
 export type Outcome = 'calculable' | 'asks' | 'withheld';
 export type GoalOutcome = {
@@ -382,6 +383,8 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
 
   // ── timing: a whole period, or a quantity holding one ──────────────────────────────────────────────────────────────
   const fixedTimings = new Set<string>();
+  /** Live start times worked out by a relation: outside the alpha (spec §3.5), so what rests on one is withheld (C10). */
+  const derivedTimings = new Set<string>();
   /** A whole period; or, for an uncertain timing, the quantity's id (S2 samples it; its whole-period reading is the PL's). */
   const timingOf = (t: number | string, at: string, item: string, live = true): number | string | null => {
     if (typeof t === 'number') { if (t < 0) err('timing', `${at} starts after ${t} periods; the count starts at 0 (from the start).`, [item]); return t; }
@@ -389,9 +392,11 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
     const q = Q.get(t)!;
     if (U.has(t) && !sameDims(U.get(t)!, period)) { err('timing', `${at}'s timing ${name(t)} is ${showUnit(U.get(t)!)}; it counts ${model.period}s from now.`, [item, t]); return null; }
     // alpha G6: a timing worked out by a relation, or one that does not apply, has no count to start from; never period 0.
-    // An option that is not compared is never built, so its timing blocks nothing (Codex r1 #3770).
+    // An option that is not compared is never built, so its timing blocks nothing (Codex r1 #3770). A worked-out one is
+    // unsupported, withholding only what rests on it (C10); one that does not apply is an error.
     if (!live && (q.status === 'derived' || q.status === 'not_applicable')) return null;
-    if (q.status === 'derived' || q.status === 'not_applicable') { err('timing', `${at}'s timing ${name(t)} is ${q.status === 'derived' ? 'worked out by a relation' : 'marked as not applying'}; a timing is a figure of ${model.period}s from now, given or estimated.`, [item, t]); return null; }
+    if (q.status === 'derived') { derivedTimings.add(t); return null; }
+    if (q.status === 'not_applicable') { err('timing', `${at}'s timing ${name(t)} is marked as not applying; a timing is a figure of ${model.period}s from now, given or estimated.`, [item, t]); return null; }
     if (!FIGURE_STATUSES.has(q.status)) return null; // asked, unknown or unsupported: an ask or a withholding, through its closure
     if (has(q.low) && has(q.high) && q.low !== q.high) {
       if (q.low < 0) err('timing', `${at}'s timing ${name(t)} starts at ${q.low}; a timing counts ${model.period}s from now, 0 or more.`, [item, t]);
@@ -441,8 +446,12 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
     }
     if (has(m.window)) { const st = resolveWindow(m.window, at, said, item); st.withheld.push(...frameWithheld); return st; }
     // A static level with no deadline is read once, at period 0, with every option's change in effect. A level that
-    // changes over time (it rests on a stock) has no single reading without a deadline: a typed blocker, never a guess.
-    const moves = [...upstream(roots)].some((x) => R.get(x)?.form === 'stock');
+    // changes over time (it rests on a stock, or on a live option's setting or a risk that starts later or at a time held in
+    // a quantity) has no single reading without a deadline: a typed blocker, never a guess and never read as in effect (C3).
+    const reads = upstream(roots), later = (t: number | string) => typeof t === 'string' || t > 0;
+    const moves = [...reads].some((x) => R.get(x)?.form === 'stock')
+      || model.options.some((o) => o.status === 'live' && o.sets.some((s) => reads.has(s.quantity) && later(s.starts_after_periods)))
+      || model.risks.some((k) => reads.has(k.effect_on) && later(k.starts_after_periods));
     return moves ? { win: null, blockers: [], withheld: frameWithheld, deadline: true } : { win: { start_period: 0, periods: 1 }, blockers: [], withheld: frameWithheld };
   };
 
@@ -624,6 +633,7 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
   }
   const held = new Map([...[...readings].filter(([, r]) => r.kind === 'held').map(([id, r]) => [id, (r as { reason: string }).reason] as const),
     ...[...contradictory].filter(([id]) => Q.get(id)!.author !== 'person').map(([id, why]) => [id, `${why}; Olumi's ${has(Q.get(id)!.low) ? 'range' : 'figure'} is unsupported`] as const),
+    ...[...derivedTimings].map((id) => [id, 'a start time worked out by a relation is unsupported'] as const),
     ...nothing]);
   /** The person's figures given outside what they can be: theirs to give again, with the reason. */
   const recheck = new Map([...contradictory].filter(([id]) => Q.get(id)!.author === 'person'));
