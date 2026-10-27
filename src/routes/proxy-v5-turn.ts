@@ -459,13 +459,14 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
 
     // 4. Internal routing via app.inject()
     // app.inject() runs the request through the full Fastify hook chain
-    // (auth, validation, handler) without an HTTP round-trip. It does NOT
-    // traverse the Render gateway, so the only timeout is ROUTE_TIMEOUT_MS.
-    // However, it does not support AbortSignal — we use Promise.race to
-    // enforce the proxy timeout. If the timeout fires, the internal request
-    // continues until ROUTE_TIMEOUT_MS kills it; this is acceptable because
-    // CEE's own budgets (V5 DRAFT_REQUEST_BUDGET_MS / LLM timeouts) terminate
-    // the LLM call independently.
+    // (auth, validation, handler) without an HTTP round-trip or a socket, so
+    // neither the Render gateway nor the server's socket timeouts
+    // (server.ts connectionTimeout / requestTimeout = ROUTE_TIMEOUT_MS) apply
+    // to it. It does not support AbortSignal: Promise.race enforces the proxy
+    // timeout for the CALLER only. When it fires, the internal request runs on
+    // to its own end. No timer here stops it (C14 map, 27 Oct: a core turn's
+    // streaming lifetime is NOT PROVEN), and a change it saves after the proxy
+    // answered is reported by its own receipt or as unknown, never rolled back.
     // 5. Serialise the body WITHOUT the caller-asserted identity extension.
     // This is what makes admitting unauthenticated callers safe — see the
     // helper's own note. It is not an optimisation and it is not hygiene:
