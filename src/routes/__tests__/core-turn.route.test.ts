@@ -81,6 +81,8 @@ let holdVersions: Promise<void> | undefined;
 let versionsHeld = 0;
 /** A guest's write, as the register commits one: saved, but no version minted (`append_turn_atomic_v5`), so no receipt. */
 let guestWrites = false;
+/** The next write's acknowledgement is lost (a 503), after its commit or before it: once, then cleared. */
+let loseAck: 'after_commit' | 'before_commit' | null = null;
 const turnRows = new Map<string, any>();
 /** The scenario's turn fence (`v5_turn_fence`): a claim takes the next generation; a Stop sets the row's tombstone. */
 const fenceRows = new Map<string, { generation: number; stopped_at: string | null }>();
@@ -312,9 +314,11 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       }
       const current = persisted === null ? null : computeGraphIdentityHash(persisted as never)!.value;
       if ((b.expected_graph_identity_hash ?? null) !== current) return reply.code(409).send({ details: { code: 'GRAPH_STALE' } });
+      if (loseAck === 'before_commit') { loseAck = null; return reply.code(503).send({ code: 'upstream_unavailable' }); }
       persisted = b.graph as Json;
       if (guestWrites) return { registered: true, graph_identity_hash: computeGraphIdentityHash(persisted as never)!, graph_hash: hashOf(persisted) };
       registered.push(b);
+      if (loseAck === 'after_commit') { loseAck = null; return reply.code(503).send({ code: 'upstream_unavailable' }); }
       const identity = computeGraphIdentityHash(persisted as never)!;
       return { registered: true, graph_identity_hash: identity, graph_hash: hashOf(persisted),
         model_version: { version_id: `v_${registered.length}`, version_number: registered.length, mutation_id: `m_${registered.length}`,
@@ -335,7 +339,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     SCENARIO = randomUUID(); persisted = programGraph(); canonicalDraft = undefined; canonicalDrafts = []; registered.length = 0; fenceRows.clear(); turnRows.clear(); conversationIds.clear();
     readiness = { status: 'blocked', may_run: false, options: [], blockers: [] }; runState = undefined; carriedResult = undefined; otherRun = undefined;
     pausedRun = null; calls = []; conversationItems = []; outputs = []; preparedId = ''; holdProvider = undefined; holdWhen = undefined; registerRefusal = null;
-    holdVersions = undefined; versionsHeld = 0; guestWrites = false;
+    holdVersions = undefined; versionsHeld = 0; guestWrites = false; loseAck = null;
   });
   const post = (payload: Json) => app.inject({ method: 'POST', url: '/agent/v1/core-turn',
     payload: { kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', ...payload } });
@@ -2110,6 +2114,40 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // Its answer row records that Run's operation, by identity, and its words stay provably typed to the next turn (`typedRowProof`).
       expect(recordedRunsOf(String(turnRows.get(second)!.request_hash))).toEqual([String(registered[2]!.operation_id)]);
       expect(typedRowProof(SCENARIO, null)(turnRows.get(second)!)).toBe(true);
+    });
+
+    it('C7: a typed Run whose register acknowledgement was lost, its save proved by its own operation’s version and a complete readback, then whose reply failed: the resend replays exactly that Run’s receipt, never a later write’s; CONTRAST: a lost acknowledgement with nothing committed stays unknown, with no receipt recorded or replayed', async () => {
+      staleEngine();
+      loseAck = 'after_commit';
+      outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run', args: { reason: 'they asked for it' } }], [{ type: 'refuse' }]];
+      const turnId = randomUUID();
+      const r = await typed('Run the analysis again, please.', turnId);
+      expect(r.statusCode, r.body).toBe(502);
+      expect((r.json() as Json).error).toEqual({ code: 'UPSTREAM_ERROR', message: SAVED_LOST, retry_safe: false, nothing_saved: false });
+      // The Run's own version, found by its own operation (the 503 carried no receipt): one commit, never a second revision.
+      expect(idsOf((r.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      expect(registered).toHaveLength(1);
+      const runOp = String(registered[0]!.operation_id);
+      expect(recordedRunsOf(String(turnRows.get(turnId)!.request_hash)), 'its answer row records that Run’s operation').toEqual([runOp]);
+      // An unrelated later write, by another operation: version 2.
+      expect((await canvasEdit(randomUUID())).statusCode).toBe(200);
+      expect(registered).toHaveLength(2);
+      const again = await typed('Run the analysis again, please.', turnId);
+      expect(again.statusCode, again.body).toBe(200);
+      expect(again.json()).toMatchObject({ durability: 'replayed', error: { code: 'REPLY_NOT_DELIVERED', message: SAVED_LOST, nothing_saved: false } });
+      expect(idsOf((again.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      expect((again.json() as Json).receipts[0].source_turn_id).toBe(registrationTurnId(SCENARIO, runOp));
+      // CONTRAST: the acknowledgement lost with nothing committed: the save is not proved, so it stays unknown and no Run is recorded.
+      staleEngine();
+      loseAck = 'before_commit';
+      outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_2', args: { reason: 'again' } }], [{ type: 'refuse' }]];
+      const unproved = randomUUID();
+      const u = await typed('And once more.', unproved);
+      expect(u.statusCode, u.body).toBe(502);
+      expect(u.json()).toMatchObject({ receipts: [], error: { nothing_saved: false } });
+      expect(registered, 'nothing committed').toHaveLength(2);
+      expect(recordedRunsOf(String(turnRows.get(unproved)!.request_hash))).toEqual([]);
+      expect(((await typed('And once more.', unproved)).json() as Json).receipts).toEqual([]);
     });
 
     it('C7: a press whose change committed, then whose answer row is refused (another answer holds the turn id; the ownership read fails): each refusal carries that change’s own receipt, never "nothing saved"', async () => {

@@ -76,6 +76,7 @@ import { compile } from '../orchestrator-v5/model-program/compile.js';
 import { applyCanvasFigure, DRAFT_REPLY_GUIDANCE, HOST_REPLY_WITHHELD_TOOLS, PROGRAM_TURN_GUIDANCE, readProgramContext, RUN_REPLY_GUIDANCE } from '../orchestrator-v5/model-program-turn/program-tools.js';
 import { programOperationId } from '../orchestrator-v5/model-program-turn/program-save.js';
 import { findOperationVersion } from '../orchestrator-v5/path-b/tools/core-write.js';
+import { registrationTurnId } from '../orchestrator-v5/graph-registration/registration-identity.js';
 import { log } from '../utils/telemetry.js';
 
 export const CORE_TURN_PATH = '/agent/v1/core-turn';
@@ -526,17 +527,23 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       && await store.isTurnStopped(scenarioId, String(turnId)).catch(() => false);
     /** C14: the writes the fence refused (the register's 409 TURN_STOPPED / TURN_SUPERSEDED): by the commit's word, nothing written. */
     let fenceRefusedWrites = 0;
-    /** C7: the operation each version this turn's writes minted was saved under (its register request's `operation_id`). */
+    /**
+     * C7: the operation each save this turn's writes made ran under (its register request's `operation_id`), by the version an
+     * acknowledged write minted, and by the registration id each write was sent under: a lost acknowledgement's save, proved by
+     * `savePostimage` (its own operation's version and a complete readback), comes back with that id as its receipt's
+     * `source_turn_id`. An unproved save has no receipt, so it is never found here.
+     */
     const mintedBy = new Map<string, string>();
     const readingDispatch: InternalDispatch = readCache.dispatch;
     const countingDispatch: InternalDispatch = async (path, b) => {
       const sendIt = async () => promoteRevisionConflictResponse(await readingDispatch(path, b));
       if (path.endsWith('/graph/register')) {
         writesDispatched += 1;
+        const operationId = isRec(b) ? b.operation_id : undefined;
+        if (typeof operationId === 'string') mintedBy.set(registrationTurnId(scenarioId, operationId), operationId);
         const res = await undoRefusedWrite(() => fenced(sendIt));
         if (res.status === 409 && FENCE_REFUSED.has((res.json.details as { code?: unknown } | undefined)?.code)) fenceRefusedWrites += 1;
         const minted = (res.json.model_version as { version_id?: unknown } | undefined)?.version_id;
-        const operationId = isRec(b) ? b.operation_id : undefined;
         if (res.status === 200 && typeof minted === 'string' && typeof operationId === 'string') mintedBy.set(minted, operationId);
         return res;
       }
@@ -666,7 +673,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         : collectTurnReceipts(calls.tool_results).map((r) => ({ ...r, authorised_by: programPayload!.model_program['turn'] === 'draft' ? 'olumi' as const : 'person' as const })));
       /** C7: each Run the AI started that saved (its own receipt, Olumi's), by the operation its write ran under, for the answer row. */
       const ranOperations = (calls: Pick<AgentTurnResult, 'tool_calls' | 'tool_results'>): string[] => (programPayload !== undefined ? []
-        : receiptsOf(calls).flatMap((r) => { const op = r.authorised_by === 'olumi' ? mintedBy.get(r.version_id) : undefined; return op === undefined ? [] : [op]; }));
+        : receiptsOf(calls).flatMap((r) => { const op = r.authorised_by !== 'olumi' ? undefined
+          : mintedBy.get(r.version_id) ?? (r.source_turn_id === null ? undefined : mintedBy.get(r.source_turn_id)); return op === undefined ? [] : [op]; }));
       const programTurn = async (): Promise<AgentTurnResult> => {
         const t0 = Date.now();
         const out = await runModelProgramTurn({ scenarioId, turnId, message, saved: { graph: saved.graph, identity: saved.identity }, dispatch: countingDispatch,
