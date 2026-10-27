@@ -577,7 +577,13 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       const reading = lawOf(x.id, x.dist).reading;
       const within = (value: number) => reading.kind === 'point' ? reading.value : Math.min(reading.upper, Math.max(reading.lower, value));
       const low = within(x.dist.low), high = within(x.dist.high);
-      const values = [low, (low + high) / 2, high];
+      // Where the basis names a middle value (a plausible range with no end past an edge: "with 0.15 as the middle value",
+      // range-law.ts `centre`), the middle tested is that value, never the halfway point between its ends: for 0.04 to 0.35
+      // around 0.15 the halfway point, 0.195, was called "the middle" at about 98%, where the middle value gives about 76%
+      // (Paul's hiring test, 27 Oct; C10: the driver basis is accurate). Where it names none (a person's bounds, an end past
+      // an edge), the middle is halfway between the ends tested, as before.
+      const named = reading.kind === 'normal' && reading.ends === 'p10_p90' && reading.share_below === 0.5;
+      const values = [low, named ? reading.centre : (low + high) / 2, high];
       const results = values.map((value) => simulate({ ...model, quantities: model.quantities
         .map((z) => (z.id === x.id ? { ...z, dist: { kind: 'fixed' as const, value, author: 'olumi' as const } } : z)) }, { seed: result.seed, draws: sweepDraws }));
       atEnds.set(x.id, { values, results });
