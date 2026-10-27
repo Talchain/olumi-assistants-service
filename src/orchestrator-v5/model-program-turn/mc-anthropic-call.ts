@@ -88,7 +88,10 @@ export function anthropicResponsesCall(model: string): ResponsesCall {
  * json_object mode, and CEE's parse -> compile -> repair loop judges the reply. Ledgered as a `deepseek` row.
  */
 export function deepseekResponsesCall(model: string): ResponsesCall {
-  const client = new OpenAI({ apiKey: process.env['DEEPSEEK_API_KEY'], baseURL: 'https://api.deepseek.com', maxRetries: 0, timeout: 600_000 });
+  // MC_DS_TOOL=1 (27 Oct): the schema as a STRICT tool on /beta (schema-enforced, as OpenAI's json_schema), forced tool_choice.
+  // MC_DRAFT_EFFORT=off: thinking disabled (DeepSeek's fast mode; forced tool_choice needs it).
+  const asTool = process.env['MC_DS_TOOL'] === '1';
+  const client = new OpenAI({ apiKey: process.env['DEEPSEEK_API_KEY'], baseURL: asTool ? 'https://api.deepseek.com/beta' : 'https://api.deepseek.com', maxRetries: 0, timeout: 600_000 });
   return async (body): Promise<CallOutput> => {
     const format = body.text?.format as { name?: string; schema?: Record<string, unknown> } | undefined;
     const system = `${String(body.instructions)}\n\nReply with ONE JSON object and nothing else (no prose, no code fences). It must conform exactly to this JSON schema "${format?.name ?? 'canonical_model'}" (strict: every property is required, no other properties; use null where the schema allows it):\n${JSON.stringify(format?.schema ?? {})}`;
@@ -99,17 +102,21 @@ export function deepseekResponsesCall(model: string): ResponsesCall {
       try {
         // MC_DRAFT_EFFORT (low | high | max): DeepSeek's reasoning effort; unset = its default (high, per GET /models, 27 Oct).
         const effort = process.env['MC_DRAFT_EFFORT'];
-        const r = await client.chat.completions.create({ model, messages, response_format: { type: 'json_object' }, max_tokens: 32_000,
-          ...(effort ? { reasoning_effort: effort } : {}) } as OpenAI.ChatCompletionCreateParamsNonStreaming);
+        const think = effort === 'off' ? { thinking: { type: 'disabled' } } : effort ? { reasoning_effort: effort } : {};
+        const shape = asTool
+          ? { tools: [{ type: 'function', function: { name: format?.name ?? 'canonical_model', strict: true, parameters: format?.schema ?? {} } }],
+            tool_choice: { type: 'function', function: { name: format?.name ?? 'canonical_model' } } }
+          : { response_format: { type: 'json_object' } };
+        const r = await client.chat.completions.create({ model, messages, max_tokens: 32_000, ...shape, ...think } as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming);
         const u = (r.usage ?? {}) as unknown as Record<string, number>;
-        const raw = r.choices[0]?.message?.content ?? '';
+        const raw = (asTool ? r.choices[0]?.message?.tool_calls?.[0]?.function?.arguments : r.choices[0]?.message?.content) ?? '';
         const bare = raw === '' ? null : bareJson(raw);
         recordProviderUsage(handle, { input_tokens: u['prompt_tokens'] ?? 0, output_tokens: u['completion_tokens'] ?? 0,
           input_tokens_details: { cached_tokens: u['prompt_cache_hit_tokens'] ?? 0 }, deepseek_usage: { ...u }, mc_cleanup: bare?.cleanup ?? null });
         recordProviderReturnedModel(handle, r.model);
         const stop = r.choices[0]?.finish_reason ?? null;
         recordProviderAttempt(handle, { transport_status: 200, result: String(stop), outcome: 'success', retry: false });
-        return { text: bare?.text ?? null, status: stop === 'stop' ? 'completed' : String(stop), incomplete: stop === 'length' ? 'max_output_tokens' : null,
+        return { text: bare?.text ?? null, status: stop === 'stop' || stop === 'tool_calls' ? 'completed' : String(stop), incomplete: stop === 'length' ? 'max_output_tokens' : null,
           usage: { ...u, mc_cleanup: bare?.cleanup ?? null } };
       } catch (err) {
         const s = (err as { status?: unknown })?.status;
