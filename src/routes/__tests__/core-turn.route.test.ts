@@ -1539,7 +1539,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('(6) ALPHA (23 Oct) + F1b (26 Oct): a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model is refused before any call', async () => {
       // Pinned from the request bodies the provider received on this route, not from the module that builds them.
-      const PROGRAM_SHA = 'e1e01c5e5848dafb2c195afd4ac742b42367bfc674a2ddf70b9976f2e970e41f'; // 27 Oct: round 1, first-model questions lead with the premise that could change the comparison. 27 Oct: T1, each caveat once per conversation. // 26 Oct: integrated review words#7 (the "on Olumi’s reading of …" basis). // 25 Oct: alpha G10 (no threshold sentences). // 25 Oct: alpha G5 (no note_on_item sentence). // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
+      const PROGRAM_SHA = '1c0f76852fabaa6cc9448477e00072e5b91996def39804df52201b0d6d80590f'; // 27 Oct: round 2, the consolidation (RESULTS the single Run-reporting owner; first-model questions in drafted order; shortened reply rules); before it e1e01c5e…. 27 Oct: round 1, first-model questions lead with the premise that could change the comparison. 27 Oct: T1, each caveat once per conversation. // 26 Oct: integrated review words#7 (the "on Olumi’s reading of …" basis). // 25 Oct: alpha G10 (no threshold sentences). // 25 Oct: alpha G5 (no note_on_item sentence). // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
       const sha = (c: Json) => createHash('sha256').update(String(c.instructions), 'utf8').digest('hex');
       persisted = postimage(KNOWN_ANSWER);
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
@@ -1549,13 +1549,13 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       outputs = [[{ type: 'message', text: 'Tell me more about the situation first.' }]];
       expect((await typed('What does the model hold now?')).statusCode).toBe(200);
       expect(calls).toHaveLength(1);
-      // Integrated review 26 Oct (words#7): the RESULTS rule, as SENT, names the basis the Run gives before approval (#3769) and
-      // keeps it whole, never shortened to "on your figures"; the two-basis wording is gone, and the "if" rule stays once.
+      // Integrated review 26 Oct (words#7): the RESULTS rule, as SENT, keeps the basis the Run gives before approval (#3769); the
+      // two-basis wording is gone, and the "if" rule stays once. Round 2 (27 Oct, consolidation): RESULTS says it in one sentence,
+      // the Run's 'if' and unconfirmed Olumi readings preserved; the words#7 wording is gone.
       const sent = String(calls[0]!.instructions);
-      expect(sent).toContain('what it rests on, "on your figures", "on Olumi’s reading of …" or "if" with Olumi\'s assumptions (name them briefly; '
-        + 'quote "on Olumi’s reading of …" as the result words it, with any "(not yet confirmed)", never shortened to "on your figures";');
+      expect(sent.split('Preserve its \'if\', unconfirmed Olumi readings and exclusions without turning them into forecasts.')).toHaveLength(2);
       expect(sent).not.toContain('"on your figures" or "if" with Olumi');
-      expect(sent.split('never drop the "if" or turn it into a forecast')).toHaveLength(2);
+      expect(sent).not.toContain('never drop the "if" or turn it into a forecast');
       expect(sha(calls[0]!)).toBe(PROGRAM_SHA);
       expect(String(calls[0]!.instructions)).toContain('draft the first model from their brief in that same turn, even when figures are missing');
       expect(String(calls[0]!.instructions)).not.toContain('POLYMATH COACHING');
@@ -1598,7 +1598,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect((await typed(BAKERY_BRIEF)).statusCode).toBe(200);
       const draftCall = calls.find((c) => c.text?.format?.name === 'canonical_model')!;
       // Contrast: the probe reads the schema's descriptions and the agent's instructions (each holds its synthetic example).
-      expect(hostText(draftCall).join(' ')).toContain('("we\'d like fewer late deliveries")');
+      // Round 2 (27 Oct): the preference example left the schema with its description; the title's example is a schema description too.
+      expect(hostText(draftCall).join(' ')).toContain('("Second oven or wholesale?")');
       skipped.length = 0;
       expect(found(draftCall)).toEqual([]);
       expect(skipped, 'only the person\'s brief is skipped').toEqual([BAKERY_BRIEF]);
@@ -1612,7 +1613,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
       expect((await typed('What does the model hold now?')).statusCode).toBe(200);
       expect(calls).toHaveLength(1);
-      expect(String(calls[0]!.instructions)).toContain('A loose figure ("about 35") goes in exactly as they said it: their figure, 35,');
+      // Round 2 (27 Oct): the loose-figure example left the instructions; the first-model example's estimate is synthetic too.
+      expect(String(calls[0]!.instructions)).toContain('Olumi’s starting estimate, for you to correct: each extra evening adds 60 to 140 swims a month.');
       expect(calls[0]!.tools, 'the tool descriptions are scanned too').toBeDefined();
       const agentText = hostText(calls[0]!).join(' ');
       expect(agentText, 'the host\'s state block in the input is scanned').toContain('OLUMI STATE BLOCK');
@@ -1850,7 +1852,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // 26 Oct (W6 chat): RUN_WORDS_RULE gained one sentence, the leader's words as given (run.leader.words); before it 806a9ded….
       // Strip (Paul 26 Oct, B5): a worded answer goes in request; before it 6c4611c7….
       // 26 Oct (T1, Paul): RUN_WORDS_RULE reports from the Run's own facts (chance, precision_95, driver, leader.option_id), each figure once; before it 9532ffa4….
-      expect(sentSha('propose_change')).toBe('7996a9ef03dfefe5e32fa0a69d860f36ea6f553bde0a100e5a3d8c415486fbe8');
+      // 27 Oct (round 2, consolidation): RUN_WORDS_RULE is gone (RESULTS owns Run reporting), and so is the line repeating the attribution rule; before it 7996a9ef….
+      expect(sentSha('propose_change')).toBe('3817edd1d025a6aa653d2dcf5a791df9e0c40039b4fcaf2da5bf1d2f7d69f77b');
       const sentParams = (calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.parameters as Json;
       expect(Object.keys(sentParams.properties)).toEqual(['public_label', 'basis', 'request', 'remove', 'answers']);
       expect(sentParams.required).toContain('answers');
@@ -1931,7 +1934,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // 25 Oct (measure RL mrr-r4/r5): the superseded sentence; before it 09fd261b… said "read it again and prepare a new change".
       // 26 Oct (W6 chat): RUN_WORDS_RULE gained one sentence, the leader's words as given (run.leader.words); before it 4ebb0110….
       // 26 Oct (T1, Paul): RUN_WORDS_RULE reports from the Run's own facts, each figure once; before it 8ac4ec65….
-      expect(createHash('sha256').update(sent, 'utf8').digest('hex')).toBe('6a9fa6d052afe945021241a3c035e10abc292df870ef9eea766e07dd467bea58');
+      // 27 Oct (round 2, consolidation): RUN_WORDS_RULE is gone (RESULTS owns Run reporting); before it 6a9fa6d0….
+      expect(createHash('sha256').update(sent, 'utf8').digest('hex')).toBe('d19276a6a5726c9b52b73c90a23eeeb3471bf9442130fd554fdc1ffe241f6b63');
     });
 
     it('DL 23 Oct (served capacity: a new Run unseen until reload): a program reply names the Run its turn stored in `run`, and only that Run', async () => {
@@ -2106,8 +2110,10 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('(7) Codex r1 BLOCK 1 on #3707: a loose figure goes in exactly as said, with no bounds Olumi adds; Olumi asks for their range', async () => {
       const sent = await sentOnce();
-      expect(sent.split('A loose figure ("about 35") goes in exactly as they said it: their figure, 35, with their words quoted so the "about" stays visible. '
-        + 'Never add a range or bounds they did not give. If that figure feeds a goal or a limit, ask what range they would put on it.')).toHaveLength(2);
+      // Round 2 (27 Oct, consolidation): the rule is the drafter's (step 6) and the schema's (an approximate point, never endpoints
+      // made from it), no longer the agent instructions'.
+      expect(sent).not.toContain('A loose figure ("about 35") goes in exactly as they said it');
+      expect(DRAFTING_INSTRUCTIONS.split('Ask for a range when a supplied approximate point feeds a goal or limit.')).toHaveLength(2);
       for (const gone of ['18 to 22', 'a range that reads their word', 'the range is Olumi\'s reading']) expect(sent, gone).not.toContain(gone);
     });
 

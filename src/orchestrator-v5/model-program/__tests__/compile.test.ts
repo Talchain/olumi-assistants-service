@@ -543,7 +543,9 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const schemaText = JSON.stringify(z.toJSONSchema(CanonicalModel));
     expect(schemaText).not.toContain('A derived or structural quantity is a fact');
     // Round 1 (27 Oct, the PL's candidate wording): the coefficient description is shortened; the rule is unchanged.
-    expect(schemaText).toContain('A link\'s size stays a coefficient when derived.'); // contrast: the new rule is said
+    // Round 2 (27 Oct, consolidation): the kind description in one sentence each; the rule is unchanged.
+    expect(schemaText).toContain('coefficient: a causal response per unit of driver, still a coefficient when derived;'); // contrast: the new rule is said
+    expect(schemaText).toContain('derived: a quantity worked out by its relation that is not a link\'s size.');
   });
 
   it('phase 0b fix 6: a preference is shown and reported, never a goal or a limit', () => {

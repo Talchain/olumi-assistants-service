@@ -969,11 +969,14 @@ describe('the model-program turn on the real core route', () => {
     expect([old.data.run.current, Object.hasOwn(old.data.run, 'leader')]).toEqual([false, false]);
   });
 
-  it('W6 chat: the agent can say on a later turn which option is most likely, from the Run\'s own words; its tool descriptions say how, with no choosing word', () => {
-    const rule = 'Which option is most likely to achieve the goal is run.leader: name run.leader.option_id\u2019s option as the one most likely to achieve the goal in this model, a finding, never advice; '
-      + 'with no option_id, say why none is named, from run.leader.words; with no run.leader, say this Run names none; never pick, rank or advise on an option yourself.';
+  it('W6 chat: the agent can say on a later turn which option is most likely, from the Run\'s own words; the program instructions say how, and no tool description holds a choosing word', () => {
+    // Round 2 (27 Oct, consolidation): RESULTS, in the program instructions, is the single owner of the leader rule; the tool
+    // descriptions no longer repeat it (RUN_WORDS_RULE is gone).
+    const rule = 'Name a leader only from run.leader.option_id, using its option label; otherwise give run.leader.words, or say the Run names none.';
+    expect(CORE_ALIGNED_INSTRUCTIONS.split(rule)).toHaveLength(2);
+    expect(CORE_ALIGNED_INSTRUCTIONS).toContain('report findings in this model without advice or an extra disclaimer.');
     for (const [name, text] of Object.entries(PROGRAM_TOOL_DESCRIPTIONS)) {
-      expect(text.split(rule), name).toHaveLength(2);
+      expect(text, name).not.toContain('run.leader');
       for (const banned of ['recommend', 'best', 'winner', 'you should']) expect(text.toLowerCase(), `${name}: ${banned}`).not.toContain(banned);
     }
   });
@@ -2473,10 +2476,12 @@ describe('the model-program turn on the real core route', () => {
     const answered = (f: Partial<CanonicalQuantityT>) => { const m = bakery(); setQ(m, 'oven_price', { status: 'known', question: null, approval: 'approved', ...f }); return m; };
     const approx = answered({ value: 2500, quote: words, basis: APPROXIMATE_FIGURE });
     const r = compile(approx, { sourceText: `${BRIEF}\n${words}` });
-    // S1 A4: no question of the code's, and nothing waits on it; the AI asks for the range (the program instructions say so).
+    // S1 A4: no question of the code's, and nothing waits on it; a range is asked for. Round 2 (27 Oct, consolidation): the rule is the
+    // drafter's (its step 6), no longer the program instructions'.
     expect(r.blockers.some((b) => b.id === 'oven_price')).toBe(false);
     expect(JSON.stringify(r)).not.toContain('What range would you put on it');
-    expect(CORE_ALIGNED_INSTRUCTIONS).toContain('If that figure feeds a goal or a limit, ask what range they would put on it.');
+    expect(DRAFTING_INSTRUCTIONS.split('Ask for a range when a supplied approximate point feeds a goal or limit.')).toHaveLength(2);
+    expect(CORE_ALIGNED_INSTRUCTIONS).not.toContain('If that figure feeds a goal or a limit, ask what range they would put on it.');
     expect(r.within_limits.status).toBe('calculable'); // the range asked for holds nothing back
     expect(r.conversions.some((c) => c.quantity === 'oven_price')).toBe(false);
     const view = evaluateCanonical(approx, { sourceText: `${BRIEF}\n${words}`, seed: 7 }).view as Json;
