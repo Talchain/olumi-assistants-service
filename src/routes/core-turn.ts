@@ -74,6 +74,8 @@ import { runModelProgramTurn } from '../orchestrator-v5/model-program-turn/turn.
 import { isProgramGraph, programReadOf, reopenProgram, savedProgramOf, sourceTextOf, unreadableWords } from '../orchestrator-v5/model-program-turn/program-store.js';
 import { compile } from '../orchestrator-v5/model-program/compile.js';
 import { applyCanvasFigure, DRAFT_REPLY_GUIDANCE, HOST_REPLY_WITHHELD_TOOLS, PROGRAM_TURN_GUIDANCE, readProgramContext, RUN_REPLY_GUIDANCE } from '../orchestrator-v5/model-program-turn/program-tools.js';
+import { programOperationId } from '../orchestrator-v5/model-program-turn/program-save.js';
+import { findOperationVersion } from '../orchestrator-v5/path-b/tools/core-write.js';
 import { log } from '../utils/telemetry.js';
 
 export const CORE_TURN_PATH = '/agent/v1/core-turn';
@@ -351,14 +353,20 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             ? { target: { quantity_id: ev.target_id }, value: num(ev.raw_value ?? ev.value)! }
             : ev.kind === 'goal_target_edit' && typeof ev.goal_node_id === 'string' && num(ev.raw_value) !== undefined
               ? { target: { goal_id: ev.goal_node_id }, value: num(ev.raw_value)! } : undefined;
-          const edited = claim.held === 'same' ? { status: 'saved' as const }
+          // A resend of the same edit is answered from its own save: the version its operation committed, with that receipt (C7).
+          // With none found it is never called saved: the first send may have been refused, or its outcome is unknown.
+          const own = claim.held === 'same'
+            ? await findOperationVersion(dispatch, scenarioId, programOperationId(scenarioId, `card:${turnId}`)).catch(() => null) : null;
+          const edited = claim.held === 'same'
+            ? own !== null ? { status: 'saved' as const, receipt: own }
+              : { status: 'unknown' as const, reason: 'This edit was sent again, and Olumi could not confirm it was saved. Reload to see your model.' }
             : figure !== undefined ? await applyCanvasFigure({ dispatch }, scenarioId, { ...figure, operation_key: turnId, approver: userId })
             : { status: 'refused' as const, reason: ev.kind === 'edge_strength_edit'
               ? 'A link\'s size on this model is a figure in its own units; change it in the chat for now.'
               : 'Only a figure on a card or a goal\'s target can be edited here on this model; ask Olumi in the chat for other changes.' };
           const after = savedScenarioOf(await internal(graphPath, { ...FRESH_READ }));
           return send(edited.status === 'saved' ? 200 : edited.status === 'unknown' ? 503 : 409, coreTurnContract({
-            turnId, durability: claim.held === 'same' ? 'replayed' : edited.status === 'saved' ? 'recorded' : edited.status === 'unknown' ? 'unknown' : 'not_recorded',
+            turnId, durability: claim.held === 'same' ? (own !== null ? 'replayed' : 'unknown') : edited.status === 'saved' ? 'recorded' : edited.status === 'unknown' ? 'unknown' : 'not_recorded',
             revision: after.revision, scenarioRevision: after.identity, graph: appliedGraphWire(after.graph), run: programRunOf(after.graph, newestRunId(currentProgram)), analysisState: after.analysisState,
             receipts: edited.status === 'saved' && 'receipt' in edited && edited.receipt !== undefined ? collectTurnReceipts([{ model_version: edited.receipt }]).map((r) => ({ ...r, authorised_by: 'person' as const })) : [],
             error: edited.status === 'saved' ? null : { code: 'CANVAS_EDIT_REFUSED', message: edited.reason ?? 'That change could not be saved.', retry_safe: false, nothing_saved: edited.status !== 'unknown' },

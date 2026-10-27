@@ -231,7 +231,10 @@ describe('the model-program turn on the real core route', () => {
           creation_kind: registered.length === 1 ? 'initial' : 'committed_mutation', graph_identity_hash: identity.value,
           analysis_affecting_hash: computeAnalysisAffectingGraphHashSha256(persisted as never) } };
     });
-    app.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: [] }));
+    // The store's history in its served shape: each registered write under its own operation's registration id (as
+    // `core-turn.route.test.ts` serves it), so a resend can find its own save.
+    app.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: registered.map((b, i) => ({ version_id: `v_${i + 1}`, sequence: i + 1,
+      creation: { kind: i === 0 ? 'initial' : 'committed_mutation', mutation_id: `m_${i + 1}`, source_turn_id: registrationTurnId(SCENARIO, String(b.operation_id)) } })) }));
     app.post('/orchestrate/v2/turn', async (req, reply) => { legacyForwards.push({ headers: req.headers as Json, body: req.body as Json }); return reply.code(500).send({ error: 'no Run in this harness' }); });
     await app.register(route.coreTurnRoute);
     await app.ready();
