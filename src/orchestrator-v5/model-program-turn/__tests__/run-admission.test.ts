@@ -101,3 +101,32 @@ describe('the Run admission limit (alpha G11)', () => {
     expect(['available', 'none_licensed']).toContain(promotion.main_driver.kind);
   });
 });
+
+/**
+ * C14 (alpha spec §7, 27 Oct): a horizon the model works out (a derived goal window) is refused before the Run, by name, and
+ * the simulator is never called: compile's typed window error (compile.ts resolveWindow) leaves no executable, and
+ * evaluateCanonical returns before admission. Existing behaviour, witnessed on the real evaluation path; 0 provider calls.
+ */
+describe('C14: a derived goal horizon is refused before the Run, and nothing is simulated', () => {
+  it('the club\'s window "months" worked out by a definition: a typed window error naming it, no executable, sim null, the simulator never called', () => {
+    const { m, src } = clubOver(3);
+    m.quantities = [...m.quantities.map((x) => (x.id === 'months' ? q('months', 'month', { kind: 'derived', status: 'derived', author: 'olumi' }) : x)),
+      q('quarter_months', 'month', { value: 3, quote: 'within three months' })];
+    m.relations = [...m.relations, { form: 'definition', id: 'months_rel', defines: 'months', op: 'product', parts: [{ id: 'quarter_months', power: 1 }],
+      author: 'olumi', quote: null, party: null, approval: 'proposed', author_id: null, approved_by: null } as CanonicalModelT['relations'][number]];
+    const e = evaluateCanonical(m, { sourceText: src, seed: 7 });
+    const window = e.compiled.errors.filter((x) => x.code === 'window');
+    expect(window.map((x) => x.message)).toEqual(['The goal "Reach 340 members within three months" (reach_340)\'s length "months" (months) is derived; a window needs a figure.']);
+    expect(e.compiled.executable).toBeNull();
+    expect(e.sim).toBeNull();
+    expect(calls, 'nothing is simulated').toBe(0);
+  });
+
+  it('contrast: the same club with "months" as their figure (3) is admitted and simulated', () => {
+    const { m, src } = clubOver(3);
+    const e = evaluateCanonical(m, { sourceText: src, seed: 7 });
+    expect(e.compiled.errors.filter((x) => x.code === 'window')).toEqual([]);
+    expect(e.sim).not.toBeNull();
+    expect(calls, 'simulated (the headline and its driver sweep)').toBeGreaterThan(0);
+  });
+});
