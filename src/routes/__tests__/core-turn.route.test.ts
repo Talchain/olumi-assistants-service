@@ -1081,6 +1081,41 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(registered).toHaveLength(1);
     });
 
+    it('C7: a Run press whose new Run saved, resent with its chip, replays the person’s receipt; resent as the UI’s chipless retry, that save is not claimed (which chip it was is not recorded); neither calls or writes', async () => {
+      // A Run stored by an earlier engine, so the press makes and saves a new Run (under its turn: operation).
+      const engine = String((persisted!.living_model.runs as Json[]).at(-1)!.receipt.versions.engine);
+      persisted = JSON.parse(JSON.stringify(persisted).split(engine).join('mp-a04e2cebf944')) as Json;
+      const press = { turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } };
+      outputs = [[{ type: 'message', text: 'The new Run, in my words.' }]];
+      const ran = await post(press);
+      expect(ran.statusCode, ran.body).toBe(200);
+      expect(idsOf((ran.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'person']]);
+      const callsBefore = calls.length;
+      const again = await post(press);
+      expect(again.json()).toMatchObject({ durability: 'replayed' });
+      expect(idsOf((again.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'person']]);
+      const retry = await post({ turn_id: press.turn_id, message: press.message, source: 'retry' });
+      expect(retry.statusCode, retry.body).toBe(200);
+      expect(retry.json()).toMatchObject({ durability: 'replayed', receipts: [] });
+      expect([calls.length, registered.length], 'replays call no model and write nothing').toEqual([callsBefore, 1]);
+    });
+
+    it('C7: a first draft saved before its reply failed, resent as the UI’s chipless retry, replays with that draft’s own receipt (a recorded typed turn that saved was its draft)', async () => {
+      SCENARIO = randomUUID(); persisted = null; registered.length = 0;
+      canonicalDraft = JSON.stringify(bakery());
+      outputs = [[{ type: 'refuse' }]];
+      const turnId = randomUUID();
+      const lost = await app.inject({ method: 'POST', url: '/agent/v1/core-turn',
+        payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BAKERY_BRIEF, source: 'composer' } });
+      expect(lost.statusCode, lost.body).toBe(502);
+      const retry = await app.inject({ method: 'POST', url: '/agent/v1/core-turn',
+        payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BAKERY_BRIEF, source: 'retry' } });
+      expect(retry.statusCode, retry.body).toBe(200);
+      expect(retry.json()).toMatchObject({ durability: 'replayed' });
+      expect(idsOf((retry.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      expect(registered).toHaveLength(1);
+    });
+
     it('after that saved press, the same press resent replays its outcome with no call and no write, and the card pressed again finds its own saved receipt: never a second revision', async () => {
       const press = await propose();
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'refuse' }]];

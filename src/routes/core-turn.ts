@@ -61,7 +61,7 @@ import { appliedGraphWire, coreTurnStores, graphReadyEmitter, programTurnTools }
 import { programInstructions } from '../orchestrator-v5/core-route/instructions.js';
 import {
   AGENT_TURN_CLAIM_WAIT, agentTurnRequestHash, challengeTargetOf, chipOperationOf, claimHashFor, claimTurnIdOf, isChiplessRetry,
-  recordedOutcomeOf, requestHashOfAnswer, requestHashOfClaim, sameAgentTurnRequest, typedRowProof, withChipOperation, withRecordedOutcome,
+  recordedOutcomeOf, recordedWithChip, requestHashOfAnswer, requestHashOfClaim, sameAgentTurnRequest, typedRowProof, withChipOperation, withRecordedOutcome,
   type RecordedOutcome,
 } from '../orchestrator-v5/core-route/turn-request.js';
 import { stableStringify } from '../orchestrator/context/stable-stringify.js';
@@ -413,9 +413,14 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       // saves ran under (its first draft or Run, keyed by this turn; the card it approved). None found, none said.
       const ownVersion = (key: string) => findOperationVersion(dispatch, scenarioId, programOperationId(scenarioId, key)).catch(() => null);
       const [turnSave, cardSave] = await Promise.all([ownVersion(`turn:${turnId}`), approvedProposal !== undefined ? ownVersion(`proposal:${approvedProposal}`) : null]);
-      const receiptsOf = (v: Rec | null, by: 'olumi' | 'person') => (v === null ? [] : collectTurnReceipts([{ model_version: v }]).map((r) => ({ ...r, authorised_by: by })));
+      // Who authorised the turn: save, from the recorded press, never this resend's envelope: a request matched exactly says it
+      // (a Run press's re-save is the person's; a first draft, Olumi's), and a recorded typed turn that saved was its draft.
+      // The UI's chipless retry of a recorded chip press cannot say which chip it was, so that save is not claimed.
+      const turnSaveBy = !chiplessRetry ? (runPress ? 'person' : 'olumi') : recordedWithChip(prior.request_hash) ? null : 'olumi';
+      const receiptsOf = (v: Rec | null, by: 'olumi' | 'person' | null) => (v === null || by === null ? []
+        : collectTurnReceipts([{ model_version: v }]).map((r) => ({ ...r, authorised_by: by })));
       return send(200, coreTurnContract({
-        turnId, durability: 'replayed', receipts: [...receiptsOf(turnSave, runPress ? 'person' : 'olumi'), ...receiptsOf(cardSave, 'person')], assistantText: outcome === undefined || outcome === 'reply_empty' ? prior.assistant_message ?? '' : '',
+        turnId, durability: 'replayed', receipts: [...receiptsOf(turnSave, turnSaveBy), ...receiptsOf(cardSave, 'person')], assistantText: outcome === undefined || outcome === 'reply_empty' ? prior.assistant_message ?? '' : '',
         revision: now.revision, scenarioRevision: now.identity, graph: appliedGraphWire(now.graph),
         cards: await heldCardsOf(store, scenarioId, pending, now),
         // In the live reply's program shape (F7): today's stored Run and the program's own view, as the UI adopts them.

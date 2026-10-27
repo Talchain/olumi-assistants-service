@@ -135,6 +135,8 @@ export function withChipOperation(requestHash: string, chipOperation: string | u
   return chipOperation === undefined ? requestHash
     : `${requestHash}${CHIP_HASH_SEP}${tag}${createHash('sha256').update(chipOperation).digest('hex').slice(0, 32)}`;
 }
+/** Whether a recorded turn's request carried a chip (`#chip:` on its stored hash). It does not say which chip. */
+export const recordedWithChip = (stored: string): boolean => requestHashOfAnswer(stored).includes(CHIP_HASH_SEP);
 /** A UI retry: `source: 'retry'` and no chip (the UI drops it on a retry). */
 export function isChiplessRetry(body: Record<string, unknown>): boolean {
   return body['source'] === 'retry' && (body['chip'] === undefined || body['chip'] === null);
