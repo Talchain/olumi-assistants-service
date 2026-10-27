@@ -694,6 +694,8 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     waits(timed(4), 'the oven arrives in week 5');
     waits(timed('delivery', (m) => m.quantities.push(qty('delivery', 'week', { low: 2, high: 6, range_kind: 'plausible', status: 'estimated', author: 'olumi', basis: 'Typical delivery time.' }))), 'its start is a quantity');
     waits(timed(0, risk(4)), 'a breakdown from week 5');
+    // A start held in a known single figure is read as that figure: a known 2 waits, a known 0 is from the start (below).
+    waits(timed('lead_time', (m) => m.quantities.push(person('lead_time', 'week', 2, 'it takes 2 weeks to arrive'))), 'a known 2-week start');
     // A guardrail with no deadline is read the same way.
     const guard = timed(4, (m) => {
       m.goals = m.goals.filter((g) => g.id === 'cash_buffer');
@@ -707,6 +709,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     for (const [what, r] of [['from the start', timed(0)], ['a breakdown from the start', timed(0, risk(0))],
       ['a later change it does not rest on', timed(0, (m) => { m.quantities.push(person('hours', 'hour/week', 50, '50 hours a week'), person('fewer_hours', 'hour/week', 40, 'cut to 40 hours'));
         m.options.push(option('cut_hours', 'Cut my hours', [set('hours', 'fewer_hours', 'cut to 40 hours', { starts_after_periods: 4 })], 'Cut my hours')); })],
+      ['a known 0-week start held in a figure', timed('lead_time', (m) => m.quantities.push(person('lead_time', 'week', 0, 'it arrives straight away')))],
       ['a later start on a ruled-out option', timed(0, (m) => m.options.push({ ...option('second_hand', 'A second-hand oven', [set('ovens_added', 'one_oven', 'a used one', { starts_after_periods: 4 })], 'a used one'), status: 'ruled_out' }))]] as const) {
       expect(r.errors, what).toEqual([]);
       expect(r.blockers, what).toEqual([]);

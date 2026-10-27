@@ -448,7 +448,11 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
     // A static level with no deadline is read once, at period 0, with every option's change in effect. A level that
     // changes over time (it rests on a stock, or on a live option's setting or a risk that starts later or at a time held in
     // a quantity) has no single reading without a deadline: a typed blocker, never a guess and never read as in effect (C3).
-    const reads = upstream(roots), later = (t: number | string) => typeof t === 'string' || t > 0;
+    // A timing held in a known single figure is read as that figure (as timingOf reads it), so a known 0 is from the start;
+    // any other quantity timing (ranged, asked, worked out) may start later (PL #3849 review).
+    const fixedAt = (id: string): number | null => { const q = Q.get(id); const v = q === undefined || !FIGURE_STATUSES.has(q.status)
+      || (has(q.low) && has(q.high) && q.low !== q.high) ? null : q.value ?? q.low; return typeof v === 'number' ? v : null; };
+    const reads = upstream(roots), later = (t: number | string) => (typeof t === 'number' ? t > 0 : (fixedAt(t) ?? 1) > 0);
     const moves = [...reads].some((x) => R.get(x)?.form === 'stock')
       || model.options.some((o) => o.status === 'live' && o.sets.some((s) => reads.has(s.quantity) && later(s.starts_after_periods)))
       || model.risks.some((k) => reads.has(k.effect_on) && later(k.starts_after_periods));
