@@ -118,7 +118,7 @@ export const CanonicalQuantity = z.object({
   direction: z.enum(['raises', 'lowers']).nullable().describe(
     'For a link\'s size (a coefficient), used only when no figure is given (no most likely figure, and no range or one that spans zero): raises when more of the driver means more of what it moves, lowers when it means less; null when no one can say which. Null for every other quantity.'),
   author: z.enum(QUANTITY_AUTHORS).describe(
-    "Who gave the figure: person for their supplied figure or an asked fact, olumi for an estimate or reading, structure for exact mathematical constants and off/on switches, with one known figure and no range. Zero may encode no additional activity, never an unstated current level or share."),
+    "Who gave the figure: person for their figure in its stated unit and period, or an asked fact, olumi for an estimate or reading, structure for exact mathematical constants and off/on switches, with one known figure and no range. Zero may encode no additional activity, never an unstated current level or share."),
   party: attribution.party,
   quote: attribution.quote,
   approval: attribution.approval,
@@ -210,7 +210,7 @@ const per = id.nullable().describe('For a rate over the window ("no-shows per bo
 
 export const CanonicalGoal = z.object({
   id,
-  label: z.string().describe('A short title of a few words for the aim, for its card ("Weekly profit over £900"); the person\'s own words stay in quote. Never empty.'),
+  label: z.string().describe('A short title of a few words for the aim, for its card ("Weekly profit over £900"). Never empty.'),
   measure: z.object({
     quantity: id.describe('The quantity the aim is about. Never an asked quantity: that would ask for the result itself.'),
     per,
@@ -230,17 +230,17 @@ export const CanonicalGoal = z.object({
     measure_by: z.enum(AUTHORS).describe('Who named the measure: person, or olumi for a suggested measure; this does not change the aim\'s author.'),
     assumptions: ids.describe('Ids of assumption records this reading of the goal rests on; [] for none.'),
     exclusions: ids.describe('Ids of left_out records for parts of the aim this measure does not cover ("the café\'s cosy feel is not in this chance"). [] when it covers the whole aim.'),
-  }).strict().nullable().describe('Null when the aim has no measure yet; valid and excluded from the chance.'),
+  }).strict().nullable().describe('Null when the aim has no measure yet. A proposed release bar or other standard is an assumption or condition, never a substitute measure.'),
   question: z.string().nullable().describe('When the measure is null: the one plain question that would give it a measure ("How would you tell the regulars are happy: repeat visits a week?"). When the window is null but the level changes over time: "By when?". Null otherwise.'),
   ...attribution,
 }).strict().describe(
-  'An outcome sought, including wanting more or less of something without a threshold; never simultaneously a limit or preference.');
+  'An outcome sought, including wanting more or less of something without a threshold; never simultaneously a limit or preference. Events or tasks alone are context.');
 export type CanonicalGoalT = z.infer<typeof CanonicalGoal>;
 export type CanonicalMeasureT = NonNullable<CanonicalGoalT['measure']>;
 
 export const CanonicalLimit = z.object({
   id,
-  label: z.string().describe('A short title of a few words for the condition, for its card ("Running costs cap"); the person\'s own words stay in quote. Never empty.'),
+  label: z.string().describe('A short title of a few words for the condition, for its card ("Running costs cap"). Never empty.'),
   measure: z.object({
     quantity: id,
     per,
@@ -248,7 +248,7 @@ export const CanonicalLimit = z.object({
     bound: id.describe('A quantity holding the limit\'s figure, in the limited quantity\'s unit.'),
     aggregation,
     window: CanonicalWindow.nullable().describe('Null for a static condition with no period.'),
-  }).strict().nullable().describe('Null for a guardrail with no measure yet ("keep the neighbours on side"): VALID, reported as not covered by the result, never given an invented scale.'),
+  }).strict().nullable().describe('Null for a guardrail with no measure yet ("keep the neighbours on side"): never given an invented scale.'),
   question: z.string().nullable().describe('When the measure is null: the one plain question that would give it a measure. Null otherwise.'),
   ...attribution,
 }).strict().describe(
@@ -298,14 +298,14 @@ export const CanonicalOptionSet = z.object({
   range_kind: RANGE_KIND,
   question: z.string().nullable().describe('With to null and no figure: the one question to the person for this option\'s value. Null otherwise.'),
   starts_after_periods: timing,
-  author: z.enum(QUANTITY_AUTHORS).describe('Who proposed this setting, with either to or an inline value. Olumi\'s proposed option settings are olumi, quote null, even when to names the person\'s figure. structure only for a mathematical off/on switch.'),
+  author: z.enum(QUANTITY_AUTHORS).describe('Who proposed this setting, with either to or an inline value. Olumi\'s proposed option settings are olumi, even when to names the person\'s figure. structure only for a mathematical off/on switch.'),
   quote: attribution.quote,
 }).strict().describe('A setting: either a quantity id in to or its own inline figure or range. Inline values compile into named quantities.');
 export type CanonicalOptionSetT = z.infer<typeof CanonicalOptionSet>;
 
 export const CanonicalOption = z.object({
   id,
-  label: z.string().describe('A short neutral name ("Second oven"); a person\'s option keeps their own words in quote.'),
+  label: z.string().describe('A short neutral name ("Second oven").'),
   sets: z.array(CanonicalOptionSet).describe('What the option changes. [] for "carry on as now".'),
   status: z.enum(OPTION_STATUSES).describe('live: compared. ruled_out: the person rules it out but keeps it in view. removed: taken out of the comparison.'),
   developed_from: id.nullable().describe('The id of the option this is a variant of. A record, not a cause. Null otherwise.'),
@@ -315,7 +315,7 @@ export type CanonicalOptionT = z.infer<typeof CanonicalOption>;
 
 export const CanonicalRisk = z.object({
   id,
-  label: z.string().describe('A short title of a few words for an event that may or may not happen, for its card ("Oven breaks down"); the person\'s own words stay in quote. Never something already true.'),
+  label: z.string().describe('A short title of a few words for an event that may or may not happen, for its card ("Oven breaks down"). Never something already true.'),
   occurrence: id.describe('A coefficient quantity in unit "1" or "%": the chance the event happens at least once over the whole model horizon.'),
   severity: id.describe('A quantity: what it does IF it happens, drawn only when it does. In the affected quantity\'s unit for add; unit "1" for multiply.'),
   effect_on: id.describe('The quantity it changes.'),
@@ -387,7 +387,7 @@ export const PERIOD_UNITS = ['week', 'month', 'year'] as const;
 export const CanonicalModel = z.object({
   version: z.enum([CANONICAL_VERSION]),
   question: z.string().describe('What is being reasoned about, in one plain sentence.'),
-  title: z.string().nullable().describe('A short title of a few words for the situation, the name on its board ("Second oven or wholesale?"). Never empty; the question stays the one plain sentence.'),
+  title: z.string().nullable().describe('A short title of a few words for the situation, the name on its board ("Second oven or wholesale?"). Never empty.'),
   period: z.enum(PERIOD_UNITS).describe('The model\'s time step, which windows and stocks count in. Period 0 is now.'),
   quantities: z.array(CanonicalQuantity),
   relations: z.array(CanonicalRelation),
@@ -405,7 +405,7 @@ export const CanonicalModel = z.object({
   coaching_questions: z.array(z.string()).describe(
     'Ordered first-screen questions, up to three, each plain, non-leading, open and asking one thing; a selected item question uses its exact wording. [] when none would help.'),
   history: z.array(CanonicalHistoryEntry).describe('Kept by Olumi\'s host: [] in a first draft.'),
-}).strict();
+}).strict().describe('One statement, one record across all families; never paraphrase it into another. Evidence and assumptions get separate records only for distinct statements.');
 export type CanonicalModelT = z.infer<typeof CanonicalModel>;
 
 /** The record families a `concerns` list (or an error's `items`) can name, in display order. */

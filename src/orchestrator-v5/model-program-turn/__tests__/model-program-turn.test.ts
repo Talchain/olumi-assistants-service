@@ -974,7 +974,9 @@ describe('the model-program turn on the real core route', () => {
     // descriptions no longer repeat it (RUN_WORDS_RULE is gone).
     const rule = 'Name a leader only from run.leader.option_id, using its option label; otherwise give run.leader.words, or say the Run names none.';
     expect(CORE_ALIGNED_INSTRUCTIONS.split(rule)).toHaveLength(2);
-    expect(CORE_ALIGNED_INSTRUCTIONS).toContain('report findings in this model without advice or an extra disclaimer.');
+    // Round 3 (27 Oct): model-relative findings are the purpose instruction's, sent once in the same instructions.
+    expect(CORE_ALIGNED_INSTRUCTIONS.split('as a model-relative finding with its uncertainty, what it rests on and what would change it.')).toHaveLength(2);
+    expect(CORE_ALIGNED_INSTRUCTIONS).toContain('add no extra disclaimer.');
     for (const [name, text] of Object.entries(PROGRAM_TOOL_DESCRIPTIONS)) {
       expect(text, name).not.toContain('run.leader');
       for (const banned of ['recommend', 'best', 'winner', 'you should']) expect(text.toLowerCase(), `${name}: ${banned}`).not.toContain(banned);
@@ -4552,3 +4554,14 @@ describe('display words stay on one line: the compiler\'s reasons quote labels a
 });
 
 function beforeEachReset() { SCENARIO = randomUUID(); persisted = null; registered.length = 0; turnRows.clear(); conversationIds.clear(); pausedRun = null; sent.length = 0; replies = []; creates.length = 0; createAnswers = []; }
+
+describe('the update schema carries the one-statement rule (PL AMEND on R3, 27 Oct)', () => {
+  it('UPDATE_JSON_SCHEMA states it once, and the first-draft schema still states it once', async () => {
+    const { UPDATE_JSON_SCHEMA, CANONICAL_JSON_SCHEMA } = await import('../prompt.js');
+    const rule = 'One statement, one record across all families; never paraphrase it into another.';
+    const count = (s: unknown) => JSON.stringify(s).split(rule).length - 1;
+    expect(count(UPDATE_JSON_SCHEMA)).toBe(1);
+    expect(count(CANONICAL_JSON_SCHEMA)).toBe(1);
+    expect(JSON.stringify(UPDATE_JSON_SCHEMA)).toContain('Only the records this update changes or adds, each in full with its id, in its own family; [] for a family with none.');
+  });
+});
