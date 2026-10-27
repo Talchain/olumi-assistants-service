@@ -32,9 +32,12 @@ import { NOTE_MAX, NOTE_ON_ITEM, NoteOnItemParams, noteOnItem } from './note-on-
 import { STRESS_TEST, StressTestParams, stressTest, type StressDeps } from './stress-tool.js';
 import { OFFER_PUBLIC_RESEARCH, OFFER_PUBLIC_RESEARCH_DESCRIPTION, OfferResearchParams, offerResearch, type ResearchDeps } from './research-tool.js';
 import { log } from '../../../utils/telemetry.js';
-import { OUTCOME_TRACE, refused, traceRow, type ToolOutcome, type TraceRow } from './outcome.js';
+import { OUTCOME_TRACE, ok, refused, traceRow, type ToolOutcome, type TraceRow } from './outcome.js';
 import { applyProgramChange, isProgramProposal, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../../model-program-turn/program-tools.js';
 import { PROGRAM_TOOL_DESCRIPTIONS } from '../../core-route/instructions.js';
+import { runProgramWhatIf } from '../../handlers/what-if-run.js';
+import { programReadOf } from '../../model-program-turn/program-store.js';
+import { isSavedRead, readSaved } from '../../model-program-turn/saved-read.js';
 
 export { traceRow, type TraceRow, type ToolOutcome } from './outcome.js';
 export { readCanonicalContext } from './context-tool.js';
@@ -292,6 +295,35 @@ const schemaErrorToModel = (name: string, schema: typeof ProgramChangeParams) =>
 export const ProgramRunParams = z.object({ reason: z.string().describe('Why the person asked for this Run, in a few words.') }).strict();
 
 /**
+ * HC5 in the chat (DL 27 Oct): a what-if on a program's own figures, on the same draws as its saved model, NOTHING SAVED: the
+ * canvas what-if's own engine (`runProgramWhatIf`), with each option's chance on both and the paired gap. Keeping a figure is
+ * a change the person approves on its card, never this tool.
+ */
+export const WHAT_IF = 'what_if';
+/** As many as the canvas what-if holds (`WHAT_IF_MAX_CHANGES`, routes/assist.v1.scenario-what-if.ts). */
+const WHAT_IF_MAX = 6;
+export const ProgramWhatIfParams = z.object({
+  changes: z.array(z.object({
+    quantity_id: z.string().describe('The id of one figure in the saved model, from read_canonical_context.'),
+    value: z.number().describe('The value to try, in that figure\'s own units.'),
+  }).strict()).describe(`One to ${WHAT_IF_MAX} figures to try together.`),
+  whose: z.string().describe('Whose figures these are, in a few words ("their partner\'s", "a figure to test").'),
+}).strict();
+async function programWhatIf(deps: PathBToolDeps, ctx: PathBContext, args: z.infer<typeof ProgramWhatIfParams>): Promise<ToolOutcome> {
+  if (args.changes.length === 0 || args.changes.length > WHAT_IF_MAX) return refused('invalid_arguments', `A what-if tries 1 to ${WHAT_IF_MAX} figures.`);
+  const saved = await readSaved(deps, ctx.scenario_id);
+  if (!isSavedRead(saved)) return saved;
+  const read = programReadOf(saved.graph);
+  if (read.kind !== 'program') return refused('not_a_model_program');
+  const result = runProgramWhatIf(read.program, args.changes.map((c) => ({ kind: 'factor_value_edit', target_id: c.quantity_id, raw_value: c.value })), args.changes.length > 1);
+  if (result.kind === 'refused') {
+    return refused(result.reason, result.next_step, { ...(result.changes_refused !== undefined ? { changes_refused: result.changes_refused } : {}) });
+  }
+  const { kind: _ran, ...shown } = result;
+  return ok({ what_if: { ...shown, whose: args.whose } });
+}
+
+/**
  * A PROGRAM scenario's tools (alpha): the same names and approval contract, on the canonical model
  * (`model-program-turn/program-tools.ts`). Its model exists from the first turn, so there is no build; a change carries its
  * own Run, so apply_change reports that Run instead of starting the automatic one.
@@ -325,5 +357,12 @@ function programTools(deps: PathBToolDeps, ctx: PathBContext, read: Tool, record
       execute: async (args) => record(RUN_ANALYSIS, args, await runProgram(deps, ctx)),
       errorFunction: null,
     }),
+    withSentArguments(tool({
+      name: WHAT_IF,
+      description: PROGRAM_TOOL_DESCRIPTIONS.what_if,
+      parameters: ProgramWhatIfParams,
+      execute: async (args) => record(WHAT_IF, args, await programWhatIf(deps, ctx, args)),
+      errorFunction: schemaErrorToModel(WHAT_IF, ProgramWhatIfParams),
+    })),
   ];
 }
