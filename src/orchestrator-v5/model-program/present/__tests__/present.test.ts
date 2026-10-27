@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ExecutableModel, FixedAuthor, Goal, Limit, Option, Quantity, Reading, Withheld } from '../../executable.js';
 import { simulate } from '../../simulate/simulate.js';
+import type { WhenMissed } from '../../simulate/missed.js';
 import { separated } from '../../simulate/paired.js';
 import { NO_DRIVER_REASON, NO_RANGE_REASON, presentAnalysisView, type PresentInput, type PresentQuantity } from '../present.js';
 
@@ -193,14 +194,36 @@ describe('present: the canonical analysis view from a simulated model', () => {
     [goal('g', 'mrr', '>=', 'target')], [option('hold', 'Hold')], [{ id: 'l', label: 'Budget limit', quantity: 'cost', cmp: '<=', bound: 'budget', aggregation: 'end', window: ONE }]);
     const labels: Record<string, PresentQuantity> = { price: person('Price'), customers: person('Customers'), mrr: person('Monthly recurring revenue', true),
       unit_cost: person('Cost per customer'), cost: person('Customer cost', true), target: person('Target'), budget: person('Budget') };
-    const pounds = JSON.stringify(present(build(1), labels, {}, 20000));
-    const thousands = JSON.stringify(present(build(1000), labels, {}, 20000));
+    // SC7's what-a-miss-looks-like holds the values where a goal falls short, which no fixed swap below can name: it is checked
+    // on its own after (counts and shares identical, values × 1000, words identical but for the money figures); every other
+    // field is compared byte for byte, as before.
+    const apart = (v: ReturnType<typeof present>) => {
+      const { when_missed, ...rest } = v.goal_chance!;
+      return { view: { ...v, goal_chance: rest }, missed: when_missed };
+    };
+    const inPounds = apart(present(build(1), labels, {}, 20000)), inThousands = apart(present(build(1000), labels, {}, 20000));
+    const pounds = JSON.stringify(inPounds.view);
+    const thousands = JSON.stringify(inThousands.view);
     // The main driver's record holds its ends in the quantity's own unit, so they are the unit's own difference too.
     const swapped = [['£39', '0.039 £k'], ['£59', '0.059 £k'], ['£5,000', '5 £k'], ['£1,100', '1.1 £k'], ['"value":39,', '"value":0.039,'], ['"value":59,', '"value":0.059,'],
       ['(£49)', '(0.049 £k)'], ['"value":49,', '"value":0.049,'], ['£49 as the middle value', '0.049 £k as the middle value']]
       .reduce((s, [a, b]) => s.split(a!).join(b!), pounds);
     expect(swapped).not.toBe(pounds);
     expect(thousands).toBe(swapped);
+    type Missed = { readonly found: WhenMissed; readonly words: readonly string[] };
+    const [p, k] = [inPounds.missed.options[0], inThousands.missed.options[0]] as [Missed, Missed];
+    if (p.found.kind !== 'summary' || k.found.kind !== 'summary') throw new Error('no summary of the misses');
+    expect(p.found.outcomes.length).toBeGreaterThan(0);
+    expect({ ...k.found, outcomes: [] }).toEqual({ ...p.found, outcomes: [] });
+    const before = p.found.outcomes;
+    k.found.outcomes.forEach((o, i) => {
+      expect([o.goal_id, o.failed]).toEqual([before[i]!.goal_id, before[i]!.failed]);
+      expect(o.middle * 1000).toBeCloseTo(before[i]!.middle, 6);
+      expect(o.bad_end * 1000).toBeCloseTo(before[i]!.bad_end, 6);
+    });
+    const money = (w: readonly string[]) => w.map((x) => x.replace(/£\d{1,3}(,\d{3})*(\.\d+)?|\d+(\.\d+)? £k/g, '£#'));
+    expect(money(k.words)).toEqual(money(p.words));
+    expect(inThousands.missed.basis).toBe(inPounds.missed.basis);
   });
 
   it('simulation precision is labelled as precision, never as the chance’s band; no win share, verdict or forecast is said', () => {

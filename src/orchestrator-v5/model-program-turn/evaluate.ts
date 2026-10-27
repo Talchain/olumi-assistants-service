@@ -142,7 +142,8 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x, records), goals, asks, blockers, leaves_out, aims,
     limit_premises: Object.fromEntries(compiled.perLimit.map((l) => [l.limit_id, premisesFor(l.rests_on)])),
     option_premises: Object.fromEntries(compiled.perOption.map((o) => [o.option_id, premisesFor(o.rests_on)])),
-    left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })), sweep: admitted.operations + driverSweepOperations(x, draws) <= MAX_OPERATIONS });
+    left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })), sweep: admitted.operations + driverSweepOperations(x, draws) <= MAX_OPERATIONS,
+    risk_labels: Object.fromEntries(read.risks.map((r) => [r.id, r.label] as const)) });
   return { compiled, sim, projection, view };
 }
 

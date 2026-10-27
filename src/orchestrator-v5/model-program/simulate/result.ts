@@ -1,5 +1,6 @@
 // model-program/simulate/result.ts (S2 owns it)
 import type { Withheld } from '../executable.js';
+import type { WhenMissed } from './missed.js';
 import type { PairedDifference } from './paired.js';
 
 export type Chance = { chance: number; precision_95: [number, number] };                         // Wilson interval = SIMULATION precision, never the chance's meaning band
@@ -20,6 +21,8 @@ export type OptionResult = {
   // ── Additive (gold-model ruling 3): each limit's own chance, and its quantity's aggregated value (e.g. the cost) over the draws.
   per_limit: (ChanceOrWithheld & { limit_id: string })[];
   limit_outcomes: ({ limit_id: string } & ({ p10: number; p50: number; p90: number } | WithheldChance))[];
+  // ── Additive (SC7): what a miss looks like in this model, from this option's own draws (missed.ts).
+  when_missed: WhenMissed;
 };
 /** One chance the simulator withheld, listed once at the top of the result. */
 export type WithheldChanceEntry = { option_id: string; scope: 'goal' | 'limit' | 'joint' | 'within_limits' | 'joint_within_limits'; id?: string }
