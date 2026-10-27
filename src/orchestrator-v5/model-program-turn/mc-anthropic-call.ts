@@ -15,6 +15,13 @@ import type { CallOutput, ResponsesCall } from './draft.js';
 export const mcDraftModel = (): string | null =>
   (process.env['MC_DRAFT_PROVIDER'] === 'anthropic' ? process.env['MC_DRAFT_MODEL'] || 'claude-opus-5-5' : null);
 
+/** MC_OPENAI_MODEL / MC_OPENAI_EFFORT: the OpenAI drafter call with another model or effort (measurement only); unset, unchanged. */
+export function mcOpenAiBody<B extends { model?: unknown; reasoning?: unknown }>(body: B): B {
+  const model = process.env['MC_OPENAI_MODEL']; const effort = process.env['MC_OPENAI_EFFORT'];
+  if (!model && !effort) return body;
+  return { ...body, ...(model ? { model } : {}), ...(effort ? { reasoning: { ...(body.reasoning as object | undefined), effort } } : {}) };
+}
+
 const transient = (err: unknown): boolean => {
   const s = (err as { status?: unknown })?.status;
   return err instanceof Anthropic.APIConnectionError || (typeof s === 'number' && (s >= 500 || s === 408));
