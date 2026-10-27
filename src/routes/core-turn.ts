@@ -61,7 +61,7 @@ import { appliedGraphWire, coreTurnStores, graphReadyEmitter, programTurnTools }
 import { programInstructions } from '../orchestrator-v5/core-route/instructions.js';
 import {
   AGENT_TURN_CLAIM_WAIT, agentTurnRequestHash, challengeTargetOf, chipOperationOf, claimHashFor, claimTurnIdOf, isChiplessRetry,
-  recordedOutcomeOf, requestHashOfAnswer, requestHashOfClaim, sameAgentTurnRequest, typedRowProof, withChipOperation, withRecordedOutcome,
+  recordedOutcomeOf, recordedRunPress, recordedWithChip, requestHashOfAnswer, RUN_PRESS_HASH_TAG, requestHashOfClaim, sameAgentTurnRequest, typedRowProof, withChipOperation, withRecordedOutcome,
   type RecordedOutcome,
 } from '../orchestrator-v5/core-route/turn-request.js';
 import { stableStringify } from '../orchestrator/context/stable-stringify.js';
@@ -301,7 +301,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
      */
     const claimTurnId = claimTurnIdOf(turnId);
     let claimAppendSucceeded = false;
-    const takeClaim = async (forRequest: string, chipless: boolean): Promise<{ readonly held: 'mine'; readonly claimHash: string }
+    const takeClaim = async (forRequest: string, chipless: boolean, alsoAccepts?: string): Promise<{ readonly held: 'mine'; readonly claimHash: string }
       | { readonly held: 'same' } | { readonly held: 'refused'; readonly sent: unknown }> => {
       const claimHash = claimHashFor(forRequest, randomUUID());
       let owner: CommittedTurnRecord | null;
@@ -326,7 +326,9 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         return { held: 'refused', sent: fail(503, { code: 'TURN_STATE_UNVERIFIABLE', message: 'Could not confirm this turn was reserved. Nothing was run; please try again.', retry_safe: true, nothing_saved: true }) };
       }
       if (owner.request_hash === claimHash) return { held: 'mine', claimHash };
-      return sameAgentTurnRequest(requestHashOfClaim(owner.request_hash), forRequest, chipless) ? { held: 'same' } : { held: 'refused', sent: reused() };
+      const held = requestHashOfClaim(owner.request_hash);
+      return sameAgentTurnRequest(held, forRequest, chipless) || (alsoAccepts !== undefined && sameAgentTurnRequest(held, alsoAccepts, chipless))
+        ? { held: 'same' } : { held: 'refused', sent: reused() };
     };
 
     if (canvasEdit) {
@@ -396,8 +398,13 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       ? JSON.stringify({ ...(approvedProposal !== undefined ? { approve: approvedProposal } : {}), ...(selected !== null ? { selected } : {}) })
       : undefined;
     const requestHash = withChipOperation(agentTurnRequestHash(scenarioId, userId, message, operation),
-      approvedProposal === undefined ? chipOperationOf(body) : undefined);
+      approvedProposal === undefined ? chipOperationOf(body) : undefined, runPress ? RUN_PRESS_HASH_TAG : '');
     const chiplessRetry = isChiplessRetry(body);
+    // The same Run press recorded before RUN_PRESS_HASH_TAG (its #chip: suffix untagged) is this request too: its form changed,
+    // not the work (buddy on #3843). Recomputed from this exact body, never reversed from a digest; any other body stays refused.
+    const untaggedRunHash = runPress ? withChipOperation(agentTurnRequestHash(scenarioId, userId, message, operation), chipOperationOf(body)) : undefined;
+    const sameRequest = (stored: string): boolean => sameAgentTurnRequest(stored, requestHash, chiplessRetry)
+      || (untaggedRunHash !== undefined && sameAgentTurnRequest(stored, untaggedRunHash, chiplessRetry));
 
     /**
      * A replay: the recorded reply, byte for byte, on today's saved state. No model call and no Run. A row whose outcome is
@@ -409,8 +416,20 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       try { pending = await store.readMostRecentPendingActions?.(scenarioId, { validation: 'strict' }) ?? []; } catch { pending = []; }
       const paused = await store.readOpenAiPausedRun?.(scenarioId).catch(() => undefined);
       const outcome = recordedOutcomeOf(prior.request_hash);
+      // C7: a replay says what this turn saved with each version's receipt, as its live answer did: found by the operations its
+      // saves ran under (its first draft or Run, keyed by this turn; the card it approved). None found, none said.
+      const ownVersion = (key: string) => findOperationVersion(dispatch, scenarioId, programOperationId(scenarioId, key)).catch(() => null);
+      const [turnSave, cardSave] = await Promise.all([ownVersion(`turn:${turnId}`), approvedProposal !== undefined ? ownVersion(`proposal:${approvedProposal}`) : null]);
+      // Who authorised the turn: save, from the recorded press, never this resend's envelope: a request matched exactly says it
+      // (a Run press's re-save is the person's; a first draft, Olumi's); for the UI's chipless retry, the recorded hash does: a
+      // Run press is tagged (RUN_PRESS_HASH_TAG), a typed turn that saved was its draft. Any other recorded chip press (one
+      // recorded before the tag) cannot say which chip it was, so that save is not claimed.
+      const turnSaveBy = !chiplessRetry ? (runPress ? 'person' : 'olumi')
+        : recordedRunPress(prior.request_hash) ? 'person' : recordedWithChip(prior.request_hash) ? null : 'olumi';
+      const receiptsOf = (v: Rec | null, by: 'olumi' | 'person' | null) => (v === null || by === null ? []
+        : collectTurnReceipts([{ model_version: v }]).map((r) => ({ ...r, authorised_by: by })));
       return send(200, coreTurnContract({
-        turnId, durability: 'replayed', assistantText: outcome === undefined || outcome === 'reply_empty' ? prior.assistant_message ?? '' : '',
+        turnId, durability: 'replayed', receipts: [...receiptsOf(turnSave, turnSaveBy), ...receiptsOf(cardSave, 'person')], assistantText: outcome === undefined || outcome === 'reply_empty' ? prior.assistant_message ?? '' : '',
         revision: now.revision, scenarioRevision: now.identity, graph: appliedGraphWire(now.graph),
         cards: await heldCardsOf(store, scenarioId, pending, now),
         // In the live reply's program shape (F7): today's stored Run and the program's own view, as the UI adopts them.
@@ -427,8 +446,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: prior-turn read failed; refusing rather than re-running');
       return fail(503, { code: 'TURN_STATE_UNVERIFIABLE', message: 'Could not check whether this turn already ran. Nothing was run; please try again.', retry_safe: true, nothing_saved: true });
     }
-    if (prior !== null) return sameAgentTurnRequest(requestHashOfAnswer(prior.request_hash), requestHash, chiplessRetry) ? replayed(prior) : reused();
-    const claim = await takeClaim(requestHash, chiplessRetry);
+    if (prior !== null) return sameRequest(requestHashOfAnswer(prior.request_hash)) ? replayed(prior) : reused();
+    const claim = await takeClaim(requestHash, chiplessRetry, untaggedRunHash);
     if (claim.held === 'refused') return claim.sent;
     if (claim.held === 'same') {
       // Another request holds this turn: wait for its answer and replay it, never run it again.
@@ -436,7 +455,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       for (;;) {
         let answer: CommittedTurnRecord | null = null;
         try { answer = await readTurn(scenarioId, turnId); } catch { answer = null; }
-        if (answer !== null) return sameAgentTurnRequest(requestHashOfAnswer(answer.request_hash), requestHash, chiplessRetry) ? replayed(answer) : reused();
+        if (answer !== null) return sameRequest(requestHashOfAnswer(answer.request_hash)) ? replayed(answer) : reused();
         if (Date.now() >= deadline) break;
         await new Promise((r) => setTimeout(r, AGENT_TURN_CLAIM_WAIT.everyMs));
       }
