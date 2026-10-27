@@ -698,7 +698,7 @@ export function composeDroppedFigureNotice(manifest: NotModelledManifest): strin
   if (q === null || q.absent === 0) return null;
 
   const absent = q.items.filter(
-    (i) => i.verdict === "absent" && isDisclosableInDraftNotice(i.kind),
+    (i) => i.verdict === "absent" && i.kind !== undefined && isDisclosableInDraftNotice(i.kind),
   );
   if (absent.length === 0) return null;
 
