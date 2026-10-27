@@ -45,7 +45,7 @@ import {
 } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { parseProposalEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { editsRefusedSentence } from '../orchestrator-v5/agent-lane/proposal-object/reply.js';
-import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
+import { collectSaveReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { isRevisionConflict, ModelReadFailedError, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
 import { MODEL_WRITE_OWNERSHIP_REFUSAL_BODY, ModelWriteOwnershipRefused, readSuccessfulDoorEntries, readUnsavableEffects, recordReleasedTurnClaim } from '../orchestrator-v5/ownership/door-ownership.js';
@@ -75,7 +75,7 @@ import { isProgramGraph, programReadOf, reopenProgram, savedProgramOf, sourceTex
 import { compile } from '../orchestrator-v5/model-program/compile.js';
 import { applyCanvasFigure, DRAFT_REPLY_GUIDANCE, HOST_REPLY_WITHHELD_TOOLS, PROGRAM_TURN_GUIDANCE, readProgramContext, RUN_REPLY_GUIDANCE } from '../orchestrator-v5/model-program-turn/program-tools.js';
 import { programOperationId } from '../orchestrator-v5/model-program-turn/program-save.js';
-import { findOperationVersion } from '../orchestrator-v5/path-b/tools/core-write.js';
+import { findOperationSave } from '../orchestrator-v5/path-b/tools/core-write.js';
 import { registrationTurnId } from '../orchestrator-v5/graph-registration/registration-identity.js';
 import { log } from '../utils/telemetry.js';
 
@@ -195,9 +195,12 @@ function receiptsOf(result: Pick<AgentTurnResult, 'tool_calls' | 'tool_results'>
   result.tool_calls.forEach((call, i) => {
     const by: AuthorisedBy | undefined = call.name === APPLY_CHANGE ? 'person' : call.name === 'run_analysis' ? 'olumi' : undefined;
     if (by === undefined) return;
-    // A core writer's receipt is the register's `model_version` (`version_number`), read as the collector reads that shape.
+    // A core writer's receipt is the register's `model_version` (`version_number`), read as the collector reads that shape;
+    // a save that minted none (C8) is its registration row's own, keyed by that row.
     const own = (result.tool_results[i] as { receipts?: readonly unknown[] } | undefined)?.receipts ?? [];
-    for (const r of collectTurnReceipts([result.tool_results[i], ...own.map((model_version) => ({ model_version }))])) byVersion.set(r.version_id, { ...r, authorised_by: by });
+    for (const r of collectSaveReceipts([result.tool_results[i], ...own.map((model_version) => ({ model_version }))])) {
+      byVersion.set('version_id' in r ? r.version_id : r.source_turn_id, { ...r, authorised_by: by });
+    }
   });
   return [...byVersion.values()];
 }
@@ -368,11 +371,11 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           // A resend of the same edit is answered from its own save: the version its operation committed, with that receipt (C7).
           // With none found it is never called saved: the first send may have been refused, or its outcome is unknown.
           const own = claim.held === 'same'
-            ? await findOperationVersion(dispatch, scenarioId, programOperationId(scenarioId, `card:${turnId}`)).catch(() => null) : null;
+            ? await findOperationSave(dispatch, readTurn, scenarioId, programOperationId(scenarioId, `card:${turnId}`)).catch(() => null) : null;
           const edited = claim.held === 'same'
             ? own !== null ? { status: 'saved' as const, receipt: own }
               : { status: 'unknown' as const, reason: 'This edit was sent again, and Olumi could not confirm it was saved. Reload to see your model.' }
-            : figure !== undefined ? await applyCanvasFigure({ dispatch }, scenarioId, { ...figure, operation_key: turnId, approver: userId })
+            : figure !== undefined ? await applyCanvasFigure({ dispatch, readTurn }, scenarioId, { ...figure, operation_key: turnId, approver: userId })
             : { status: 'refused' as const, reason: ev.kind === 'edge_strength_edit'
               ? 'A link\'s size on this model is a figure in its own units; change it in the chat for now.'
               : 'Only a figure on a card or a goal\'s target can be edited here on this model; ask Olumi in the chat for other changes.' };
@@ -380,7 +383,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           return send(edited.status === 'saved' ? 200 : edited.status === 'unknown' ? 503 : 409, coreTurnContract({
             turnId, durability: claim.held === 'same' ? (own !== null ? 'replayed' : 'unknown') : edited.status === 'saved' ? 'recorded' : edited.status === 'unknown' ? 'unknown' : 'not_recorded',
             revision: after.revision, scenarioRevision: after.identity, graph: appliedGraphWire(after.graph), run: programRunOf(after.graph, newestRunId(currentProgram)), analysisState: after.analysisState,
-            receipts: edited.status === 'saved' && 'receipt' in edited && edited.receipt !== undefined ? collectTurnReceipts([{ model_version: edited.receipt }]).map((r) => ({ ...r, authorised_by: 'person' as const })) : [],
+            receipts: edited.status === 'saved' && 'receipt' in edited && edited.receipt !== undefined ? collectSaveReceipts([{ model_version: edited.receipt }]).map((r) => ({ ...r, authorised_by: 'person' as const })) : [],
             error: edited.status === 'saved' ? null : { code: 'CANVAS_EDIT_REFUSED', message: edited.reason ?? 'That change could not be saved.', retry_safe: false, nothing_saved: edited.status !== 'unknown' },
             modelProgram: { canonical_analysis_view: reopenProgram(after.graph)?.view ?? null, model_program: { turn: 'card_edit', saved: edited.status === 'saved' } },
             agent: { forwarded_kind: kind, program: true },
@@ -423,7 +426,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
      * found, none said.
      */
     const ownSaves = async (recorded: string): Promise<CoreTurnReceipt[]> => {
-      const operationVersion = (operationId: string) => findOperationVersion(dispatch, scenarioId, operationId).catch(() => null);
+      // Its own save: a version, or (C8) the save the operation's own registration row carries when it minted none.
+      const operationVersion = (operationId: string) => findOperationSave(dispatch, readTurn, scenarioId, operationId).catch(() => null);
       const ownVersion = (key: string) => operationVersion(programOperationId(scenarioId, key));
       const [turnSave, cardSave, ...ranSaves] = await Promise.all([ownVersion(`turn:${turnId}`),
         approvedProposal !== undefined ? ownVersion(`proposal:${approvedProposal}`) : null, ...recordedRunsOf(recorded).map(operationVersion)]);
@@ -433,8 +437,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       // recorded before the tag) cannot say which chip it was, so that save is not claimed. A Run the AI started is Olumi's.
       const turnSaveBy = !chiplessRetry ? (runPress ? 'person' : 'olumi')
         : recordedRunPress(recorded) ? 'person' : recordedWithChip(recorded) ? null : 'olumi';
-      const receiptsOf = (v: Rec | null, by: 'olumi' | 'person' | null) => (v === null || by === null ? []
-        : collectTurnReceipts([{ model_version: v }]).map((r) => ({ ...r, authorised_by: by })));
+      const receiptsOf = (v: unknown, by: 'olumi' | 'person' | null) => (v === null || by === null ? []
+        : collectSaveReceipts([{ model_version: v }]).map((r) => ({ ...r, authorised_by: by })));
       return [...receiptsOf(turnSave, turnSaveBy), ...ranSaves.flatMap((v) => receiptsOf(v, 'olumi')), ...receiptsOf(cardSave, 'person')];
     };
 
@@ -543,7 +547,9 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         if (typeof operationId === 'string') mintedBy.set(registrationTurnId(scenarioId, operationId), operationId);
         const res = await undoRefusedWrite(() => fenced(sendIt));
         if (res.status === 409 && FENCE_REFUSED.has((res.json.details as { code?: unknown } | undefined)?.code)) fenceRefusedWrites += 1;
-        const minted = (res.json.model_version as { version_id?: unknown } | undefined)?.version_id;
+        // A save that minted no version (C8) is keyed by the revision its own row carries, as the guest's Run is said.
+        const minted = (res.json.model_version as { version_id?: unknown } | undefined)?.version_id
+          ?? (res.json.unversioned_save as { scenario_revision?: unknown } | undefined)?.scenario_revision;
         if (res.status === 200 && typeof minted === 'string' && typeof operationId === 'string') mintedBy.set(minted, operationId);
         return res;
       }
@@ -670,15 +676,15 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       let hostTurn: AgentTurnResult | undefined;
       /** Each saved version these calls reported, with who authorised it: a drafted first model's is Olumi's, every other the person's. */
       const turnReceipts = (calls: Pick<AgentTurnResult, 'tool_calls' | 'tool_results'>): CoreTurnReceipt[] => (programPayload === undefined ? receiptsOf(calls)
-        : collectTurnReceipts(calls.tool_results).map((r) => ({ ...r, authorised_by: programPayload!.model_program['turn'] === 'draft' ? 'olumi' as const : 'person' as const })));
+        : collectSaveReceipts(calls.tool_results).map((r) => ({ ...r, authorised_by: programPayload!.model_program['turn'] === 'draft' ? 'olumi' as const : 'person' as const })));
       /** C7: each Run the AI started that saved (its own receipt, Olumi's), by the operation its write ran under, for the answer row. */
       const ranOperations = (calls: Pick<AgentTurnResult, 'tool_calls' | 'tool_results'>): string[] => (programPayload !== undefined ? []
         : receiptsOf(calls).flatMap((r) => { const op = r.authorised_by !== 'olumi' ? undefined
-          : mintedBy.get(r.version_id) ?? (r.source_turn_id === null ? undefined : mintedBy.get(r.source_turn_id)); return op === undefined ? [] : [op]; }));
+          : mintedBy.get('version_id' in r ? r.version_id : r.scenario_revision) ?? (r.source_turn_id === null ? undefined : mintedBy.get(r.source_turn_id)); return op === undefined ? [] : [op]; }));
       const programTurn = async (): Promise<AgentTurnResult> => {
         const t0 = Date.now();
         const out = await runModelProgramTurn({ scenarioId, turnId, message, saved: { graph: saved.graph, identity: saved.identity }, dispatch: countingDispatch,
-          onModelRegistered: graphReadyEmitter(startedAt), proposals, userId });
+          onModelRegistered: graphReadyEmitter(startedAt), proposals, userId, readTurn });
         if (out.verifiedSave) verifiedSave = true;
         programPayload = out.payload;
         const ms = Date.now() - t0;
@@ -702,7 +708,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         const agentTurn = () => ({
           ctx: coreCtx, message, budget: coreBudget(), userId,
           calls: seen,
-          tools: programTurnTools({ ctx: coreCtx, mode: MODE, dispatch: countingDispatch, proposals, onVerifiedSave: () => { verifiedSave = true; } }),
+          tools: programTurnTools({ ctx: coreCtx, mode: MODE, dispatch: countingDispatch, proposals, readTurn, onVerifiedSave: () => { verifiedSave = true; } }),
           instructions: programInstructions(),
           // A pause must name a card this scenario holds, awaiting approval (`sdk-turn.ts`).
           isPendingCard: (id: string) => proposals.outstanding(coreCtx.scenario_id, coreCtx.authenticated_user_id).some((p) => p.proposal_id === id),

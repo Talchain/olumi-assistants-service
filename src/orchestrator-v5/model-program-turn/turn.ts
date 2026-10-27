@@ -8,6 +8,7 @@
  */
 import type { ProposalStore } from '../agent-lane/proposal.js';
 import type { InternalDispatch } from '../core-route/internal-dispatch.js';
+import type { RegistrationRowRead } from '../path-b/tools/core-write.js';
 import type { ToolResult } from '../agent-lane/runtime/agent-tools.js';
 import type { CanonicalModelT } from '../model-program/canonical.js';
 import { compile, normalise, type Blocker } from '../model-program/compile.js';
@@ -40,6 +41,8 @@ export interface ProgramTurnInput {
   /** Where the first draft's reading card is held (the route's store), and who would approve it. No store: no card. */
   readonly proposals?: ProposalStore;
   readonly userId?: string | null;
+  /** The store's read of a committed row: a save that minted no version (a guest's) is found again from its own row (C8). */
+  readonly readTurn?: RegistrationRowRead;
 }
 export interface ProgramTurnOutput {
   readonly assistantText: string;
@@ -131,7 +134,7 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
   const kind: TurnKind = prior === undefined ? 'draft' : 'run';
   const next = withNewRun(program);
   const { write, readback } = await savePostimage(input.dispatch, { scenarioId: input.scenarioId, operationId: programOperationId(input.scenarioId, `turn:${input.turnId}`),
-    expectedIdentity: input.saved.identity, ...(kind === 'draft' ? { briefText: input.message } : {}) }, next.graph);
+    expectedIdentity: input.saved.identity, ...(kind === 'draft' ? { briefText: input.message } : {}), ...(input.readTurn !== undefined ? { readTurn: input.readTurn } : {}) }, next.graph);
   const saved = isSaved(write);
   if (write.status === 'saved') { try { input.onModelRegistered?.(write.after.graph); } catch { /* an observer never decides the outcome */ } }
   const receipt = saved && 'receipt' in write ? write.receipt : null;

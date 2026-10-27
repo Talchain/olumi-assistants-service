@@ -22,7 +22,7 @@ import { z } from 'zod-v4';
 import type { InternalDispatch } from '../core-route/internal-dispatch.js';
 import type { AgentToolContext } from '../agent-lane/runtime/agent-tools.js';
 import { createProposal, type ProposalChange, type ProposalOperation, type ProposalStore, type StructuredProposal } from '../agent-lane/proposal.js';
-import { findOperationVersion } from '../path-b/tools/core-write.js';
+import { findOperationSave, type RegistrationRowRead } from '../path-b/tools/core-write.js';
 import { isNoModelYet, isSavedRead, readSaved } from './saved-read.js';
 import { ok, refused, unavailable, type ToolOutcome } from '../path-b/tools/outcome.js';
 import { CanonicalQuantity, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
@@ -38,7 +38,8 @@ import { stableStringify } from '../../orchestrator/context/stable-stringify.js'
 
 type Rec = Record<string, unknown>;
 type Ctx = Pick<AgentToolContext, 'scenario_id' | 'authenticated_user_id' | 'turn_id' | 'verified_user_messages' | 'user_turn_text'>;
-export interface ProgramToolDeps { readonly dispatch: InternalDispatch; readonly proposals: ProposalStore }
+/** `readTurn`: the store's read of a committed row, so a save that minted no version (a guest's) is found from its own row (C8). */
+export interface ProgramToolDeps { readonly dispatch: InternalDispatch; readonly proposals: ProposalStore; readonly readTurn?: RegistrationRowRead }
 
 /** Said with the turn's state on a program scenario: how its tools work. The standing instructions stay byte for byte. */
 export const PROGRAM_TURN_GUIDANCE = 'This scenario\'s model is a model program: read_canonical_context gives its quantities (with who gave each figure), goals, limits, options, open questions and its stored Run. '
@@ -274,7 +275,7 @@ export async function applyProgramChange(deps: ProgramToolDeps, ctx: Ctx, propos
   if (p.scenario_id !== ctx.scenario_id || p.user_id !== ctx.authenticated_user_id) return refused('not_authorised');
   const program = savedProgramOf({ living_model: p.living_model })!;
   const operationId = programOperationId(ctx.scenario_id, `proposal:${p.proposal_id}`);
-  const ownVersion = () => findOperationVersion(deps.dispatch, ctx.scenario_id, operationId);
+  const ownVersion = () => findOperationSave(deps.dispatch, deps.readTurn, ctx.scenario_id, operationId);
   const alreadySaved = (receipt: unknown): ToolOutcome => {
     if (receipt !== null && typeof receipt === 'object') deps.proposals.markApplied(p.proposal_id, [receipt as never]);
     return ok({ already_saved: true, receipt }, { mutated: false });
@@ -335,7 +336,8 @@ export async function runProgram(deps: ProgramToolDeps, ctx: Ctx): Promise<ToolO
   if (shown?.run && shown.current && shown.engine_current) return ok({ run: runWords(shown.run), stored: true }, { ran: false });
   const next = withNewRun(base.program);
   const operationId = programOperationId(ctx.scenario_id, `run:${next.run.receipt.revision_digest}:${base.program.runs.length}`);
-  const { write } = await savePostimage(deps.dispatch, { scenarioId: ctx.scenario_id, operationId, expectedIdentity: base.saved.identity }, next.graph);
+  const { write } = await savePostimage(deps.dispatch, { scenarioId: ctx.scenario_id, operationId, expectedIdentity: base.saved.identity,
+    ...(deps.readTurn !== undefined ? { readTurn: deps.readTurn } : {}) }, next.graph);
   if (!isSaved(write)) return write.status === 'unknown' ? write.outcome : refused(write.status === 'stale' ? 'superseded' : 'registration_refused');
   // Its own receipt, as every writer reports one: a turn that fails after this Run still says what it saved (C7).
   return ok({ run: runWords(next.run), stored: false, receipt: 'receipt' in write ? write.receipt : null }, { mutated: true, ran: true });
@@ -350,7 +352,7 @@ export async function runProgram(deps: ProgramToolDeps, ctx: Ctx): Promise<ToolO
  * its approval, approved_by and author_id included.
  */
 export type CanvasFigure = { readonly quantity_id: string } | { readonly goal_id: string };
-export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch'>, scenarioId: string, edit: { readonly target: CanvasFigure; readonly value: number | null;
+export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch' | 'readTurn'>, scenarioId: string, edit: { readonly target: CanvasFigure; readonly value: number | null;
   readonly low?: number | null; readonly high?: number | null; readonly operation_key: string; readonly approver: string | null }): Promise<{ readonly status: 'saved' | 'refused' | 'unknown'; readonly reason?: string; readonly receipt?: unknown;
   readonly changes?: readonly ProposalChange[] }> {
   const saved = await readSaved(deps, scenarioId);
@@ -390,7 +392,8 @@ export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch'>,
   if (!v.ok) return { status: 'refused', reason: v.reason };
   const next = withNewRun({ ...program, canonical: v.model, person_words: [...program.person_words, words] });
   if (next.evaluation.compiled.errors.length > 0) return { status: 'refused', reason: `That figure does not fit the model: ${next.evaluation.compiled.errors[0]!.message}` };
-  const { write } = await savePostimage(deps.dispatch, { scenarioId, operationId: programOperationId(scenarioId, `card:${edit.operation_key}`), expectedIdentity: saved.identity },
+  const { write } = await savePostimage(deps.dispatch, { scenarioId, operationId: programOperationId(scenarioId, `card:${edit.operation_key}`), expectedIdentity: saved.identity,
+    ...(deps.readTurn !== undefined ? { readTurn: deps.readTurn } : {}) },
     next.graph);
   return isSaved(write) ? { status: 'saved', receipt: 'receipt' in write ? write.receipt : undefined, changes: v.changes }
     : { status: write.status === 'unknown' ? 'unknown' : 'refused', reason: write.status === 'stale' ? 'Your model changed meanwhile; reload to see it.' : 'That change could not be saved.' };

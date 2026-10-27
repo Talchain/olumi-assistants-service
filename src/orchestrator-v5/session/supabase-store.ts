@@ -67,6 +67,7 @@ import {
   type SessionTurnWrite,
 } from './store.js';
 import { parseAnswerOffers } from '../agent-lane/answer-offers-envelope.js';
+import { registrationRequestOf } from '../graph-registration/registration-identity.js';
 import {
   categoriseGraphCasWrite,
   computeExpectedGraphCasHashes,
@@ -458,7 +459,9 @@ export class SupabaseSessionStore implements SessionStore {
         //    and only the prose differs, because "already recorded" would itself
         //    be false here.
         if (typeof row.request_hash !== 'string') return 'new';
-        return row.request_hash === write.request_hash ? 'replay' : 'conflict';
+        // C8: a registration's hash carries its save (`#saved:…`); the REQUEST is compared exactly, that suffix aside, so a
+        // row written before it still replays and a different graph or brief is still a conflict. Any other hash: whole.
+        return registrationRequestOf(row.request_hash) === registrationRequestOf(write.request_hash) ? 'replay' : 'conflict';
       }
     } catch {
       // Fall through: an unreadable row is an unknown, not a fact.
@@ -2100,7 +2103,7 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   async readCommittedTurn(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null> {
-    const columns = 'id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance';
+    const columns = 'id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions, agent_guidance, model_version_created';
     const read = (select: string) => this.client.from('v5_conversation_turns').select(select)
       .eq('scenario_id', scenarioId).eq('turn_id', turnId).limit(1);
     let { data, error } = await read(`${columns}, run_narration`);
@@ -2133,6 +2136,8 @@ export class SupabaseSessionStore implements SessionStore {
         .filter((pa): pa is NonNullable<typeof pa> => pa !== null && pa.scenario_id === scenarioId),
       // The narration this exact answer was sent with; absent or malformed reads as unknown.
       run_narration: answerRunNarrationOf(row.run_narration),
+      // C8: the commit's own version marker, exactly; anything but a boolean reads as never marked.
+      model_version_created: typeof row.model_version_created === 'boolean' ? row.model_version_created : null,
     };
   }
 

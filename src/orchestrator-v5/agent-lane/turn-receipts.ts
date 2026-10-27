@@ -39,6 +39,48 @@ export interface TurnReceipt {
   readonly source_turn_id: string | null;
 }
 
+/**
+ * ⭐ C8: a save that minted NO version (a guest's), as its own registration row carries it (`registration-identity.ts`,
+ * `unversionedSaveOf`). The UI reads it as proof of the person's own save, never as an Undo point, and refuses a receipt that
+ * carries any version key (DGAI #3037), so `version`, `version_id` and `mutation_id` are ABSENT, never null.
+ */
+export interface UnversionedTurnReceipt {
+  readonly kind: 'unversioned';
+  readonly scenario_revision: string;
+  readonly run_id: string | null;
+  readonly source_turn_id: string;
+}
+
+const UNVERSIONED_KEYS = ['kind', 'scenario_revision', 'run_id', 'source_turn_id'];
+
+/** Exactly the four keys, well formed; anything else (a version key included) is not an unversioned receipt. */
+export function unversionedReceiptOf(value: unknown): UnversionedTurnReceipt | null {
+  const r = asMaybeRecord(value);
+  if (r === null || Object.keys(r).length !== UNVERSIONED_KEYS.length || !UNVERSIONED_KEYS.every((k) => k in r)) return null;
+  if (r.kind !== 'unversioned' || typeof r.scenario_revision !== 'string' || !/^[0-9a-f]{64}$/.test(r.scenario_revision)) return null;
+  if (r.run_id !== null && (typeof r.run_id !== 'string' || !/^[A-Za-z0-9_.-]{1,128}$/.test(r.run_id))) return null;
+  if (typeof r.source_turn_id !== 'string' || !r.source_turn_id.startsWith('graph_registration:')) return null;
+  return { kind: 'unversioned', scenario_revision: r.scenario_revision, run_id: r.run_id, source_turn_id: r.source_turn_id };
+}
+
+/**
+ * Every save this turn's tools reported: each version's receipt (`collectTurnReceipts`, newest last), then each unversioned
+ * save's, once per registration row (`source_turn_id`), read from the same two places a version's is.
+ */
+export function collectSaveReceipts(toolResults: readonly unknown[] | undefined): readonly (TurnReceipt | UnversionedTurnReceipt)[] {
+  if (!Array.isArray(toolResults)) return [];
+  const unversioned = new Map<string, UnversionedTurnReceipt>();
+  for (const result of toolResults) {
+    const rec = asMaybeRecord(result);
+    if (rec === null) continue;
+    for (const candidate of [rec.model_version, ...(Array.isArray(rec.receipts) ? rec.receipts : [])]) {
+      const r = unversionedReceiptOf(candidate);
+      if (r !== null && !unversioned.has(r.source_turn_id)) unversioned.set(r.source_turn_id, r);
+    }
+  }
+  return [...collectTurnReceipts(toolResults), ...unversioned.values()];
+}
+
 function asMaybeRecord(value: unknown): Record<string, unknown> | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   return value as Record<string, unknown>;

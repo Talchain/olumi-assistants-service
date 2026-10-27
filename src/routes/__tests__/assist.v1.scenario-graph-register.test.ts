@@ -97,7 +97,7 @@ import { resolveCeeRateLimit } from "../../cee/config/limits.js";
 import { RATE_BUCKET_REGISTRY } from "../../cee/config/limits.js";
 import { checkPersistedGraphInvariants } from "../../orchestrator-v5/persisted-graph-invariants.js";
 import { currentTurnFenceSlot, runWithTurnFence, TurnFenceRejectedError } from "../../orchestrator-v5/session/turn-fence.js";
-import { registrationRequestHash, registrationTurnId } from "../../orchestrator-v5/graph-registration/registration-identity.js";
+import { registrationRequestHash, registrationRequestOf, registrationTurnId } from "../../orchestrator-v5/graph-registration/registration-identity.js";
 
 
 
@@ -1761,6 +1761,64 @@ describe("register — create-only construction: `null` refuses a real model, no
     expect(res.json().details.failed_expectation).toBe("absence");
     expect(append).not.toHaveBeenCalled();
     await app.close();
+  });
+
+  /**
+   * ⭐ C8: the stored hash carries the save (`#saved:…`); the REQUEST is still compared exactly. A row written before the
+   * carrier replays; a different brief over the SAME graph (so the same `#saved` identity) or a malformed carrier never does.
+   */
+  const committed = (request_hash: string) => ({ id: "row-1", request_hash, model_version_created: false, assistant_message: null, user_message: null, llm_calls_used: 0 });
+
+  it("C8 (6): a row written BEFORE the carrier (no #saved) for the same request still reaches the replay arm", async () => {
+    loadGraph.mockResolvedValue(projected());
+    const preCarrier = registrationRequestOf(registrationRequestHash(projected(), undefined));
+    expect(preCarrier).not.toContain("#saved:");
+    readCommittedTurn.mockResolvedValue(committed(preCarrier));
+    append.mockResolvedValue({ id: "turn-1", replayedPriorTurn: true });
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: null, operation_id: OP });
+    expect(res.statusCode, res.body.slice(0, 300)).toBe(200);
+    expect(res.json().replayed).toBe(true);
+    expect(res.json(), "never this retry's save claimed for the old row").not.toHaveProperty("unversioned_save");
+    await app.close();
+  });
+
+  it("C8 (5): the same operation with a DIFFERENT brief over the same graph (its stored hash carries the same #saved identity) is refused, never a replay", async () => {
+    loadGraph.mockResolvedValue(projected());
+    const other = registrationRequestHash(projected(), "a different brief");
+    const mine = registrationRequestHash(projected(), undefined);
+    expect(other.slice(other.indexOf("#saved:")), "the same graph: the same carrier").toBe(mine.slice(mine.indexOf("#saved:")));
+    readCommittedTurn.mockResolvedValue(committed(other));
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: null, operation_id: OP });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().details.failed_expectation).toBe("absence");
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("C8 (5): the same operation with a DIFFERENT graph is refused, never a replay", async () => {
+    loadGraph.mockResolvedValue(projected());
+    readCommittedTurn.mockResolvedValue(committed(registrationRequestHash(SERVER_PRE_IMPORT, undefined)));
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: null, operation_id: OP });
+    expect(res.statusCode).toBe(409);
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("C8 (9): a stored hash with a MALFORMED carrier is compared whole: never a replay", async () => {
+    loadGraph.mockResolvedValue(projected());
+    const base = registrationRequestOf(registrationRequestHash(projected(), undefined));
+    for (const malformed of [`${base}#saved:not-a-hash`, `${base}#saved:${"a".repeat(63)}`, `${base}#saved:${"a".repeat(64)}:bad#run`]) {
+      append.mockClear();
+      readCommittedTurn.mockResolvedValue(committed(malformed));
+      const app = await buildApp();
+      const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: null, operation_id: OP });
+      expect(res.statusCode, malformed).toBe(409);
+      expect(append).not.toHaveBeenCalled();
+      await app.close();
+    }
   });
 
   it("CONTRAST (b): somebody else's model and no committed turn for this operation → refused, nothing written", async () => {

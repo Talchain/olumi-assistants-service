@@ -97,9 +97,10 @@ import { config } from "../config/index.js";
 import { coreTurnStreamTimeout, type CoreTurnReceipt } from "../orchestrator-v5/core-route/contract.js";
 import type { InternalDispatch } from "../orchestrator-v5/core-route/internal-dispatch.js";
 import { isChiplessRetry, withinOwnSaveRead } from "../orchestrator-v5/core-route/turn-request.js";
-import { collectTurnReceipts } from "../orchestrator-v5/agent-lane/turn-receipts.js";
+import { collectSaveReceipts } from "../orchestrator-v5/agent-lane/turn-receipts.js";
 import { programOperationId } from "../orchestrator-v5/model-program-turn/program-save.js";
-import { findOperationVersion } from "../orchestrator-v5/path-b/tools/core-write.js";
+import { findOperationSave, type RegistrationRowRead } from "../orchestrator-v5/path-b/tools/core-write.js";
+import { getSessionStore } from "../orchestrator-v5/session/index.js";
 
 /**
  * The buffered turn both streamed routes forward to. Single source of truth.
@@ -147,8 +148,13 @@ async function ownTurnSave(app: FastifyInstance, headers: Record<string, string>
     const res = await app.inject({ method: "POST", url: path, headers, payload: b as Record<string, unknown> });
     try { return { status: res.statusCode, json: res.json() as Record<string, unknown> }; } catch { return { status: res.statusCode, json: {} }; }
   };
-  const own = await findOperationVersion(dispatch, scenarioId, programOperationId(scenarioId, `turn:${turnId}`)).catch(() => null);
-  return own === null ? [] : collectTurnReceipts([{ model_version: own }]).map((r) => ({ ...r, authorised_by: by }));
+  // C8: a save that minted no version (a guest's) is found from its own registration row, as the turn's replay finds it.
+  const readTurn: RegistrationRowRead = async (sid, id) => {
+    const store = getSessionStore();
+    return typeof store.readCommittedTurn === "function" ? store.readCommittedTurn(sid, id) : null;
+  };
+  const own = await findOperationSave(dispatch, readTurn, scenarioId, programOperationId(scenarioId, `turn:${turnId}`)).catch(() => null);
+  return own === null ? [] : collectSaveReceipts([{ model_version: own }]).map((r) => ({ ...r, authorised_by: by }));
 }
 
 const EVENT_STREAM = "text/event-stream";

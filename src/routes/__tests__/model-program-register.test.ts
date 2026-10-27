@@ -53,6 +53,7 @@ import { GRAPH_MAX_NODES, PROGRAM_GRAPH_MAX_NODES } from '../../config/graphCaps
 import { runModelProgramTurn } from '../../orchestrator-v5/model-program-turn/turn.js';
 import { computeGraphIdentityHash } from '../../orchestrator-v5/context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
+import { registrationRequestOf, registrationTurnId } from '../../orchestrator-v5/graph-registration/registration-identity.js';
 
 type Rec = Record<string, unknown>;
 beforeEach(() => {
@@ -458,5 +459,74 @@ describe('a model program\'s postimage through the real /graph/register', () => 
     expect(res.statusCode, res.body).toBe(422);
     expect(res.json().details.code).toBe('GRAPH_INVARIANT_VIOLATION');
     expect(append).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * ⭐ C8 (alpha, 27 Oct; DL + PL): a save that minted no version (a guest's) carries its own receipt on its own registration
+ * row, through the REAL register: the row's immutable `request_hash` (written in the same commit as the graph) gains
+ * `#saved:<identity.v1>[:<newest stored Run>]`, and the 200 answers with the receipt READ BACK from that row, only on the
+ * RPC's positive marker `model_version_created === false`. A signed-in save that minted a version is answered as before.
+ */
+describe('C8: a guest’s program save through the real /graph/register carries its own receipt on its own row', () => {
+  const OP = '7c6b5a49-3827-4615-a4b3-c2d1e0f9a8b7';
+  const TURN = registrationTurnId(SCENARIO, OP);
+  const guestProgram = () => withNewRun({ model_program: MODEL_PROGRAM, canonical: bakery(), seed: seedOf(SCENARIO), person_words: [BRIEF], runs: [] });
+  /** The row the RPC committed: exactly the write's request hash, with the marker given (false: no version minted). */
+  const committedRow = (marker: boolean | null, hash?: string) => ({ id: 'row-1', request_hash: hash ?? String((append.mock.calls[0]![0] as Rec).request_hash),
+    model_version_created: marker, assistant_message: null, user_message: null, llm_calls_used: 0 });
+  const KEYS_BEFORE_C8 = ['schema', 'scenario_id', 'registered', 'graph_identity_hash', 'graph_hash', 'node_count', 'edge_count', 'kind_fields_normalised', 'request_id'];
+
+  it('(1) the written request hash carries the save (the stored bytes’ identity.v1 and their newest Run), and the 200’s `unversioned_save` is that row’s, read back', async () => {
+    const { graph, run } = guestProgram();
+    store.readCommittedTurn.mockImplementation(async () => (append.mock.calls.length === 0 ? null : committedRow(false)));
+    const res = await register({ graph, thin_core: true, brief_text: BRIEF, operation_id: OP }, true);
+    expect(res.statusCode, res.body).toBe(200);
+    const write = append.mock.calls[0]![0] as Rec;
+    const identity = computeGraphIdentityHash(write.graph as never)!.value;
+    expect(write.turn_id).toBe(TURN);
+    expect(write.request_hash).toBe(`${registrationRequestOf(String(write.request_hash))}#saved:${identity}:${run.run_id}`);
+    expect(registrationRequestOf(String(write.request_hash))).toMatch(/^graph_registration:[0-9a-f]{64}$/);
+    const body = res.json() as Rec;
+    expect((body.graph_identity_hash as Rec).value, 'the ack names the same bytes').toBe(identity);
+    expect(body.unversioned_save).toEqual({ kind: 'unversioned', scenario_revision: identity, run_id: run.run_id, source_turn_id: TURN });
+    expect(store.readCommittedTurn).toHaveBeenLastCalledWith(SCENARIO, TURN);
+    expect(body).not.toHaveProperty('model_version');
+  });
+
+  it('(8) CONTRAST: a row the RPC never marked (null) or marked as a version is no unversioned save, and the 200 is as before', async () => {
+    const { graph } = guestProgram();
+    for (const marker of [null, true]) {
+      append.mockClear();
+      store.readCommittedTurn.mockImplementation(async () => (append.mock.calls.length === 0 ? null : committedRow(marker)));
+      const res = await register({ graph, thin_core: true, brief_text: BRIEF, operation_id: OP }, true);
+      expect(res.statusCode, res.body).toBe(200);
+      expect(Object.keys(res.json() as Rec), String(marker)).toEqual(KEYS_BEFORE_C8);
+    }
+  });
+
+  it('(6) a replay of a row written BEFORE the carrier (no #saved) replays, and is never given this retry’s save: no `unversioned_save`', async () => {
+    const { graph } = guestProgram();
+    let stored = '';
+    store.readCommittedTurn.mockImplementation(async () => (stored === '' ? null : committedRow(false, stored)));
+    append.mockImplementation(async (w: Rec) => { stored = registrationRequestOf(String(w.request_hash)); return { id: 'turn-1', replayedPriorTurn: true }; });
+    const res = await register({ graph, thin_core: true, brief_text: BRIEF, operation_id: OP }, true);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(stored, 'the stored row has no carrier').not.toContain('#saved:');
+    expect((res.json() as Rec).replayed).toBe(true);
+    expect(res.json()).not.toHaveProperty('unversioned_save');
+  });
+
+  it('(7) CONTRAST: a signed-in save that minted a version is answered exactly as before: its `model_version`, no `unversioned_save`, and no row read for it', async () => {
+    const { graph } = guestProgram();
+    const identity = computeGraphIdentityHash(JSON.parse(JSON.stringify(graph)) as never);
+    append.mockResolvedValue({ id: 'turn-1', modelVersionReceipt: { mutation_id: 'm-1', version_id: 'v-1', version_number: 1, creation_kind: 'initial',
+      graph_identity_hash: identity?.value ?? 'a'.repeat(64), analysis_affecting_hash: 'b'.repeat(64) } });
+    const res = await register({ graph, thin_core: true, brief_text: BRIEF, operation_id: OP }, true);
+    expect(res.statusCode, res.body).toBe(200);
+    const keys = [...KEYS_BEFORE_C8];
+    keys.splice(5, 0, 'model_version');
+    expect(Object.keys(res.json() as Rec)).toEqual(keys);
+    expect(store.readCommittedTurn, 'no read of the registration row after a version was minted').not.toHaveBeenCalledWith(SCENARIO, TURN);
   });
 });

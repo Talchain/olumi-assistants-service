@@ -149,6 +149,8 @@ export interface ProgramTurnToolsInput {
   readonly proposals: PathBToolDeps['proposals'];
   /** Told when a tool's own receipt AND its successful postimage readback establish a saved change. */
   readonly onVerifiedSave: () => void;
+  /** The store's read of a committed row: a save that minted no version (a guest's) is found from its own row (C8). */
+  readonly readTurn?: PathBToolDeps['readTurn'];
 }
 
 /**
@@ -159,6 +161,7 @@ export interface ProgramTurnToolsInput {
 export function programTurnTools(i: ProgramTurnToolsInput): CoreTurnInput['tools'] {
   const noLivingModelRun: PathBToolDeps['runAnalysis'] = () => Promise.reject(new Error('a model program runs its own Run'));
   return (onCall, press) => pathBTools({ dispatch: i.dispatch, proposals: i.proposals, runAnalysis: noLivingModelRun,
+    ...(i.readTurn !== undefined ? { readTurn: i.readTurn } : {}),
     ...(press !== undefined ? { pressedProposal: press.approves } : {}) }, i.ctx, i.mode,
     (row, result) => {
       if (result.ok && result.mutated && (result.receipts?.length ?? 0) > 0) i.onVerifiedSave();

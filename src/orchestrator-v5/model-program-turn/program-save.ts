@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import type { InternalDispatch } from '../core-route/internal-dispatch.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
-import { findOperationVersion, unknownWrite, writeCorePostimage, type CoreWrite } from '../path-b/tools/core-write.js';
+import { findOperationSave, unknownWrite, writeCorePostimage, type CoreWrite, type RegistrationRowRead } from '../path-b/tools/core-write.js';
 import { approvedGraphHeld, isSavedRead, readSaved } from './saved-read.js';
 import { compile } from '../model-program/compile.js';
 import { project } from '../model-program/project.js';
@@ -69,11 +69,12 @@ export type ProgramSave = { readonly write: CoreWrite; readonly readback: Rec };
  * content is in doubt.
  */
 export async function savePostimage(dispatch: InternalDispatch, w: { readonly scenarioId: string; readonly operationId: string; readonly expectedIdentity: string | null;
-  readonly briefText?: string; readonly ownVersion?: () => Promise<unknown | null> }, graph: Rec): Promise<ProgramSave> {
+  readonly briefText?: string; readonly ownVersion?: () => Promise<unknown | null>; readonly readTurn?: RegistrationRowRead }, graph: Rec): Promise<ProgramSave> {
   const sentWrite = await writeCorePostimage({ dispatch }, { scenarioId: w.scenarioId, graph, operationId: w.operationId, expectedIdentity: w.expectedIdentity,
     ...(w.briefText !== undefined ? { briefText: w.briefText } : {}), ownVersion: w.ownVersion ?? (async () => null) });
+  // Its own save: a version, or (C8) the save its own registration row carries when it minted none (a guest's).
   const own = sentWrite.status === 'unknown' && sentWrite.outcome.status === 'unavailable' && sentWrite.outcome.reason === 'not_confirmed'
-    ? await (w.ownVersion ?? (() => findOperationVersion(dispatch, w.scenarioId, w.operationId)))().catch(() => null) : null;
+    ? await (w.ownVersion ?? (() => findOperationSave(dispatch, w.readTurn, w.scenarioId, w.operationId)))().catch(() => null) : null;
   const sent = savedProgramOf(graph);
   const read = await readSaved({ dispatch }, w.scenarioId);
   const back = isSavedRead(read) ? savedProgramOf(read.graph) : undefined;

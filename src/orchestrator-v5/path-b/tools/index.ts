@@ -33,6 +33,7 @@ import { STRESS_TEST, StressTestParams, stressTest, type StressDeps } from './st
 import { OFFER_PUBLIC_RESEARCH, OFFER_PUBLIC_RESEARCH_DESCRIPTION, OfferResearchParams, offerResearch, type ResearchDeps } from './research-tool.js';
 import { log } from '../../../utils/telemetry.js';
 import { OUTCOME_TRACE, refused, traceRow, type ToolOutcome, type TraceRow } from './outcome.js';
+import type { RegistrationRowRead } from './core-write.js';
 import { applyProgramChange, isProgramProposal, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../../model-program-turn/program-tools.js';
 import { PROGRAM_TOOL_DESCRIPTIONS } from '../../core-route/instructions.js';
 
@@ -69,6 +70,8 @@ export type PathBToolDeps = ChangeDeps & DraftDeps & RunDeps & Pick<StressDeps, 
   readonly noteOnlyOn?: string;
   /** The card a press approves: on that turn the apply is bound to it, never to the AI's argument (DL 93d79c3e). */
   readonly pressedProposal?: string;
+  /** A program's tools: the store's read of a committed row, so a save that minted no version is found from its own row (C8). */
+  readonly readTurn?: RegistrationRowRead;
 };
 export type PathBContext = Pick<AgentToolContext, 'scenario_id' | 'authenticated_user_id' | 'turn_id' | 'verified_user_messages' | 'user_turn_text'>;
 /** The route's tool result for one call: what `tool_results[i]` reads. `mutated` is false for an unknown write (the row says null). */
