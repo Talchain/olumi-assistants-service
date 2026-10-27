@@ -637,7 +637,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(again.statusCode, again.body).toBe(200);
       expect((again.json() as Json).durability).toBe('replayed');
       // C7: the resend says the save it found, with that version's receipt (the first send's own operation).
-      expect((again.json() as Json).receipts).toMatchObject([{ version_id: 'v_1', version: 1, authorised_by: 'person' }]);
+      expect((again.json() as Json).receipts).toMatchObject([{ version_id: 'v_1', version: 1, authorised_by: 'person',
+        source_turn_id: registrationTurnId(SCENARIO, programOperationId(SCENARIO, `card:${turnId}`)) }]);
       // CONTRAST: a different edit under that turn id is refused, and never saved.
       const other = await canvasEdit(turnId, 330);
       expect(other.statusCode).toBe(409);
@@ -648,6 +649,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     it('🔴 C7: an edit refused on its first send and resent is never answered "saved": nothing was written', async () => {
       const turnId = randomUUID();
       const notAFigure = () => post({ kind: 'system_event', turn_id: turnId, event: { kind: 'factor_value_edit', target_id: 'not_in_this_model', raw_value: 1 } });
+      // Another edit's save is already in the history, so only this edit's own operation can answer its resend.
+      expect((await canvasEdit(randomUUID())).statusCode).toBe(200);
       const first = await notAFigure();
       expect(first.statusCode, first.body).toBe(409);
       expect((first.json() as Json).error).toMatchObject({ code: 'CANVAS_EDIT_REFUSED', nothing_saved: true });
@@ -655,7 +658,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(again.statusCode, again.body).toBe(503);
       expect(again.json() as Json).toMatchObject({ durability: 'unknown', receipts: [],
         error: { code: 'CANVAS_EDIT_REFUSED', nothing_saved: false }, model_program: { turn: 'card_edit', saved: false } });
-      expect(registered).toHaveLength(0);
+      expect(registered).toHaveLength(1);
     });
   });
 
