@@ -1,0 +1,126 @@
+/**
+ * W8 (acceptance check 7, "what Olumi says", judged as the person reads it): the host's own words on the reading card, the
+ * Analysis tab and the canvas's provenance, each family on its real producer (readingOf, evaluateCanonical, project). A
+ * synthetic repair shop, never a brief's or journey's words. Each row is RED with its producer's change reverted.
+ */
+import { describe, expect, it } from 'vitest';
+import type { CanonicalModelT } from '../../model-program/canonical.js';
+import { compile } from '../../model-program/compile.js';
+import { project } from '../../model-program/project.js';
+import { evaluateCanonical } from '../evaluate.js';
+import { readingOf } from '../postimage.js';
+import { readingGroups } from '../reading-groups.js';
+import { at, q } from './bakery.fixture.js';
+
+type Json = Record<string, any>;
+const BRIEF = 'We fix 60 jobs a week and want to reach 75 jobs a week. Each mechanic does 10 to 20 jobs a week. We could hire one mechanic, or keep the team as it is. We charge £20 per customer per month.';
+
+function shop(): CanonicalModelT {
+  return {
+    version: 'canonical.v1', question: 'Should the shop hire a mechanic?', period: 'week',
+    quantities: [
+      q('jobs_now', 'job/week', { value: 60, quote: 'We fix 60 jobs a week' }),
+      q('extra_mechanics', 'mechanic', { value: 0, author: 'structure', basis: 'Zero is no extra mechanic; the options set it.' }),
+      q('per_mechanic', 'job/week/mechanic', { kind: 'coefficient', value: 15, low: 10, high: 20, range_kind: 'bounds', floor: 0, quote: 'Each mechanic does 10 to 20 jobs a week' }),
+      q('extra_jobs', 'job/week', { kind: 'derived', status: 'derived', author: 'olumi' }),
+      q('total_jobs', 'job/week', { kind: 'derived', status: 'derived', author: 'olumi' }),
+      q('target', 'job/week', { value: 75, quote: 'want to reach 75 jobs a week' }),
+      q('fee', 'GBP/customer/month', { value: 20, quote: 'We charge £20 per customer per month' }),
+    ],
+    relations: [
+      { form: 'definition', id: 'extra_rel', defines: 'extra_jobs', op: 'product', parts: [{ id: 'extra_mechanics', power: 1 }, { id: 'per_mechanic', power: 1 }], author: 'olumi', quote: null, ...at },
+      { form: 'definition', id: 'total_rel', defines: 'total_jobs', op: 'sum', parts: [{ id: 'jobs_now', sign: 1 }, { id: 'extra_jobs', sign: 1 }], author: 'olumi', quote: null, ...at },
+    ],
+    goals: [{ id: 'reach_75', label: 'Reach 75 jobs a week', measure: { quantity: 'total_jobs', per: null, cmp: '>=', target: 'target', frame: 'level', reference: null, aggregation: 'end',
+      window: null, measure_by: 'person', assumptions: [], exclusions: [] }, question: null, author: 'person', quote: 'want to reach 75 jobs a week', ...at }],
+    limits: [], preferences: [],
+    options: [
+      { id: 'hire', label: 'Hire one mechanic', sets: [{ quantity: 'extra_mechanics', to: null, value: 1, low: null, high: null, range_kind: null, question: null, starts_after_periods: 0,
+        author: 'person', quote: 'We could hire one mechanic' }], status: 'live', developed_from: null, author: 'person', quote: 'We could hire one mechanic', ...at },
+      { id: 'keep', label: 'Keep the team', sets: [], status: 'live', developed_from: null, author: 'person', quote: 'keep the team as it is', ...at },
+    ],
+    risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [],
+    title: null, coaching_questions: [],
+  } as CanonicalModelT;
+}
+const card = () => {
+  const v = readingOf(shop(), { words: [BRIEF], approver: null });
+  if (!v.ok) throw new Error(JSON.stringify(v));
+  return v.changes;
+};
+const after = (id: string) => card().find((c) => c.id === id)?.after;
+const view = () => evaluateCanonical(shop(), { sourceText: BRIEF, seed: 7, draws: 2000 }).view as Json;
+const cellOf = (v: Json, id: string) => (v.options as Json[]).find((o) => o.option_id === id)!;
+const count = (text: string, part: string) => text.split(part).length - 1;
+
+describe('W8 c7: the words a person reads, at their producers', () => {
+  it('card, c7.7: an option says what it changes, once, never "compared, sets X 0 to Option: X 1"; its own setting is no second line', () => {
+    expect(after('hire')).toBe('sets "extra mechanics" to 1 mechanic from the start, in your words "We could hire one mechanic"');
+    expect(after('keep')).toBe('carries on as now, in your words "keep the team as it is"');
+    // The option's own setting (compile.ts `normalise`: "Hire one mechanic: extra mechanics") is said on the option's line.
+    expect(card().filter((c) => c.label.includes(': '))).toEqual([]);
+    expect(card().some((c) => c.id === 'hire__extra_mechanics')).toBe(false);
+  });
+
+  it('card, c7.1 and c7.7: a worked-out figure is one line with its relation, said as a short sentence by name, never "X is Y 0 multiplied by Z"', () => {
+    const labels = card().map((c) => c.label);
+    expect(labels.filter((l) => l === 'total jobs')).toHaveLength(1);
+    expect(labels.filter((l) => l === 'extra jobs')).toHaveLength(1);
+    expect(after('total_rel')).toBe('worked out as "jobs now" plus "extra jobs", in jobs per week');
+    expect(after('extra_rel')).toBe('worked out as "extra mechanics" multiplied by "per mechanic", in jobs per week');
+    // The first reply's counts read the same map, so a folded figure is counted once, as its line.
+    expect(readingGroups(shop(), () => true).has('total_jobs')).toBe(false);
+  });
+
+  it('card, c7.3: a unit as a person writes it, never unit algebra', () => {
+    expect(after('per_mechanic')).toBe('from 10 to 20 jobs per mechanic per week, most likely 15 (firm ends) (never below 0: Olumi’s reading), in your words "Each mechanic does 10 to 20 jobs a week"');
+    expect(after('fee')).toBe('£20 per customer per month, in your words "We charge £20 per customer per month"');
+    expect(card().map((c) => c.after ?? '').join(' ')).not.toMatch(/\b[a-z]+\/[a-z]+|GBP\//);
+  });
+
+  it('card, c7.3: no classification tag on a whole figure ("a fact, known", "a result, worked out from the model"); structure said plainly', () => {
+    const said = card().map((c) => c.after ?? '').join(' | ');
+    expect(said).not.toMatch(/\ba (fact|rate|result)\b|\bknown\b|worked out from the model|fixed part of the model’s structure|\bcompared\b/);
+    expect(after('extra_mechanics')).toBe('0 mechanics, based on "Zero is no extra mechanic; the options set it.", part of how the model is set up');
+    expect(after('jobs_now')).toBe('60 jobs per week, in your words "We fix 60 jobs a week"');
+  });
+
+  it('analysis, c7.6: the settings tested are explained beside the overall chance, so 0% / 100% / 100% beside about 50% reads as agreeing', () => {
+    const v = view(), hire = cellOf(v, 'hire');
+    expect(hire.main_driver.kind).toBe('available');
+    expect(hire.main_driver.detail).toContain('With ‘per mechanic’ held at its low end (10 jobs per mechanic per week), the chance is ');
+    expect(hire.main_driver.detail).toContain(`Each of these holds ‘per mechanic’ at one value. The overall chance, ${hire.cell.display}, allows for every value it can take.`);
+    // The leader names what it is most sensitive to, and never repeats the settings.
+    expect(v.leader.words).toContain('Its chance is most sensitive to ‘per mechanic’ (your range).');
+    expect(v.leader.words).not.toMatch(/at its (low end|middle|high end)/);
+  });
+
+  it('analysis, c7.1: a range\'s reading ("values near its middle are likelier …") is said once in the whole view', () => {
+    const text = JSON.stringify(view());
+    expect(count(text, 'values near its middle are likelier than values near its ends')).toBe(1);
+    // Every chance still names the range it rests on.
+    for (const id of ['hire', 'keep']) expect(cellOf(view(), id).cell.face).toContain('‘per mechanic’ follows Olumi’s provisional reading of your range, 10 to 20 jobs per mechanic per week');
+  });
+
+  it('analysis, c7.2 and c7.3: a chance, then what it rests on, one point per sentence, in plain words', () => {
+    const v = view(), keep = cellOf(v, 'keep').cell.face as string, hire = cellOf(v, 'hire').cell.face as string;
+    expect(hire.startsWith(`‘Hire one mechanic’: ${cellOf(v, 'hire').cell.display} chance of ‘total jobs’ being at least 75 jobs per week, in this model. It rests on Olumi’s reading of your figures (not yet confirmed). It assumes ‘per mechanic’ follows`)).toBe(true);
+    expect(keep).toContain('Whatever the uncertain figures turn out to be, ‘total jobs’ is 60 jobs per week, below 75 jobs per week.');
+    for (const face of [hire, keep, v.leader.words as string]) expect(face).not.toMatch(/with each option in effect|simulated draw| \/ |, if /);
+    expect(v.leader.words).toContain('the next most likely. Like each option’s chance, it rests on Olumi’s reading of your figures (not yet confirmed) and the assumptions listed with it.');
+  });
+
+  it('canvas provenance (DL, served 1c16eb41): a figure Olumi asks of the person, with no words of theirs, is not "From your brief"', () => {
+    const m = shop();
+    m.quantities.push(q('parts_delay', 'job/week', { status: 'asked', question: 'How many jobs a week wait on parts?' }),
+      q('weekend_jobs', 'job/week', { value: 5, quote: 'about 5 at weekends' }));
+    const total = m.relations.find((r) => r.id === 'total_rel');
+    if (total?.form === 'definition' && total.op === 'sum') total.parts.push({ id: 'parts_delay', sign: -1 }, { id: 'weekend_jobs', sign: 1 });
+    const nodes = project(m, compile(m), { brief: BRIEF }).graph.nodes as Json[];
+    const provenance = (id: string) => nodes.find((n) => n.id === id)!.provenance;
+    expect(provenance('parts_delay')).toBe('ai_inferred');
+    // Contrasts: their brief's figure stays from the brief; a figure they gave later stays theirs as added.
+    expect(provenance('jobs_now')).toBe('from_brief');
+    expect(provenance('weekend_jobs')).toBe('user_set');
+  });
+});

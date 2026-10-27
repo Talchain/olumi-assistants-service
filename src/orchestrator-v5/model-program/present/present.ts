@@ -39,7 +39,7 @@
  */
 import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
 import { displayedPctAt } from '../../goal-target/goal-chance-display.js';
-import { comparatorWords, displayRoundingFor, sayDisplayedPct } from './display-words.js';
+import { comparatorWords, displayRoundingFor, sayDisplayedPct, unitWords } from './display-words.js';
 import type { Aggregation, Cmp, Domain, ExecutableModel, FixedAuthor, Goal, Limit, Quantity, Window } from '../executable.js';
 import { separated, type PairedDifference } from '../simulate/paired.js';
 import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
@@ -269,8 +269,14 @@ export const inlineWords = (text: string): string => text.trim().replace(/\s+/g,
 const q = (label: string): string => `‘${inlineWords(label)}’`;
 /** A sentence's full stop, unless it already ends in one (a question keeps its "?"). */
 const stop = (x: string): string => (/[.?!]$/.test(x) ? x : `${x}.`);
-/** A figure in its unit; a pure number (unit "1") is said alone. */
-const say = (value: number, unit: string): string => (unit.trim() === '' || unit.trim() === '1' ? sayFigureAsWritten(value, '') : sayFigureAsWritten(value, unit));
+/** A figure in its unit as a person writes it (W8 c7.3: "20 tickets per specialist per week", never "ticket / week / specialist"); a pure number (unit "1") is said alone. */
+const say = (value: number, unit: string): string => sayFigureAsWritten(value, unitWords(unit, value));
+/** A range's two ends with the unit said once: "10 to 30 tickets per week", "£10 to £30 per month", "5% to 15%". */
+const sayBetween = (low: string, high: string): string => {
+  const [, pre = '', num = '', post = ''] = /^(\D*?)(-?[\d.,]+)(.*)$/.exec(low) ?? [];
+  const [, hiPre = '', , hiPost = ''] = /^(\D*?)(-?[\d.,]+)(.*)$/.exec(high) ?? [];
+  return num !== '' && pre === hiPre && post === hiPost && post.trim() !== '' && !post.startsWith('%') ? `${pre}${num} to ${high}` : `${low} to ${high}`;
+};
 const plural = (unit: string, n: number): string => `${n} ${unit}${n === 1 ? '' : 's'}`;
 
 /**
@@ -320,7 +326,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
    * When it is read. An aim with no window is read once with every option's change in effect (the compiler's own reading,
    * compile.ts); one that changes over time without a deadline waits on a `deadline` blocker and is never said here (S4).
    */
-  const whenWords = (c: Goal | Limit): string => (c.no_deadline === true ? 'with each option in effect' : horizonWords(c.aggregation, c.window, unit, readingOf(byId.get(c.quantity)!)));
+  // W8 (c7.3, "with each option in effect" read as machinery): an aim with no deadline is said with no horizon words.
+  const whenWords = (c: Goal | Limit): string => (c.no_deadline === true ? '' : horizonWords(c.aggregation, c.window, unit, readingOf(byId.get(c.quantity)!)));
   const label = (id: string): string | undefined => meta(id)?.label ?? byId.get(id)?.label;
   const optionLabel = new Map(model.options.map((o) => [o.id, o.label] as const));
   const unit = model.period_unit;
@@ -338,11 +345,13 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   /** A domain's ends in plain words (alpha G2): "never below 0 member", "0 to 1". */
   const canBe = (id: string, unit: string, d: Domain | undefined): string => {
     const min = d?.min !== undefined && Number.isFinite(d.min) ? sayOf(id, d.min, unit) : null, max = d?.max !== undefined && Number.isFinite(d.max) ? sayOf(id, d.max, unit) : null;
-    return min !== null && max !== null ? `${min} to ${max}` : min !== null ? `never below ${min}` : max !== null ? `never above ${max}` : 'the values it can take';
+    return min !== null && max !== null ? sayBetween(min, max) : min !== null ? `never below ${min}` : max !== null ? `never above ${max}` : 'the values it can take';
   };
   /** Olumi's assumptions among these quantities, in plain words, model order, each said once (a shadow named as its quantity,
    * compile.ts `shadowLabel`, says the same words). Empty = every input is the person's. */
-  const assumptions = (ids: ReadonlySet<string>): string[] => [...new Set(model.quantities.filter((x) => ids.has(x.id)).flatMap((x): string[] => {
+  // W8 (c7.1: "values near its middle are likelier than values near its ends" four times in one analysis): `once`, the
+  // view's own record of what it has said, gives a range's reading in full the first time and by its ends after.
+  const assumptions = (ids: ReadonlySet<string>, once?: Set<string>): string[] => [...new Set(model.quantities.filter((x) => ids.has(x.id)).flatMap((x): string[] => {
     const name = q(label(x.id) ?? x.id), m = meta(x.id);
     if (x.dist?.kind === 'range') {
       // DL ruling 4: every range's law is Olumi's provisional reading, never the person's probability law; the person's
@@ -351,7 +360,9 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       // end on a hard edge as never below or above it, with its median as the middle value.
       const d: RangeDist = x.dist;
       const { domain, reading } = lawOf(x.id, d);
-      const ends = `${sayOf(x.id, d.low, x.unit)} to ${sayOf(x.id, d.high, x.unit)}`;
+      const ends = sayBetween(sayOf(x.id, d.low, x.unit), sayOf(x.id, d.high, x.unit));
+      const first = once === undefined || !once.has(x.id);
+      once?.add(x.id);
       // DL ruling (author not recorded): a range whose basis is neither the person's nor Olumi's is listed as such, never
       // passed as the person's; `rangeLaw` draws it unbounded (only a person's stated bounds condition the draw).
       const whose = d.basis === 'person_range' ? 'your range' : d.basis === 'olumi_estimate' ? 'Olumi’s own estimated range' : `a range ${NOT_RECORDED}`;
@@ -361,7 +372,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       const kept = `, kept to Olumi’s reading of what it can be (${canBe(x.id, x.unit, domain)})`;
       if (reading.ends === 'hard_bounds') {
         const held = reading.lower === d.low && reading.upper === d.high ? ', held within those bounds' : Number.isFinite(reading.lower) || Number.isFinite(reading.upper) ? kept : '';
-        return [`${name} follows Olumi’s provisional reading of ${whose}, ${ends}${held}: values near its middle are likelier than values near its ends`];
+        return [`${name} follows Olumi’s provisional reading of ${whose}, ${ends}${held}${first ? ': values near its middle are likelier than values near its ends' : ''}`];
       }
       const at = (v: number): string => sayOf(x.id, v, x.unit);
       const never = [...(reading.edge_below ? [`below ${at(reading.lower)}`] : []), ...(reading.edge_above ? [`above ${at(reading.upper)}`] : [])];
@@ -380,7 +391,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
               : whole.below && whole.above ? `, as ${EIGHT_IN_TEN_WORDS}${middle}` : middle;
       // What it can be, said only where it keeps the draws somewhere that is not already one of its ends.
       const within = (Number.isFinite(reading.lower) && !reading.edge_below) || (Number.isFinite(reading.upper) && !reading.edge_above) ? kept : '';
-      return [`${name} follows Olumi’s provisional reading of ${whose}, ${ends}${how}${within}`];
+      return [`${name} follows Olumi’s provisional reading of ${whose}, ${ends}${first ? `${how}${within}` : ''}`];
     }
     if (x.dist?.kind === 'fixed') {
       // executable.ts r3: the author of every fixed value. A structural constant (a conversion, a switch, a count) and a
@@ -419,23 +430,31 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     return `on Olumi’s reading of ${listWords(open.map((i) => (i.pending ? `${i.name} (not yet confirmed)` : i.name)))}`;
   };
   /** What the chance is conditional on: the premises, then Olumi's assumptions. */
-  const conditions = (ids: ReadonlySet<string>, premises: readonly PresentPremise[]): string[] => [...premises.map(premiseWords), ...assumptions(ids)];
+  const conditions = (ids: ReadonlySet<string>, premises: readonly PresentPremise[], once?: Set<string>): string[] => [...premises.map(premiseWords), ...assumptions(ids, once)];
   /** "on your figures" only when every record is confirmed and nothing is conditional; otherwise the reading and/or "if …". */
-  const basisWords = (ids: ReadonlySet<string>, premises: readonly PresentPremise[], aimIds: readonly string[], readings: ReadonlySet<string> = ids): string => {
-    const lead = unconfirmed(readings, aimIds), a = conditions(ids, premises);
+  const basisWords = (ids: ReadonlySet<string>, premises: readonly PresentPremise[], aimIds: readonly string[], readings: ReadonlySet<string> = ids, once?: Set<string>): string => {
+    const lead = unconfirmed(readings, aimIds), a = conditions(ids, premises, once);
     const iff = a.length === 0 ? undefined : `if ${listWords(a)}`;
     return [lead, iff].filter((x): x is string => x !== undefined).join(', ') || 'on your figures';
+  };
+  /** One assumption as its own sentence (W8 c7.2: one point per sentence): "It assumes …", then "It also assumes …". */
+  const assumeSentences = (conds: readonly string[], lead = 'It'): string[] => conds.map((c, i) => (c.startsWith('using ')
+    ? `${lead} ${i === 0 ? '' : 'also '}uses ${c.slice('using '.length)}.` : `${lead} ${i === 0 ? '' : 'also '}assumes ${c}.`));
+  /** The same basis as short sentences: what it reads, then each assumption once, each on its own. */
+  const basisSentences = (ids: ReadonlySet<string>, premises: readonly PresentPremise[], aimIds: readonly string[], once: Set<string>): string => {
+    const lead = unconfirmed(ids, aimIds), a = conditions(ids, premises, once);
+    return [...(lead !== undefined ? [`It rests ${lead}.`] : a.length === 0 ? ['It rests on your figures.'] : []), ...assumeSentences(a)].join(' ');
   };
   /**
    * A target's basis covers every option: the shared model's basis, then each option's own assumptions, named by option
    * ("on your figures; with ‘Raise’, if ‘New price’ is £59, Olumi’s figure").
    */
-  const sharedBasisWords = (r: readonly string[], premises: readonly PresentPremise[], aimIds: readonly string[]): string => {
+  const sharedBasisWords = (r: readonly string[], premises: readonly PresentPremise[], aimIds: readonly string[], once?: Set<string>): string => {
     const shared = upstream(r, null), conditional = conditions(shared, premises).length > 0;
-    const lead = basisWords(shared, premises, aimIds, new Set([...shared, ...model.options.flatMap((o) => [...upstream(r, o.id)])]));
+    const lead = basisWords(shared, premises, aimIds, new Set([...shared, ...model.options.flatMap((o) => [...upstream(r, o.id)])]), once);
     const own = model.options.flatMap((o) => {
       const extra = [...(input.option_premises?.[o.id] ?? []).filter((p) => !premises.some((x) => x.id === p.id)).map(premiseWords),
-        ...assumptions(new Set([...upstream(r, o.id)].filter((id) => !shared.has(id))))];
+        ...assumptions(new Set([...upstream(r, o.id)].filter((id) => !shared.has(id))), once)];
       return extra.length === 0 ? [] : [`with ${q(optionLabel.get(o.id) ?? o.id)}, ${conditional ? 'also ' : ''}if ${listWords(extra)}`];
     });
     // Codex on #3769: a bare "on your figures" beside an option's own conditions would read as covering every option; the
@@ -460,7 +479,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     // A ratio (executable.ts r3 `per`) names both quantities: "‘Sign-ups’ per ‘Visitors’ being at least 0.05 …".
     const of = c.per === undefined ? q(subject) : label(c.per) === undefined ? undefined : `${q(subject)} per ${q(label(c.per)!)}`;
     if (of === undefined) return undefined;
-    return `${of} ${role === 'goal' ? 'being' : 'is'} ${bound} ${figure} ${whenWords(c)}`;
+    return `${of} ${role === 'goal' ? 'being' : 'is'} ${bound} ${figure} ${whenWords(c)}`.trimEnd();
   };
   const goalWords = new Map(model.goals.map((g) => [g.id, conditionWords(g, g.target, 'goal')] as const));
   const limitWords = model.limits.map((l) => conditionWords(l, l.bound, 'limit'));
@@ -588,7 +607,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       const line = fixedLine(c, against, out.p50, met);
       return line === undefined ? [] : [line];
     });
-    return lines.length === 0 ? undefined : `in every simulated draw ${listWords(lines)}`;
+    // W8 (c7.3, "in every simulated draw"): the same fact in the person's words.
+    return lines.length === 0 ? undefined : `whatever the uncertain figures turn out to be, ${listWords(lines)}`;
   };
   // ── What each computed chance rests on most (DRIVER_MIN_SWING): each input at its low end, middle and high end, cached ──
   const switches = new Set(model.options.flatMap((o) => o.sets.map((s) => s.quantity)));
@@ -639,13 +659,21 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const author = x.dist.basis === 'person_range' ? 'person' as const : 'olumi' as const;
     const whose = whoseRange(author);
     const [low, middle, high] = endsOf(x).values.map((value, i) => ({ value, display: shown(at[i]!, sweepDraws)?.display ?? null }));
-    const said = (e: End) => `(${sayOf(x.id, e.value, x.unit)}) ${e.display ?? 'could not be tested'}`;
+    const setAt = (e: End) => `(${sayOf(x.id, e.value, x.unit)})`, chance = (e: End) => e.display ?? 'it could not be worked out';
     const others = untested.filter((t) => t.x.id !== x.id);
+    const name = q(label(x.id) ?? x.id), overall = shown(o.joint_within_limits, result.draws)?.display;
+    // W8 (c7.6: "0% at its low end, 100% at its middle and 100% at its high end" beside an overall about 50% read as a
+    // contradiction): each setting holds the figure at one value; the overall chance allows for every value it can take. Said
+    // once, here, where the settings are.
     return { kind: 'available', driver: { quantity: x.id, author, low: low!, middle: middle!, high: high!, swing_points: Number((best.swing * 100).toFixed(1)), draws: sweepDraws,
       untested: untested.map((t) => ({ quantity: t.x.id, settings: t.missing })) },
-      detail: `In this model, of the figures tested one at a time, the chance is most sensitive to ${q(label(x.id) ?? x.id)} ${whose}: `
-        + `at the low end ${said(low!)}, at the middle ${said(middle!)}, at the high end ${said(high!)}.${others.length > 0 ? ` ${notTested(others)}` : ''}` };
+      detail: `In this model, of the figures tested one at a time, the chance is most sensitive to ${name} ${whose}. `
+        + `With ${name} held at its low end ${setAt(low!)}, ${low!.display === null ? 'the chance could not be worked out' : `the chance is ${low!.display}`}; at its middle ${setAt(middle!)}, ${chance(middle!)}; at its high end ${setAt(high!)}, ${chance(high!)}.`
+        + (overall !== undefined ? ` Each of these holds ${name} at one value. The overall chance, ${overall}, allows for every value it can take.` : '')
+        + `${others.length > 0 ? ` ${notTested(others)}` : ''}` };
   };
+  /** What this view has said in full (W8 c7.1): each range's reading, the first time only. */
+  const saidOnce = new Set<string>();
   const options = result.options.map((o: OptionResult) => {
     const name = optionLabel.get(o.option_id) ?? o.option_id;
     const notRecorded = { kind: 'not_recorded' as const };
@@ -667,7 +695,9 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const s = shown(headline, result.draws)!;
     const why = headline.precision_95[0] === headline.precision_95[1] ? fixedWhy(o, headline.chance === 1) : undefined;
     const cell: PresentCell = { kind: 'figure', display: s.display,
-      face: `${q(name)}: ${s.display} chance of ${jointWords}, in this model, ${basisWords(upstream(roots, o.option_id), optionPremises(o.option_id), [...model.goals, ...model.limits].map((c) => c.id))}${why !== undefined ? `: ${why}` : ''}.`
+      // W8 (c7.2): the chance, then what it rests on, one point per sentence.
+      face: `${q(name)}: ${s.display} chance of ${jointWords}, in this model. ${basisSentences(upstream(roots, o.option_id), optionPremises(o.option_id), [...model.goals, ...model.limits].map((c) => c.id), saidOnce)}`
+        + (why !== undefined ? ` ${why.charAt(0).toUpperCase()}${why.slice(1)}.` : '')
         + (model.limits.length > 0 ? ` Each limit on its own: ${limitLines(o).join('; ')}.` : '')
         + (uncheckedLine !== undefined ? ` ${stop(uncheckedLine)}` : ''),
       detail: { precision_95: headline.precision_95, draws: result.draws, precision_words: s.precision_words } };
@@ -698,7 +728,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const perTarget = !several ? [] : model.goals.flatMap((g) => {
     const words = goalWords.get(g.id);
     if (words === undefined) return [];
-    return [{ constraint_id: g.id, words: `${words}, in this model, ${sharedBasisWords([g.quantity, g.target, ...(g.per !== undefined ? [g.per] : [])], premisesOf([g.id]), [g.id])}`,
+    return [{ constraint_id: g.id, words: `${words}, in this model, ${sharedBasisWords([g.quantity, g.target, ...(g.per !== undefined ? [g.per] : [])], premisesOf([g.id]), [g.id], saidOnce)}`,
       options: result.options.flatMap((o) => {
         const s = shown(o.per_goal.find((x) => x.goal_id === g.id)!, result.draws);
         return s === undefined ? [] : [{ option_id: o.option_id, display: s.display }];
@@ -733,7 +763,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const ranked = [...said].sort((a, b) => b.c.chance - a.c.chance || a.at - b.at), top = ranked[0]!, rest = ranked.slice(1);
     const name = (id: string): string => q(optionLabel.get(id) ?? id);
     const basis = sharedBasisWords(roots, [...new Map([...premisesOf(model.goals.map((g) => g.id)), ...model.limits.flatMap((l) => input.limit_premises?.[l.id] ?? [])]
-      .map((p) => [p.id, p] as const)).values()], [...model.goals, ...model.limits].map((c) => c.id));
+      .map((p) => [p.id, p] as const)).values()], [...model.goals, ...model.limits].map((c) => c.id), saidOnce);
     const aim = model.goals.length === 1 ? 'the goal' : 'every goal together';
     /** Each option's chance, in the model's order (a withheld finding ranks nothing). */
     const each = listWords(said.map((x) => `${x.display} for ${name(x.id)}`));
@@ -767,12 +797,16 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       return withheld(tied.map((x) => x.id), `In this model, ${listWords(tied.map((x) => `${name(x.id)} (${x.display})`))} are too close to call: ${why}, ${basis}.`);
     }
     const next = rest[0]!, d = top.driver;
-    const there = (e: End): string => e.display ?? 'could not be tested';
-    const rests = d.kind === 'available'
-      ? ` Its chance is most sensitive to ${q(label(d.driver.quantity) ?? d.driver.quantity)} ${whoseRange(d.driver.author)}: ${there(d.driver.low)} at its low end, ${there(d.driver.middle)} at its middle and ${there(d.driver.high)} at its high end.`
+    // W8 (c7.1, c7.2: the closing paragraph restated every chance, condition and setting): the finding, its two chances, and
+    // what it rests on, each once; the settings tested are said with the option's own chance, never again here.
+    const rests = d.kind === 'available' ? ` Its chance is most sensitive to ${q(label(d.driver.quantity) ?? d.driver.quantity)} ${whoseRange(d.driver.author)}.`
       : d.kind === 'none_licensed' ? ` ${d.reason}` : '';
+    const reading = unconfirmed(new Set([null, ...model.options.map((o) => o.id)].flatMap((id) => [...upstream(roots, id)])), [...model.goals, ...model.limits].map((c) => c.id));
+    const conditional = basis !== 'on your figures' && basis !== reading;
+    const restsOnWords = reading === undefined && !conditional ? 'It rests on your figures.'
+      : `Like each option’s chance, it rests on ${[...(reading !== undefined ? [reading.replace(/^on /, '')] : []), ...(conditional ? ['the assumptions listed with it'] : [])].join(' and ')}.`;
     return { licence: 'permitted', option_id: null, goal_chance_leader: top.id, similar_option_ids: [],
-      words: `In this model, ${name(top.id)} is the option most likely to achieve ${aim}: ${top.display} chance of ${jointWords}, against ${next.display} for ${name(next.id)}, the next most likely, ${basis}.`
+      words: `In this model, ${name(top.id)} is the option most likely to achieve ${aim}: ${top.display} chance, against ${next.display} for ${name(next.id)}, the next most likely. ${restsOnWords}`
         + (top.c.precision_95[1] < 0.5 ? ` Even so, in this model it is more likely to miss ${aim} than to meet it.` : '') + rests };
   })();
   const known = input.current !== undefined && input.run !== undefined;

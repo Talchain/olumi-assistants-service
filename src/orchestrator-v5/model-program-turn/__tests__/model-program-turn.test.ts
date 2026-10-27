@@ -886,9 +886,10 @@ describe('the model-program turn on the real core route', () => {
   });
 
   /** The bakery's chance words and basis as the view says them (step 3), written out by hand. */
-  const BAKERY_SALES = '‘sales’ being at least 380 loaf / week with each option in effect';
+  const BAKERY_SALES = '‘sales’ being at least 380 loaves per week';
+  /** W8 (c7.1): after the first chance has said the range's reading in full, the leader's words name it by its ends. */
   const BAKERY_BASIS = 'on Olumi’s reading of your figures (not yet confirmed), if ‘sell through’ follows Olumi’s provisional reading of Olumi’s own estimated range, '
-    + '0.5 to 0.9, as the range it falls in 8 times out of 10, with 0.7 as the middle value and ‘sales’ follows Olumi’s assumed relationship';
+    + '0.5 to 0.9 and ‘sales’ follows Olumi’s assumed relationship';
   /** The bakery with the oven's price given: the £3,000 limit is then checked, and the second oven is within it in every draw. */
   const PRICED = `${BRIEF} The oven costs £2,500.`;
   const priced = (): CanonicalModelT => {
@@ -934,10 +935,12 @@ describe('the model-program turn on the real core route', () => {
     expect(view.leader_licence).toBe('permitted');
     const d = oven.main_driver.driver;
     expect([oven.main_driver.kind, d.quantity, d.author]).toEqual(['available', 'sell_through', 'olumi']);
-    const words = `In this model, ‘A second oven’ is the option most likely to achieve the goal: ${oven.cell.display} ${view.goal_chance.chance_words}, against 0% for ‘Keep our one oven’, `
-      + `the next most likely, ${BAKERY_BASIS}. Even so, in this model it is more likely to miss the goal than to meet it. `
-      + `Its chance is most sensitive to ‘sell through’ (Olumi’s estimate): ${d.low.display} at its low end, ${d.middle.display} at its middle and ${d.high.display} at its high end.`;
-    expect(view.goal_chance.chance_words).toBe(`chance of ${BAKERY_SALES}, while ‘spend’ is at most £3,000 with each option in effect`);
+    // W8 (c7.1, c7.2): the finding, its two chances and what it rests on, each once; the settings are said with the option's chance.
+    const words = `In this model, ‘A second oven’ is the option most likely to achieve the goal: ${oven.cell.display} chance, against 0% for ‘Keep our one oven’, `
+      + 'the next most likely. Like each option’s chance, it rests on Olumi’s reading of your figures (not yet confirmed) and the assumptions listed with it. '
+      + 'Even so, in this model it is more likely to miss the goal than to meet it. Its chance is most sensitive to ‘sell through’ (Olumi’s estimate).';
+    expect(oven.main_driver.detail).toContain(`held at its low end (0.5), the chance is ${d.low.display}; at its middle (0.7), ${d.middle.display}; at its high end (0.9), ${d.high.display}.`);
+    expect(view.goal_chance.chance_words).toBe(`chance of ${BAKERY_SALES}, while ‘spend’ is at most £3,000`);
     expect(view.leader).toEqual({ licence: 'permitted', option_id: null, goal_chance_leader: 'second_oven', similar_option_ids: [], words });
     const paragraphs = (r.assistant_text as string).split('\n\n');
     expect(paragraphs.filter((x) => x === words)).toHaveLength(1);
@@ -1203,8 +1206,8 @@ describe('the model-program turn on the real core route', () => {
     const after = (id: string): string => v.changes.find((c: Json) => c.id === id).after;
     expect(after('sell_through')).toContain('from 0.5 to 0.9 per oven, most likely 0.7');
     expect(after('sell_through')).not.toContain('1/oven');
-    expect(after('base_sales')).toContain('300 loaf/week');
-    expect(after('budget')).toContain('3,000 GBP');
+    expect(after('base_sales')).toContain('300 loaves per week');
+    expect(after('budget')).toContain('£3,000');
   });
 
   it('alpha G2: a declared bound is said as Olumi\'s reading on the card and in the chance\'s basis; a change to it alone shows as a change', () => {
@@ -1212,22 +1215,22 @@ describe('the model-program turn on the real core route', () => {
     setQ(d, 'base_sales', { floor: 0 });
     const v = readingOf(d, { words: [BRIEF], approver: null }) as Json;
     expect(v.ok).toBe(true);
-    expect(v.changes.find((c: Json) => c.id === 'base_sales').after).toBe('300 loaf/week (never below 0: Olumi’s reading), a fact, known, in your words "We bake 300 loaves a week"');
+    expect(v.changes.find((c: Json) => c.id === 'base_sales').after).toBe('300 loaves per week (never below 0: Olumi’s reading), in your words "We bake 300 loaves a week"');
     // Only Olumi's reading of it changes: the card shows that figure's change alone, never refused for want of their words.
     const post = JSON.parse(JSON.stringify(d)) as CanonicalModelT;
     setQ(post, 'base_sales', { floor: null, ceiling: 1000 });
     const u = validatePostimage(d, post, { removals: [], words: [BRIEF], fresh: [] }) as Json;
     expect(u.ok, JSON.stringify(u)).toBe(true);
     expect(u.changes.filter((c: Json) => c.id === 'base_sales').map((c: Json) => [c.before, c.after])).toEqual([[
-      '300 loaf/week (never below 0: Olumi’s reading)', '300 loaf/week (never above 1,000: Olumi’s reading)']]);
+      '300 loaves per week (never below 0: Olumi’s reading)', '300 loaves per week (never above 1,000: Olumi’s reading)']]);
     // The chance's basis: Olumi's range for the promotion's effect, drawn within its declared floor, says so with the floor.
     const m = club();
     m.quantities = m.quantities.map((x) => (x.id === 'promo_effect' ? { ...x, floor: 0 } : x));
     const face = ((evaluateCanonical(m, { sourceText: CLUB_BRIEF, seed: 7 }).view as Json).options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
     // Codex B1 on #3801: the floor is 3/1.56061 = 1.92 σ below the low end, inside the 4 σ the tail needs to be whole, so no
     // frequency is said (the same range with no floor keeps its 8 in 10: HALL below).
-    expect(face).toContain('‘promo effect’ follows Olumi’s provisional reading of Olumi’s own estimated range, 3 member / month / promotion to 7 member / month / promotion, '
-      + 'with 5 member / month / promotion as the middle value, kept to Olumi’s reading of what it can be (never below 0 member / month / promotion)');
+    expect(face).toContain('‘promo effect’ follows Olumi’s provisional reading of Olumi’s own estimated range, 3 to 7 members per promotion per month, '
+      + 'with 5 members per promotion per month as the middle value, kept to Olumi’s reading of what it can be (never below 0 members per promotion per month)');
   });
 
   it('numbers#2 (spec §3.7): Olumi\'s floor on a worked-out stock is said, saved and applied; a path that keeps to it gives its chance', async () => {
@@ -1240,8 +1243,10 @@ describe('the model-program turn on the real core route', () => {
     const r = (await turn({ message: CLUB_BRIEF })).json();
     expect(r.model_program.saved).toBe(true);
     const after = (id: string): string => r.cards[0].changes.find((c: Json) => c.id === id).after;
-    expect(after('members')).toBe('in member (never below 0: Olumi’s reading), a result, worked out from the model');
-    expect(after('members_now')).toBe('300 member (never below 0: Olumi’s reading), a fact, known, in your words "300 members today"');
+    // W8: the worked-out stock is said on its relation's line, with Olumi's floor.
+    expect(r.cards[0].changes.some((c: Json) => c.id === 'members')).toBe(false);
+    expect(after('members_rel')).toBe('a running total that starts at "members now" and adds "joins" and takes away "leavers" each month, in members (never below 0: Olumi’s reading)');
+    expect(after('members_now')).toBe('300 members (never below 0: Olumi’s reading), in your words "300 members today"');
     // Saved as drafted, and read so by the agent.
     const read = await readProgramContext({ dispatch, proposals: new ProposalStore() }, { scenario_id: SCENARIO, authenticated_user_id: null }) as Json;
     expect((read.data.model.quantities as Json[]).find((x) => x.id === 'members')).toMatchObject({ floor: 0 });
@@ -1268,7 +1273,7 @@ describe('the model-program turn on the real core route', () => {
     expect(d.driver.low.value).toBe(0.8);
     expect(d.driver.middle.value).toBe(0.9);
     expect(d.driver.high.value).toBe(1);
-    expect(d.detail).toContain('at the middle (90%)');
+    expect(d.detail).toContain('at its middle (90%)');
     expect(d.detail).not.toContain('(120%)');
     expect(m.quantities.find((x) => x.id === 'sell_through')).toMatchObject({ low: 80, high: 120, ceiling: 100 });
   });
@@ -1281,12 +1286,12 @@ describe('the model-program turn on the real core route', () => {
     expect(r.cards).toHaveLength(1);
     expect(r.cards[0].reading).toBe(true);
     expect(r.cards[0].changes.find((c: Json) => c.id === 'lost_bake_time')).toMatchObject({ action: 'add', author: 'olumi',
-      after: `no figure yet (in loaf/week/oven), ↓ lowers sales, a rate, not known yet, based on "${LOST_BASIS}"` });
+      after: `no figure yet (in loaves per oven per week), ↓ lowers sales, based on "${LOST_BASIS}"` });
     // Contrast: the same link stated as raising reads so; with no direction, nothing about one is said.
     const said = (d: CanonicalQuantityT['direction']) => { const x = JSON.parse(JSON.stringify(m)) as CanonicalModelT; setQ(x, 'lost_bake_time', { direction: d });
       const v = readingOf(x, { words: [BRIEF], approver: null }); return v.ok ? v.changes.find((c) => c.id === 'lost_bake_time')!.after : v.code; };
-    expect(said('raises')).toBe(`no figure yet (in loaf/week/oven), ↑ raises sales, a rate, not known yet, based on "${LOST_BASIS}"`);
-    expect(said(null)).toBe(`no figure yet (in loaf/week/oven), a rate, not known yet, based on "${LOST_BASIS}"`);
+    expect(said('raises')).toBe(`no figure yet (in loaves per oven per week), ↑ raises sales, based on "${LOST_BASIS}"`);
+    expect(said(null)).toBe(`no figure yet (in loaves per oven per week), based on "${LOST_BASIS}"`);
   });
 
   it('issue 40 (Codex #3742): a direction on a per-unit rate written as a two-part product (one size times one driver) is kept and worded, unknown or across zero, as on an effect\'s link; times another size it is no link, and S1 strip (B3 off): its direction is kept and said alone', () => {
@@ -1301,12 +1306,12 @@ describe('the model-program turn on the real core route', () => {
       return { direction: read.quantities.find((x) => x.id === 'loss_per_oven')!.direction, after: v.ok ? v.changes.find((c) => c.id === 'loss_per_oven')!.after : v.code };
     };
     expect(rated({ status: 'unknown', basis: BASIS, direction: 'lowers' }))
-      .toEqual({ direction: 'lowers', after: `no figure yet (in loaf/week/oven), ↓ lowers extra loss, a rate, not known yet, based on "${BASIS}"` });
+      .toEqual({ direction: 'lowers', after: `no figure yet (in loaves per oven per week), ↓ lowers extra loss, based on "${BASIS}"` });
     expect(rated({ status: 'estimated', low: -20, high: 10, range_kind: 'plausible', basis: BASIS, direction: 'raises' }))
-      .toEqual({ direction: 'raises', after: `from -20 to 10 loaf/week/oven (a plausible range), ↑ raises extra loss, a rate, an estimate, based on "${BASIS}"` });
+      .toEqual({ direction: 'raises', after: `from -20 to 10 loaves per oven per week (a plausible range), ↑ raises extra loss, an estimate, based on "${BASIS}"` });
     // Contrast: times another size ("sell through", a coefficient) it is no per-unit rate and no link: kept as written, said alone.
     expect(rated({ status: 'unknown', basis: BASIS, direction: 'lowers' }, 'sell_through'))
-      .toEqual({ direction: 'lowers', after: `no figure yet (in loaf/week/oven), ↓ lowers, a rate, not known yet, based on "${BASIS}"` });
+      .toEqual({ direction: 'lowers', after: `no figure yet (in loaves per oven per week), ↓ lowers, based on "${BASIS}"` });
   });
 
   // C6 (27 Oct 2026): who approved is approved_by; author_id is who said it (the C6 rows below), no longer the approver.
@@ -1347,13 +1352,13 @@ describe('the model-program turn on the real core route', () => {
     const sales = (d: CanonicalModelT) => setQ(d, 'base_sales', { value: 320, quote: 'We now bake 320 loaves a week' });
     const p = await propose(sales);
     expect(p.status, JSON.stringify(p)).toBe('ok');
-    expect(p.data.changes).toEqual([{ id: 'base_sales', kind: 'quantity', action: 'change', label: 'base sales', before: '300 loaf/week, in your words "We bake 300 loaves a week"',
-      after: '320 loaf/week, in your words "We now bake 320 loaves a week"', author: 'person', family: 'quantity' }]);
+    expect(p.data.changes).toEqual([{ id: 'base_sales', kind: 'quantity', action: 'change', label: 'base sales', before: '300 loaves per week, in your words "We bake 300 loaves a week"',
+      after: '320 loaves per week, in your words "We now bake 320 loaves a week"', author: 'person', family: 'quantity' }]);
     // Contrast: the AI's own change to a direction the model uses (a linked size with no figure) is on the card.
     const flipped = await propose((d) => { sales(d); setQ(d, 'lost_bake_time', { direction: 'raises' }); });
     expect(flipped.status, JSON.stringify(flipped)).toBe('ok');
     expect(flipped.data.changes.map((c: Json) => c.id)).toEqual(['base_sales', 'lost_bake_time']);
-    expect(flipped.data.changes[1]).toMatchObject({ action: 'change', before: 'no figure yet (in loaf/week/oven), ↓ lowers sales', after: 'no figure yet (in loaf/week/oven), ↑ raises sales' });
+    expect(flipped.data.changes[1]).toMatchObject({ action: 'change', before: 'no figure yet (in loaves per oven per week), ↓ lowers sales', after: 'no figure yet (in loaves per oven per week), ↑ raises sales' });
   });
 
   /** Issue 40 (marketing-r3): the bakery with Olumi's link of unknown size and a stated direction, saved; an update the AI writes on it. */
@@ -1369,16 +1374,16 @@ describe('the model-program turn on the real core route', () => {
     } };
   };
   /** The size's own entry when its direction goes: said on what it moved, before. */
-  const SIZE_SIGN_GOES = { id: 'lost_bake_time', kind: 'quantity', action: 'change', label: 'lost bake time', before: 'no figure yet (in loaf/week/oven), ↓ lowers sales', after: 'no figure yet (in loaf/week/oven)', author: 'olumi', family: 'quantity' };
+  const SIZE_SIGN_GOES = { id: 'lost_bake_time', kind: 'quantity', action: 'change', label: 'lost bake time', before: 'no figure yet (in loaves per oven per week), ↓ lowers sales', after: 'no figure yet (in loaves per oven per week)', author: 'olumi', family: 'quantity' };
 
   it('issue 40 (marketing-r3), S1 strip (B3 off): unlinking a link sized by Olumi\'s unknown with a stated direction, the size kept, is on the card and saved, its direction kept as the AI wrote it', async () => {
     const { deps, propose } = await linkUpdate();
     // The link taken off sales, its size kept as saved, direction and all: the host clears nothing, so only the link changes.
     const p = await propose((d) => { d.relations = d.relations.map((r) => (r.form === 'effect' ? { ...r, terms: r.terms.filter((t) => t.coefficient !== 'lost_bake_time') } : r)); });
     expect(p.status, JSON.stringify(p)).toBe('ok');
-    const LINKS = 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "sold per oven" for each "ovens added" 0 oven';
+    const LINKS = 'starts from "base sales" and changes by "sold per oven" for each "ovens added"';
     expect(p.data.changes).toEqual([{ id: 'sales_rel', kind: 'relation', action: 'change', label: 'sales',
-      before: `${LINKS}, changes by "lost bake time" (no figure yet loaf/week/oven) for each "ovens added" 0 oven`, after: `${LINKS}, no link 2`, author: 'olumi', family: 'relation' }]);
+      before: `${LINKS}, and by "lost bake time" for each "ovens added"`, after: `${LINKS}, no link 2`, author: 'olumi', family: 'relation' }]);
     // Approved, the unlink is saved: the size kept, with its direction, and the link gone.
     expect(await applyProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const saved = persisted!.living_model.canonical as CanonicalModelT;
@@ -1404,8 +1409,8 @@ describe('the model-program turn on the real core route', () => {
     expect(r.status, JSON.stringify(r)).toBe('saved');
     expect(r.changes!.map((c) => c.id)).toEqual(['lost_bake_time']);
     const change = r.changes!.find((c) => c.id === 'lost_bake_time')!;
-    expect(change.before).toContain('no figure yet (in loaf/week/oven), ↓ lowers sales');
-    expect(change.after).toMatch(/^from -5 to 10 loaf\/week\/oven/);
+    expect(change.before).toContain('no figure yet (in loaves per oven per week), ↓ lowers sales');
+    expect(change.after).toMatch(/^from -5 to 10 loaves per oven per week/);
     expect(change.after).toContain('↓ lowers sales');
     expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'lost_bake_time')).toMatchObject({ low: -5, high: 10, author: 'person', direction: 'lowers' });
   });
@@ -1490,15 +1495,17 @@ describe('the model-program turn on the real core route', () => {
       ['goal', 'more_loaves', 'add', null], ['record', 'within_budget', 'add', null], ['option', 'second_oven', 'add', null], ['option', 'keep_one', 'add', null],
       ['left_out', 'staff_morale', 'add', null], ['left_out', 'longer_shifts', 'add', null], ['left_out', 'delivery_days', 'add', null], ['relation', 'sold_rel', 'add', null], ['relation', 'sales_rel', 'add', null], ['relation', 'spend_rel', 'add', null],
       ['quantity', 'base_sales', 'add', null], ['quantity', 'ovens_added', 'add', null], ['quantity', 'one_oven', 'add', null], ['quantity', 'extra_per_oven', 'add', null],
-      ['quantity', 'sell_through', 'add', null], ['quantity', 'sold_per_oven', 'add', null], ['quantity', 'sales', 'add', null], ['quantity', 'sales_target', 'add', null],
-      ['quantity', 'budget', 'add', null], ['quantity', 'oven_price', 'add', null], ['quantity', 'spend', 'add', null]]);
+      ['quantity', 'sell_through', 'add', null], ['quantity', 'sales_target', 'add', null],
+      ['quantity', 'budget', 'add', null], ['quantity', 'oven_price', 'add', null]]);
+    // W8 (c7.1, c7.7): a worked-out figure is said on its relation's line, never as a second line of the same name.
+    for (const id of ['sold_per_oven', 'sales', 'spend']) expect(card.changes.some((c: Json) => c.id === id), id).toBe(false);
     // (7) Alpha G13: each row's group, and the first reply's one line counting the same rows (11 theirs in their words, Olumi's
     // sell-through estimate, the 3 left-out notes; its workings, structure and the asked oven price are in no count).
     expect(card.changes.map((c: Json) => [c.id, c.group])).toEqual([
       ['more_loaves', 'used'], ['within_budget', 'used'], ['second_oven', 'used'], ['keep_one', 'used'], ['staff_morale', 'left_out'], ['longer_shifts', 'left_out'],
       ['delivery_days', 'left_out'], ['sold_rel', 'other'], ['sales_rel', 'used'], ['spend_rel', 'other'], ['base_sales', 'used'], ['ovens_added', 'used'], ['one_oven', 'used'],
-      ['extra_per_oven', 'used'], ['sell_through', 'inferred'], ['sold_per_oven', 'other'], ['sales', 'other'], ['sales_target', 'used'], ['budget', 'used'],
-      ['oven_price', 'other'], ['spend', 'other']]);
+      ['extra_per_oven', 'used'], ['sell_through', 'inferred'], ['sales_target', 'used'], ['budget', 'used'],
+      ['oven_price', 'other']]);
     expect(r.assistant_text).toBe(DEFAULT_AGENT_REPLY); // the first reply is the AI's (T1); the host's count line is read at the end
     // (6) The kinds the card reads, spelled as DGAI's proposalChangeSchema has them at 128bd2db (left_out added there first).
     expect(ProposalChangeSchema.shape.kind.options).toEqual(['quantity', 'relation', 'goal', 'option', 'risk', 'record', 'left_out']);
@@ -1513,7 +1520,7 @@ describe('the model-program turn on the real core route', () => {
     // Contrast: a left-out item with only its why says only its why, as written.
     expect(card.changes[4]).toEqual({ id: 'staff_morale', kind: 'left_out', action: 'add', label: 'Staff morale while the second oven beds in', before: null,
       after: 'It has no measure in this model.', author: 'olumi', group: 'left_out', family: 'left_out' });
-    expect(card.changes[0]).toEqual({ id: 'more_loaves', kind: 'goal', action: 'add', label: 'Reach 380 loaves a week', before: null, after: '"sales" at least "sales target" 380 loaf/week, no deadline set, the measure you named, in your words "want to reach 380 loaves a week"', author: 'person' , group: 'used', family: 'goal' });
+    expect(card.changes[0]).toEqual({ id: 'more_loaves', kind: 'goal', action: 'add', label: 'Reach 380 loaves a week', before: null, after: '"sales" at least "sales target" 380 loaves per week, no deadline set, the measure you named, in your words "want to reach 380 loaves a week"', author: 'person' , group: 'used', family: 'goal' });
     // The held card's model: the saved draft accepted by its approver (a guest here), authorship and words untouched; a new Run.
     const held = agentProposalOf([...turnRows.values()].at(-1).pending_actions[0])!;
     expect(held.proposal_id).toBe(card.proposal_id);
@@ -1573,22 +1580,23 @@ describe('the model-program turn on the real core route', () => {
         expect((c.after ?? '').split(', ').filter((p) => p === 'yours' || p === 'Olumi’s'), `${name} ${c.id}`).toEqual([]);
       }
     }
-    expect(entries).toBe(80); // positive control: 19 bakery + 18 club + 29 hiring + 14 capacity items read
+    // W8: a worked-out figure is read on its relation's line and an option's own setting on its option's line (11 lines fewer).
+    expect(entries).toBe(69); // positive control: 16 bakery + 16 club + the hiring and capacity items read
     // The words, spelled, for one item of each kind the bakery has.
     const reading = readingOf(bakery(), { words: [BRIEF], approver: null });
     const said = new Map((reading.ok ? reading.changes : []).map((c) => [c.id, c.after] as const));
     expect(Object.fromEntries(['more_loaves', 'within_budget', 'second_oven', 'keep_one', 'sold_rel', 'sales_rel', 'spend_rel', 'sell_through', 'oven_price', 'sales'].map((id) => [id, said.get(id)])))
       .toEqual({
-        more_loaves: '"sales" at least "sales target" 380 loaf/week, no deadline set, the measure you named, in your words "want to reach 380 loaves a week"',
-        within_budget: '"spend" at most "budget" 3,000 GBP, no deadline set, in your words "We have £3,000 to spend"',
-        second_oven: 'compared, sets "ovens added" 0 oven to "one oven" 1 oven from the start, in your words "A second oven"',
-        keep_one: 'carries on as now, compared, in your words "keep our one oven"',
-        sold_rel: '"sold per oven" is "extra per oven" 100 loaf/week/oven multiplied by "sell through" 0.5–0.9',
-        sales_rel: 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "sold per oven" for each "ovens added" 0 oven, link 1 is yours, in your words "A second oven adds about 100 loaves a week"',
-        spend_rel: '"spend" is "oven price" (still to be given) multiplied by "ovens added" 0 oven',
-        sell_through: 'from 0.5 to 0.9, most likely 0.7 (a plausible range), a rate, an estimate, based on "New capacity sells only as far as demand grows."',
-        oven_price: 'no figure yet (in GBP/oven), a fact, still to be given, Olumi asks "What would the second oven cost?"',
-        sales: 'in loaf/week, a result, worked out from the model',
+        more_loaves: '"sales" at least "sales target" 380 loaves per week, no deadline set, the measure you named, in your words "want to reach 380 loaves a week"',
+        within_budget: '"spend" at most "budget" £3,000, no deadline set, in your words "We have £3,000 to spend"',
+        second_oven: 'sets "ovens added" to "one oven" 1 oven from the start, in your words "A second oven"',
+        keep_one: 'carries on as now, in your words "keep our one oven"',
+        sold_rel: 'worked out as "extra per oven" multiplied by "sell through", in loaves per oven per week',
+        sales_rel: 'starts from "base sales" and changes by "sold per oven" for each "ovens added", link 1 is yours, in your words "A second oven adds about 100 loaves a week", in loaves per week',
+        spend_rel: 'worked out as "oven price" multiplied by "ovens added", in £',
+        sell_through: 'from 0.5 to 0.9, most likely 0.7 (a plausible range), an estimate, based on "New capacity sells only as far as demand grows."',
+        oven_price: 'no figure yet (in £ per oven), Olumi asks "What would the second oven cost?"',
+        sales: undefined,
       });
   });
 
@@ -1694,8 +1702,8 @@ describe('the model-program turn on the real core route', () => {
     // The update's request is prompt.ts's text, then the change (DL 24 Oct: the update text is prompt code).
     expect(sent[1]!.input[2].content).toBe(`${UPDATE_PREFIX}\nThe change: The oven price is their answer: about £2,500.\nRemove: nothing`);
     // The card shows the change's substance, before and after, and whose it is.
-    expect(proposed.data.changes).toEqual([{ id: 'oven_price', kind: 'quantity', action: 'change', label: 'oven price', before: 'no figure yet (in GBP/oven), still to be given, Olumi asks "What would the second oven cost?", no basis given, not in your words',
-      after: `2,500 GBP/oven, known, no question, based on "${APPROXIMATE_FIGURE}", in your words "The oven would cost about £2,500."`, author: 'person', family: 'quantity' }]);
+    expect(proposed.data.changes).toEqual([{ id: 'oven_price', kind: 'quantity', action: 'change', label: 'oven price', before: 'no figure yet (in £ per oven), still to be given, Olumi asks "What would the second oven cost?", no basis given, not in your words',
+      after: `£2,500 per oven, known, no question, based on "${APPROXIMATE_FIGURE}", in your words "The oven would cost about £2,500."`, author: 'person', family: 'quantity' }]);
     expect(deps.proposals.get(proposed.data.proposal_id)!.changes).toEqual(proposed.data.changes);
     expect(registered).toHaveLength(1); // proposing saves nothing
     const applied = await applyProgramChange(deps, ctx, proposed.data.proposal_id) as Json;
@@ -1863,7 +1871,7 @@ describe('the model-program turn on the real core route', () => {
 
     // (5) S1 strip (A2, A2b off): no words check refuses a returned record: words not theirs, or their figure moved under their
     // earlier words, are proposed as the AI wrote them, on the card for the person's press.
-    for (const [quote, after] of [['about 320 loaves I think', '320 loaf/week, in your words "about 320 loaves I think"'], ['We bake 300 loaves a week', '320 loaf/week']]) {
+    for (const [quote, after] of [['about 320 loaves I think', '320 loaves per week, in your words "about 320 loaves I think"'], ['We bake 300 loaves a week', '320 loaves per week']]) {
       const p = await propose({ quantities: [{ ...baseSales, quote }], conditions: [landlord] });
       expect(p.status, JSON.stringify(p)).toBe('ok');
       expect(p.data.changes.find((c: Json) => c.id === 'base_sales')).toMatchObject({ action: 'change', author: 'person', after });
@@ -1968,8 +1976,8 @@ describe('the model-program turn on the real core route', () => {
     replies = [savedWith((m) => setQ(m, 'promo_effect', { value: 6, low: null, high: null, range_kind: null, status: 'known', author: 'person', basis: null, quote: 'a promotion brings 6 more a month' }))];
     const p = await proposeProgramChange(deps, ctx, { public_label: 'Promotion effect 6 a month', basis: 'their experience', request: 'The promotion brings 6 more a month, in their words.', remove: [] }) as Json;
     expect(p.data.changes.map((c: Json) => [c.id, c.action, c.before, c.after])).toEqual([['promo_effect', 'change',
-      'from 3 to 7 member/month/promotion, most likely 5 (a plausible range), an estimate, based on "Promotions at clubs this size bring a few extra joins a month.", Olumi’s, not in your words',
-      '6 member/month/promotion, known, no basis given, yours, in your words "a promotion brings 6 more a month"']]);
+      'from 3 to 7 members per promotion per month, most likely 5 (a plausible range), an estimate, based on "Promotions at clubs this size bring a few extra joins a month.", Olumi’s, not in your words',
+      '6 members per promotion per month, known, no basis given, yours, in your words "a promotion brings 6 more a month"']]);
     expect(await applyProgramChange(deps, ctx, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const m3 = persisted!.living_model.canonical as CanonicalModelT;
     expect(m3.quantities.find((x) => x.id === 'promo_effect')).toMatchObject({ value: 6, low: null, high: null, author: 'person', quote: 'a promotion brings 6 more a month' });
@@ -2051,9 +2059,9 @@ describe('the model-program turn on the real core route', () => {
     const p = await proposeProgramChange(deps, c, args(['keep_one'])) as Json;
     expect(p.status, JSON.stringify(p)).toBe('ok');
     const changes: ProposalChange[] = [
-      { id: 'oven_price', kind: 'quantity', action: 'change', label: 'oven price', before: 'no figure yet (in GBP/oven), still to be given, Olumi asks "What would the second oven cost?", not in your words',
-        after: '2,000 GBP/oven, known, no question, in your words "the oven is £2,000"', author: 'person', family: 'quantity' },
-      { id: 'keep_one', kind: 'option', action: 'remove', label: 'Keep our one oven', before: 'carries on as now, compared, in your words "keep our one oven"', after: null, author: 'person', family: 'option' },
+      { id: 'oven_price', kind: 'quantity', action: 'change', label: 'oven price', before: 'no figure yet (in £ per oven), still to be given, Olumi asks "What would the second oven cost?", not in your words',
+        after: '£2,000 per oven, known, no question, in your words "the oven is £2,000"', author: 'person', family: 'quantity' },
+      { id: 'keep_one', kind: 'option', action: 'remove', label: 'Keep our one oven', before: 'carries on as now, in your words "keep our one oven"', after: null, author: 'person', family: 'option' },
       { id: 'landlord_agrees', kind: 'record', action: 'add', label: 'Only once the landlord agrees.', before: null,
         after: 'a prerequisite, about "A second oven", in your words "our landlord must agree first"', author: 'person', family: 'conditions' },
     ];
@@ -2102,8 +2110,8 @@ describe('the model-program turn on the real core route', () => {
     // (b) Every changed field is on the card: the event's timing, moved between two figures already in the model, shows both.
     const shown = await propose(timing('opening_later'));
     expect(shown.status, JSON.stringify(shown)).toBe('ok');
-    expect(shown.data.changes).toEqual([{ id: 'more_loaves', kind: 'goal', action: 'change', label: 'Reach 380 loaves a week', before: 'by the end of "four weeks" 4 week, counted from "the opening", which is "opening in" 2 week from the start of this model',
-      after: 'by the end of "four weeks" 4 week, counted from "the opening", which is "opening later" 3 week from the start of this model', author: 'person', family: 'goal' }]);
+    expect(shown.data.changes).toEqual([{ id: 'more_loaves', kind: 'goal', action: 'change', label: 'Reach 380 loaves a week', before: 'by the end of "four weeks" 4 weeks, counted from "the opening", which is "opening in" 2 weeks from the start of this model',
+      after: 'by the end of "four weeks" 4 weeks, counted from "the opening", which is "opening later" 3 weeks from the start of this model', author: 'person', family: 'goal' }]);
     // Words that would read the same on both sides (two timings named and sized alike): not proposed.
     expect(await propose(timing('opening_twin'))).toMatchObject({ status: 'refused', reason: 'unshown_change', data: { ids: ['more_loaves (measure.window.origin_offset)'] } });
     // (c) The drafter's approval and author_id are never taken: on an untouched item they change nothing; a changed item is
@@ -2135,8 +2143,8 @@ describe('the model-program turn on the real core route', () => {
     const both = await propose((d) => setQ(d, 'base_sales', { value: 320, question: 'Is that every week of the year?', quote: 'We now bake 320 loaves a week' }));
     expect(both.status, JSON.stringify(both)).toBe('ok');
     expect(both.data.changes).toEqual([{ id: 'base_sales', kind: 'quantity', action: 'change', label: 'base sales',
-      before: '300 loaf/week, no question, in your words "We bake 300 loaves a week"',
-      after: '320 loaf/week, Olumi asks "Is that every week of the year?", in your words "We now bake 320 loaves a week"', author: 'person', family: 'quantity' }]);
+      before: '300 loaves per week, no question, in your words "We bake 300 loaves a week"',
+      after: '320 loaves per week, Olumi asks "Is that every week of the year?", in your words "We now bake 320 loaves a week"', author: 'person', family: 'quantity' }]);
     // (2) A link's size moved to the figure named and sized alike, while who it is from also changes: refused, naming the
     // field that would read the same; the other change does not carry it through.
     const swap = (to: string) => (d: CanonicalModelT) => {
@@ -2147,8 +2155,8 @@ describe('the model-program turn on the real core route', () => {
     const named = await propose(swap('extra_per_oven'));
     expect(named.status, JSON.stringify(named)).toBe('ok');
     expect(named.data.changes).toEqual([{ id: 'sales_rel', kind: 'relation', action: 'change', label: 'sales',
-      before: 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "sold per oven" for each "ovens added" 0 oven, link 1 is yours, in your words "A second oven adds about 100 loaves a week"',
-      after: 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "extra per oven" 100 loaf/week/oven for each "ovens added" 0 oven, link 1 is yours, '
+      before: 'starts from "base sales" and changes by "sold per oven" for each "ovens added", link 1 is yours, in your words "A second oven adds about 100 loaves a week"',
+      after: 'starts from "base sales" and changes by "extra per oven" for each "ovens added", link 1 is yours, '
         + 'in our baker’s words "A second oven adds about 100 loaves a week"', author: 'olumi', family: 'relation' }]);
   });
 
@@ -2176,9 +2184,9 @@ describe('the model-program turn on the real core route', () => {
     const shown = await relink('impact_9')();
     expect(shown.status, JSON.stringify(shown)).toBe('ok');
     expect(shown.data.changes).toEqual([{ id: 'sales_rel', kind: 'relation', action: 'change', label: 'sales',
-      before: 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "impact" 1 loaf/week/oven for each "ovens added" 0 oven, no link 2',
-      after: 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "impact" 9 loaf/week/oven for each "ovens added" 0 oven, '
-        + 'changes by "other" 2–4 loaf/week/oven for each "one oven" 1 oven', author: 'olumi', family: 'relation' }]);
+      before: 'starts from "base sales" and changes by "impact" 1 loaf per oven per week for each "ovens added", no link 2',
+      after: 'starts from "base sales" and changes by "impact" 9 loaves per oven per week for each "ovens added", '
+        + 'and by "other" for each "one oven"', author: 'olumi', family: 'relation' }]);
     // Moved to the twin (named and sized alike) while link 2 is added: refused, naming the field that would read the same.
     expect(await relink('impact_twin')()).toMatchObject({ status: 'refused', reason: 'unshown_change', data: { ids: ['sales_rel (terms.0.coefficient)'] } });
   });
@@ -2196,7 +2204,7 @@ describe('the model-program turn on the real core route', () => {
     // Contrast: the timing alone is on the card, before and after.
     const timing = check(club(), (m) => { m.options[0]!.sets[0]!.starts_after_periods = 2; });
     expect(timing.ok ? timing.changes : timing).toEqual([{ id: 'promotion', kind: 'option', action: 'change', label: 'Run a promotion',
-      before: 'sets "promo on" 0 promotion to "one promo" 1 promotion from the start', after: 'sets "promo on" 0 promotion to "one promo" 1 promotion after 2 months', author: 'person', family: 'option' }]);
+      before: 'sets "promo on" to "one promo" 1 promotion from the start', after: 'sets "promo on" to "one promo" 1 promotion after 2 months', author: 'person', family: 'option' }]);
     // The same figure on a setting that arrives with its own entry, or with a whole new option: refused too.
     expect(check(club(), (m) => { m.options[0]!.sets.push({ ...m.options[0]!.sets[0]!, value: 99 }); })).toMatchObject(unshown(['promotion (sets.2.value)']));
     expect(check(club(), (m) => { m.options.push({ ...m.options[0]!, id: 'promo_twice', label: 'Run two promotions', author: 'olumi', quote: null, sets: [{ ...m.options[0]!.sets[0]!, value: 99, author: 'olumi', quote: null }] }); }))
@@ -2206,14 +2214,14 @@ describe('the model-program turn on the real core route', () => {
     const untimed = check(timed.model, (m) => { m.goals[0]!.measure!.window = null; }, [BRIEF]);
     expect(untimed.ok ? untimed.changes.map((c) => [c.before, c.after]) : untimed).toEqual([['by the end of "one oven" 1 oven', 'no deadline set']]);
     const fewer = check(club(), (m) => { m.options[0]!.sets.pop(); });
-    expect(fewer.ok ? fewer.changes.map((c) => [c.before, c.after]) : fewer).toEqual([['sets "spend" 0 GBP to "promo cost" 500 GBP from the start, in your words "The promotion costs £500"', 'without this setting']]);
+    expect(fewer.ok ? fewer.changes.map((c) => [c.before, c.after]) : fewer).toEqual([['sets "spend" to "promo cost" £500 from the start, in your words "The promotion costs £500"', 'without this setting']]);
     // A link whose size is a fall of 3 to 7 (compiler-valid) reads "changes by" its own signed figure, never "raised by".
     const falls = club();
     setQ(falls, 'promo_effect', { value: -5, low: -7, high: -3 });
     expect(compile(falls, { sourceText: CLUB_BRIEF }).errors).toEqual([]);
     const read = readingOf(falls, { words, approver: null });
     expect(read.ok ? read.changes.find((c) => c.id === 'joins_rel')?.after : read)
-      .toBe('an effect on "joins", starting from "base joins" 20 member/month, changes by "promo effect" -7–-3 member/month/promotion for each "promo on" 0 promotion');
+      .toBe('starts from "base joins" and changes by "promo effect" for each "promo on", in members per month');
   });
   it('simplify v1 (buddy 21:46Z): an item the card could not name is never proposed: an empty-label risk is refused by the card\'s own contract and by the compiler; so is a note with no words', async () => {
     replies = [JSON.stringify(bakery())];
@@ -2240,7 +2248,7 @@ describe('the model-program turn on the real core route', () => {
     const named = await propose(risky('The oven breaks down'));
     expect(named.status, JSON.stringify(named)).toBe('ok');
     expect(named.data.changes.find((c: Json) => c.id === 'breakdown')).toEqual({ id: 'breakdown', kind: 'risk', action: 'add', label: 'The oven breaks down', before: null,
-      after: 'with a chance of "breakdown chance" 0.05–0.2, adding "lost loaves" -150–-50 loaf/week to "sales", from the start', author: 'olumi', family: 'risk' });
+      after: 'with a chance of "breakdown chance" 0.05–0.2, adding "lost loaves" -150–-50 loaves per week to "sales", from the start', author: 'olumi', family: 'risk' });
   });
 
   it('simplify v1 (A3): a typed card edit builds its postimage from its exact target and value with NO AI call, through the same validator: the change on its reply and in history', async () => {
@@ -2251,8 +2259,8 @@ describe('the model-program turn on the real core route', () => {
     const r = await applyCanvasFigure({ dispatch }, SCENARIO, { target: { quantity_id: 'base_sales' }, value: 320, operation_key: randomUUID(), approver: null });
     expect(r).toMatchObject({ status: 'saved' });
     expect(sent).toHaveLength(0);
-    expect(r.changes).toEqual([{ id: 'base_sales', kind: 'quantity', action: 'change', label: 'base sales', before: '300 loaf/week, in your words "We bake 300 loaves a week"',
-      after: '320 loaf/week, in your words "base sales: 320 loaf/week"', author: 'person', family: 'quantity' }]);
+    expect(r.changes).toEqual([{ id: 'base_sales', kind: 'quantity', action: 'change', label: 'base sales', before: '300 loaves per week, in your words "We bake 300 loaves a week"',
+      after: '320 loaves per week, in your words "base sales: 320 loaf/week"', author: 'person', family: 'quantity' }]);
     const after = persisted!.living_model.canonical as CanonicalModelT;
     // C6 (27 Oct 2026): who approved it is recorded apart from who said it (a guest: neither known).
     expect(after.history.at(-1)).toEqual({ id: 'base_sales', change: 'superseded', old: JSON.stringify(before.quantities.find((x) => x.id === 'base_sales')), quote: 'base sales: 320 loaf/week', author_id: null, approved_by: null });
@@ -2487,7 +2495,7 @@ describe('the model-program turn on the real core route', () => {
     expect(r.within_limits.status).toBe('calculable'); // the range asked for holds nothing back
     expect(r.conversions.some((c) => c.quantity === 'oven_price')).toBe(false);
     const view = evaluateCanonical(approx, { sourceText: `${BRIEF}\n${words}`, seed: 7 }).view as Json;
-    expect(JSON.stringify(view)).toContain('using £2,500 / oven for ‘oven price’ for now — you said ‘It would cost about £2,500.’');
+    expect(JSON.stringify(view)).toContain('It also uses £2,500 per oven for ‘oven price’ for now — you said ‘It would cost about £2,500.’');
     expect(JSON.stringify(view)).not.toContain('your range');
     expect(JSON.stringify(view)).not.toContain('as you stated it');
     // Contrast: the ends in their own words are their range, read as theirs, and no range is asked for.
@@ -2617,8 +2625,8 @@ describe('the model-program turn on the real core route', () => {
     // The args as the agent's tool schema admits them (the SDK parses every call with it).
     const p = await proposeProgramChange(deps, ctx, ProgramChangeParams.parse({ public_label: 'Read 80–120 as firm', basis: 'their answer', request: 'Their 80 to 120 are firm ends.', remove: [] })) as Json;
     expect(p.status, JSON.stringify(p)).toBe('ok');
-    expect(p.data.changes).toEqual([{ id: 'extra_per_oven', kind: 'quantity', action: 'change', label: 'extra per oven', before: 'from 80 to 120 loaf/week/oven',
-      after: 'from 80 to 120 loaf/week/oven (firm ends)', author: 'person', family: 'quantity' }]);
+    expect(p.data.changes).toEqual([{ id: 'extra_per_oven', kind: 'quantity', action: 'change', label: 'extra per oven', before: 'from 80 to 120 loaves per oven per week',
+      after: 'from 80 to 120 loaves per oven per week (firm ends)', author: 'person', family: 'quantity' }]);
     expect(await applyProgramChange(deps, ctx, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const after = (persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'extra_per_oven')!;
     expect(after).toMatchObject({ low: 80, high: 120, range_kind: 'bounds', author: 'person', quote: 'between 80 and 120 loaves a week' });
@@ -2660,9 +2668,9 @@ describe('the model-program turn on the real core route', () => {
     // R8: "on your figures" needs their reading confirmed too, so the contrast is the model as accepted.
     const confirmed = JSON.parse(JSON.stringify(m).replaceAll('"approval":"proposed"', '"approval":"approved"')) as CanonicalModelT;
     const face = (sourceText: string) => ((evaluateCanonical(confirmed, { sourceText, seed: 7 }).view as Json).options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
-    expect(face(`${CLUB_BRIEF} The promotion brings five extra joins a month.`)).toContain(', in this model, on your figures');
+    expect(face(`${CLUB_BRIEF} The promotion brings five extra joins a month.`)).toContain(', in this model. It rests on your figures.');
     const unfound = face(CLUB_BRIEF);
-    expect(unfound).toContain(', in this model, on your figures');
+    expect(unfound).toContain(', in this model. It rests on your figures.');
     expect(unfound).not.toContain('not found in your words');
   });
 
@@ -2766,12 +2774,12 @@ describe('the model-program turn on the real core route', () => {
       m.conditions.push(hall);
       const face = faceOf(m, HALL);
       // The club's members stock is Olumi's (accepted, but never theirs): Olumi's reading, named, with no "(not yet confirmed)".
-      expect(face).toContain(', in this model, on Olumi’s reading of ‘members’, if your condition ‘The council must let us use the hall’ is met, ‘promo effect’ follows Olumi’s provisional reading of '
-        + 'Olumi’s own estimated range, 3 member / month / promotion to 7 member / month / promotion, as the range it falls in 8 times out of 10, with 5 member / month / promotion as the middle value '
-        + 'and ‘joins’ follows Olumi’s assumed relationship.');
+      expect(face).toContain(', in this model. It rests on Olumi’s reading of ‘members’. It assumes your condition ‘The council must let us use the hall’ is met. It also assumes ‘promo effect’ follows Olumi’s provisional reading of '
+        + 'Olumi’s own estimated range, 3 to 7 members per promotion per month, as the range it falls in 8 times out of 10, with 5 members per promotion per month as the middle value. '
+        + 'It also assumes ‘joins’ follows Olumi’s assumed relationship.');
       expect(face).not.toContain('on your figures');
       // The exact 0% names it too, before what fixes it.
-      expect(faceOf(m, HALL, 'carry_on')).toContain(', in this model, on Olumi’s reading of ‘members’, if your condition ‘The council must let us use the hall’ is met, ‘promo effect’');
+      expect(faceOf(m, HALL, 'carry_on')).toContain(', in this model. It rests on Olumi’s reading of ‘members’. It assumes your condition ‘The council must let us use the hall’ is met. It also assumes ‘promo effect’');
     });
 
     it('integrated review 26 Oct: an applied assumption on a risk is a premise of what the risk reaches: named, never "on your figures"', () => {
@@ -2781,10 +2789,10 @@ describe('the model-program turn on the real core route', () => {
       m.risks.push({ id: 'quiet_month', label: 'A quiet month', occurrence: 'quiet_chance', severity: 'quiet_extra', effect_on: 'leavers', mode: 'add', starts_after_periods: 0,
         author: 'person', quote: 'a one in five chance of a quiet month', ...at });
       // Contrast first: the risk is theirs too, so with no premise the result is still on their figures.
-      expect(faceOf(approved(m), RISK)).toContain(', in this model, on your figures');
+      expect(faceOf(approved(m), RISK)).toContain(', in this model. It rests on your figures.');
       m.assumptions.push({ id: 'quiet_once', text: 'A quiet month happens at most once.', applied: true, concerns: ['quiet_month'], author: 'olumi', quote: null, ...at });
       const face = faceOf(approved(m), RISK);
-      expect(face).toContain('if Olumi’s assumption ‘A quiet month happens at most once’ holds');
+      expect(face).toContain('It assumes Olumi’s assumption ‘A quiet month happens at most once’ holds');
       expect(face).not.toContain('on your figures');
     });
 
@@ -2792,33 +2800,33 @@ describe('the model-program turn on the real core route', () => {
       const m = approved(allTheirs());
       m.assumptions.push({ id: 'fees', text: 'Membership fees stay the same.', applied: true, concerns: [], author: 'olumi', quote: null, ...at });
       const face = faceOf(m, OWN);
-      expect(face).toContain(', in this model, if Olumi’s assumption ‘Membership fees stay the same’ holds: in every simulated draw ‘members’ is 345 member');
+      expect(face).toContain(', in this model. It assumes Olumi’s assumption ‘Membership fees stay the same’ holds. Whatever the uncertain figures turn out to be, ‘members’ is 345 members');
       expect(face).not.toContain('on your figures');
     });
 
     it('contrast: every input theirs and confirmed, no premise → "on your figures"; a noted assumption and a challenge are never premises', () => {
-      expect(faceOf(approved(allTheirs()), OWN)).toContain(', in this model, on your figures: in every simulated draw ‘members’ is 345 member');
+      expect(faceOf(approved(allTheirs()), OWN)).toContain(', in this model. It rests on your figures. Whatever the uncertain figures turn out to be, ‘members’ is 345 members');
       const noted = approved(allTheirs());
       noted.assumptions.push({ id: 'word', text: 'Word of mouth may help.', applied: false, concerns: ['reach_340'], author: 'olumi', quote: null, ...at });
       noted.conditions.push({ id: 'winter', text: 'Leavers may rise in winter.', kind: 'challenge', concerns: [], author: 'olumi', quote: null, ...at });
       // Even named by the goal itself, a noted assumption is no premise: the record says the calculation is not worked out under it.
       noted.goals = noted.goals.map((g) => ({ ...g, measure: { ...g.measure!, assumptions: ['word'] } }));
       const face = faceOf(noted, OWN);
-      expect(face).toContain(', in this model, on your figures: in every simulated draw ‘members’ is 345 member');
+      expect(face).toContain(', in this model. It rests on your figures. Whatever the uncertain figures turn out to be, ‘members’ is 345 members');
       expect(face).not.toMatch(/Word of mouth|Leavers may rise/);
     });
 
     it('their figures not yet confirmed (a first draft) are said as Olumi\'s reading of them, all or by name', () => {
-      expect(faceOf(allTheirs(), OWN)).toContain(', in this model, on Olumi’s reading of your figures (not yet confirmed): in every simulated draw');
+      expect(faceOf(allTheirs(), OWN)).toContain(', in this model. It rests on Olumi’s reading of your figures (not yet confirmed). Whatever the uncertain figures turn out to be,');
       const one = approved(allTheirs());
       one.quantities = one.quantities.map((x) => (x.id === 'members_now' ? { ...x, approval: 'proposed' } : x));
       const face = faceOf(one, OWN);
-      expect(face).toContain(', in this model, on Olumi’s reading of ‘members now’ (not yet confirmed): in every simulated draw');
+      expect(face).toContain(', in this model. It rests on Olumi’s reading of ‘members now’ (not yet confirmed). Whatever the uncertain figures turn out to be,');
       expect(face).not.toContain('on your figures');
       // With a condition too: the reading leads, then what the chance is conditional on.
       const both = allTheirs();
       both.conditions.push(hall);
-      expect(faceOf(both, `${OWN} The council must let us use the hall.`)).toContain(', in this model, on Olumi’s reading of your figures (not yet confirmed), if your condition ‘The council must let us use the hall’ is met: in every simulated draw');
+      expect(faceOf(both, `${OWN} The council must let us use the hall.`)).toContain(', in this model. It rests on Olumi’s reading of your figures (not yet confirmed). It assumes your condition ‘The council must let us use the hall’ is met. Whatever the uncertain figures turn out to be,');
     });
 
     it('Codex #3738: their relation not yet accepted, a link of Olumi\'s in it, and their link not yet accepted are each Olumi\'s reading', () => {
@@ -2830,11 +2838,11 @@ describe('the model-program turn on the real core route', () => {
       const terms = (t: { author?: 'person' | 'olumi'; quote?: string | null; approval?: 'proposed' | 'approved' }) =>
         (r: CanonicalModelT['relations'][number]) => (r.form === 'effect' ? { ...r, terms: r.terms.map((x) => ({ ...x, ...t })) } : r);
       for (const face of [joins((r) => ({ ...r, approval: 'proposed' })), joins(terms({ approval: 'proposed' }))]) {
-        expect(face).toContain(', in this model, on Olumi’s reading of ‘joins’ (not yet confirmed): in every simulated draw');
+        expect(face).toContain(', in this model. It rests on Olumi’s reading of ‘joins’ (not yet confirmed). Whatever the uncertain figures turn out to be,');
         expect(face).not.toContain('on your figures');
       }
       // Olumi's link, accepted: Olumi's reading, never theirs, and not "not yet confirmed".
-      expect(joins(terms({ author: 'olumi', quote: null }))).toContain(', in this model, on Olumi’s reading of ‘joins’: in every simulated draw');
+      expect(joins(terms({ author: 'olumi', quote: null }))).toContain(', in this model. It rests on Olumi’s reading of ‘joins’. Whatever the uncertain figures turn out to be,');
     });
 
     it('DL #3738: an accepted Olumi stock is Olumi\'s reading with no "(not yet confirmed)"; unaccepted, it keeps it; mixed, each says its own', () => {
@@ -2845,11 +2853,11 @@ describe('the model-program turn on the real core route', () => {
         return faceOf(m, OWN);
       };
       const accepted = stock('approved');
-      expect(accepted).toContain(', in this model, on Olumi’s reading of ‘members’: in every simulated draw');
+      expect(accepted).toContain(', in this model. It rests on Olumi’s reading of ‘members’. Whatever the uncertain figures turn out to be,');
       expect(accepted).not.toMatch(/not yet confirmed|on your figures/);
-      expect(stock('proposed')).toContain(', in this model, on Olumi’s reading of ‘members’ (not yet confirmed): in every simulated draw');
+      expect(stock('proposed')).toContain(', in this model. It rests on Olumi’s reading of ‘members’ (not yet confirmed). Whatever the uncertain figures turn out to be,');
       const mixed = stock('approved', (m) => { m.quantities = m.quantities.map((x) => (x.id === 'members_now' ? { ...x, approval: 'proposed' } : x)); });
-      expect(mixed).toContain(', in this model, on Olumi’s reading of ‘members now’ (not yet confirmed) and ‘members’: in every simulated draw');
+      expect(mixed).toContain(', in this model. It rests on Olumi’s reading of ‘members now’ (not yet confirmed) and ‘members’. Whatever the uncertain figures turn out to be,');
     });
 
     // Codex r3 #3738: the goal is read with its own record (and its measure's author and its window's figure), and so is a limit.
@@ -2867,7 +2875,7 @@ describe('the model-program turn on the real core route', () => {
         m.goals = m.goals.map((g) => (g.id === 'reach_340' ? goal(g) : g));
         also(m);
         const face = faceOf(m, OWN);
-        expect(face).toContain(`, in this model, ${lead}: in every simulated draw`);
+        expect(face).toContain(`, in this model. It rests ${lead}. Whatever the uncertain figures turn out to be,`);
         expect(face).not.toContain('on your figures');
       });
     }
@@ -2876,7 +2884,7 @@ describe('the model-program turn on the real core route', () => {
       for (const goal of [(g: Goal): Goal => ({ ...g, quote: 'grow to 340 members by spring' }), (g: Goal): Goal => ({ ...g, measure: { ...g.measure!, measure_by: 'olumi' } })]) {
         const m = approved(allTheirs());
         m.goals = m.goals.map((g) => (g.id === 'reach_340' ? goal(g) : g));
-        expect(faceOf(m, OWN)).toContain(', in this model, on your figures');
+        expect(faceOf(m, OWN)).toContain(', in this model. It rests on your figures.');
       }
     });
 
@@ -2884,11 +2892,11 @@ describe('the model-program turn on the real core route', () => {
       const proposed = approved(allTheirs());
       proposed.conditions.push({ ...hall, approval: 'proposed' });
       const face = faceOf(proposed, `${OWN} The council must let us use the hall.`);
-      expect(face).toContain(', in this model, if the condition ‘The council must let us use the hall’ is met (not yet confirmed): in every simulated draw');
+      expect(face).toContain(', in this model. It assumes the condition ‘The council must let us use the hall’ is met (not yet confirmed). Whatever the uncertain figures turn out to be,');
       expect(face).not.toMatch(/your condition|Olumi’s condition|on your figures/);
       const unfound = approved(allTheirs());
       unfound.conditions.push(hall);
-      expect(faceOf(unfound, OWN)).toContain('if your condition ‘The council must let us use the hall’ is met');
+      expect(faceOf(unfound, OWN)).toContain('It assumes your condition ‘The council must let us use the hall’ is met');
     });
 
     it('Codex #3738: the same premise reaching the chance twice (both goals rest on it, one also names it) is named once', () => {
@@ -2901,10 +2909,10 @@ describe('the model-program turn on the real core route', () => {
       const face = (v.options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
       const FEES = 'Olumi’s assumption ‘Membership fees stay the same’ holds';
       expect(face.split(FEES).length - 1).toBe(1);
-      expect(face).toContain(`, in this model, if ${FEES}: in every simulated draw`);
+      expect(face).toContain(`, in this model. It assumes ${FEES}. Whatever the uncertain figures turn out to be,`);
       expect((v.goal_chance.targets.per_target as Json[]).map((t) => t.words)).toEqual([
-        `‘members’ being at least 340 member at 3 months from the start of this model, in this model, if ${FEES}`,
-        `‘members’ being at least 320 member at 3 months from the start of this model, in this model, if ${FEES}`]);
+        `‘members’ being at least 340 members at 3 months from the start of this model, in this model, if ${FEES}`,
+        `‘members’ being at least 320 members at 3 months from the start of this model, in this model, if ${FEES}`]);
     });
 
     const HALL_WORDS = `${OWN} The council must let us use the hall. And keep at least 320 members.`;
@@ -2916,14 +2924,14 @@ describe('the model-program turn on the real core route', () => {
     };
     const optionFace = (v: Json, id: string) => (v.options as Json[]).find((o) => o.option_id === id)!.cell.face as string;
     const HALL_MET = 'if your condition ‘The council must let us use the hall’ is met';
-    const REACH = '‘members’ being at least 340 member at 3 months from the start of this model, in this model,';
+    const REACH = '‘members’ being at least 340 members at 3 months from the start of this model, in this model,';
 
     it('Codex #3769: a prerequisite on a limit is named in every option\'s chance (each is within the limit), never in the goal\'s own line', () => {
       const m = approved(allTheirs());
       m.conditions.push({ ...hall, concerns: ['within_budget'] });
       const v = viewOf(m);
       for (const id of ['promotion', 'carry_on']) {
-        expect(optionFace(v, id)).toContain(`, in this model, ${HALL_MET}`);
+        expect(optionFace(v, id)).toContain(`. It assumes your condition ‘The council must let us use the hall’ is met`);
         expect(optionFace(v, id)).not.toContain('on your figures');
       }
       expect((v.goal_chance.targets.per_target as Json[])[0]!.words).toBe(`${REACH} on your figures`);
@@ -2934,9 +2942,9 @@ describe('the model-program turn on the real core route', () => {
         const m = approved(allTheirs());
         m.conditions.push({ ...hall, concerns });
         const v = viewOf(m);
-        expect(optionFace(v, 'promotion')).toContain(`, in this model, ${HALL_MET}`);
+        expect(optionFace(v, 'promotion')).toContain(`. It assumes your condition ‘The council must let us use the hall’ is met`);
         expect(optionFace(v, 'promotion')).not.toContain('on your figures');
-        expect(optionFace(v, 'carry_on')).toContain(', in this model, on your figures');
+        expect(optionFace(v, 'carry_on')).toContain(', in this model. It rests on your figures.');
         expect(optionFace(v, 'carry_on')).not.toContain('council');
         expect((v.goal_chance.targets.per_target as Json[])[0]!.words).toBe(`${REACH} with ‘Run a promotion’, ${HALL_MET}`);
       }
@@ -2949,9 +2957,9 @@ describe('the model-program turn on the real core route', () => {
       m.conditions.push({ ...hall, concerns: ['keep_320'] });
       const v = evaluateCanonical(m, { sourceText: `${OWN} The council must let us use the hall. And keep at least 320 members.`, seed: 7 }).view as Json;
       const words = (id: string) => (v.goal_chance.targets.per_target as Json[]).find((t) => t.constraint_id === id)!.words as string;
-      expect(words('keep_320')).toBe('‘members’ being at least 320 member at 3 months from the start of this model, in this model, if your condition ‘The council must let us use the hall’ is met');
-      expect(words('reach_340')).toBe('‘members’ being at least 340 member at 3 months from the start of this model, in this model, on your figures');
-      expect(((v.options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string)).toContain(', in this model, if your condition ‘The council must let us use the hall’ is met: in every simulated draw');
+      expect(words('keep_320')).toBe('‘members’ being at least 320 members at 3 months from the start of this model, in this model, if your condition ‘The council must let us use the hall’ is met');
+      expect(words('reach_340')).toBe('‘members’ being at least 340 members at 3 months from the start of this model, in this model, on your figures');
+      expect(((v.options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string)).toContain(', in this model. It assumes your condition ‘The council must let us use the hall’ is met. Whatever the uncertain figures turn out to be,');
     });
   });
 
@@ -2959,7 +2967,7 @@ describe('the model-program turn on the real core route', () => {
     const goalWords = (m: CanonicalModelT, text: string) => String(((evaluateCanonical(m, { sourceText: text, seed: 7 }).view as Json).goal_chance as Json).chance_words);
     // The bakery's aim states no window: read once with every option in effect, and said so.
     const noDeadline = goalWords(bakery(), BRIEF);
-    expect(noDeadline).toContain('‘sales’ being at least 380 loaf / week with each option in effect');
+    expect(noDeadline).toContain('‘sales’ being at least 380 loaves per week');
     expect(noDeadline).not.toMatch(/deadline/);
     // The compiler lists no deadline for it (a static level), so nothing on the result says one is missing.
     expect(evaluateCanonical(bakery(), { sourceText: BRIEF, seed: 7 }).compiled.blockers.filter((b) => b.code === 'deadline')).toEqual([]);
@@ -2998,16 +3006,16 @@ describe('the model-program turn on the real core route', () => {
     const loose = await proposeProgramChange({ dispatch, proposals: new ProposalStore() }, ctx(), ProgramChangeParams.parse({ public_label: 'Measure the aim', basis: 'their answer',
       request: 'The aim is measured by sales: at least 380 loaves a week, within 4 weeks.', remove: [] })) as Json;
     expect(loose.status, JSON.stringify(loose)).toBe('ok');
-    expect(loose.data.changes.find((x: Json) => x.id === 'more_loaves_target')).toMatchObject({ author: 'person', after: '380 loaf/week, a fact, known, in your words "at least 400 loaves a week"' });
+    expect(loose.data.changes.find((x: Json) => x.id === 'more_loaves_target')).toMatchObject({ author: 'person', after: '380 loaves per week, in your words "at least 400 loaves a week"' });
     replies = [measured(words)];
     const c = ctx();
     const p = await propose(c);
     expect(p.status, JSON.stringify(p)).toBe('ok');
     expect(p.data.changes.map((x: Json) => [x.id, x.kind, x.action, x.before, x.after, x.author])).toEqual([
-      ['more_loaves_target', 'quantity', 'add', null, `380 loaf/week, a fact, known, in your words "${words}"`, 'person'],
-      ['more_loaves_window', 'quantity', 'add', null, `4 week, a fact, known, in your words "${words}"`, 'person'],
+      ['more_loaves_target', 'quantity', 'add', null, `380 loaves per week, in your words "${words}"`, 'person'],
+      ['more_loaves_window', 'quantity', 'add', null, `4 weeks, in your words "${words}"`, 'person'],
       ['more_loaves', 'goal', 'change', 'no measure yet, Olumi asks "How would you know the bakery is doing well enough?"',
-        '"sales" at least "more loaves target" 380 loaf/week, by the end of "more loaves window" 4 week, the measure you named, no question', 'person'],
+        '"sales" at least "more loaves target" 380 loaves per week, by the end of "more loaves window" 4 weeks, the measure you named, no question', 'person'],
     ]);
     expect(await applyProgramChange(deps, c, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const after = persisted!.living_model.canonical as CanonicalModelT;
@@ -3066,10 +3074,10 @@ describe('the model-program turn on the real core route', () => {
     expect(sent).toHaveLength(1);
     expect((sent[0]!.input as Json[])[2]).toEqual({ role: 'user', content: `${UPDATE_PREFIX}\nThe change: ${request}\nRemove: nothing` });
     expect(p.data.changes.map((x: Json) => [x.id, x.kind, x.action, x.before, x.after, x.author])).toEqual([
-      ['more_loaves_target', 'quantity', 'add', null, `380 loaf/week, a fact, known, in your words "${words}"`, 'person'],
-      ['more_loaves_window', 'quantity', 'add', null, `4 week, a fact, known, in your words "${words}"`, 'person'],
+      ['more_loaves_target', 'quantity', 'add', null, `380 loaves per week, in your words "${words}"`, 'person'],
+      ['more_loaves_window', 'quantity', 'add', null, `4 weeks, in your words "${words}"`, 'person'],
       ['more_loaves', 'goal', 'change', 'no measure yet, Olumi asks "How would you know the bakery is doing well enough?"',
-        '"sales" at least "more loaves target" 380 loaf/week, by the end of "more loaves window" 4 week, the measure you named, no question', 'person'],
+        '"sales" at least "more loaves target" 380 loaves per week, by the end of "more loaves window" 4 weeks, the measure you named, no question', 'person'],
     ]);
     // Approved, it is saved with a new Run: the goal has its measure and is no longer asked about.
     expect(await applyProgramChange(deps, c, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
@@ -3277,7 +3285,7 @@ describe('the model-program turn on the real core route', () => {
       return m;
     };
     const goalChance = (model: CanonicalModelT, text = words) => (evaluateCanonical(model, { sourceText: `${BRIEF}\n${text}`, seed: 7 }).view as Json).goal_chance as Json;
-    expect((goalChance(measured(['50 new regulars'], true)).notes as string[]).some((n) => /^Covers: ‘sales’ being at least 380 loaf \/ week .* · Leaves out: ‘50 new regulars’$/.test(n))).toBe(true);
+    expect((goalChance(measured(['50 new regulars'], true)).notes as string[]).some((n) => /^Covers: ‘sales’ being at least 380 loaves per week.* · Leaves out: ‘50 new regulars’$/.test(n))).toBe(true);
     // A deadline they stated that the model cannot hold yet is named as left out, and never asked for again.
     const ln = goalChance(measured(['50 new regulars', 'within 4 weeks'], false)).notes as string[];
     expect(ln.some((n) => n.endsWith('Leaves out: ‘50 new regulars’ and ‘within 4 weeks’'))).toBe(true);
@@ -3524,7 +3532,7 @@ describe('the model-program turn on the real core route', () => {
     expect(p.status, JSON.stringify(p)).toBe('ok');
     expect(p.data.changes.map((c: Json) => [c.id, c.action, c.author])).toEqual([['budget_window', 'change', 'person'], ['early_target', 'add', 'person'], ['early_months', 'add', 'person'],
       ['early_loaves', 'add', 'person'], ['period', 'change', 'olumi']]);
-    expect(p.data.changes.find((c: Json) => c.id === 'budget_window')).toMatchObject({ before: '1 year', after: '12 month' });
+    expect(p.data.changes.find((c: Json) => c.id === 'budget_window')).toMatchObject({ before: '1 year', after: '12 months' });
     expect(await applyProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const saved = persisted!.living_model.canonical as CanonicalModelT;
     expect(saved.goals.map((g) => g.id)).toEqual(['more_loaves', 'early_loaves']);
@@ -3536,8 +3544,8 @@ describe('the model-program turn on the real core route', () => {
       const now = JSON.parse(JSON.stringify(was)) as CanonicalModelT; setQ(now, 'budget_window', to);
       return validatePostimage(was, now, { removals: [], words: [brief, words], fresh: [words] });
     };
-    expect(said({ unit: 'week', value: 1 }, { unit: 'day', value: 7 })).toMatchObject({ ok: true, changes: [{ id: 'budget_window', action: 'change', before: '1 week', after: '7 day' }] });
-    expect(said({ unit: 'week', value: 13 }, { unit: 'month', value: 3 })).toMatchObject({ ok: true, changes: [{ id: 'budget_window', action: 'change', before: '13 week', after: '3 month' }] });
+    expect(said({ unit: 'week', value: 1 }, { unit: 'day', value: 7 })).toMatchObject({ ok: true, changes: [{ id: 'budget_window', action: 'change', before: '1 week', after: '7 days' }] });
+    expect(said({ unit: 'week', value: 13 }, { unit: 'month', value: 3 })).toMatchObject({ ok: true, changes: [{ id: 'budget_window', action: 'change', before: '13 weeks', after: '3 months' }] });
     // A range converts end by end: every one of value, low and high exactly, or it is a change (Codex BLOCK on #3739).
     const range = { unit: 'year', value: 1, low: 1, high: 2 };
     expect(said(range, { unit: 'month', value: 12, low: 12, high: 24 }).ok).toBe(true);
@@ -3672,9 +3680,8 @@ describe('the model-program turn on the real core route', () => {
       ['features_shipped_per_month', 'quantity', 'add', 'person'], ['features_now', 'quantity', 'add', 'person'], ['lead_effect', 'quantity', 'add', 'olumi'], ['developer_effect', 'quantity', 'add', 'olumi'],
       ['features_rel', 'relation', 'add', 'olumi'], ['increase_productivity', 'goal', 'change', 'person'], ['leads_unblock', 'record', 'add', 'olumi'], ['lead_needs_scope', 'record', 'add', 'olumi'],
       ['hires_productive_in_window', 'record', 'add', 'olumi'], ['scope_agreed_first', 'record', 'add', 'olumi']]);
-    expect(card.data.changes.find((c: Json) => c.id === 'features_rel').after).toBe('an effect on "Features shipped per month", starting from "features now" (still to be given), '
-      + 'changes by "lead effect" 0–4 feature/month/tech lead for each "Tech leads hired" 0 tech lead, '
-      + 'changes by "developer effect" 0.3–1.5 feature/month/developer for each "Additional developers hired" 0 developer');
+    expect(card.data.changes.find((c: Json) => c.id === 'features_rel').after).toBe('starts from "features now" and changes by "lead effect" for each "Tech leads hired", '
+      + 'and by "developer effect" for each "Additional developers hired"');
     expect(registered).toHaveLength(1); // proposing saves nothing
     expect(await applyProgramChange(deps, ctx, card.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const after = persisted!.living_model.canonical as CanonicalModelT;
@@ -4096,14 +4103,14 @@ describe('the model-program turn on the real core route', () => {
     expect(gc.chance_words).toBeUndefined();
     expect(JSON.stringify(e.view)).not.toContain('chance of ,');
     // The limit on its own, and each option's cell saying what the chance waits on, as before.
-    expect(gc.limits).toEqual([{ constraint_id: 'within_budget', words: '‘spend’ is at most £3,000 with each option in effect',
+    expect(gc.limits).toEqual([{ constraint_id: 'within_budget', words: '‘spend’ is at most £3,000',
       options: [{ option_id: 'second_oven', display: '100%' }, { option_id: 'keep_one', display: '100%' }] }]);
     expect(((e.view as Json).options as Json[]).map((o) => o.cell.why))
       .toEqual(Array(2).fill('The chance waits on the result you want. This run checks only the limits, each on its own: ‘spend’ within its limit: 100%.'));
     // Contrast: with its aim, the same model says the chance in full.
     m.goals = bakery().goals;
     expect(((evaluateCanonical(m, { sourceText: src, seed: 7 }).view as Json).goal_chance as Json).chance_words)
-      .toBe('chance of ‘sales’ being at least 380 loaf / week with each option in effect, while ‘spend’ is at most £3,000 with each option in effect');
+      .toBe('chance of ‘sales’ being at least 380 loaves per week, while ‘spend’ is at most £3,000');
   });
 
   it('DoD-G hiring: a change from today on a quantity already named "… relative to today" never says "today today", and says its assumed relationship once', () => {
@@ -4117,16 +4124,16 @@ describe('the model-program turn on the real core route', () => {
     };
     const today = rel('sales relative to today');
     expect(today.e.compiled.executable!.quantities.find((x) => x.id === 'sales__today')!.label).toBe('sales relative to today');
-    expect(today.face).toBe('‘A second oven’: more than 99% chance of ‘Relative change in sales relative to today’ being at least 10% with each option in effect, in this model, '
+    expect(today.face).toBe('‘A second oven’: more than 99% chance of ‘Relative change in sales relative to today’ being at least 10%, in this model. '
       // G9 (#3738): a first draft is Olumi's reading until the person confirms it, and its basis says so.
-      + 'on Olumi’s reading of your figures (not yet confirmed), if ‘sell through’ follows Olumi’s provisional reading of Olumi’s own estimated range, 0.5 to 0.9, as the range it falls in 8 times '
-      + 'out of 10, with 0.7 as the middle value and ‘sales relative to today’ follows Olumi’s assumed relationship. '
+      + 'It rests on Olumi’s reading of your figures (not yet confirmed). It assumes ‘sell through’ follows Olumi’s provisional reading of Olumi’s own estimated range, 0.5 to 0.9, as the range it falls in 8 times '
+      + 'out of 10, with 0.7 as the middle value. It also assumes ‘sales relative to today’ follows Olumi’s assumed relationship. '
       + 'Not yet checked: ‘Within the £3,000’ — needs "oven price".');
     expect(JSON.stringify(today.e.view)).not.toContain('today today');
     // Contrast: a quantity not already said "today" keeps its shadow's "today", listed as before.
     const plain = rel('sales');
     expect(plain.e.compiled.executable!.quantities.find((x) => x.id === 'sales__today')!.label).toBe('sales today');
-    expect(plain.face).toContain(', ‘sales’ follows Olumi’s assumed relationship and ‘sales today’ follows Olumi’s assumed relationship.');
+    expect(plain.face).toContain('. It also assumes ‘sales’ follows Olumi’s assumed relationship. It also assumes ‘sales today’ follows Olumi’s assumed relationship.');
   });
 
   it('a bound an option moves is never said as the base figure (Codex r2 #3719 case on the figure cell): a second oven takes the budget from £3,000 to £2,000; every chance line names the budget instead', () => {
@@ -4152,7 +4159,7 @@ describe('the model-program turn on the real core route', () => {
     setQ(exact, 'sell_through', { author: 'person', status: 'known', kind: 'fact', low: null, high: null, range_kind: null, basis: null, quote: 'seven in ten sell' });
     const x = evaluateCanonical(exact, { sourceText: `${BRIEF} The second oven costs £2,500. With a second oven our budget is £2,000. Seven in ten sell.`, seed: 7 }).view as Json;
     const exactFace = (x.options as Json[]).find((o) => o.option_id === 'second_oven')!.cell.face as string;
-    expect(exactFace).toContain('in every simulated draw');
+    expect(exactFace).toContain('Whatever the uncertain figures turn out to be, ');
     expect(exactFace).toContain('‘spend’ is £2,500, above ‘budget’');
     expect(exactFace).not.toMatch(/£3,000|£2,000/);
     // Contrast: with no option moving it, the budget is said as its figure, as before.
@@ -4173,10 +4180,10 @@ describe('the model-program turn on the real core route', () => {
     const read = readingOf(m, { words: budgetWords, approver: null });
     expect(said(read, 'within_budget')).toContain('"spend" at most "budget",');
     expect(said(read, 'within_budget')).not.toMatch(/"budget" [0-9]|GBP/); // their own words ("We have £3,000 to spend") stay
-    expect(said(read, 'budget')).toContain('3,000 GBP');
-    expect(said(read, 'second_oven')).toContain('sets "budget" 3,000 GBP to "reduced budget" 2,000 GBP');
+    expect(said(read, 'budget')).toContain('£3,000');
+    expect(said(read, 'second_oven')).toContain('sets "budget" to "reduced budget" £2,000');
     expect(changeOf(m, (d) => { d.limits[0]!.measure!.cmp = '<'; }, budgetWords)).toEqual([['within_budget', '"spend" at most "budget"', '"spend" less than "budget"']]);
-    expect(said(readingOf(fixed, { words: [`${BRIEF} The second oven costs £2,500.`], approver: null }), 'within_budget')).toContain('"spend" at most "budget" 3,000 GBP');
+    expect(said(readingOf(fixed, { words: [`${BRIEF} The second oven costs £2,500.`], approver: null }), 'within_budget')).toContain('"spend" at most "budget" £3,000');
     // A goal's target an option moves (keeping one oven aims for 350, not 380): the results and the card name it.
     const target = bakery();
     setQ(target, 'oven_price', { status: 'known', value: 2500, question: null, quote: 'The second oven costs £2,500' });
@@ -4192,7 +4199,7 @@ describe('the model-program turn on the real core route', () => {
     const targetRead = readingOf(target, { words: targetWords, approver: null });
     expect(said(targetRead, 'more_loaves')).toContain('"sales" at least "sales target",');
     expect(said(targetRead, 'more_loaves')).not.toContain('"sales target" 380');
-    expect(said(targetRead, 'sales_target')).toContain('380 loaf/week');
+    expect(said(targetRead, 'sales_target')).toContain('380 loaves per week');
     expect(changeOf(target, (d) => { d.goals[0]!.measure!.cmp = '>'; }, targetWords)).toEqual([['more_loaves', '"sales" at least "sales target"', '"sales" more than "sales target"']]);
   });
 

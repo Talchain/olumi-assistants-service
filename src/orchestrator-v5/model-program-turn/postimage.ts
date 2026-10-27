@@ -17,10 +17,12 @@
  * and who said it is unchanged: C6), and the history (each change and removal appended, with who said it and who approved it).
  */
 import { ProposalChangeSchema, type ProposalChange } from '../agent-lane/proposal.js';
-import { readingGroups } from './reading-groups.js';
+import { foldedInto, readingGroups } from './reading-groups.js';
 import { CanonicalModel, CMP_WORDS, HOST_OWNED_FIELDS, type CanonicalModelT } from '../model-program/canonical.js';
-import { norm } from '../model-program/compile.js';
+import { inlineQuantityId, norm } from '../model-program/compile.js';
 import { linkTargets } from '../model-program/links.js';
+import { unitWords } from '../model-program/present/display-words.js';
+import { placeFigure } from '../agent-lane/say-figure.js';
 
 type Rec = Record<string, unknown>;
 type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'title' | 'period' | 'coaching_questions' | 'history'>;
@@ -219,8 +221,13 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
         : typeof r['party'] === 'string' ? [`From ${r['party']}`] : [])]
       .reduce((said, part) => `${said}${/[.!?]$/.test(said) ? ' ' : '. '}${part}`);
     // A whole item added or removed: its name is the card's label and whose it is (theirs or Olumi's) the card's mark, so
-    // neither is said again; a fixed part of the model's structure is said.
-    const onCard = (x: ReturnType<typeof said>[number], r: Rec) => x.group === 'name' || (x.group === 'author' && r['author'] !== 'structure');
+    // neither is said again; a fixed part of the model's structure is said. W8 (c7.3, "a fact, known"): a whole figure is
+    // not tagged with its kind, nor with a status its figure already says (a figure in hand, worked out, still to be given
+    // or not known yet: "no figure yet"); a compared option is not called "compared". A CHANGE of kind or status is still said.
+    const SAID_BY_FIGURE: ReadonlySet<unknown> = new Set(['known', 'derived', 'asked', 'unknown']);
+    const onCard = (x: ReturnType<typeof said>[number], r: Rec) => x.group === 'name' || (x.group === 'author' && r['author'] !== 'structure')
+      || (family === 'quantities' && (x.group === 'kind' || (x.group === 'status' && SAID_BY_FIGURE.has(r['status']))))
+      || (family === 'options' && x.group === 'status' && r['status'] === 'live');
     const phrase = (fields: ReturnType<typeof said>, side: 'old' | 'now', r: Rec, whole: boolean) =>
       [...new Set([...(family === 'options' && whole && Array.isArray(r['sets']) && r['sets'].length === 0 ? ['carries on as now'] : []),
         ...fields.filter((x) => !(whole && onCard(x, r))).map((x) => x[side])].filter((x) => x !== ''))].join(', ');
@@ -252,10 +259,21 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
     if (base[key] !== post[key]) changes.push({ id: key, kind: 'record', action: 'change', label, before: base[key], after: post[key], author: 'olumi' });
   }
   if (changes.length === 0) return refuse('no_change', [], 'The proposed model is the saved one: nothing changes.');
+  // W8 (c7.1, c7.7: "Total weekly support capacity" on two lines; "Add one specialist: Additional specialists" under "Add one
+  // specialist"): a figure added with the row that says it is ONE line. A worked-out figure's unit and reading join its
+  // relation's line; an option's own setting is said, figure and all, on the option's line. Only where both are added on this
+  // card (`foldedInto`, the same map the first reply counts), so a later change to the figure alone still has its own line.
+  const fold = foldedInto(post);
+  const adds = new Map(changes.filter((c) => c.action === 'add').map((c) => [c.id, c] as const));
+  const onOwnLine = (c: ProposalChange) => c.action !== 'add' || !adds.has(fold.get(c.id) ?? '');
+  const shownChanges = changes.filter(onOwnLine).map((c) => {
+    const joined = c.action === 'add' && c.kind === 'relation' ? changes.filter((x) => !onOwnLine(x) && fold.get(x.id) === c.id && (x.after ?? '') !== '') : [];
+    return joined.length === 0 ? c : { ...c, after: [c.after, ...joined.map((x) => x.after)].filter((x) => x !== null && x !== '').join(', ') };
+  });
   // Every entry as the card reads it (one contract): an entry the card could not show refuses the proposal, never drops.
-  const invalid = changes.filter((c) => !ProposalChangeSchema.safeParse(c).success).map((c) => c.id);
+  const invalid = [...new Set([...changes, ...shownChanges].filter((c) => !ProposalChangeSchema.safeParse(c).success).map((c) => c.id))];
   if (invalid.length > 0) return refuse('invalid_change_entry', invalid, `The card cannot show ${invalid.join(', ')} (an item needs a name); nothing is proposed.`);
-  return { ok: true, model: { ...post, ...families, history }, changes };
+  return { ok: true, model: { ...post, ...families, history }, changes: shownChanges };
 }
 
 /** The reading card's order: what they want and what they could do first, then the structure, then the figures. */
@@ -283,7 +301,7 @@ export function readingOf(model: CanonicalModelT, opts: { readonly words: readon
 const RANGE_WORDS: Record<string, string> = { bounds: 'firm ends', plausible: 'a plausible range' };
 /** A link's direction, before the name of what it moves (Paul 24 Oct, "Arrow + words": "↓ lowers Churn"). */
 const DIRECTION_WORDS: Record<string, string> = { raises: '↑ raises', lowers: '↓ lowers' };
-const WHO_WORDS: Record<string, string> = { person: 'yours', olumi: 'Olumi’s', structure: 'a fixed part of the model’s structure' };
+const WHO_WORDS: Record<string, string> = { person: 'yours', olumi: 'Olumi’s', structure: 'part of how the model is set up' };
 const AGG_WORDS: Record<string, string> = { end: 'by the end of', sum: 'in total over', mean: 'on average over', every: 'in every period of', max: 'at its highest over', min: 'at its lowest over' };
 const AGG_ALONE: Record<string, string> = { end: '', sum: 'in total', mean: 'on average', every: 'in every period', max: 'at its highest', min: 'at its lowest' };
 const of = (words: Readonly<Record<string, string>>, v: unknown): string => (typeof v === 'string' && words[v] !== undefined ? words[v]! : 'not given');
@@ -303,13 +321,24 @@ function wordsIn(m: CanonicalModelT) {
     }
     return id;
   };
-  /** A unit as words: a pure number has none, and "1/x" is "per x"; an identifier's underscores read as spaces ("tech_lead" → "tech lead"). */
-  const unitOf = (u: unknown) => (u === '1' || u === '' || typeof u !== 'string' ? '' : ` ${u.replace(/^1\s*\/\s*/, 'per ').replace(/_/g, ' ')}`);
-  /** A quantity as it is referred to: by name, with its value or range, or that it is asked or worked out. */
+  /** W8 (c7.3, "ticket/week/specialist"): a figure with its unit as a person writes it ("80 tickets per week", "£20 per
+   *  customer per month", "5%"), and a range's ends with the unit said once ("10 to 30 tickets per specialist per week"). */
+  const withUnit = (x: number, u: unknown) => placeFigure(n(x), unitWords(u, x));
+  const between = (lo: number, hi: number, u: unknown, sep = ' to ') => {
+    const [pre = '', post = ''] = placeFigure('#', unitWords(u)).split('#');
+    return `${pre}${n(lo)}${post.startsWith('%') ? '%' : ''}${sep}${withUnit(hi, u)}`;
+  };
+  /** A quantity as it is referred to: by name, with its value or range, or that it is asked; its unit alone is on its own line. */
   const timed = (id: string) => {
     const q = Q.get(id);
     return q === undefined ? `"${id}"` : q.status === 'asked' ? `"${q.label}" (still to be given)` : q.status === 'derived' ? `"${q.label}"`
-      : `"${q.label}" ${q.low !== null && q.high !== null ? `${n(q.low)}–${n(q.high)}${unitOf(q.unit)}` : q.value !== null ? `${n(q.value)}${unitOf(q.unit)}` : `(no figure yet${unitOf(q.unit)})`}`;
+      : `"${q.label}" ${q.low !== null && q.high !== null ? between(q.low, q.high, q.unit, '–') : q.value !== null ? withUnit(q.value, q.unit) : '(no figure yet)'}`;
+  };
+  /** An item by name only: what a calculation is worked out from (each figure is on its own line, W8 c7.7); a figure that
+   *  shares its name with another is told apart by its figure, so a link moved between the two still shows. */
+  const nm = (id: unknown) => {
+    const q = Q.get(String(id));
+    return q !== undefined && m.quantities.some((x) => x.id !== q.id && x.label === q.label) ? timed(q.id) : `"${named(String(id))}"`;
   };
   /** A target or bound an option sets to another figure: its name only, as the results say it (#3722); its figure is on its own item. */
   const bound = (id: string) => (m.options.some((o) => o.sets.some((s) => s.quantity === id)) ? `"${named(id)}"` : timed(id));
@@ -318,7 +347,8 @@ function wordsIn(m: CanonicalModelT) {
   const and = (xs: readonly string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
   /** A figure from its value, range, reading and unit, all together, and a link's direction on what it moves (issue 40). */
   const figure = (r: Rec) => {
-    const u = unitOf(r['unit']), at = (k: string) => (typeof r[k] === 'number' ? `${n(r[k] as number)}${u}` : null);
+    // The unit alone, as a person writes it: "tickets per week", "£ per oven", "%".
+    const u = placeFigure('', unitWords(r['unit'])).trim(), at = (k: string) => (typeof r[k] === 'number' ? withUnit(r[k] as number, r['unit']) : null);
     const bare = (k: string) => n(r[k] as number);
     // What it moves is said by name; a direction on a size no link has is said alone, so its change shows (B3 off the path).
     const moves = typeof r['direction'] === 'string' && typeof r['id'] === 'string' ? linkTargets(m, r['id']) : [];
@@ -326,11 +356,11 @@ function wordsIn(m: CanonicalModelT) {
     // alpha G2: what it can be is Olumi's reading, said as such, so a change to it shows.
     const can = [...(at('floor') !== null ? [`never below ${bare('floor')}`] : []), ...(at('ceiling') !== null ? [`never above ${bare('ceiling')}`] : [])];
     const reading = (typeof r['range_kind'] === 'string' ? ` (${of(RANGE_WORDS, r['range_kind'])})` : '') + (can.length > 0 ? ` (${can.join(', ')}: Olumi’s reading)` : '');
-    if (at('low') !== null && at('high') !== null) return sign(`from ${bare('low')} to ${at('high')}${at('value') !== null ? `, most likely ${bare('value')}` : ''}${reading}`);
+    if (at('low') !== null && at('high') !== null) return sign(`from ${between(r['low'] as number, r['high'] as number, r['unit'])}${at('value') !== null ? `, most likely ${bare('value')}` : ''}${reading}`);
     const ends = [...(at('low') !== null ? [`no lower than ${at('low')}`] : []), ...(at('high') !== null ? [`no higher than ${at('high')}`] : [])].join(', ');
     // A worked-out figure has no figure of its own to give: only its unit.
-    const none = r['status'] === 'derived' ? (u === '' ? '' : `in${u}`) : `no figure yet${u === '' ? '' : ` (in${u})`}`;
-    return sign([at('value') ?? none, ...(ends === '' ? [] : [ends])].filter((x) => x !== '').join(', ') + reading);
+    const none = r['status'] === 'derived' ? (u === '' ? '' : `in ${u}`) : `no figure yet${u === '' ? '' : ` (in ${u})`}`;
+    return sign(([at('value') ?? none, ...(ends === '' ? [] : [ends])].filter((x) => x !== '').join(', ') + reading).trim());
   };
   /** Whose words an item is in: the person's own, or someone they report, by name. */
   const words = (r: Rec) => (typeof r['quote'] === 'string' ? `in ${typeof r['party'] === 'string' ? `${r['party']}’s` : 'your'} words "${r['quote']}"`
@@ -347,7 +377,7 @@ function wordsIn(m: CanonicalModelT) {
         : family === 'quantities' || family === 'goals' || family === 'limits' || family === 'options' || family === 'risks' ? `named "${String(r['label'] ?? '')}"` : `worded "${String(r['text'] ?? '')}"`;
       case 'figure': return figure(r);
       case 'kind': return family === 'conditions' ? of({ prerequisite: 'a prerequisite', challenge: 'a challenge' }, r['kind']) : of({ fact: 'a fact', coefficient: 'a rate', derived: 'a result' }, r['kind']);
-      case 'status': return family === 'options' ? of({ live: 'compared', ruled_out: 'ruled out, kept in view', removed: 'taken out of the comparison' }, r['status'])
+      case 'status': return family === 'options' ? of({ live: 'in the comparison', ruled_out: 'ruled out, kept in view', removed: 'taken out of the comparison' }, r['status'])
         : of({ known: 'known', estimated: 'an estimate', asked: 'still to be given', derived: 'worked out from the model', unknown: 'not known yet', not_applicable: 'does not apply',
           unsupported: 'outside what the model can use' }, r['status']);
       case 'question': return typeof r['question'] === 'string' ? `Olumi asks "${r['question']}"` : 'no question';
@@ -355,16 +385,21 @@ function wordsIn(m: CanonicalModelT) {
       case 'author': return of(WHO_WORDS, r['author']);
       case 'words': return words(r);
       case 'how': {
+        // W8 (c7.7, "X is Y 0 multiplied by Z"): how it is worked out, in one short sentence, by name only: what it works out
+        // is the line's own name, and each figure it uses is on that figure's line.
         const parts = Array.isArray(r['parts']) ? (r['parts'] as Rec[]) : [];
         const terms = Array.isArray(r['terms']) ? (r['terms'] as Rec[]) : [];
-        const each = (ids: unknown, verb: string) => (Array.isArray(ids) ? ids.map((id) => `, ${verb} ${timed(String(id))}`).join('') : '');
-        if (r['form'] === 'effect') return `an effect on ${q('defines')}, starting from ${q('base')}${terms.map((t) => `, changes by ${timed(String(t['coefficient']))} for each ${timed(String(t['driver']))}`).join('')}`;
-        if (r['form'] === 'stock') return `a running total of ${q('defines')}, starting at ${q('start')}${each(r['inflows'], 'adding')}${each(r['outflows'], 'taking away')}, each ${m.period}`;
+        const ids = (v: unknown) => (Array.isArray(v) ? v.map(nm) : []);
+        if (r['form'] === 'effect') return `starts from ${nm(r['base'])}${terms.map((t, i) => `${i === 0 ? ' and changes' : ', and'} by ${nm(t['coefficient'])} for each ${nm(t['driver'])}`).join('')}`;
+        if (r['form'] === 'stock') {
+          const moves = [...(ids(r['inflows']).length > 0 ? [`adds ${and(ids(r['inflows']))}`] : []), ...(ids(r['outflows']).length > 0 ? [`takes away ${and(ids(r['outflows']))}`] : [])];
+          return `a running total that starts at ${nm(r['start'])}${moves.length > 0 ? ` and ${moves.join(' and ')} each ${m.period}` : ''}`;
+        }
         if (r['form'] !== 'definition') return 'no calculation';
         const said = parts.map((x, i) => (r['op'] === 'product'
-          ? `${i === 0 ? (x['power'] === -1 ? 'one divided by ' : '') : x['power'] === -1 ? ' divided by ' : ' multiplied by '}${timed(String(x['id']))}`
-          : `${i === 0 ? (x['sign'] === -1 ? 'less ' : '') : x['sign'] === -1 ? ', lowered by ' : ', raised by '}${timed(String(x['id']))}`)).join('');
-        return `${q('defines')} is ${r['op'] === 'product' ? said : `the sum of ${said}`}`;
+          ? `${i === 0 ? (x['power'] === -1 ? 'one divided by ' : '') : x['power'] === -1 ? ' divided by ' : ' multiplied by '}${nm(x['id'])}`
+          : `${i === 0 ? (x['sign'] === -1 ? 'minus ' : '') : x['sign'] === -1 ? ' minus ' : ' plus '}${nm(x['id'])}`)).join('');
+        return `worked out as ${said}`;
       }
       case 'link#': {
         // A link's own authorship is said where it is not the item's (the card's mark), and its words where it has them.
@@ -390,11 +425,21 @@ function wordsIn(m: CanonicalModelT) {
       case 'direction': return of({ lower: 'lower is better', higher: 'higher is better' }, r['direction']);
       case 'variant': return typeof r['developed_from'] === 'string' ? `a variant of "${named(r['developed_from'])}"` : 'not a variant of another option';
       case 'setting#': {
+        // W8 (c7.7, "compared, sets X 0 to Option: X 1"): what the option changes, said once: the figure it sets, by name, to
+        // the figure this option gives it (its own setting, said here rather than by that setting's own name), or to the
+        // figure it is set from; an on/off switch is set to yes or no.
         const x = Array.isArray(r['sets']) ? (r['sets'] as Rec[])[at] : undefined;
         if (x === undefined) return 'without this setting';
-        const to = typeof x['to'] === 'string' ? timed(x['to']) : figure({ ...x, unit: Q.get(String(x['quantity']))?.unit });
-        return `sets ${timed(String(x['quantity']))} to ${to} ${start(x['starts_after_periods'] as number | string)}${typeof x['question'] === 'string' ? `, Olumi asks "${x['question']}"` : ''}`
-          + `${x['author'] === 'structure' ? ', as a switch' : x['author'] !== r['author'] ? `, as ${of(WHO_WORDS, x['author'])}` : ''}${x['quote'] === r['quote'] ? '' : typeof x['quote'] === 'string' ? `, in your words "${x['quote']}"` : ', not in your words'}`;
+        const target = Q.get(String(x['quantity']));
+        const own = typeof x['to'] === 'string' && x['to'] === inlineQuantityId(String(r['id']), String(x['quantity'])) ? Q.get(x['to']) : undefined;
+        const given: Rec | undefined = own ?? (typeof x['to'] === 'string' ? undefined : { ...x, unit: target?.unit });
+        const point = given !== undefined && given['low'] == null && given['high'] == null && (given['value'] === 0 || given['value'] === 1) ? given['value'] : undefined;
+        const onOff = point !== undefined && target !== undefined && unitWords(target.unit) === '' && (target.value === 0 || target.value === 1)
+          && (target.ceiling === 1 || target.author === 'structure');
+        const to = onOff ? (point === 1 ? 'yes' : 'no') : given !== undefined ? figure(given) : timed(String(x['to']));
+        return `sets ${nm(x['quantity'])} to ${to} ${start(x['starts_after_periods'] as number | string)}${typeof x['question'] === 'string' ? `, Olumi asks "${x['question']}"` : ''}`
+          + `${x['author'] === 'structure' ? `, as ${WHO_WORDS['structure']}` : x['author'] !== r['author'] ? `, as ${of(WHO_WORDS, x['author'])}` : ''}`
+          + `${x['quote'] === r['quote'] ? '' : typeof x['quote'] === 'string' ? `, in your words "${x['quote']}"` : x['author'] === 'structure' ? '' : ', not in your words'}`;
       }
       case 'chance': return `with a chance of ${q('occurrence')}`;
       case 'effect': return r['mode'] === 'multiply' ? `multiplying ${q('effect_on')} by ${q('severity')}` : `adding ${q('severity')} to ${q('effect_on')}`;

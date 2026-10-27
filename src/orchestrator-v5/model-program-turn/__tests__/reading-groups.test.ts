@@ -16,9 +16,11 @@ describe('the first reply counts what it used, inferred and left out (alpha G13)
   it('the bakery draft: 11 records theirs in their words, Olumi\'s sell-through estimate; workings, structure and an asked figure in no count', () => {
     expect(groupsOf(bakery())).toEqual({
       more_loaves: 'used', within_budget: 'used', second_oven: 'used', keep_one: 'used', sold_rel: 'other', sales_rel: 'used', spend_rel: 'other',
-      base_sales: 'used', ovens_added: 'used', one_oven: 'used', extra_per_oven: 'used', sell_through: 'inferred', sold_per_oven: 'other', sales: 'other',
-      sales_target: 'used', budget: 'used', oven_price: 'other', spend: 'other',
+      base_sales: 'used', ovens_added: 'used', one_oven: 'used', extra_per_oven: 'used', sell_through: 'inferred',
+      sales_target: 'used', budget: 'used', oven_price: 'other',
     });
+    // W8: a worked-out figure is said on its relation's line (sold_per_oven, sales, spend), so it is no row and in no count.
+    for (const id of ['sold_per_oven', 'sales', 'spend']) expect(readingGroups(bakery(), words).has(id), id).toBe(false);
     expect(readingLine(readingGroups(bakery(), words))).toBe('I used 11 things from your brief and added 1 of my own for you to check.');
   });
 
