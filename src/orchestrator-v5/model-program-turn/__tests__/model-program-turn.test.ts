@@ -37,6 +37,7 @@ import { ENGINE_VERSIONS, revisionDigest, RUN_AGAIN_AFTER_UPDATE, RUN_AGAIN_FOR_
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { PROGRAM_MODEL_STATE_PREFIX } from '../../agent-lane/turn-context.js';
 import { responsesSse } from '../../agent-lane/__tests__/stream-when-asked.js';
+import { AGENTS_CLIENT_MAX_RETRIES } from '../../../adapters/llm/openai-agents-client.js';
 import { at, bakery, bakeryWithDefect, BRIEF, club, CLUB_BRIEF, q, updateOf } from './bakery.fixture.js';
 
 /** A draft captured before a field existed, read in today's format (the saved-model reader's own mapping). */
@@ -623,6 +624,134 @@ describe('the model-program turn on the real core route', () => {
       expect(JSON.stringify(out.payload)).not.toContain('socket hang up');
     }
     expect(sent).toHaveLength(0);
+  });
+
+  /**
+   * C14 (alpha spec §7, bounded operation, 27 Oct): a first draft whose provider call fails or comes back unusable ends in a
+   * bounded number of physical attempts (the OpenAI client's own configured retries, AGENTS_CLIENT_MAX_RETRIES, are the only
+   * resend; the drafter's loop sends nothing again), writes nothing, and says nothing was saved. Today's behaviour, pinned on
+   * the real core route with the provider's answer injected at fetch; a sentinel reply queued after the last expected attempt
+   * stays unsent. Elapsed time is printed, never asserted. NOT covered here: a provider that never answers (the drafter passes
+   * no timeout or signal of its own; only the client's default applies).
+   */
+  describe('C14: a failed first-draft call is bounded and writes nothing; every physical call is on the record', () => {
+    const sha = (s: string): string => createHash('sha256').update(s, 'utf8').digest('hex');
+    const NEVER = 'C14 sentinel: never sent';
+    const failedDraft = async (label: string, answers: (() => Response)[]) => {
+      replies = [...answers, NEVER];
+      const t0 = performance.now();
+      const r = await turn({ message: BRIEF });
+      console.log('C14 elapsed ms', label, Math.round(performance.now() - t0));
+      return { r, j: r.json() as Json };
+    };
+    /** What every failed first draft leaves: no write, no Conversation, the host's own refusal words, one drafter attempt. */
+    const nothingWritten = (j: Json, why: string) => {
+      expect([registered.length, persisted, creates.length], 'nothing registered, no Conversation opened').toEqual([0, null, 0]);
+      expect(j.assistant_text).toBe(`I couldn't build a model that calculates from this yet (${why}). Nothing was saved.`);
+      expect(j.model_program).toMatchObject({ turn: 'draft', saved: false });
+      expect(j._agent.tool_calls).toEqual([{ name: 'draft_canonical_model', outcome: 'refused', refusal: 'no_draft' }]);
+      expect(replies, 'the sentinel after the last expected attempt is never sent').toEqual([NEVER]);
+    };
+    const usage = { input_tokens: 1000, input_tokens_details: { cached_tokens: 0 }, output_tokens: 500, output_tokens_details: { reasoning_tokens: 100 }, total_tokens: 1500 };
+
+    it('(a) HTTP 503 on every attempt: 1 + AGENTS_CLIENT_MAX_RETRIES = 3 physical attempts of the same request, then refused; nothing saved', async () => {
+      const { r, j } = await failedDraft('503 x3', [() => createAnswer(503), () => createAnswer(503), () => createAnswer(503)]);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(sent).toHaveLength(1 + AGENTS_CLIENT_MAX_RETRIES);
+      expect(sent).toHaveLength(3);
+      expect(callKinds(), 'every attempt is the drafter\'s; no AI reply').toEqual([false, false, false]);
+      expect(new Set(sent.map((b) => stableStringify(b))).size, 'the same request resent, unchanged').toBe(1);
+      nothingWritten(j, 'call failed: Error');
+      // The drafter's loop made ONE logical call; its typed provider fields are the last physical attempt's.
+      expect(j.model_program.draft.attempts).toEqual([{ attempt: 0, errors: null, failed: 'call failed: Error', provider_error: { status: 503, type: null, code: null, request_id: null },
+        status: null, usage: null, ms: expect.any(Number) }]);
+      // The ledger: one row per physical attempt, each closed as an HTTP error, the two resent ones marked retried.
+      const rows = j._provider_calls as Json[];
+      expect(rows.map((c) => [c.site, c.purpose, c.outcome, c.attempt])).toEqual([0, 1, 2].map((i) => ['model-program.draft', 'canonical_draft', 'allowed',
+        { transport_status: 503, result: 'http_error', outcome: 'http_error', ...(i < 2 ? { retry: true, retry_reason: 'transport' } : { retry: false }) }]));
+      expect(rows.every((c) => c.usage === undefined), 'no usage on a failed attempt').toBe(true);
+      expect(j.error).toBeNull();
+    }, 30_000);
+
+    it('(b) HTTP 429 without x-should-retry: the client retries it as it does a 5xx, 3 physical attempts, then refused; nothing saved (contrast: x-should-retry false is sent once, the 25 Oct 03:55Z row)', async () => {
+      const { r, j } = await failedDraft('429 x3', [() => createAnswer(429), () => createAnswer(429), () => createAnswer(429)]);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(sent).toHaveLength(1 + AGENTS_CLIENT_MAX_RETRIES);
+      expect(callKinds()).toEqual([false, false, false]);
+      nothingWritten(j, 'call failed: Error');
+      expect(j.model_program.draft.attempts).toEqual([{ attempt: 0, errors: null, failed: 'call failed: Error',
+        provider_error: { status: 429, type: 'requests', code: 'rate_limit_exceeded', request_id: null }, status: null, usage: null, ms: expect.any(Number) }]);
+      const rows = j._provider_calls as Json[];
+      expect(rows.map((c) => [c.site, c.attempt.transport_status, c.attempt.outcome, c.attempt.retry])).toEqual([
+        ['model-program.draft', 429, 'rate_limited', true], ['model-program.draft', 429, 'rate_limited', true], ['model-program.draft', 429, 'rate_limited', false]]);
+      // Never the provider's message on the wire.
+      expect(r.body).not.toContain('Rate limit reached');
+      expect(j.error).toBeNull();
+    }, 30_000);
+
+    it('(c) a completed response whose text is not JSON: ONE call, never resent or repaired; nothing saved', async () => {
+      const { r, j } = await failedDraft('not JSON', [() => sse('Here is your model: a bakery with two ovens.')]);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(callKinds()).toEqual([false]);
+      nothingWritten(j, 'output is not JSON');
+      expect(j.model_program.draft.attempts).toEqual([{ attempt: 0, errors: null, failed: 'output is not JSON', status: 'completed', usage, ms: expect.any(Number) }]);
+      const rows = j._provider_calls as Json[];
+      expect(rows.map((c) => [c.site, c.attempt.transport_status, c.attempt.result, c.attempt.outcome, c.attempt.retry])).toEqual([['model-program.draft', 200, 'completed', 'success', false]]);
+      expect(rows[0]!.usage).toMatchObject({ input_tokens: 1000, output_tokens: 500, cached_input_tokens: 0 });
+      expect(j.error).toBeNull();
+    }, 30_000);
+
+    it('(d) an incomplete response (max_output_tokens, no message): ONE call, never resent; the reason is said; nothing saved', async () => {
+      const spent = { input_tokens: 1000, input_tokens_details: { cached_tokens: 0 }, output_tokens: 32_000, output_tokens_details: { reasoning_tokens: 32_000 }, total_tokens: 33_000 };
+      const incomplete = { id: 'resp_incomplete', object: 'response', status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' }, model: 'gpt-6.1-sol', output: [], usage: spent };
+      const ev = (o: Json) => `event: ${o.type}\ndata: ${JSON.stringify(o)}\n\n`;
+      const stream = ev({ type: 'response.created', sequence_number: 0, response: { ...incomplete, status: 'in_progress', incomplete_details: null, usage: null } })
+        + ev({ type: 'response.incomplete', sequence_number: 1, response: incomplete });
+      const { r, j } = await failedDraft('incomplete', [() => new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } })]);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(callKinds()).toEqual([false]);
+      nothingWritten(j, 'no output (incomplete: max_output_tokens)');
+      expect(j.model_program.draft.attempts).toEqual([{ attempt: 0, errors: null, failed: 'no output (incomplete: max_output_tokens)', status: 'incomplete', usage: spent, ms: expect.any(Number) }]);
+      // Today the ledger closes an incomplete terminal response as a delivered one (its terminal event passed through).
+      const rows = j._provider_calls as Json[];
+      expect(rows.map((c) => [c.site, c.attempt.transport_status, c.attempt.result, c.attempt.outcome, c.attempt.retry])).toEqual([['model-program.draft', 200, 'incomplete', 'success', false]]);
+      expect(rows[0]!.usage).toMatchObject({ input_tokens: 1000, output_tokens: 32_000, cached_input_tokens: 0 });
+      expect(j.error).toBeNull();
+    }, 30_000);
+
+    it('(6) the provider-call record of a successful first draft: one row per physical call, each bound to the request actually sent (site, purpose, prompt alias and hashes, attempt) with its usage as numbers', async () => {
+      replies = [JSON.stringify(bakery())];
+      const t0 = performance.now();
+      const r = await turn({ message: BRIEF });
+      console.log('C14 elapsed ms', 'first draft ok', Math.round(performance.now() - t0));
+      expect(r.statusCode, r.body).toBe(200);
+      const j = r.json() as Json;
+      const rows = j._provider_calls as Json[];
+      expect(callKinds()).toEqual([false, true]);
+      expect(rows, 'one row per physical call').toHaveLength(sent.length);
+      expect(rows.map((c) => [c.site, c.provider, c.purpose, c.outcome, c.prompt_alias])).toEqual([
+        ['model-program.draft', 'openai', 'canonical_draft', 'allowed', 'agent.construct'], ['agent-core.sdk', 'openai', 'conversation', 'allowed', 'agent.converse']]);
+      // Each row's identity is read off the body that call sent (its own index), never a constant another call could match.
+      rows.forEach((c, i) => {
+        const body = sent[i]!;
+        expect(c.prompt_sha256, `row ${i}: the instructions sent`).toBe(sha(String(body.instructions)));
+        expect(c.input_sha256, `row ${i}: the input sent`).toBe(sha(JSON.stringify(body.input)));
+        expect(c.attempt, `row ${i}: one delivered attempt, not retried`).toMatchObject({ transport_status: 200, result: 'completed', outcome: 'success', retry: false });
+        expect(c.attempt.response_sha256).toMatch(/^[0-9a-f]{64}$/);
+        expect(c.duration_ms).toEqual(expect.any(Number));
+        expect(c.usage, `row ${i}: the provider's usage is recorded`).toBeDefined();
+        for (const k of ['input_tokens', 'output_tokens', 'cached_input_tokens']) expect(typeof c.usage[k], `row ${i}: usage.${k}`).toBe('number');
+        expect(c.usage).toMatchObject({ input_tokens: 1000, output_tokens: 500, cached_input_tokens: 0 });
+      });
+      const draft = rows[0]!;
+      expect(draft).toMatchObject({ model: 'gpt-6.1-sol', returned_model: 'gpt-6.1-sol', reasoning_effort: 'medium', max_output_tokens: 32_000, tool_names: [],
+        schema_sha256: sha(JSON.stringify(sent[0]!.text.format.schema)) });
+      // The draft record's schema hash is the one the ledger saw sent; its prompt hash is the FIXED instructions' (step 1),
+      // the ledger's the composed instructions with today's line.
+      expect(draft.schema_sha256).toBe(j.model_program.draft.schema_sha256);
+      expect(draft.prompt_sha256).not.toBe(j.model_program.draft.prompt_sha256);
+      expect(rows[1]!.schema_sha256, 'the reply sends no schema').toBeUndefined();
+    }, 30_000);
   });
 
   it('alpha G4: a draft whose save cannot be confirmed (the register call throws) never says nothing was changed', async () => {

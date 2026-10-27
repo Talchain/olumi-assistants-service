@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CanonicalModelT } from '../../model-program/canonical.js';
 import type { ExecutableModel } from '../../model-program/executable.js';
 import { costOf } from '../../model-program/simulate/simulate.js';
-import { admission, evaluateCanonical } from '../evaluate.js';
+import { admission, evaluateCanonical, MAX_BYTES, MAX_OPERATIONS, RUN_DRAWS } from '../evaluate.js';
 import { programReadinessOf } from '../program-readiness.js';
 import { livingModelOf, MODEL_PROGRAM } from '../program-store.js';
 import { club, CLUB_BRIEF, q } from './bakery.fixture.js';
@@ -99,6 +99,56 @@ describe('the Run admission limit (alpha G11)', () => {
     const promotion = (e.view as Json).options.find((o: Json) => o.option_id === 'promotion');
     expect(promotion.main_driver.reason ?? '').not.toMatch(/too large/);
     expect(['available', 'none_licensed']).toContain(promotion.main_driver.kind);
+  });
+});
+
+/**
+ * C14 (alpha spec §7, bounded operation, 27 Oct): THE ADMISSION BOUNDARY, on the real evaluation path. The club's cost over an
+ * N-month window is 10,000 × (42N + 122) operations (hand arithmetic; 42 more a draw for each month the 2 options visit and
+ * the goal's window reads), so N = 354 is the largest admitted (149,900,000 ≤ MAX_OPERATIONS 150,000,000) and N = 355 the
+ * first refused (150,320,000). Each figure is checked on the executable evaluateCanonical itself compiled.
+ * Elapsed time is printed, never asserted.
+ */
+describe('C14: the Run admission boundary on the real evaluation path (club, RUN_DRAWS draws)', () => {
+  it('354 months, the largest admitted: costOf is 149,900,000 operations; the headline is simulated once and both options show a figure; the sweep is not run', () => {
+    const { m, src } = clubOver(354);
+    const t0 = performance.now();
+    const e = evaluateCanonical(m, { sourceText: src, seed: 7 });
+    console.log('C14 elapsed ms', 'evaluateCanonical club 354 months (admitted)', Math.round(performance.now() - t0));
+    const cost = costOf(e.compiled.executable!, RUN_DRAWS);
+    expect(cost.operations).toBe(10_000 * (42 * 354 + 122));
+    expect(cost.operations).toBe(149_900_000);
+    expect(cost.operations).toBeLessThanOrEqual(MAX_OPERATIONS);
+    expect(cost.operations + 10_000 * 42, 'one more month passes the limit').toBeGreaterThan(MAX_OPERATIONS);
+    expect(cost.bytes, 'operations, not memory, is the limit at this edge').toBeLessThan(MAX_BYTES);
+    expect(calls, 'the headline only').toBe(1);
+    expect(e.sim).not.toBeNull();
+    const v = e.view as Json;
+    expect(v.options.map((o: Json) => [o.option_id, o.cell.kind])).toEqual([['promotion', 'figure'], ['carry_on', 'figure']]);
+    expect(JSON.stringify(v)).not.toContain('too large to work out in one run');
+    const notMeasured = { kind: 'none_licensed', reason: 'This model is too large to test each figure one at a time in one run, so what the chance rests on most is not measured.' };
+    expect((v.options as Json[]).map((o) => o.main_driver)).toEqual([notMeasured, notMeasured]);
+  }, 60_000);
+
+  it('355 months, the first refused: costOf is 150,320,000 operations; refused by name, the simulator never called', () => {
+    const { m, src } = clubOver(355);
+    const e = evaluateCanonical(m, { sourceText: src, seed: 7 });
+    const cost = costOf(e.compiled.executable!, RUN_DRAWS);
+    expect(cost.operations).toBe(10_000 * (42 * 355 + 122));
+    expect(cost.operations).toBe(150_320_000);
+    expect(cost.operations).toBeGreaterThan(MAX_OPERATIONS);
+    expect(cost.bytes).toBeLessThan(MAX_BYTES);
+    expect(admission(e.compiled.executable!)).toEqual({ ok: false, over: 'operations' });
+    expect(calls).toBe(0);
+    expect(e.sim).toBeNull();
+    const why = 'This model is too large to work out in one run: 355 months ahead for 2 options. Counting in longer periods, looking less far ahead or comparing fewer options reduces the work.';
+    const v = e.view as Json;
+    expect(v.options.map((o: Json) => o.option_id)).toEqual(['promotion', 'carry_on']);
+    for (const o of v.options as Json[]) {
+      expect(o.cell).toEqual({ kind: 'withheld', face: 'Chance not shown yet', why, reasons: [{ code: 'too_large', message: why }] });
+      expect(o.main_driver).toEqual({ kind: 'not_recorded' });
+    }
+    expect(v.goal_chance.notes[0]).toBe(why);
   });
 });
 
