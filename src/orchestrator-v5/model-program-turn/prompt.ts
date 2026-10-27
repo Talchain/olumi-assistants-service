@@ -59,7 +59,7 @@ export const CanonicalUpdate = CanonicalModel.omit({ history: true, title: true,
   preferences: z.array(CanonicalModel.shape.preferences.element),
   options: z.array(CanonicalModel.shape.options.element),
   remove: z.array(z.string()).describe('The ids of the records this update removes: only the ids listed to remove; [] for none.'),
-}).describe('Only the records this update changes or adds, each in full with its id, in its own family; [] for a family with none.');
+}).describe(`Only the records this update changes or adds, each in full with its id, in its own family; [] for a family with none. ${CanonicalModel.description ?? ''}`);
 export type CanonicalUpdateT = z.infer<typeof CanonicalUpdate>;
 
 /**

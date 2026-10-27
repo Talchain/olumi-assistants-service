@@ -4554,3 +4554,14 @@ describe('display words stay on one line: the compiler\'s reasons quote labels a
 });
 
 function beforeEachReset() { SCENARIO = randomUUID(); persisted = null; registered.length = 0; turnRows.clear(); conversationIds.clear(); pausedRun = null; sent.length = 0; replies = []; creates.length = 0; createAnswers = []; }
+
+describe('the update schema carries the one-statement rule (PL AMEND on R3, 27 Oct)', () => {
+  it('UPDATE_JSON_SCHEMA states it once, and the first-draft schema still states it once', async () => {
+    const { UPDATE_JSON_SCHEMA, CANONICAL_JSON_SCHEMA } = await import('../prompt.js');
+    const rule = 'One statement, one record across all families; never paraphrase it into another.';
+    const count = (s: unknown) => JSON.stringify(s).split(rule).length - 1;
+    expect(count(UPDATE_JSON_SCHEMA)).toBe(1);
+    expect(count(CANONICAL_JSON_SCHEMA)).toBe(1);
+    expect(JSON.stringify(UPDATE_JSON_SCHEMA)).toContain('Only the records this update changes or adds, each in full with its id, in its own family; [] for a family with none.');
+  });
+});
