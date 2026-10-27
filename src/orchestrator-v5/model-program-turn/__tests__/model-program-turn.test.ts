@@ -974,7 +974,9 @@ describe('the model-program turn on the real core route', () => {
     // descriptions no longer repeat it (RUN_WORDS_RULE is gone).
     const rule = 'Name a leader only from run.leader.option_id, using its option label; otherwise give run.leader.words, or say the Run names none.';
     expect(CORE_ALIGNED_INSTRUCTIONS.split(rule)).toHaveLength(2);
-    expect(CORE_ALIGNED_INSTRUCTIONS).toContain('report findings in this model without advice or an extra disclaimer.');
+    // Round 3 (27 Oct): model-relative findings are the purpose instruction's, sent once in the same instructions.
+    expect(CORE_ALIGNED_INSTRUCTIONS.split('as a model-relative finding with its uncertainty, what it rests on and what would change it.')).toHaveLength(2);
+    expect(CORE_ALIGNED_INSTRUCTIONS).toContain('add no extra disclaimer.');
     for (const [name, text] of Object.entries(PROGRAM_TOOL_DESCRIPTIONS)) {
       expect(text, name).not.toContain('run.leader');
       for (const banned of ['recommend', 'best', 'winner', 'you should']) expect(text.toLowerCase(), `${name}: ${banned}`).not.toContain(banned);
