@@ -154,4 +154,16 @@ describe('deriveProgramNotModelledManifest: which canonical quantities become it
     ]);
     expect([m.quantities!.total, m.quantities!.in_model, m.quantities!.absent]).toEqual([2, 1, 1]);
   });
+
+  it('one sentence quoted by a held AND an asked quantity is not modelled yet, never "in the model" (C2)', () => {
+    const mixed = { ...records, quantities: [
+      q('staff', 'person', 'We sell 40 loaves a day.', 'known', 40),
+      q('days', 'person', 'We sell 40 loaves a day.', 'asked', null),
+    ] };
+    for (const order of [mixed.quantities, [...mixed.quantities].reverse()]) {
+      const m = deriveProgramNotModelledManifest(brief, { ...mixed, quantities: order }, new Set(['staff']), []);
+      expect(m.quantities!.items.map((i) => [i.literal, i.verdict, i.matched_node_id])).toEqual([['We sell 40 loaves a day.', 'absent', null]]);
+      expect([m.quantities!.total, m.quantities!.in_model, m.quantities!.in_model_anchored, m.quantities!.absent]).toEqual([1, 0, 0, 1]);
+    }
+  });
 });

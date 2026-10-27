@@ -2295,7 +2295,9 @@ export function deriveProgramNotModelledManifest(
     const prev = byPlace.get(key);
     byPlace.set(key, prev === undefined
       ? { literal: q.quote, at, held, matched, constraint: bounds.has(q.id) }
-      : { ...prev, held: prev.held || held, matched: prev.matched ?? matched, constraint: prev.constraint || bounds.has(q.id) });
+      : { ...prev, held: prev.held && held, matched: prev.matched ?? matched, constraint: prev.constraint || bounds.has(q.id) });
+    // One sentence, several quantities: it is in the model only when every one of them holds its figure (assessor + PL C2, 27 Oct).
+    // One still asked leaves the sentence not modelled yet, so the panel never says all its figures are in.
   }
   const stated = [...byPlace.values()].sort((x, y) => x.at - y.at || x.literal.length - y.literal.length);
   const tally = Object.fromEntries(STATED_KINDS.map((k) => [k, 0])) as Record<StatedKind, number>;
@@ -2304,12 +2306,12 @@ export function deriveProgramNotModelledManifest(
   let anchored = 0;
   for (const f of stated) {
     if (f.held) inModel += 1;
-    if (f.matched !== null) anchored += 1;
+    if (f.held && f.matched !== null) anchored += 1;
     if (items.length < MAX_ITEMS) {
       const statedKind: StatedKind = f.constraint ? "constraint" : "figure";
       tally[statedKind] += 1;
       items.push({ literal: f.literal, char_offset: f.at, verdict: f.held ? "in_model" : "absent",
-        matched_node_id: f.matched, stated_kind: statedKind });
+        matched_node_id: f.held ? f.matched : null, stated_kind: statedKind });
     }
   }
   const label = new Map([...records.goals, ...records.limits].map((r) => [r.id, r.label] as const));
