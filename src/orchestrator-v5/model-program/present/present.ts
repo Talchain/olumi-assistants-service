@@ -31,6 +31,8 @@
  *     least two options, `leader` names the option with the highest chance (`goal_chance_leader`, `leader_licence: 'permitted'`)
  *     only where the Run's shared draws separate it from every other option (SC2, `paired.ts`: the difference is real in this
  *     model; the 1% and 10-point gates are off the path, S1 strip, Paul 26 Oct) and only when every limit is checked. Otherwise
+ *     Where the nearest option is separated but under `SMALL_GAP` behind (SC2's middle tier, S1: 5 points), the licence is
+ *     `'permitted_with_caveat'` and the words say "slightly more likely" with the gap on the shared draws. Otherwise
  *     it is withheld, its words naming each option's chance and why: the options are too close to call (`similar_option_ids`), or a limit is not yet checked
  *     (a target-only chance is not the whole goal). Its `words` say both chances, the basis and what the leading chance is most
  *     sensitive to. A model-relative finding: never "best", a winner, a recommendation or a win share (`option_id` is null).
@@ -174,7 +176,7 @@ export interface PresentedAnalysisView {
     readonly reason: null;
     readonly limitation: 'Hash equality cannot detect brief, framing or stage changes.' | 'Currentness is unknown because an analysis hash is unavailable.';
   };
-  readonly leader_licence: 'permitted' | 'withheld';
+  readonly leader_licence: 'permitted' | 'permitted_with_caveat' | 'withheld';
   /** Which option is most likely to achieve the goal in this model, or which are too close to call (see the header). */
   readonly leader?: PresentedLeader;
   readonly options: readonly { readonly option_id: string; readonly cell: PresentCell; readonly main_driver: PresentMainDriver }[];
@@ -195,6 +197,9 @@ export interface PresentedAnalysisView {
     readonly when_missed?: { readonly basis: string; readonly options: readonly { readonly option_id: string; readonly words: readonly string[]; readonly found: WhenMissed }[] };
     /** SC4: the figures whose third, known before choosing, could change which option is most likely, in words and numbers (`worth-knowing.ts`). */
     readonly worth_knowing?: { readonly basis: string; readonly figures: readonly { readonly quantity: string; readonly words: string; readonly found: WorthKnowing['figures'][number] }[] };
+    /** SC3: for each option shown, the first-order share of its result's variation that goes with each figure's third. */
+    readonly uncertainty_share?: { readonly basis: string; readonly options: readonly { readonly option_id: string; readonly words: string;
+      readonly figures: readonly { readonly quantity: string; readonly share: number }[] }[] };
   };
 }
 
@@ -204,7 +209,7 @@ export interface PresentedAnalysisView {
  * achieve the goal, only where licensed.
  */
 export interface PresentedLeader {
-  readonly licence: 'permitted' | 'withheld';
+  readonly licence: 'permitted' | 'permitted_with_caveat' | 'withheld';
   readonly option_id: null;
   readonly goal_chance_leader: string | null;
   readonly similar_option_ids: readonly string[];
@@ -248,6 +253,27 @@ const SWEEP_DRAWS = 4000;
  * over DRIVER_MIN_SWING is the driver; otherwise none is licensed. A finding in this model, never advice.
  */
 export const DRIVER_MIN_SWING = 0.05;
+/** SC2's middle tier (Paul's S1, set at 5 points on 27 Oct): a separated leader less than this far ahead is "slightly more likely". */
+export const SMALL_GAP = 0.05;
+
+/**
+ * SC3: the first-order share of a 0/1 result's variance that goes with which third of its draws one figure falls in, from the
+ * simulator's tercile drivers (simulate.ts `terciles`: the lowest and highest m = floor(n/3) draws, the rest the middle).
+ * Var(E[met | third]) / Var(met): the middle third's mean is what the other two leave of the overall chance p, and the
+ * between-thirds variance loses its sampling bias, (3 − 1)/n of the variance when the figure does not matter. Undefined where
+ * the result does not vary (p is 0 or 1) or there are too few draws. It is the share for the figure grouped into thirds, so
+ * knowing the figure exactly can account for more; it leaves out what figures do together.
+ */
+export function uncertaintyShare(p: number, n: number, low: number, high: number): number | undefined {
+  const m = Math.floor(n / 3);
+  if (m === 0 || p <= 0 || p >= 1) return undefined;
+  const mid = (n * p - m * low - m * high) / (n - 2 * m);
+  const between = (m * (low - p) ** 2 + (n - 2 * m) * (mid - p) ** 2 + m * (high - p) ** 2) / n;
+  return Math.min(1, Math.max(0, between / (p * (1 - p)) - 2 / n));
+}
+export const SHARE_BASIS_WORDS = 'Each share is first-order: one figure at a time, grouped into thirds of its draws, so it leaves out what figures do '
+  + 'together and anything finer than a third. It rests on the figures varying independently, as the model draws them, and says '
+  + 'how much the result goes with a figure, never that the figure causes it.';
 /** The sweep's cost (alpha G11): three settings of every ranged input no option sets, each a run of SWEEP_DRAWS. */
 export function driverSweepOperations(model: ExecutableModel, draws: number): number {
   const switches = new Set(model.options.flatMap((o) => o.sets.map((s) => s.quantity)));
@@ -784,6 +810,21 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     return [{ quantity: f.quantity, found: f,
       words: `In this model, knowing which third of its draws ${q(label(f.quantity) ?? f.quantity)}${whose} falls in before choosing, and taking the option most likely there, meets ${worthAim} in about ${more} more of every 100 simulated draws than ${name(f.overall)}, the option most likely overall. Most likely in each third: ${bands.join('; ')}.` }];
   });
+  // SC3: detail behind the main driver, for each option whose chance is shown, on a Run not known to be stale with every limit
+  // checked (a chance that leaves a limit out is not the whole aim, Codex r1); a share under 1% is not said.
+  const meets = model.limits.length > 0 ? 'meets every goal and limit' : model.goals.length === 1 ? 'meets the goal' : 'meets every goal';
+  const shareRows = input.current === false || unchecked.length > 0 ? [] : options.flatMap((o, at) => {
+    const r = result.options[at]!, c = r.joint_within_limits;
+    if (o.cell.kind !== 'figure' || isWithheld(c)) return [];
+    const figures = r.drivers.flatMap((d) => {
+      const share = uncertaintyShare((c as Chance).chance, result.draws, d.joint_if_low, d.joint_if_high);
+      return share === undefined || Math.round(share * 100) < 1 ? [] : [{ quantity: d.quantity, share: Math.round(share * 1000) / 1000 }];
+    }).sort((a, b) => b.share - a.share);
+    if (figures.length === 0) return [];
+    const said = figures.map((f, i) => `${i === 0 ? 'the third ' : 'and the third '}${q(label(f.quantity) ?? f.quantity)} falls in ${i === 0 ? 'accounts for ' : ''}about ${Math.min(99, Math.round(f.share * 100))}%`);
+    return [{ option_id: o.option_id, figures,
+      words: `For ${q(optionLabel.get(o.option_id) ?? o.option_id)}, of the variation in whether a simulated draw ${meets}, ${said.join(', ')}.` }];
+  });
   const goal_chance = {
     ...(jointWords !== undefined && waiting.length === 0 ? { chance_words: `chance of ${jointWords}` } : {}),
     ...(notes.length > 0 ? { notes } : {}),
@@ -802,6 +843,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     ...((input.blockers ?? []).length > 0 ? { waits_on: input.blockers!.map((b) => ({ ...b, label: inlineWords(b.label) })) } : {}),
     ...(missed.length > 0 ? { when_missed: { basis: WHEN_MISSED_BASIS, options: missed } } : {}),
     ...(worth.length > 0 ? { worth_knowing: { basis: WORTH_KNOWING_BASIS, figures: worth } } : {}),
+    ...(shareRows.length > 0 ? { uncertainty_share: { basis: SHARE_BASIS_WORDS, options: shareRows } } : {}),
   };
   // ── Which option is most likely to achieve the goal, in this model (Paul 6 and 14 Oct: say it; never choose for them) ──
   const leader = ((): PresentedLeader | undefined => {
@@ -848,13 +890,20 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       const why = `for their chances of ${jointWords}, the simulation cannot tell them apart on its shared draws`;
       return withheld(tied.map((x) => x.id), `In this model, ${listWords(tied.map((x) => `${name(x.id)} (${x.display})`))} are too close to call: ${why}, ${basis}.`);
     }
-    const next = rest[0]!, d = top.driver;
+    const next = rest[0]!, d = top.driver, gap = gapOver(next)!;
     const there = (e: End): string => e.display ?? 'could not be tested';
     const rests = d.kind === 'available'
       ? ` Its chance is most sensitive to ${q(label(d.driver.quantity) ?? d.driver.quantity)} ${whoseRange(d.driver.author)}: ${there(d.driver.low)} at its low end, ${there(d.driver.middle)} at its middle and ${there(d.driver.high)} at its high end.`
       : d.kind === 'none_licensed' ? ` ${d.reason}` : '';
-    return { licence: 'permitted', option_id: null, goal_chance_leader: top.id, similar_option_ids: [],
-      words: `In this model, ${name(top.id)} is the option most likely to achieve ${aim}: ${top.display} chance of ${jointWords}, against ${next.display} for ${name(next.id)}, the next most likely, ${basis}.`
+    // SC2's middle tier (S1: 5 points): separated, but the nearest option is under SMALL_GAP behind on the shared draws.
+    const small = gap.kind !== 'withheld' && gap.difference < SMALL_GAP;
+    const pts = (v: number): string => (Math.round(v * 1000) / 10).toFixed(1);
+    const gapWords = gap.kind === 'sampled' ? `about ${pts(gap.difference)} points (${pts(gap.precision_95[0])} to ${pts(gap.precision_95[1])})`
+      : gap.kind === 'exact' ? `${pts(gap.difference)} points` : '';
+    return { licence: small ? 'permitted_with_caveat' : 'permitted', option_id: null, goal_chance_leader: top.id, similar_option_ids: [],
+      words: (small
+        ? `In this model, ${name(top.id)} is slightly more likely than ${name(next.id)} to achieve ${aim}: ${top.display} chance of ${jointWords}, against ${next.display}, ${basis}. The gap is small: ${gapWords} on the same simulated draws, under ${Math.round(SMALL_GAP * 100)} points.`
+        : `In this model, ${name(top.id)} is the option most likely to achieve ${aim}: ${top.display} chance of ${jointWords}, against ${next.display} for ${name(next.id)}, the next most likely, ${basis}.`)
         + (top.c.precision_95[1] < 0.5 ? ` Even so, in this model it is more likely to miss ${aim} than to meet it.` : '') + rests };
   })();
   const known = input.current !== undefined && input.run !== undefined;
