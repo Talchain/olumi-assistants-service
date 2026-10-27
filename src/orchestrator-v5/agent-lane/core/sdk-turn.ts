@@ -28,7 +28,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   Agent, extractAllTextOutput, MaxTurnsExceededError, OpenAIResponsesModel, run, RunState, setTracingDisabled,
-  ToolCallError, withTrace, type AgentInputItem, type RunToolApprovalItem, type Tool,
+  ToolCallError, withTrace, type AgentInputItem, type RunToolApprovalItem, type Tool, type ToolToFinalOutputFunction,
 } from '@openai/agents';
 import { APIConnectionError, APIError, type OpenAI } from 'openai-v7';
 import { getRuntimeEnv } from '../../../config/env-resolver.js';
@@ -422,12 +422,12 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
     tools: [...tools],
     // C14 (27 Oct): after each step's tools, a turn the person has stopped ends there, with no further model call (its reply);
     // that step's tool answers are kept to go into the Conversation below.
-    ...(input.stopped !== undefined ? { toolUseBehavior: async (_ctx: unknown, results: readonly { type: string; output?: unknown; runItem?: { rawItem?: { callId?: unknown } } }[]) => {
-      if (await input.stopped!().catch(() => false) !== true) return { isFinalOutput: false as const, isInterrupted: undefined };
-      stoppedAnswers = results.flatMap((r) => { const callId = r.runItem?.rawItem?.callId;
+    ...(input.stopped !== undefined ? { toolUseBehavior: (async (_ctx, results) => {
+      if (await input.stopped!().catch(() => false) !== true) return { isFinalOutput: false, isInterrupted: undefined };
+      stoppedAnswers = results.flatMap((r) => { const callId = (r.runItem?.rawItem as { callId?: unknown } | undefined)?.callId;
         return r.type === 'function_output' && typeof callId === 'string' ? [{ call_id: callId, output: typeof r.output === 'string' ? r.output : JSON.stringify(r.output) }] : []; });
-      return { isFinalOutput: true as const, isInterrupted: undefined, finalOutput: '' };
-    } } : {}),
+      return { isFinalOutput: true, isInterrupted: undefined, finalOutput: '' };
+    }) satisfies ToolToFinalOutputFunction } : {}),
   });
   // Tool time, from the SDK's own lifecycle events (the calls run one at a time: `parallelToolCalls: false`).
   let toolStartedAt: number | undefined;

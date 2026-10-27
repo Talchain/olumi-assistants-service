@@ -2160,7 +2160,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const realSetTimeout = globalThis.setTimeout;
       let fire: (() => void) | undefined;
       const timers = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
-        (ms === budget && fire === undefined ? (fire = fn, realSetTimeout(() => {}, 0)) : realSetTimeout(fn, ms, ...rest))) as never);
+        (ms === budget && fire === undefined ? (fire = fn, realSetTimeout(() => {}, 0)) : Reflect.apply(realSetTimeout, globalThis, [fn, ms, ...rest]))) as never);
       try {
         const streamed = streamTurnAsStagedSse({ app, reply: reply as never, requestId: 'req-stream', internalHeaders: { 'content-type': 'application/json' },
           payload: JSON.stringify({ kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BAKERY_BRIEF, source: 'composer' }),
@@ -2211,7 +2211,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const timers = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
         (ms === budget && fire === undefined ? (fire = fn, realSetTimeout(() => {}, 0))
           : fired && ms === OWN_SAVE_READ_MS && bound === undefined ? (bound = fn, realSetTimeout(() => {}, 0))
-          : realSetTimeout(fn, ms, ...rest))) as never);
+          : Reflect.apply(realSetTimeout, globalThis, [fn, ms, ...rest]))) as never);
       try {
         const streamed = streamTurnAsStagedSse({ app, reply: reply as never, requestId: 'req-stream', internalHeaders: { 'content-type': 'application/json' },
           payload: JSON.stringify({ kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BAKERY_BRIEF, source: 'composer' }),
