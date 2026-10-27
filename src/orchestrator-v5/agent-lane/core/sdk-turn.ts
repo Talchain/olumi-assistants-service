@@ -287,6 +287,8 @@ export interface CoreTurnInput {
   /** The model revision and selected Run this turn began on, carried on the SDK trace with the prompt, model and Conversation. */
   readonly traceMeta?: { readonly revision?: string; readonly run_id?: string };
   readonly signal?: AbortSignal;
+  /** C14: has the person stopped this turn (the route's fence read)? Once it has, the run ends after its tools: no reply call. */
+  readonly stopped?: () => Promise<boolean>;
   readonly now?: () => number;
 }
 
@@ -399,6 +401,8 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
     ...(restrictedTo !== undefined ? { requestBody: (body: Record<string, unknown>) => (body['tool_choice'] === undefined || body['tool_choice'] === 'auto'
       ? { ...body, tool_choice: restrictedTo } : body) } : {}),
     detailOf: (body) => ({ model: budget.model, purpose: 'conversation', ...agentRequestIdentity('agent.converse', body) }) });
+  /** The tool answers of the step after which a stopped run ended (C14), for its Conversation. */
+  let stoppedAnswers: { readonly call_id: string; readonly output: string }[] | undefined;
   const agent = new Agent({
     name: 'Olumi',
     instructions: input.instructions,
@@ -416,6 +420,14 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       providerData: { prompt_cache_key: corePromptCacheKey(budget.model, input.instructions) },
     },
     tools: [...tools],
+    // C14 (27 Oct): after each step's tools, a turn the person has stopped ends there, with no further model call (its reply);
+    // that step's tool answers are kept to go into the Conversation below.
+    ...(input.stopped !== undefined ? { toolUseBehavior: async (_ctx: unknown, results: readonly { type: string; output?: unknown; runItem?: { rawItem?: { callId?: unknown } } }[]) => {
+      if (await input.stopped!().catch(() => false) !== true) return { isFinalOutput: false as const, isInterrupted: undefined };
+      stoppedAnswers = results.flatMap((r) => { const callId = r.runItem?.rawItem?.callId;
+        return r.type === 'function_output' && typeof callId === 'string' ? [{ call_id: callId, output: typeof r.output === 'string' ? r.output : JSON.stringify(r.output) }] : []; });
+      return { isFinalOutput: true as const, isInterrupted: undefined, finalOutput: '' };
+    } } : {}),
   });
   // Tool time, from the SDK's own lifecycle events (the calls run one at a time: `parallelToolCalls: false`).
   let toolStartedAt: number | undefined;
@@ -604,6 +616,13 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
           result = await go(result.state);
           calls += result.rawResponses.length;
         }
+      }
+      // C14: a stopped run's last tool answers were carried by no reply call, so they go into the Conversation here, once: the next
+      // turn finds no call left unanswered. A failure is logged; the turn's outcome is the route's.
+      if (stoppedAnswers !== undefined && stoppedAnswers.length > 0) {
+        await client.conversations.items.create(conversation.id, { items: stoppedAnswers.map((a) => ({ type: 'function_call_output' as const, ...a })) }, { maxRetries: 0 })
+          .catch((err: unknown) => log.warn({ event: 'agent_core.stopped_answers_not_added', scenario_id: input.ctx.scenario_id, ...createFailureOf(err) },
+            'agent-core: a stopped turn\'s tool answers were not added to the Conversation'));
       }
       // A run still stopped on a call is unfinished: its own words this turn, or none (the route's REPLY_INCOMPLETE), never `finalOutput`.
       const text = result.interruptions.length > 0 ? extractAllTextOutput(result.newItems) : typeof result.finalOutput === 'string' ? result.finalOutput : '';

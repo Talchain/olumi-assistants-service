@@ -669,6 +669,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           instructions: programInstructions(),
           // A pause must name a card this scenario holds, awaiting approval (`sdk-turn.ts`).
           isPendingCard: (id: string) => proposals.outstanding(coreCtx.scenario_id, coreCtx.authenticated_user_id).some((p) => p.proposal_id === id),
+          // C14: once the person has stopped this turn, its run ends after its tools, with no reply call.
+          stopped: turnStopped,
           ...coreTurnStores(store),
         });
         try {
@@ -684,13 +686,17 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             if (programPayload?.canonical_analysis_view != null && (kept?.['saved'] === true || kept?.['stored'] === true)) {
               const fresh = await readProgramContext({ dispatch: readingDispatch, proposals }, { scenario_id: scenarioId, authenticated_user_id: userId });
               if (fresh.status !== 'ok') throw new ModelReadFailedError(fresh);
-              const reply = await runCoreTurn({ ...agentTurn(),
-                turnGuidance: [PROGRAM_TURN_GUIDANCE, runPress ? RUN_REPLY_GUIDANCE : DRAFT_REPLY_GUIDANCE],
-                briefText: saved.graph === null ? undefined : saved.briefText,
-                canonicalState: fresh.data, withheldTools: [...HOST_REPLY_WITHHELD_TOOLS] });
-              result = { ...result, assistant_text: reply.assistant_text, sdk: reply.sdk, hops: result.hops + reply.hops,
-                timing: { ...result.timing, provider_calls: providerCallsMade() ?? result.timing.provider_calls + reply.timing.provider_calls } };
-              aiReplied = true;
+              // C14: a turn the person has stopped makes no reply call; what it saved stands, said below with its receipt.
+              if (await turnStopped()) result = { ...result, assistant_text: '' };
+              else {
+                const reply = await runCoreTurn({ ...agentTurn(),
+                  turnGuidance: [PROGRAM_TURN_GUIDANCE, runPress ? RUN_REPLY_GUIDANCE : DRAFT_REPLY_GUIDANCE],
+                  briefText: saved.graph === null ? undefined : saved.briefText,
+                  canonicalState: fresh.data, withheldTools: [...HOST_REPLY_WITHHELD_TOOLS] });
+                result = { ...result, assistant_text: reply.assistant_text, sdk: reply.sdk, hops: result.hops + reply.hops,
+                  timing: { ...result.timing, provider_calls: providerCallsMade() ?? result.timing.provider_calls + reply.timing.provider_calls } };
+                aiReplied = true;
+              }
             }
           } else {
             result = await runCoreTurn({ ...agentTurn(),

@@ -419,7 +419,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(fenceRows.get(`${SCENARIO}:${press.turn_id}`)?.stopped_at, 'the tombstone').not.toBeNull();
     release();
     const a = (await approval).json() as Json;
-    expect(calls.at(-2)?.tool_choice, 'control: the AI did send its apply').toMatchObject({ type: 'function', name: 'apply_change' });
+    expect(calls.at(-1)?.tool_choice, 'control: the AI did send its apply').toMatchObject({ type: 'function', name: 'apply_change' });
+    // C14 (27 Oct): that call is the turn's last: once stopped, no reply call is made.
+    expect(calls).toHaveLength(before + 1);
     expect(registered, 'nothing committed after the Stop').toHaveLength(0);
     expect(figure('oven_price')).toBeNull();
     expect(a.receipts).toEqual([]);
@@ -466,8 +468,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const stop = await stopAsTheRpcDerives(String(press.turn_id));
       release();
       const turn = await pending;
-      // What the AI read of its own apply after the Stop: the tool answer on the reply call.
-      const told = ((calls.at(-1)!.input ?? []) as Json[]).filter((i) => i.type === 'function_call_output' && i.call_id === 'apply')
+      // What the AI is told of its own apply after the Stop: the tool answer, put into the scenario's Conversation (C14, 27 Oct:
+      // no reply call is made after a Stop, so the next call reads it there).
+      const told = conversationItems.flatMap((c) => c.items).filter((i) => i.type === 'function_call_output' && i.call_id === 'apply')
         .map((i) => JSON.parse(String(i.output)) as Json);
       return { press, stop, turn, told };
     };
@@ -495,14 +498,15 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const t = turn.json() as Json;
       // C14 (27 Oct): the stopped turn's answer is typed TURN_STOPPED. Its apply was sent (the fence refused it), so it keeps
       // nothing_saved false with no receipt: unknown, never "nothing changed". The refused write is typed on its tool call.
-      expect(t).toMatchObject({ durability: 'recorded', error: STOPPED_AFTER_WRITE, receipts: [], assistant_text: STOPPED_REPLY });
+      // No reply call is made after the Stop, so there are no words (STOPPED_REPLY was scripted for one).
+      expect(t).toMatchObject({ durability: 'recorded', error: STOPPED_AFTER_WRITE, receipts: [], assistant_text: '' });
       expect(t._agent.tool_calls).toEqual([{ name: 'apply_change', outcome: 'refused', refusal: 'registration_refused' }]);
       expect(told).toEqual([expect.objectContaining({ status: 'refused', reason: 'registration_refused', data: { code: 'TURN_STOPPED', written: false } })]);
       expect([registered.length, figure('oven_price')]).toEqual([0, null]);
       const callsBefore = calls.length;
       const again = await post(press);
       expect(again.statusCode, again.body).toBe(200);
-      expect(again.json()).toMatchObject({ durability: 'replayed', error: STOPPED_AFTER_WRITE, receipts: [], assistant_text: STOPPED_REPLY });
+      expect(again.json()).toMatchObject({ durability: 'replayed', error: STOPPED_AFTER_WRITE, receipts: [], assistant_text: '' });
       expect([calls.length, registered.length], 'a resend calls no model and writes nothing').toEqual([callsBefore, 0]);
       // The Stop ended that turn only: the card is still held, and a new press applies it once, with the person's receipt.
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_again' }], [{ type: 'message', text: 'Saved.' }]];
@@ -2121,6 +2125,42 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // CONTRAST: the same turn not stopped answers with no error.
       outputs = [[{ type: 'message', text: 'Still a question.' }]];
       expect((await typed('What does the model hold for the oven?')).json()).toMatchObject({ durability: 'recorded', error: null });
+    });
+
+    it('C14: once a turn is stopped its reply call is never made: a press stopped during its first call makes no second call, writes nothing and answers its apply in the Conversation; a first draft stopped after its save makes no reply call and keeps its save, with its receipt', async () => {
+      const stopTurn = (turnId: string) => app.inject({ method: 'POST', url: '/orchestrate/v2/turn/stop', payload: { scenario_id: SCENARIO, turn_id: turnId } });
+      // (1) The agent's run: a press whose first call is held, then stopped there.
+      const press = await propose();
+      let release!: () => void;
+      holdProvider = new Promise<void>((resolve) => { release = resolve; });
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'A reply written after the Stop.' }]];
+      const before = calls.length;
+      const pending = post(press);
+      await vi.waitFor(() => expect(calls.length).toBe(before + 1));
+      expect((await stopTurn(String(press.turn_id))).json()).toMatchObject({ stopped: true, claimed: true });
+      release();
+      const r = await pending;
+      expect(r.statusCode, r.body).toBe(200);
+      expect(calls.length, 'the apply call only: no reply call after the Stop').toBe(before + 1);
+      expect(r.json()).toMatchObject({ assistant_text: '', receipts: [], error: { code: 'TURN_STOPPED', retry_safe: false, nothing_saved: false } });
+      expect([registered.length, figure('oven_price')]).toEqual([0, null]);
+      // The apply's own answer is in the Conversation, so the next turn finds no call left unanswered.
+      const answered = conversationItems.flatMap((c) => c.items).filter((i) => i.type === 'function_call_output' && i.call_id === 'apply');
+      expect(answered.map((i) => (JSON.parse(String(i.output)) as Json).data)).toEqual([{ code: 'TURN_STOPPED', written: false }]);
+      // (2) The host's turn: a first draft saved, then stopped before its reply call (the Stop lands on the read for that reply).
+      SCENARIO = randomUUID(); persisted = null; registered.length = 0; turnRows.clear(); pausedRun = null;
+      canonicalDraft = JSON.stringify(bakery());
+      const turnId = randomUUID();
+      const read = program.read.getMockImplementation()!;
+      program.read.mockImplementationOnce(async (...args: Parameters<typeof read>) => { await stopTurn(turnId); return read(...args); });
+      const callsBefore = calls.length;
+      const drafted = await app.inject({ method: 'POST', url: '/agent/v1/core-turn',
+        payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BAKERY_BRIEF, source: 'composer' } });
+      expect(drafted.statusCode, drafted.body).toBe(200);
+      expect(calls.slice(callsBefore).map((c) => c.text?.format?.name ?? null), 'the drafting call only: no reply call').toEqual(['canonical_model']);
+      expect(drafted.json()).toMatchObject({ assistant_text: '', error: { code: 'TURN_STOPPED', retry_safe: false, nothing_saved: false } });
+      expect(idsOf((drafted.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      expect(registered, 'the save stands, once: nothing undone').toHaveLength(1);
     });
   });
 });
