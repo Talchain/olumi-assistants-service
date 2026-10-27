@@ -76,14 +76,8 @@ function resolveSpec(from: string, spec: string): string | null {
 const rel = (abs: string): string => relative(SRC, abs);
 const forbidden = (file: string): boolean => FORBIDDEN.some((f) => (f.endsWith('/') ? rel(file).startsWith(f) : rel(file) === f));
 
-/**
- * ⛔ OPEN, NOT CUT (W5, 27 Oct, for the DL): the program's save checks its version receipt's analysis-affecting hash against
- * the read-back (`core-write.ts` → `computeAnalysisAffectingGraphHashSha256`). That hash is the legacy analysis projection
- * (`graph-hash.ts`, which loads the old readiness helper and, through `goal-direction.ts`, `graph-identity.ts`). Cutting it
- * changes the save's readback check or moves that projection, so it is not a pure move. This one edge is not followed, so
- * every other chain still fails here; the row below fails once the edge is gone, so the exception goes with it.
- */
-const OPEN: readonly (readonly [string, string])[] = [['orchestrator-v5/path-b/tools/core-write.ts', 'orchestrator-v5/context/graph-hash.ts']];
+/** No edge is exempt: the save's receipt check no longer computes the legacy analysis hash (W5, 27 Oct). */
+const OPEN: readonly (readonly [string, string])[] = [];
 
 const loads = new Map<string, string[]>();
 /** The files `file` loads at runtime, less an OPEN edge. */
@@ -148,7 +142,7 @@ describe('W5 alpha runtime wall', () => {
     expect(legacyChains()).toEqual([]);
   });
 
-  it('each OPEN edge is still there (an exception never outlives its cut)', () => {
-    for (const [from, to] of OPEN) expect(loadsOf(join(SRC, from), []).map(rel), `${from} -> ${to}`).toContain(to);
+  it('no edge is exempt from the wall', () => {
+    expect(OPEN).toEqual([]);
   });
 });
