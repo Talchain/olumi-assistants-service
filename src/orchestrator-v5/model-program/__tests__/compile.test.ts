@@ -672,6 +672,53 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(rm.executable!.goals.map((g) => g.id)).toEqual(['weekly_profit']);
   });
 
+  it('C3 (spec §3.5): with no deadline, an aim or guardrail resting on a live option or a risk that starts later asks for a deadline, never read as in effect', () => {
+    // Weekly profit with no deadline is static (no stock), so it is read once at period 0; the cash goal keeps its quarter.
+    const timed = (t: number | string, f: (m: CanonicalModelT) => void = () => {}) => {
+      const m = bakery();
+      m.goals = m.goals.map((g) => (g.id === 'weekly_profit' ? { ...g, measure: { ...g.measure!, window: null } } : g));
+      m.options = m.options.map((o) => (o.id === 'buy_oven' ? { ...o, sets: o.sets.map((s) => ({ ...s, starts_after_periods: t })) } : o));
+      f(m);
+      return compile(m);
+    };
+    const waits = (r: ReturnType<typeof compile>, what: string) => {
+      expect(r.errors, what).toEqual([]);
+      expect(r.perGoal.find((p) => p.goal_id === 'weekly_profit'), what).toMatchObject({ status: 'asks', needs_deadline: true, asks: [], reasons: ['It changes over time, so it needs a deadline.'] });
+      expect(r.blockers, what).toEqual([{ id: 'weekly_profit', code: 'deadline', scope: ['weekly_profit'] }]);
+      expect(r.executable!.goals.map((g) => g.id), what).toEqual(['cash_buffer']);
+    };
+    const risk = (from: number) => (m: CanonicalModelT) => {
+      m.quantities.push(olumi('breakdown_chance', '1', 0.05, 0.2), olumi('lost_loaves', 'loaf/week', -150, -50, -100));
+      m.risks.push({ id: 'breakdown', label: 'The oven breaks down', occurrence: 'breakdown_chance', severity: 'lost_loaves', effect_on: 'sales', mode: 'add', starts_after_periods: from, author: 'olumi', quote: null, ...base });
+    };
+    waits(timed(4), 'the oven arrives in week 5');
+    waits(timed('delivery', (m) => m.quantities.push(qty('delivery', 'week', { low: 2, high: 6, range_kind: 'plausible', status: 'estimated', author: 'olumi', basis: 'Typical delivery time.' }))), 'its start is a quantity');
+    waits(timed(0, risk(4)), 'a breakdown from week 5');
+    // A start held in a known single figure is read as that figure: a known 2 waits, a known 0 is from the start (below).
+    waits(timed('lead_time', (m) => m.quantities.push(person('lead_time', 'week', 2, 'it takes 2 weeks to arrive'))), 'a known 2-week start');
+    // A guardrail with no deadline is read the same way.
+    const guard = timed(4, (m) => {
+      m.goals = m.goals.filter((g) => g.id === 'cash_buffer');
+      m.quantities.push(person('takings_floor', 'GBP/week', 1000, 'takings of at least £1,000 a week'));
+      m.limits.push({ ...limit('min_takings', 'Takings at least £1,000 a week', 'takings', '>=', 'takings_floor', 'end', 'quarter', 'at least £1,000 a week'), measure: { ...limit('x', 'x', 'takings', '>=', 'takings_floor', 'end', 'quarter', 'q').measure!, window: null } });
+    });
+    expect(guard.errors).toEqual([]);
+    expect(guard.perLimit).toEqual([expect.objectContaining({ limit_id: 'min_takings', status: 'asks', reasons: ['It changes over time, so it needs a deadline.'] })]);
+    expect(guard.blockers).toEqual([{ id: 'min_takings', code: 'deadline', scope: ['min_takings'] }]);
+    // Contrast: from the start, or a later start on what it does not rest on, or on an option not compared: read once, in effect.
+    for (const [what, r] of [['from the start', timed(0)], ['a breakdown from the start', timed(0, risk(0))],
+      ['a later change it does not rest on', timed(0, (m) => { m.quantities.push(person('hours', 'hour/week', 50, '50 hours a week'), person('fewer_hours', 'hour/week', 40, 'cut to 40 hours'));
+        m.options.push(option('cut_hours', 'Cut my hours', [set('hours', 'fewer_hours', 'cut to 40 hours', { starts_after_periods: 4 })], 'Cut my hours')); })],
+      ['a known 0-week start held in a figure', timed('lead_time', (m) => m.quantities.push(person('lead_time', 'week', 0, 'it arrives straight away')))],
+      ['a later risk on what it does not rest on', timed(0, (m) => { m.quantities.push(person('hours', 'hour/week', 50, '50 hours a week'), olumi('strain_chance', '1', 0.05, 0.2), olumi('lost_hours', 'hour/week', -10, -2, -5));
+        m.risks.push({ id: 'strain', label: 'Burnout cuts my hours', occurrence: 'strain_chance', severity: 'lost_hours', effect_on: 'hours', mode: 'add', starts_after_periods: 4, author: 'olumi', quote: null, ...base }); })],
+      ['a later start on a ruled-out option', timed(0, (m) => m.options.push({ ...option('second_hand', 'A second-hand oven', [set('ovens_added', 'one_oven', 'a used one', { starts_after_periods: 4 })], 'a used one'), status: 'ruled_out' }))]] as const) {
+      expect(r.errors, what).toEqual([]);
+      expect(r.blockers, what).toEqual([]);
+      expect(r.executable!.goals.find((g) => g.id === 'weekly_profit'), what).toMatchObject({ window: { start_period: 0, periods: 1 }, no_deadline: true });
+    }
+  });
+
   it('DL defect (a), S1 strip (B16 off): an option that reaches only a limit reaches; one that reaches neither is no error and compares as carrying on', () => {
     const m = bakery();
     m.quantities.push(person('hours', 'hour/week', 50, '50 hours a week'), person('fewer_hours', 'hour/week', 40, 'cut to 40 hours'), person('hours_cap', 'hour/week', 45, 'no more than 45 hours'));
@@ -870,19 +917,16 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     }
   });
 
-  it('alpha G6: a setting\'s timing worked out by a relation, or one that does not apply, is a typed error, never period 0', () => {
-    const timed = (opens: Partial<CanonicalQuantityT>, relation = false) => {
+  it('alpha G6: a setting\'s timing that does not apply is a typed error, never period 0 (one worked out by a relation: C10 below)', () => {
+    const timed = (opens: Partial<CanonicalQuantityT>) => {
       const g = gymFilled();
       g.quantities.push(qty('opens', 'month', opens), person('lease', 'month', 2, 'the lease is signed in two months'), person('fit', 'month', 1, 'a month to fit out'));
-      if (relation) g.relations.push(def('opens_rel', 'opens', 'sum', ['lease', 'fit']));
       g.options = g.options.map((o) => (o.id === 'promo' ? { ...o, sets: o.sets.map((s) => ({ ...s, starts_after_periods: 'opens' })) } : o));
       return compile(g);
     };
-    for (const [what, r] of [['derived', timed({ status: 'derived', kind: 'derived' }, true)],
-      ['not applicable', timed({ status: 'not_applicable', author: 'olumi', basis: 'Nothing sets when it opens.' })]] as const) {
-      expect(r.errors.map((e) => [e.code, e.items]), what).toContainEqual(['timing', ['promo', 'opens']]);
-      expect(r.executable, what).toBeNull();
-    }
+    const r = timed({ status: 'not_applicable', author: 'olumi', basis: 'Nothing sets when it opens.' });
+    expect(r.errors.map((e) => [e.code, e.items])).toContainEqual(['timing', ['promo', 'opens']]);
+    expect(r.executable).toBeNull();
     // Codex r1 #3770: on a ruled-out option it blocks nothing; the live options still run.
     const out = (() => { const g = gymFilled();
       g.quantities.push(qty('opens', 'month', { status: 'derived', kind: 'derived' }), person('lease', 'month', 2, 'the lease is signed in two months'), person('fit', 'month', 1, 'a month to fit out'));
@@ -891,10 +935,55 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       return compile(g); })();
     expect(out.errors).toEqual([]);
     expect(out.executable!.options.map((o) => o.id)).toEqual(['carry_on']);
+    // The same on a timing that does not apply: a ruled-out option is never built, so it is no error (review on #3849).
+    const outNa = (() => { const g = gymFilled();
+      g.quantities.push(qty('opens', 'month', { status: 'not_applicable', author: 'olumi', basis: 'Nothing sets when it opens.' }));
+      g.options = g.options.map((o) => (o.id === 'promo' ? { ...o, status: 'ruled_out' as const, sets: o.sets.map((s) => ({ ...s, starts_after_periods: 'opens' })) } : o));
+      return compile(g); })();
+    expect(outNa.errors).toEqual([]);
+    expect(outNa.executable!.options.map((o) => o.id)).toEqual(['carry_on']);
     // Contrast: an asked timing is asked of them (the option waits on it), never an error and never period 0.
     const asked = timed({ status: 'asked', question: 'When does it open?' });
     expect(asked.errors).toEqual([]);
     expect(asked.perOption.find((o) => o.option_id === 'promo')).toMatchObject({ status: 'asks', asks: ['opens'] });
+  });
+
+  it('C10 (spec §3.5): a start time worked out by a relation withholds only what rests on it, as unsupported, never period 0 and never a model error', () => {
+    const opens = (g: CanonicalModelT) => {
+      g.quantities.push(derived('opens', 'month'), person('lease', 'month', 2, 'the lease is signed in two months'), person('fit', 'month', 1, 'a month to fit out'));
+      g.relations.push(def('opens_rel', 'opens', 'sum', ['lease', 'fit']));
+      return g;
+    };
+    const why = 'rests on "opens": a start time worked out by a relation is unsupported; give a most likely figure, or ask';
+    // A live option starting then: that option is withheld; both goals still calculate, compared with carrying on.
+    const g = opens(gymFilled());
+    g.options = g.options.map((o) => (o.id === 'promo' ? { ...o, sets: o.sets.map((s) => ({ ...s, starts_after_periods: 'opens' })) } : o));
+    const r = compile(g);
+    expect(r.errors).toEqual([]);
+    expect(r.perOption.map((p) => [p.option_id, p.status, p.reasons])).toEqual([['promo', 'withheld', [why]], ['carry_on', 'calculable', []]]);
+    expect(r.perGoal.map((p) => [p.goal_id, p.status])).toEqual([['reach_400', 'calculable'], ['class_income', 'calculable']]);
+    expect(r.executable!.options.map((o) => o.id)).toEqual(['carry_on']);
+    expect(r.executable!.withheld).toEqual([{ id: 'promo', kind: 'option', label: 'Run a summer promotion', reason: why }]);
+    expect(r.in_model).toEqual(expect.arrayContaining(['opens', 'lease', 'fit'])); // kept in the model, for correction
+    // A risk starting then: only the goal it reaches is withheld; the members goal still calculates.
+    const k = opens(gymFilled());
+    k.quantities.push(olumi('leave_chance', '1', 0.05, 0.2), olumi('class_loss', '1', 0.5, 0.9, 0.7));
+    k.risks.push({ id: 'instructor_leaves', label: 'The instructor leaves', occurrence: 'leave_chance', severity: 'class_loss', effect_on: 'class_revenue', mode: 'multiply', starts_after_periods: 'opens', author: 'olumi', quote: null, ...base });
+    const rk = compile(k);
+    expect(rk.errors).toEqual([]);
+    expect(rk.perGoal.map((p) => [p.goal_id, p.status])).toEqual([['reach_400', 'calculable'], ['class_income', 'withheld']]);
+    expect(rk.perGoal.find((p) => p.goal_id === 'class_income')!.reasons).toEqual([why]);
+    expect(rk.executable!.goals.map((x) => x.id)).toEqual(['reach_400']);
+    // Contrast: the same risk from a given start time runs, with both goals.
+    const given = opens(gymFilled());
+    given.quantities = given.quantities.map((q) => (q.id === 'opens' ? person('opens', 'month', 3, 'it opens in three months') : q));
+    given.relations = given.relations.filter((x) => x.id !== 'opens_rel');
+    given.quantities.push(olumi('leave_chance', '1', 0.05, 0.2), olumi('class_loss', '1', 0.5, 0.9, 0.7));
+    given.risks.push({ ...k.risks[0] });
+    const rg = compile(given);
+    expect(rg.errors).toEqual([]);
+    expect(rg.executable!.goals.map((x) => x.id)).toEqual(['reach_400', 'class_income']);
+    expect(rg.executable!.risks).toEqual([{ id: 'instructor_leaves', occurrence: 'leave_chance', severity: 'class_loss', effect_on: 'class_revenue', mode: 'multiply', from_period: 3 }]);
   });
 
   it('Codex r1 #3771: a setting is read within what it sets in ITS own unit, and within every quantity it sets at once, whatever the order', () => {
