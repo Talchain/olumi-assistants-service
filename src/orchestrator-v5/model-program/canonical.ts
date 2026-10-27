@@ -25,7 +25,8 @@
  *    (end, sum, mean, every, max, min), optional rate denominator (`per`) and window;
  *  · a window's length and its origin's timing are quantities, and timing may name a quantity, so every ask fills exactly one
  *    quantity;
- *  · authorship (`author`, `party`, `quote`, `author_id`) and approval are on every record, and on every effect term.
+ *  · authorship (`author`, `party`, `quote`, `author_id`) and approval (`approval`, `approved_by`) are on every record, and on
+ *    every effect term: who said it and who accepted it are separate facts (C6).
  *
  * Strict-output shape: every field is present (null when not stated), every object is closed, unions are `anyOf`, and no
  * number carries a bound (bounds are checked in `compile.ts`, where the error is a sentence the AI can act on).
@@ -53,7 +54,7 @@ export const APPROVALS = ['proposed', 'approved'] as const;
  * The fields only Olumi's host sets (Paul 26 Oct: the AI does no unnecessary work): never in the schema the drafter is sent
  * (`prompt.ts`), and set by the host when a draft is read (`draft.ts` withHostFields). The stored model keeps them.
  */
-export const HOST_OWNED_FIELDS = ['approval', 'author_id'] as const;
+export const HOST_OWNED_FIELDS = ['approval', 'approved_by', 'author_id'] as const;
 
 /** Who asserted it, in whose words, and whether the person has accepted it. Separate facts, never one. */
 const attribution = {
@@ -64,7 +65,10 @@ const attribution = {
   quote: z.string().nullable().describe(
     "The person's exact words that state this, copied verbatim from what they wrote. Required for the person's figures and relations. Null for Olumi's own items."),
   approval: z.enum(APPROVALS).describe('proposed: not yet accepted by the person (always, in a draft). approved: the person accepted it (set by Olumi\'s host, never by the draft).'),
-  author_id: z.string().nullable().describe('Set by Olumi\'s host: which person said or approved it, when several people work on one model. Always null in a draft.'),
+  // C6 (27 Oct 2026): approving never makes the approver the author. A record approved before this held its approver in
+  // author_id; it reads with approved_by null (`withDeclaredTiming`) and is never rewritten on read.
+  approved_by: z.string().nullable().describe('Set by Olumi\'s host: which person accepted it, on an approved record; null when proposed or not known.'),
+  author_id: z.string().nullable().describe('Set by Olumi\'s host: which person said it (whose words these are), when several people work on one model; null for Olumi\'s own and when not known. Never who approved it. Always null in a draft.'),
 };
 
 // ── Quantities ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -126,6 +130,7 @@ export const CanonicalQuantity = z.object({
   party: attribution.party,
   quote: attribution.quote,
   approval: attribution.approval,
+  approved_by: attribution.approved_by,
   author_id: attribution.author_id,
 }).strict();
 export type CanonicalQuantityT = z.infer<typeof CanonicalQuantity>;
@@ -272,15 +277,20 @@ export const OPTION_STATUSES = ['live', 'ruled_out', 'removed'] as const;
 export const STARTS_AFTER_PERIODS = 'How many whole periods pass before it takes effect: 0 = from the start ("straight away", "from the first month" and "from now" are all 0), "from month 3" is 2, "in two months" is 2';
 const timing = z.union([z.number().int(), id]).describe(`${STARTS_AFTER_PERIODS}. Or the id of a quantity in the model's period unit giving that count, when the timing is the person's figure, asked, or differs by option ("when the extension opens").`);
 /** The old fields, mapped ONCE, where a saved model is read (program-store): `from_period` k is `starts_after_periods` k, the
- *  same count under its old name. Missing quantity direction and physical bounds read as null, without inferring them.
+ *  same count under its old name. Missing quantity direction and physical bounds read as null, without inferring them, and
+ *  so does a missing approved_by on a record, a link or a history entry (C6): an earlier approver stays where it was saved.
  *  A model that has both timing names, or neither, is left for the schema to judge. */
 export function withDeclaredTiming(raw: unknown): unknown {
   const rec = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
   const renamed = (x: unknown) => { if (!rec(x) || !('from_period' in x) || 'starts_after_periods' in x) return x; const { from_period, ...rest } = x; return { ...rest, starts_after_periods: from_period }; };
   if (!rec(raw) || !Array.isArray(raw['options']) || !Array.isArray(raw['risks'])) return raw;
   const declaredQuantity = (x: unknown) => (rec(x) ? { direction: null, floor: null, ceiling: null, ...x } : x);
-  return { ...raw, ...(Array.isArray(raw['quantities']) ? { quantities: raw['quantities'].map(declaredQuantity) } : {}),
+  const approver = (x: unknown): unknown => (Array.isArray(x) ? x.map(approver) : !rec(x) ? x
+    : Object.fromEntries([...Object.entries(x).map(([k, v]) => [k, approver(v)] as const), ...('approval' in x && !('approved_by' in x) ? [['approved_by', null] as const] : [])]));
+  const read = { ...raw, ...(Array.isArray(raw['quantities']) ? { quantities: raw['quantities'].map(declaredQuantity) } : {}),
     options: raw['options'].map((o) => (rec(o) && Array.isArray(o['sets']) ? { ...o, sets: o['sets'].map(renamed) } : o)), risks: raw['risks'].map(renamed) };
+  return Object.fromEntries(Object.entries(read).map(([k, v]) => [k, !Array.isArray(v) ? v : k === 'history'
+    ? v.map((h) => (rec(h) && !('approved_by' in h) ? { ...h, approved_by: null } : h)) : approver(v)]));
 }
 
 export const CanonicalOptionSet = z.object({
@@ -371,6 +381,7 @@ export const CanonicalHistoryEntry = z.object({
   old: z.string().describe('The earlier record, as JSON text, so a correction never loses what it replaced.'),
   quote: attribution.quote,
   author_id: attribution.author_id,
+  approved_by: z.string().nullable().describe('Set by Olumi\'s host: which person approved this change; null when not known.'),
 }).strict();
 
 // ── The model ────────────────────────────────────────────────────────────────────────────────────────────────────────────

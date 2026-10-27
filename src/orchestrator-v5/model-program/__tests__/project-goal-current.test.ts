@@ -12,7 +12,7 @@ import { compile } from '../compile.js';
 import { project } from '../project.js';
 import { exactInitialValues } from '../simulate/simulate.js';
 
-const record = { party: null, approval: 'approved' as const, author_id: null };
+const record = { party: null, approval: 'approved' as const, approved_by: null, author_id: null };
 const bounds = { floor: null, ceiling: null };
 const quantity = (id: string, unit: string, value: number | null, patch: Partial<CanonicalQuantityT> = {}): CanonicalQuantityT => ({
   id, label: id, unit, value, kind: 'fact', status: 'known', low: null, high: null, range_kind: null,

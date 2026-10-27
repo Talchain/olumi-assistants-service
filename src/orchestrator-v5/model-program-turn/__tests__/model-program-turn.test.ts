@@ -510,9 +510,9 @@ describe('the model-program turn on the real core route', () => {
       const saved = (read.kind === 'program' ? read.program.canonical : null)!;
       const none = { version: saved.version, question: null, period: null, quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [], claims: [],
         evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: [] };
-      const broken = { ...none, claims: [{ id: 'nowhere', text: 'Bread sells.', concerns: ['no_such_record'], author: 'olumi', quote: null, party: null, approval: 'proposed', author_id: null }] };
+      const broken = { ...none, claims: [{ id: 'nowhere', text: 'Bread sells.', concerns: ['no_such_record'], author: 'olumi', quote: null, party: null, approval: 'proposed', approved_by: null, author_id: null }] };
       const landlord = { id: 'landlord_agrees', text: 'Only once the landlord agrees.', kind: 'prerequisite', concerns: ['second_oven'], author: 'person', party: null,
-        quote: 'the landlord must agree first', approval: 'proposed', author_id: null };
+        quote: 'the landlord must agree first', approval: 'proposed', approved_by: null, author_id: null };
       const words = 'The oven would cost £2,500, and the landlord must agree first.';
       replies = [JSON.stringify(broken), overloaded, JSON.stringify({ ...none, conditions: [landlord] })];
       sent.length = 0;
@@ -1151,7 +1151,8 @@ describe('the model-program turn on the real core route', () => {
       .toEqual({ direction: 'lowers', after: `no figure yet (in loaf/week/oven), ↓ lowers, a rate, not known yet, based on "${BASIS}"` });
   });
 
-  it('alpha G16: approval records WHO approved (author_id) and never who said it: author, party and quote stay each item\'s own', () => {
+  // C6 (27 Oct 2026): who approved is approved_by; author_id is who said it (the C6 rows below), no longer the approver.
+  it('alpha G16: approval records WHO approved (approved_by) and never who said it: author, party and quote stay each item\'s own', () => {
     const APPROVER = 'user-7f3a';
     const draft = bakery();
     const v = readingOf(draft, { words: [BRIEF], approver: APPROVER });
@@ -1162,7 +1163,7 @@ describe('the model-program turn on the real core route', () => {
       const before = new Map((draft[family] as Json[]).map((r) => [r.id, r]));
       for (const r of v.model[family] as Json[]) {
         expect(origin(r), `${family}/${r.id}`).toEqual(origin(before.get(r.id)!));
-        expect([r.approval, r.author_id], `${family}/${r.id}`).toEqual(['approved', APPROVER]);
+        expect([r.approval, r.approved_by], `${family}/${r.id}`).toEqual(['approved', APPROVER]);
       }
     }
     // Olumi's own items stay Olumi's after a person approves them: approval is not authorship.
@@ -1256,9 +1257,11 @@ describe('the model-program turn on the real core route', () => {
     const EXEMPT: Record<string, string> = {
       id: 'the change\'s own id: the card entry is keyed by it (postimage `bare`)',
       approval: 'host-owned, at any depth (postimage HOST_FIELDS)',
+      // C6 (27 Oct 2026): who approved it, apart from who said it.
+      approved_by: 'host-owned, at any depth (postimage HOST_FIELDS)',
       author_id: 'host-owned, at any depth (postimage HOST_FIELDS)',
     };
-    const exemptAs = (path: string) => (path === 'id' ? 'id' : ['approval', 'author_id'].find((k) => path === k || path.endsWith(`.${k}`)));
+    const exemptAs = (path: string) => (path === 'id' ? 'id' : ['approval', 'approved_by', 'author_id'].find((k) => path === k || path.endsWith(`.${k}`)));
     const defOf = (s: z.ZodType) => s._zod.def as Record<string, any>;
     /** Every field of a schema, as the card's diff names it: records key by key, a list's entries as `*`. */
     const fields = (s: z.ZodType, path = ''): string[] => {
@@ -1541,7 +1544,8 @@ describe('the model-program turn on the real core route', () => {
     expect(after.quantities.find((x) => x.id === 'oven_price')).toMatchObject({ status: 'known', value: 2500, low: null, high: null, author: 'person', quote: words, approval: 'approved', question: null });
     expect(after.quantities.filter((x) => x.id !== 'oven_price')).toEqual(before.quantities.filter((x) => x.id !== 'oven_price'));
     expect({ ...after, quantities: [], history: [] }).toEqual({ ...before, quantities: [], history: [] });
-    expect(after.history).toEqual([...before.history, { id: 'oven_price', change: 'superseded', old: JSON.stringify(before.quantities.find((x) => x.id === 'oven_price')), quote: words, author_id: null }]);
+    // C6 (27 Oct 2026): the entry records who approved the change apart from who said it (a guest here: neither known).
+    expect(after.history).toEqual([...before.history, { id: 'oven_price', change: 'superseded', old: JSON.stringify(before.quantities.find((x) => x.id === 'oven_price')), quote: words, author_id: null, approved_by: null }]);
     expect(persisted!.living_model.person_words).toEqual([BRIEF, words]);
     // The approved card's frozen program is what was written: model and Run.
     expect(stableStringify(persisted!.living_model)).toBe(stableStringify(deps.proposals.get(proposed.data.proposal_id)!.living_model));
@@ -1644,7 +1648,7 @@ describe('the model-program turn on the real core route', () => {
       'dissent', 'conditions', 'left_out'] as const).flatMap((f) => (m[f] as readonly { id: string }[]).filter((r) => !ids.includes(r.id)).map((r) => `${f}:${JSON.stringify(r)}`));
     const baseSales = { ...saved.quantities.find((x) => x.id === 'base_sales')!, value: 320, quote: 'We bake 320 loaves a week now' };
     const landlord = { id: 'landlord_agrees', text: 'Only once the landlord agrees.', kind: 'prerequisite', concerns: ['second_oven'], author: 'person', party: null,
-      quote: 'the landlord must agree first', approval: 'proposed', author_id: null };
+      quote: 'the landlord must agree first', approval: 'proposed', approved_by: null, author_id: null };
 
     // (1) ONE changed record: the card holds that one change, and every other record is the saved one, byte for byte
     // (positive control: the records compared); the question, time step and version are the saved ones.
@@ -1706,7 +1710,7 @@ describe('the model-program turn on the real core route', () => {
 
     // (6) A merged model that does not compile is refused as today, after the drafter's two repairs; each repair asks for
     // the changes again (never the whole model), after the changes it returned.
-    const broken = { claims: [{ id: 'nowhere', text: 'Bread sells.', concerns: ['no_such_record'], author: 'olumi', quote: null, party: null, approval: 'proposed', author_id: null }] };
+    const broken = { claims: [{ id: 'nowhere', text: 'Bread sells.', concerns: ['no_such_record'], author: 'olumi', quote: null, party: null, approval: 'proposed', approved_by: null, author_id: null }] };
     const info = vi.spyOn(staticLog, 'info'); // the instance the statically imported tools hold (the routes are re-imported after resetModules)
     expect(await propose(broken, {}, 3)).toMatchObject({ status: 'refused', reason: 'does_not_compile' });
     // Why it took three calls is logged: each attempt's compiler codes, never words (T record 26 Oct: a 124 s edit's second draft had no recorded cause).
@@ -1869,7 +1873,7 @@ describe('the model-program turn on the real core route', () => {
     const edited = (drop: boolean) => savedWith((d) => {
       if (drop) d.options = d.options.filter((o) => o.id !== 'keep_one');
       setQ(d, 'oven_price', { status: 'known', value: 2000, question: null, quote: 'the oven is £2,000' });
-      d.conditions.push({ id: 'landlord_agrees', text: 'Only once the landlord agrees.', kind: 'prerequisite', concerns: ['second_oven'], author: 'person', party: null, quote: 'our landlord must agree first', approval: 'proposed', author_id: null });
+      d.conditions.push({ id: 'landlord_agrees', text: 'Only once the landlord agrees.', kind: 'prerequisite', concerns: ['second_oven'], author: 'person', party: null, quote: 'our landlord must agree first', approval: 'proposed', approved_by: null, author_id: null });
     });
     // Left out with no listed removal: refused, and nothing is proposed.
     replies = [edited(true)];
@@ -2089,7 +2093,8 @@ describe('the model-program turn on the real core route', () => {
     expect(r.changes).toEqual([{ id: 'base_sales', kind: 'quantity', action: 'change', label: 'base sales', before: '300 loaf/week, in your words "We bake 300 loaves a week"',
       after: '320 loaf/week, in your words "base sales: 320 loaf/week"', author: 'person', family: 'quantity' }]);
     const after = persisted!.living_model.canonical as CanonicalModelT;
-    expect(after.history.at(-1)).toEqual({ id: 'base_sales', change: 'superseded', old: JSON.stringify(before.quantities.find((x) => x.id === 'base_sales')), quote: 'base sales: 320 loaf/week', author_id: null });
+    // C6 (27 Oct 2026): who approved it is recorded apart from who said it (a guest: neither known).
+    expect(after.history.at(-1)).toEqual({ id: 'base_sales', change: 'superseded', old: JSON.stringify(before.quantities.find((x) => x.id === 'base_sales')), quote: 'base sales: 320 loaf/week', author_id: null, approved_by: null });
     expect(after.quantities.find((x) => x.id === 'base_sales')).toMatchObject({ value: 320, author: 'person', quote: 'base sales: 320 loaf/week', approval: 'approved', status: 'known' });
     // Through the route, a goal's target typed on its card: saved, still no AI call.
     const t = await turn({ kind: 'system_event', event: { kind: 'goal_target_edit', goal_node_id: 'more_loaves', constraint_type: 'at_least', raw_value: 400, unit: 'loaf/week', base_graph_hash: hashOf(persisted) } });
@@ -2100,6 +2105,8 @@ describe('the model-program turn on the real core route', () => {
 
   // ── HC0 (spec §3, "Authorship and acceptance are separate"): the route passed no user, so a card edit saved author_id null and
   // erased an earlier approver's id from the record. Every row on the REAL route, every record bound by its family and id. ──
+  // C6 (27 Oct 2026): the editor types the figure, so they both said it (author_id) and approved it (approved_by), on the record
+  // and its history entry; before C6 author_id alone held the approver.
   describe('HC0: a canvas edit on a program changes only the edited record, and records who edited it', () => {
     const EDITOR = 'user-hc0-editor';
     const EARLIER = 'user-hc0-earlier-approver';
@@ -2143,15 +2150,15 @@ describe('the model-program turn on the real core route', () => {
       const after = persisted!.living_model.canonical as CanonicalModelT;
       const now = recordsOf(after);
       // The edited record: their typed figure, in the words they typed, approved by the editor (never by no one, never by the earlier approver).
-      expect(now.get('quantities/base_sales')).toEqual({ ...was.get('quantities/base_sales'), value: 320, quote: 'base sales: 320 loaf/week', approval: 'approved', author_id: EDITOR });
+      expect(now.get('quantities/base_sales')).toEqual({ ...was.get('quantities/base_sales'), value: 320, quote: 'base sales: 320 loaf/week', approval: 'approved', approved_by: EDITOR, author_id: EDITOR });
       expect(after.history).toEqual([...before.history,
-        { id: 'base_sales', change: 'superseded', old: JSON.stringify(was.get('quantities/base_sales')), quote: 'base sales: 320 loaf/week', author_id: EDITOR }]);
+        { id: 'base_sales', change: 'superseded', old: JSON.stringify(was.get('quantities/base_sales')), quote: 'base sales: 320 loaf/week', author_id: EDITOR, approved_by: EDITOR }]);
       // The earlier approver is never erased: the record they approved is kept whole in the edit's history entry.
       expect(JSON.parse(after.history.at(-1)!.old)).toMatchObject({ value: 300, quote: 'We bake 300 loaves a week', approval: 'approved', author_id: EARLIER });
       othersAsSaved(was, now, 'quantities/base_sales');
       expect([after.version, after.question, after.period]).toEqual([before.version, before.question, before.period]);
-      // The editor is named on that record and its history entry, and nowhere else in the model.
-      expect(JSON.stringify(after).split(EDITOR).length - 1).toBe(2);
+      // The editor is named on that record and its history entry (as who said it and who approved it), and nowhere else in the model.
+      expect(JSON.stringify(after).split(EDITOR).length - 1).toBe(4);
     });
 
     it('a goal\'s target typed on its card: the target figure is approved by the editor, and the goal and every other record are exactly as saved', async () => {
@@ -2163,8 +2170,8 @@ describe('the model-program turn on the real core route', () => {
       expect([edit.statusCode, edit.json().error], edit.body).toEqual([200, null]);
       const after = persisted!.living_model.canonical as CanonicalModelT;
       const now = recordsOf(after);
-      expect(now.get('quantities/sales_target')).toEqual({ ...was.get('quantities/sales_target'), value: 400, quote: 'Reach 380 loaves a week target: 400 loaf/week', approval: 'approved', author_id: EDITOR });
-      expect(after.history.at(-1)).toEqual({ id: 'sales_target', change: 'superseded', old: JSON.stringify(was.get('quantities/sales_target')), quote: 'Reach 380 loaves a week target: 400 loaf/week', author_id: EDITOR });
+      expect(now.get('quantities/sales_target')).toEqual({ ...was.get('quantities/sales_target'), value: 400, quote: 'Reach 380 loaves a week target: 400 loaf/week', approval: 'approved', approved_by: EDITOR, author_id: EDITOR });
+      expect(after.history.at(-1)).toEqual({ id: 'sales_target', change: 'superseded', old: JSON.stringify(was.get('quantities/sales_target')), quote: 'Reach 380 loaves a week target: 400 loaf/week', author_id: EDITOR, approved_by: EDITOR });
       othersAsSaved(was, now, 'quantities/sales_target');
     });
 
@@ -2178,7 +2185,7 @@ describe('the model-program turn on the real core route', () => {
       const after = persisted!.living_model.canonical as CanonicalModelT;
       const now = recordsOf(after);
       expect(now.get('quantities/base_sales')).toEqual({ ...was.get('quantities/base_sales'), value: 320, quote: 'base sales: 320 loaf/week', approval: 'approved', author_id: null });
-      expect(after.history.at(-1)).toEqual({ id: 'base_sales', change: 'superseded', old: JSON.stringify(was.get('quantities/base_sales')), quote: 'base sales: 320 loaf/week', author_id: null });
+      expect(after.history.at(-1)).toEqual({ id: 'base_sales', change: 'superseded', old: JSON.stringify(was.get('quantities/base_sales')), quote: 'base sales: 320 loaf/week', author_id: null, approved_by: null });
       othersAsSaved(was, now, 'quantities/base_sales');
     });
 
@@ -2194,7 +2201,7 @@ describe('the model-program turn on the real core route', () => {
       expect([inside.statusCode, inside.json().error], inside.body).toEqual([200, null]);
       const now = recordsOf(persisted!.living_model.canonical as CanonicalModelT);
       expect(now.get('quantities/base_sales')).toEqual({ ...was.get('quantities/base_sales'), value: 310, low: 280, high: 320, range_kind: 'bounds',
-        quote: 'base sales: 310 loaf/week, within 280 to 320', approval: 'approved', author_id: EDITOR });
+        quote: 'base sales: 310 loaf/week, within 280 to 320', approval: 'approved', approved_by: EDITOR, author_id: EDITOR });
       othersAsSaved(was, now, 'quantities/base_sales');
       // Contrast: Olumi's estimate is a range of Olumi's; the person types one figure, so the figure is theirs and the range goes.
       expect(now.get('quantities/sell_through')).toMatchObject({ value: 0.7, low: 0.5, high: 0.9, author: 'olumi', approval: 'proposed', author_id: null });
@@ -2220,6 +2227,69 @@ describe('the model-program turn on the real core route', () => {
       expect(legacyForwards).toHaveLength(0);
       expect([registered.length, sent.length]).toEqual([saves, 0]);
       expect(persisted).toEqual(plain);
+    });
+  });
+
+  // ── C6 (alpha spec §7, §3; 27 Oct 2026): accepting changes acceptance, never who said it. Source words, contributor
+  // (author_id) and approval actor (approved_by) are three facts. Every row on the real path, every record bound by its id. ──
+  describe('C6: who said it and who approved it stay separate', () => {
+    const APPROVER = 'user-c6-approver';
+    const EARLIER = 'user-c6-earlier-contributor';
+    const byId = (m: CanonicalModelT, family: 'quantities' | 'relations' | 'goals' | 'limits', id: string) => (m[family] as readonly Json[]).find((r) => r.id === id)!;
+    const host = (r: Json) => ({ author: r.author, party: r.party, quote: r.quote, approval: r.approval, author_id: r.author_id, approved_by: r.approved_by });
+
+    it('confirming the first reading accepts Olumi\'s estimates as Olumi\'s: value, author and words untouched, author_id null, the approver recorded apart; the brief\'s own records are said by its writer', async () => {
+      replies = [JSON.stringify(bakery())];
+      const proposals = new ProposalStore();
+      const out = await runModelProgramTurn({ scenarioId: SCENARIO, turnId: randomUUID(), message: BRIEF, saved: { graph: null, identity: null }, dispatch, proposals, userId: APPROVER });
+      expect(out.toolCalls[1]).toMatchObject({ name: 'confirm_reading', ok: true });
+      expect(await applyProgramChange({ dispatch, proposals }, { scenario_id: SCENARIO, authenticated_user_id: APPROVER, turn_id: randomUUID() }, out.toolCalls[1]!.proposal_id!))
+        .toMatchObject({ status: 'ok', data: { saved: true } });
+      const m = persisted!.living_model.canonical as CanonicalModelT;
+      // Olumi's estimate: accepted, by the approver; its figure and its author exactly as drafted, and said by no person.
+      expect(byId(m, 'quantities', 'sell_through')).toMatchObject({ value: 0.7, low: 0.5, high: 0.9, range_kind: 'plausible', status: 'estimated' });
+      expect(host(byId(m, 'quantities', 'sell_through'))).toEqual({ author: 'olumi', party: null, quote: null, approval: 'approved', author_id: null, approved_by: APPROVER });
+      expect(host(byId(m, 'relations', 'sold_rel'))).toEqual({ author: 'olumi', party: null, quote: null, approval: 'approved', author_id: null, approved_by: APPROVER });
+      // Contrast: a figure in the brief's words is said by the person who wrote the brief; one of theirs with no words is said by no one known.
+      expect(host(byId(m, 'quantities', 'base_sales'))).toEqual({ author: 'person', party: null, quote: 'We bake 300 loaves a week', approval: 'approved', author_id: APPROVER, approved_by: APPROVER });
+      expect(host(byId(m, 'quantities', 'oven_price'))).toEqual({ author: 'person', party: null, quote: null, approval: 'approved', author_id: null, approved_by: APPROVER });
+      // A link in the person's words inside Olumi's relation: each carries its own.
+      const link = byId(m, 'relations', 'sales_rel');
+      expect([host(link), host(link.terms[0])]).toEqual([{ author: 'olumi', party: null, quote: null, approval: 'approved', author_id: null, approved_by: APPROVER },
+        { author: 'person', party: null, quote: 'A second oven adds about 100 loaves a week', approval: 'approved', author_id: APPROVER, approved_by: APPROVER }]);
+    });
+
+    it('a card approved by one person keeps an earlier contributor on a record whose words it does not change; a figure they restate in this turn\'s words is said by them; each history entry carries both', async () => {
+      replies = [JSON.stringify(bakery())];
+      expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+      // As saved after an earlier person stated and confirmed the brief: every record of theirs (a link too) said and approved by EARLIER.
+      const mark = (v: unknown): unknown => (Array.isArray(v) ? v.map(mark) : v !== null && typeof v === 'object'
+        ? Object.fromEntries(Object.entries(v as Json).map(([k, x]) => [k, (v as Json).author !== 'person' ? mark(x) : k === 'approval' ? 'approved'
+          : k === 'author_id' || k === 'approved_by' ? EARLIER : mark(x)])) : v);
+      const m0 = persisted!.living_model.canonical as CanonicalModelT;
+      persisted!.living_model.canonical = { ...m0, ...Object.fromEntries(Object.entries(m0).filter(([k, v]) => k !== 'history' && Array.isArray(v)).map(([k, v]) => [k, mark(v)])) };
+      const before = persisted!.living_model.canonical as CanonicalModelT;
+      expect(host(byId(before, 'goals', 'more_loaves'))).toMatchObject({ author_id: EARLIER, approved_by: EARLIER });
+      const words = 'We now bake 320 loaves a week. Call the goal reach 380 loaves every week.';
+      const deps = { dispatch, proposals: new ProposalStore() };
+      const ctx = { scenario_id: SCENARIO, authenticated_user_id: APPROVER, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
+      replies = [savedWith((d) => { setQ(d, 'base_sales', { value: 320, quote: 'We now bake 320 loaves a week' }); d.goals = d.goals.map((g) => ({ ...g, label: 'Reach 380 loaves every week' })); })];
+      const p = await proposeProgramChange(deps, ctx, { public_label: 'Base sales and the goal', basis: 'their words', request: words, remove: [] }) as Json;
+      expect(p.status, JSON.stringify(p)).toBe('ok');
+      expect(p.data.changes.map((c: Json) => [c.id, c.action])).toEqual([['base_sales', 'change'], ['more_loaves', 'change']]);
+      expect(await applyProgramChange(deps, ctx, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+      const after = persisted!.living_model.canonical as CanonicalModelT;
+      // Restated in this turn's words: said by the approver, who also approved it.
+      expect(byId(after, 'quantities', 'base_sales')).toMatchObject({ value: 320 });
+      expect(host(byId(after, 'quantities', 'base_sales'))).toEqual({ author: 'person', party: null, quote: 'We now bake 320 loaves a week', approval: 'approved', author_id: APPROVER, approved_by: APPROVER });
+      // Renamed, its words unchanged: still said by EARLIER, now approved by the approver (never made its author).
+      expect(byId(after, 'goals', 'more_loaves')).toMatchObject({ label: 'Reach 380 loaves every week' });
+      expect(host(byId(after, 'goals', 'more_loaves'))).toEqual({ author: 'person', party: null, quote: 'want to reach 380 loaves a week', approval: 'approved', author_id: EARLIER, approved_by: APPROVER });
+      // Contrast: a record the card does not touch is exactly as saved.
+      expect(byId(after, 'quantities', 'budget')).toEqual(byId(before, 'quantities', 'budget'));
+      expect(after.history.slice(before.history.length)).toEqual([
+        { id: 'base_sales', change: 'superseded', old: JSON.stringify(byId(before, 'quantities', 'base_sales')), quote: 'We now bake 320 loaves a week', author_id: APPROVER, approved_by: APPROVER },
+        { id: 'more_loaves', change: 'superseded', old: JSON.stringify(byId(before, 'goals', 'more_loaves')), quote: 'want to reach 380 loaves a week', author_id: EARLIER, approved_by: APPROVER }]);
     });
   });
 
@@ -2265,7 +2335,7 @@ describe('the model-program turn on the real core route', () => {
   it('the agent\'s context after a cold reopen is the model AS AUTHORED: relations, coefficient basis and range kind, goal windows, option timing, the qualitative records, and the Run\'s goal_chance unchanged', async () => {
     const brief = `${CLUB_BRIEF} Sam thinks promotions never last.`;
     const m = club();
-    m.dissent = [{ id: 'sam_doubts', holder: 'Sam', position: 'Promotions never last.', concerns: ['promotion'], author: 'person', party: null, quote: 'Sam thinks promotions never last', approval: 'proposed', author_id: null }];
+    m.dissent = [{ id: 'sam_doubts', holder: 'Sam', position: 'Promotions never last.', concerns: ['promotion'], author: 'person', party: null, quote: 'Sam thinks promotions never last', approval: 'proposed', approved_by: null, author_id: null }];
     replies = [JSON.stringify(m)];
     expect((await turn({ message: brief })).json().model_program.saved).toBe(true);
     vi.resetModules();
@@ -2935,7 +3005,7 @@ describe('the model-program turn on the real core route', () => {
       const m = bakery();
       m.quantities.push(q('more_loaves_target', 'loaf/week', { value: 380, quote }), ...(window ? [q('more_loaves_window', 'week', { value: 4, quote })] : []));
       const notes = leaves.map((w, i) => ({ id: `more_loaves_leaves_out${i === 0 ? '' : `_${i + 1}`}`, text: w, why: 'It is part of the aim they stated, but it has no measure yet, so the chance does not cover it.',
-        question: `How would you measure "${w}"?`, concerns: ['more_loaves'], author: 'person' as const, party: null, quote: w, approval: 'approved' as const, author_id: null }));
+        question: `How would you measure "${w}"?`, concerns: ['more_loaves'], author: 'person' as const, party: null, quote: w, approval: 'approved' as const, approved_by: null, author_id: null }));
       m.left_out.push(...notes);
       m.goals = [{ ...m.goals[0]!, question: null, measure: { quantity: 'sales', per: null, cmp: '>=', target: 'more_loaves_target', frame: 'level', reference: null, aggregation: 'end',
         window: window ? { origin_event: null, origin_offset: null, start: 0, periods: 'more_loaves_window' } : null, measure_by: 'person', assumptions: [], exclusions: notes.map((n) => n.id) } }];
@@ -4084,7 +4154,7 @@ describe('the model-program turn on the real core route', () => {
     it('a reading readingOf refuses holds no card, and the reply has no count line', async () => {
       const m = bakery();
       // A note the card cannot name (no words): readingOf refuses it (S1 strip: the quote check that used to refuse here is off).
-      m.claims.push({ id: 'blank_note', text: '', concerns: [], author: 'olumi', quote: null, party: null, approval: 'proposed', author_id: null });
+      m.claims.push({ id: 'blank_note', text: '', concerns: [], author: 'olumi', quote: null, party: null, approval: 'proposed', approved_by: null, author_id: null });
       replies = [JSON.stringify(m)];
       const proposals = new ProposalStore();
       const out = await runModelProgramTurn({ scenarioId: SCENARIO, turnId: randomUUID(), message: BRIEF, saved: { graph: null, identity: null }, dispatch, proposals });

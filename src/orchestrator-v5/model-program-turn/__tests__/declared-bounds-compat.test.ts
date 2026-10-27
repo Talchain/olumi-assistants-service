@@ -145,3 +145,49 @@ describe('declared physical bounds on saved models', () => {
     expect(opened.run).toEqual(saved.living_model.runs[0]);
   });
 });
+
+describe('C6: a model saved before approved_by (27 Oct 2026)', () => {
+  it('opens with its stored Run current: approved_by reads null on its record, its link and its history entry, author_id is never rewritten on read, and its saved bytes are untouched', () => {
+    // Synthetic, in the format before approved_by: an approved figure, an approved link inside Olumi's relation, and a history
+    // entry, each with author_id holding the person who approved it then.
+    const at = { party: null, approval: 'approved', author_id: 'owner' };
+    const fig = (id: string, unit: string, value: number | null, quote: string | null, f: Record<string, unknown> = {}) => ({ id, label: id.replace(/_/g, ' '), unit, value, low: null, high: null,
+      range_kind: null, direction: null, floor: null, ceiling: null, kind: 'fact', status: 'known', question: null, basis: null, author: 'person', quote, ...at, ...f });
+    const said = ['300 loaves a week', 'one oven', 'each oven adds 100 loaves'];
+    const canonical = {
+      version: 'canonical.v1', question: 'Should the bakery buy a second oven?', period: 'week',
+      quantities: [fig('base_loaves', 'loaf/week', 300, said[0]!), fig('ovens', 'oven', 1, said[1]!), fig('per_oven', 'loaf/week/oven', 100, said[2]!, { kind: 'coefficient' }),
+        fig('loaves', 'loaf/week', null, null, { kind: 'derived', status: 'derived', author: 'olumi' })],
+      relations: [{ form: 'effect', id: 'loaves_rel', defines: 'loaves', base: 'base_loaves', terms: [{ driver: 'ovens', coefficient: 'per_oven', author: 'person', quote: said[2]!, ...at }],
+        author: 'olumi', quote: null, ...at }],
+      goals: [], limits: [], preferences: [], options: [], risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [],
+      history: [{ id: 'base_loaves', change: 'superseded', old: '{"id":"base_loaves","value":280}', quote: said[0]!, author_id: 'owner' }],
+    };
+    // Its digest as stored then, independent of the code: null declarations left out.
+    const quantities = canonical.quantities.map(({ direction: _d, floor: _f, ceiling: _c, ...q }) => q);
+    const digest = createHash('sha256').update(stableStringify({ canonical: { ...canonical, quantities }, person_words: said }), 'utf8').digest('hex');
+    const run: StoredRun = {
+      run_id: 'mp_run_synthetic_before_c6', computed_at: '2026-10-26T12:00:00.000Z',
+      receipt: { revision_digest: digest, versions: priorVersions, seed: 7, draws: null },
+      result: { canonical_analysis_view: { marker: 'stored result, never recomputed',
+        run: { run_id: 'mp_run_synthetic_before_c6', graph_hash_at_run: 'old-graph', computed_at: '2026-10-26T12:00:00.000Z' }, staleness: { stale: false, reason: 'graph_hash_match' } },
+        chances: null, compile: null },
+    };
+    const before = JSON.stringify({ living_model: { model_program: MODEL_PROGRAM, canonical, person_words: said, seed: 7, runs: [run] } });
+    expect(before).not.toContain('approved_by');
+    const cold = JSON.parse(before);
+    const opened = reopenProgram(cold, priorVersions)!;
+    expect(opened).toBeDefined();
+    expect([opened.current, opened.engine_current]).toEqual([true, true]);
+    expect(opened.run).toEqual(run);
+    const m = opened.program.canonical;
+    const who = (r: { author_id: string | null; approved_by: string | null }) => [r.author_id, r.approved_by];
+    const rel = m.relations.find((r) => r.id === 'loaves_rel')!;
+    expect([who(m.quantities.find((q) => q.id === 'base_loaves')!), who(rel), rel.form === 'effect' ? who(rel.terms[0]!) : null, who(m.history[0]!)])
+      .toEqual([['owner', null], ['owner', null], ['owner', null], ['owner', null]]);
+    expect(JSON.stringify(cold)).toBe(before);
+    // Contrast: a named approver is part of the revision.
+    const named = { ...m, quantities: m.quantities.map((q) => (q.id === 'base_loaves' ? { ...q, approved_by: 'owner' } : q)) };
+    expect(revisionDigest(named, said)).not.toBe(digest);
+  });
+});

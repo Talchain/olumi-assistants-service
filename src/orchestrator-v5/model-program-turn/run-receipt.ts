@@ -66,6 +66,8 @@ export type StoredRun = {
   readonly result: { readonly canonical_analysis_view: unknown; readonly chances: unknown; readonly compile: unknown };
 };
 
+type Rec = Record<string, unknown>;
+const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 /** The digest of what an evaluation reads: the canonical model and the person's words. */
 export function revisionDigest(canonical: CanonicalModelT, personWords: readonly string[]): string {
   // Absent declarations read as null without changing an old model's digest. A declared bound still changes its identity.
@@ -75,7 +77,11 @@ export function revisionDigest(canonical: CanonicalModelT, personWords: readonly
     ...(floor === null || floor === undefined ? {} : { floor }),
     ...(ceiling === null || ceiling === undefined ? {} : { ceiling }),
   }));
-  return createHash('sha256').update(stableStringify({ canonical: { ...canonical, quantities }, person_words: personWords }), 'utf8').digest('hex');
+  // C6: an approved_by that reads as null (a model saved before it, a draft, a guest) leaves the digest as it was; a named
+  // approver is part of the revision.
+  const lean = (v: unknown): unknown => (Array.isArray(v) ? v.map(lean)
+    : isRec(v) ? Object.fromEntries(Object.entries(v).filter(([k, x]) => !(k === 'approved_by' && x == null)).map(([k, x]) => [k, lean(x)])) : v);
+  return createHash('sha256').update(stableStringify({ canonical: lean({ ...canonical, quantities }), person_words: personWords }), 'utf8').digest('hex');
 }
 
 export function newRun(args: { canonical: CanonicalModelT; personWords: readonly string[]; seed: number; draws: number | null; result: StoredRun['result'];
@@ -88,8 +94,6 @@ export function newRun(args: { canonical: CanonicalModelT; personWords: readonly
   return { run_id, computed_at, receipt, result: { ...result, canonical_analysis_view: viewOf(result.canonical_analysis_view, { run_id, graph_hash_at_run: receipt.revision_digest, computed_at }, true) } };
 }
 
-type Rec = Record<string, unknown>;
-const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 /** CEE's sentence for a Run the model has moved on from (the core view's `face_when_stale`, one authority for both). */
 export const RUN_AGAIN_FOR_CHANCE = 'Run the analysis again to see the chance.';
 /** For a Run the person's model has NOT moved on from, made stale by an update (the engine, or how the model is read): S4. */

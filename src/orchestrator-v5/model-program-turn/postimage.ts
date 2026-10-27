@@ -13,8 +13,8 @@
  *    drives the card: every changed path is said in plain words on its change's before and after, or, when it has no
  *    plain rendering or reads the same on both sides, the proposal is refused;
  *  · compile: it compiles (the caller's `withNewRun` evaluates it).
- * Host-owned, never the AI's: approval and author_id (an item on an approved card is accepted, its author unchanged), and
- * the history (each change and removal appended).
+ * Host-owned, never the AI's: approval, approved_by and author_id (an item on an approved card is accepted by its approver,
+ * and who said it is unchanged: C6), and the history (each change and removal appended, with who said it and who approved it).
  */
 import { ProposalChangeSchema, type ProposalChange } from '../agent-lane/proposal.js';
 import { readingGroups } from './reading-groups.js';
@@ -83,11 +83,23 @@ export const verbatimIn = (quote: unknown, words: readonly string[]): boolean =>
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 export const withoutHost = (v: unknown): unknown => (Array.isArray(v) ? v.map(withoutHost)
   : isRec(v) ? Object.fromEntries(Object.entries(v).filter(([k]) => !HOST_FIELDS.has(k)).map(([k, x]) => [k, withoutHost(x)])) : v);
-/** The host's own fields, set all the way down a record: its approval, and who approved it. Who authored it is unchanged. */
-const hostSet = (v: unknown, approval: 'proposed' | 'approved', by: string | null): unknown => (Array.isArray(v) ? v.map((x) => hostSet(x, approval, by))
-  : isRec(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, k === 'approval' ? approval : k === 'author_id' ? by : hostSet(x, approval, by)])) : v);
-/** On an approved card: accepted, by the approving person. */
-const accepted = (v: unknown, by: string | null): unknown => hostSet(v, 'approved', by);
+/**
+ * The host's own fields, set all the way down a record (C6, spec §3: authorship and acceptance are separate): its approval
+ * and who approved it (`approved_by`: `by` once approved), and who SAID it (`author_id`), never the approver for being one:
+ * `by` for a record of the person's in words they give in this change (`fresh`), else whoever said the same words in the
+ * saved record (`prior`), else no one known. Olumi's own records, and structure, are said by no person.
+ */
+const hostSet = (v: unknown, approval: 'proposed' | 'approved', by: string | null, fresh: readonly string[] = [], prior?: unknown): unknown => {
+  if (Array.isArray(v)) return v.map((x, i) => hostSet(x, approval, by, fresh, Array.isArray(prior) ? prior[i] : undefined));
+  if (!isRec(v)) return v;
+  const was: Rec = isRec(prior) ? prior : {};
+  const saidBy = () => (v['author'] !== 'person' ? null : verbatimIn(v['quote'], fresh) ? by
+    : WORDS.every((k) => (was[k] ?? null) === (v[k] ?? null)) ? (was['author_id'] ?? null) : null);
+  return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, k === 'approval' ? approval : k === 'approved_by' ? (approval === 'approved' ? by : null)
+    : k === 'author_id' ? saidBy() : hostSet(x, approval, by, fresh, was[k])]));
+};
+/** On an approved card: accepted, by the approving person; who said each part as `hostSet` reads it against the saved record. */
+const accepted = (v: unknown, by: string | null, fresh: readonly string[], prior: unknown): unknown => hostSet(v, 'approved', by, fresh, prior);
 /** A first draft, as the host saves it: every record proposed and approved by no one, whatever the drafter wrote (step 2). */
 export const asDrafted = (m: CanonicalModelT): CanonicalModelT =>
   ({ ...m, ...Object.fromEntries(FAMILIES.map(([f]) => [f, hostSet(m[f], 'proposed', null)])) }) as CanonicalModelT;
@@ -126,7 +138,8 @@ const idsOf = (m: CanonicalModelT, f: Family): string[] => (m[f] as readonly { i
 /**
  * Check `raw`, a whole proposed model, against the saved one. `removals`: the ids the person asked to remove, listed
  * explicitly; `words`: every word of theirs this change may quote (their earlier words and `fresh`, this change's own);
- * `approver`: who approves the card (its items' author_id), null for a guest.
+ * `approver`: who approves the card (its items' approved_by), and the person whose words `fresh` are (in every caller the
+ * same person: the turn's own); null for a guest.
  */
 export function validatePostimage(saved: CanonicalModelT, raw: unknown,
   opts: { readonly removals: readonly string[]; readonly words: readonly string[]; readonly fresh: readonly string[]; readonly approver?: string | null }): PostimageResult {
@@ -222,14 +235,15 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
       const fields = said(String(r['id']), old, r);
       // Unchanged but for what the host owns: the saved record, exactly.
       if (old !== undefined && fields.length === 0 && !unshown.some((u) => u.startsWith(`${String(r['id'])} (`))) return old;
-      const record = accepted(r, opts.approver ?? null) as Rec;
+      const record = accepted(r, opts.approver ?? null, opts.fresh, old) as Rec;
       changes.push(entry(String(r['id']), old === undefined ? 'add' : 'change', fields, now.title(family, record), authorOf(record), r));
-      if (old !== undefined) history.push({ id: String(r['id']), change: 'superseded', old: JSON.stringify(old), quote: typeof r['quote'] === 'string' ? r['quote'] : null, author_id: opts.approver ?? null });
+      if (old !== undefined) history.push({ id: String(r['id']), change: 'superseded', old: JSON.stringify(old), quote: typeof r['quote'] === 'string' ? r['quote'] : null,
+        author_id: typeof record['author_id'] === 'string' ? record['author_id'] : null, approved_by: opts.approver ?? null });
       return record;
     });
     for (const [id, old] of before) if (removals.has(id)) {
       changes.push(entry(id, 'remove', said(id, old, undefined), was.title(family, old), authorOf(old), old));
-      history.push({ id, change: 'withdrawn', old: JSON.stringify(old), quote: null, author_id: opts.approver ?? null });
+      history.push({ id, change: 'withdrawn', old: JSON.stringify(old), quote: null, author_id: null, approved_by: opts.approver ?? null });
     }
     return [family, records];
   })) as Pick<CanonicalModelT, Family>;
@@ -249,11 +263,12 @@ const READING_ORDER: readonly Family[] = ['goals', 'limits', 'options', 'left_ou
 /**
  * "CHECK WHAT I UNDERSTOOD" (step 2): a saved first draft as ONE card, every record an add against an empty model, through
  * the same validator and the same diff as every change, in the reading order. Its model is the draft accepted by the
- * approving person (approval and author_id the host's; author, party and words untouched).
+ * approving person (approval, approved_by and author_id the host's; author, party and words untouched). The draft's words are
+ * the brief, given this turn by that person, so a record of theirs in its words is said by them (C6).
  */
 export function readingOf(model: CanonicalModelT, opts: { readonly words: readonly string[]; readonly approver: string | null }): PostimageResult {
   const empty = { ...model, ...Object.fromEntries(FAMILIES.map(([f]) => [f, []])) } as CanonicalModelT;
-  const v = validatePostimage(empty, model, { removals: [], words: opts.words, fresh: [], approver: opts.approver });
+  const v = validatePostimage(empty, model, { removals: [], words: opts.words, fresh: opts.words, approver: opts.approver });
   if (!v.ok) return v;
   const rank = new Map(READING_ORDER.flatMap((f, i) => idsOf(model, f).map((id) => [id, i] as const)));
   const at = (id: string) => rank.get(id) ?? READING_ORDER.length;

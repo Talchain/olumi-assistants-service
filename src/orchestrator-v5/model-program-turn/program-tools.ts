@@ -15,7 +15,8 @@
  *  · run_analysis: shows the stored Run when it is current; otherwise evaluates a NEW Run and stores it.
  * The canvas's figure edits (`applyCanvasFigure`) are the person's own hand: one figure, built exactly from its target and
  * value (no AI call), through the SAME validator, saved with its Run; the typed edit is its own approval, so no card, and
- * the editing person is that figure's approver (its author_id and its history entry's), as on an approved card.
+ * the editing person both said that figure (its author_id) and approved it (its approved_by), on it and its history entry,
+ * as on an approved card (C6).
  */
 import { z } from 'zod-v4';
 import type { InternalDispatch } from '../core-route/internal-dispatch.js';
@@ -328,9 +329,9 @@ export async function runProgram(deps: ProgramToolDeps, ctx: Ctx): Promise<ToolO
  * The canvas's own figure edits on a program scenario: the person's own hand on ONE figure, by the id it is drawn under
  * (a card's id is its quantity id; a link carries its coefficient's id; a goal's target edit names the goal). Saved at
  * once with a new Run, as the core canvas edit saves; the words the person typed are kept as theirs. `approver`: who typed
- * it (the caller's user id; null for a guest, never guessed): the edited figure's author_id and its history entry's, exactly
- * as `validatePostimage` records an approved card's. A record the edit does not change is as saved, its approval and
- * author_id included.
+ * it (the caller's user id; null for a guest, never guessed): the edited figure's author_id and approved_by, and its history
+ * entry's, exactly as `validatePostimage` records an approved card's (C6). A record the edit does not change is as saved,
+ * its approval, approved_by and author_id included.
  */
 export type CanvasFigure = { readonly quantity_id: string } | { readonly goal_id: string };
 export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch'>, scenarioId: string, edit: { readonly target: CanvasFigure; readonly value: number | null;
