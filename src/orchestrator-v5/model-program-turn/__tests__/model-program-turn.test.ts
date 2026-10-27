@@ -22,7 +22,7 @@ import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_JSO
 import { runModelProgramTurn } from '../turn.js';
 import { evaluateCanonical, seedOf, RUN_DRAWS } from '../evaluate.js';
 import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, sourceTextOf } from '../program-store.js';
-import { proposePostimage, withHostFields } from '../draft.js';
+import { draftCanonicalModel, proposePostimage, withHostFields } from '../draft.js';
 import { applyCanvasFigure, applyProgramChange, holdProgramCard, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
 import { log as staticLog } from '../../../utils/telemetry.js';
 import { GROUPS, readingOf, validatePostimage, withoutHost } from '../postimage.js';
@@ -1080,8 +1080,8 @@ describe('the model-program turn on the real core route', () => {
 
     it('(a) neither schema the drafter is sent (first draft, update) holds approval or author_id anywhere, and each stays valid strict output', () => {
       // Positive control: the walker reaches every attributed object (each record family, the four relation forms, a link, an
-      // option's setting, and a history entry in the first draft's).
-      for (const [name, schema, quoted] of [['draft', CANONICAL_JSON_SCHEMA, 19], ['update', UPDATE_JSON_SCHEMA, 18]] as const) {
+      // option's setting); neither holds a history entry (W2: the host's).
+      for (const [name, schema, quoted] of [['draft', CANONICAL_JSON_SCHEMA, 18], ['update', UPDATE_JSON_SCHEMA, 18]] as const) {
         const a = audit(schema);
         expect([a.host, a.loose, a.quoted], name).toEqual([[], [], quoted]);
         expect(JSON.stringify(schema), name).not.toMatch(/approval|author_id/);
@@ -1137,7 +1137,28 @@ describe('the model-program turn on the real core route', () => {
       // The host fills only a draft: a stored model without them is not read as a program.
       expect(programReadOf(graph(unhosted(approved))).kind).toBe('unreadable');
       // The fill sets the host fields and nothing else.
-      expect(withHostFields(approved)).toEqual(bakery());
+      expect(withHostFields(approved, false)).toEqual(bakery());
+    });
+
+    it('(d) W2 (spec §3, history is host-owned): the first draft is never asked for history, and one whose output carries history anyway is saved with the host\'s alone: none yet', async () => {
+      // As sent: no history in the first draft's schema or its instructions (contrast: the stored format keeps it).
+      expect(JSON.stringify(CANONICAL_JSON_SCHEMA)).not.toContain('history');
+      expect(DRAFTING_INSTRUCTIONS).not.toContain('history');
+      expect(Object.keys((z.toJSONSchema(CanonicalModel) as Json).properties)).toContain('history');
+      // The drafter writes a history of its own: an earlier figure it claims was superseded, said and approved by someone.
+      const made = { id: 'base_sales', change: 'superseded', old: JSON.stringify({ ...bakery().quantities[0], value: 250 }), quote: 'We bake 300 loaves a week', author_id: 'someone-else', approved_by: 'someone-else' };
+      replies = [JSON.stringify({ ...bakery(), history: [made] })];
+      const r = await turn({ message: BRIEF });
+      expect(r.json().model_program.saved).toBe(true);
+      const saved = persisted!.living_model.canonical as CanonicalModelT;
+      expect(saved.history).toEqual([]);
+      // Contrast: every record is the drafter's, as before.
+      expect(saved).toEqual(bakery());
+      // A draft written to the sent schema (no history at all) is read the same way: the host's history, none yet.
+      const { history: _none, ...asSent } = bakery();
+      const out = await draftCanonicalModel(BRIEF, async () => ({ text: JSON.stringify(asSent), status: 'completed', incomplete: null, usage: null }), BRIEF, { interpret: true });
+      expect(out.attempts.map((x) => x.errors?.length ?? x.failed)).toEqual([0]);
+      expect(out.model!.history).toEqual([]);
     });
   });
 
