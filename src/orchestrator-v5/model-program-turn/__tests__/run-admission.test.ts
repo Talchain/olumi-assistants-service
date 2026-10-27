@@ -5,13 +5,14 @@
  * is not measured, and readiness says such a model is blocked. Every expected figure and sentence is written by hand.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CanonicalModelT } from '../../model-program/canonical.js';
+import type { CanonicalLimitT, CanonicalModelT, CanonicalRelationT } from '../../model-program/canonical.js';
+import { compile } from '../../model-program/compile.js';
 import type { ExecutableModel } from '../../model-program/executable.js';
-import { costOf } from '../../model-program/simulate/simulate.js';
+import { costOf, simulate } from '../../model-program/simulate/simulate.js';
 import { admission, evaluateCanonical, MAX_BYTES, MAX_OPERATIONS, RUN_DRAWS } from '../evaluate.js';
 import { programReadinessOf } from '../program-readiness.js';
 import { livingModelOf, MODEL_PROGRAM } from '../program-store.js';
-import { club, CLUB_BRIEF, q } from './bakery.fixture.js';
+import { at, club, CLUB_BRIEF, q } from './bakery.fixture.js';
 
 let calls = 0;
 vi.mock('../../model-program/simulate/simulate.js', async (importOriginal) => {
@@ -50,8 +51,9 @@ describe('the Run admission limit (alpha G11)', () => {
     // A sum's parts are work, however few quantities hold them (Codex r1): 1,000 more parts, 2 times × 1,000 more reads a draw.
     expect(costOf(tiny(1000), 10).operations).toBe(240 + 10 * 2 * 1000);
     // A risk on s (Codex r2–r3): 8 at each of 2 times and 8 a draw, so 10 × 24 more operations, and its uniforms, 8 bytes a draw.
+    // Its chance `a` can leave [0, 1] (C14, 27 Oct): the goal's walk over it, 8 a draw (10 × 8 more) and 72 bytes.
     const risky: ExecutableModel = { ...tiny(), risks: [{ id: 'k', occurrence: 'a', severity: 'a', effect_on: 's', mode: 'add', from_period: 0 }] };
-    expect(costOf(risky, 10)).toEqual({ operations: 240 + 240, bytes: 434 + 80 });
+    expect(costOf(risky, 10)).toEqual({ operations: 240 + 240 + 80, bytes: 434 + 80 + 72 });
   });
 
   it('the limits by name: 450 ranged inputs pass MAX_BYTES while their work fits; 1,000,000 parts pass MAX_OPERATIONS', () => {
@@ -191,5 +193,87 @@ describe('C14: a derived goal horizon is refused before the Run, and nothing is 
     expect(e.compiled.errors.filter((x) => x.code === 'window')).toEqual([]);
     expect(e.sim).not.toBeNull();
     expect(calls, 'simulated (the headline and its driver sweep)').toBeGreaterThan(0);
+  });
+});
+
+/**
+ * C14 (alpha spec §7, bounded operation, 27 Oct): in every draw, for every option, each goal and limit walks the values that
+ * left their domain (simulate.ts Tally.add), so hundreds of conditions over hundreds of values that can leave (a declared floor
+ * or ceiling, a risk's chance, a ratio) is work costOf did not count: 400 conditions over 900 such values were admitted at
+ * 108,080,000 operations and took minutes. costOf now counts 8 for each condition and each such value, per option, in every
+ * draw. Every figure is hand arithmetic; elapsed time is printed, never asserted. 0 provider calls.
+ */
+describe('C14: the walk over values that left their domain is counted (conditions × values that can leave)', () => {
+  /** One period, one option: fixed `a` and `t`, `leavers` fixed −1 values each with a floor of 0 (so each leaves it in every
+   *  draw), `s` = a + all of them, and `checks` goals s ≥ t, each resting on every one of them. */
+  const leaving = (checks: number, leavers: number): ExecutableModel => ({
+    periods: 1, period_unit: 'month', withheld: [], risks: [], limits: [],
+    quantities: [
+      { id: 'a', label: 'a', unit: '1', reading: 'state', dist: { kind: 'fixed', value: 1, author: 'person' } },
+      { id: 't', label: 't', unit: '1', reading: 'state', dist: { kind: 'fixed', value: 2, author: 'person' } },
+      ...Array.from({ length: leavers }, (_, i) => ({ id: `x${i}`, label: 'x', unit: '1', reading: 'state' as const, domain: { min: 0 },
+        dist: { kind: 'fixed' as const, value: -1, author: 'person' as const } })),
+      { id: 's', label: 's', unit: '1', reading: 'state', equation: { form: 'definition', op: 'sum', parts: ['a', ...Array.from({ length: leavers }, (_, i) => `x${i}`)] } },
+    ],
+    goals: Array.from({ length: checks }, (_, i) => ({ id: `g${i}`, label: 'g', quantity: 's', cmp: '>=' as const, target: 't', aggregation: 'end' as const,
+      window: { start_period: 0, periods: 1 } })),
+    options: [{ id: 'o', label: 'o', sets: [] }],
+  });
+  /** The club with `n` worked-out shortfalls, each the promotion's £500 less the £800 budget (−£300), so with Olumi's floor of
+   *  £0 each is below it in every draw; and `caps` more limits on their total, each resting on all of them. */
+  const shortfalls = (n: number, caps: number, floor: number | null): CanonicalModelT => {
+    const m = club();
+    m.quantities.push(...Array.from({ length: n }, (_, i) => q(`short_${i}`, 'GBP', { kind: 'derived', status: 'derived', author: 'olumi', floor })),
+      q('shortfall', 'GBP', { kind: 'derived', status: 'derived', author: 'olumi' }));
+    m.relations.push(...Array.from({ length: n }, (_, i): CanonicalRelationT => ({ form: 'definition', id: `short_${i}_rel`, defines: `short_${i}`, op: 'sum',
+      parts: [{ id: 'promo_cost', sign: 1 }, { id: 'budget', sign: -1 }], author: 'olumi', quote: null, ...at })),
+    { form: 'definition', id: 'shortfall_rel', defines: 'shortfall', op: 'sum', parts: Array.from({ length: n }, (_, i) => ({ id: `short_${i}`, sign: 1 as const })),
+      author: 'olumi', quote: null, ...at });
+    m.limits.push(...Array.from({ length: caps }, (_, i): CanonicalLimitT => ({ id: `short_cap_${i}`, label: `The shortfall within the £800 (${i})`,
+      measure: { quantity: 'shortfall', per: null, cmp: '<=', bound: 'budget', aggregation: 'end', window: null }, question: null, author: 'person', quote: 'we can spend £800', ...at })));
+    return m;
+  };
+
+  it('400 conditions over 900 values that leave are refused by name before the Run; the boundary by hand; on the real path the simulator is never called', () => {
+    // By hand, RUN_DRAWS = 10,000 draws, 1 option, 2 times, ⌈log2 10,001⌉ = 14: reads 2L + 4 at each time (a, t and each x 1,
+    // s 1 + L + 1 parts), each goal's window 4 and sorts 14, and 8 for each goal and each value that can leave:
+    // 10,000 × (4L + 8 + 18C + 8CL). Without the walk, 400 × 900 was 10,000 × 10,808 = 108,080,000: admitted.
+    expect(costOf(leaving(400, 900), RUN_DRAWS)).toEqual({ operations: 10_000 * (3_608 + 7_200 + 2_880_000), bytes: 10_000 * (9 * 400 + 4 + 8) + 8 * 2 * 903 + 72 * 400 * 900 });
+    expect(costOf(leaving(400, 900), RUN_DRAWS).operations).toBe(28_908_080_000);
+    expect(admission(leaving(400, 900))).toEqual({ ok: false, over: 'operations' });
+    // A ratio can leave too (a divisor of 0): tiny's s as a ÷ b, the same two parts, is its 240 and the goal's walk over s,
+    // 10 × 8, with 72 bytes.
+    const ratio: ExecutableModel = { ...tiny(), quantities: tiny().quantities.map((x) => (x.id === 's' ? { ...x, equation: { form: 'definition', op: 'ratio', parts: ['a', 'b'] } } : x)) };
+    expect(costOf(ratio, 10)).toEqual({ operations: 240 + 80, bytes: 434 + 72 });
+    // The boundary at 40 conditions: 10,000 × (324L + 728), so 44 values is the most admitted (149,840,000 ≤ 150,000,000) and
+    // 45 the first refused (153,080,000).
+    expect(admission(leaving(40, 44))).toEqual({ ok: true, operations: 149_840_000 });
+    expect(costOf(leaving(40, 45), RUN_DRAWS).operations).toBe(153_080_000);
+    expect(admission(leaving(40, 45))).toEqual({ ok: false, over: 'operations' });
+    // The real path: the compiler gives each floored shortfall its domain, and the club's 52 conditions over 50 of them, for
+    // 2 options, cost 10,000 × 2 × 52 × 50 × 8 = 416,000,000 more than the same model without the floors. Refused by name
+    // before the Run (unmodified, it was admitted and its headline alone took about 5 s on the Mac).
+    const floored = compile(shortfalls(50, 50, 0)).executable!, free = compile(shortfalls(50, 50, null)).executable!;
+    expect(floored.quantities.filter((x) => x.domain !== undefined).map((x) => x.id)).toEqual(Array.from({ length: 50 }, (_, i) => `short_${i}`));
+    expect(floored.goals.length + floored.limits.length).toBe(52);
+    expect(costOf(floored, RUN_DRAWS).operations - costOf(free, RUN_DRAWS).operations).toBe(416_000_000);
+    const e = evaluateCanonical(shortfalls(50, 50, 0), { sourceText: CLUB_BRIEF, seed: 7 });
+    expect(calls, 'nothing is simulated').toBe(0);
+    expect(e.sim).toBeNull();
+    const why = 'This model is too large to work out in one run: 3 months ahead for 2 options. Counting in longer periods, looking less far ahead or comparing fewer options reduces the work.';
+    for (const o of (e.view as Json).options as Json[]) expect(o.cell).toEqual({ kind: 'withheld', face: 'Chance not shown yet', why, reasons: [{ code: 'too_large', message: why }] });
+  });
+
+  it('contrast: a realistic model (30 conditions, 5 values that can leave) is admitted, and its Run walks them in every draw', () => {
+    // 10,000 × (4 × 5 + 8 + 18 × 30 + 8 × 30 × 5) = 10,000 × 1,768.
+    expect(admission(leaving(30, 5))).toEqual({ ok: true, operations: 17_680_000 });
+    const t0 = performance.now();
+    const sim = simulate(leaving(30, 5), { seed: 7, draws: RUN_DRAWS });
+    console.log('C14 elapsed ms', 'simulate 30 conditions × 5 values that leave (admitted)', Math.round(performance.now() - t0));
+    expect(calls).toBe(1);
+    // Every value leaves its floor in every draw, so every goal is withheld in all 10,000 draws, naming them.
+    for (const [i, g] of sim.options[0]!.per_goal.entries()) {
+      expect(g).toEqual({ goal_id: `g${i}`, withheld: { reason: 'invalid_domain', count: 10_000, quantities: ['s', 'x0', 'x1', 'x2', 'x3', 'x4'] } });
+    }
   });
 });
