@@ -20,7 +20,7 @@ import { withCanonicalAnalysisView } from '../../orchestrator-v5/agent-lane/__te
 import { streamWhenAsked } from '../../orchestrator-v5/agent-lane/__tests__/stream-when-asked.js';
 import { SELECTION_NOTE_PREFIX } from '../../orchestrator-v5/agent-lane/selection-context.js';
 import { TODAY_PREFIX } from '../../orchestrator-v5/agent-lane/turn-context.js';
-import { corePromptCacheKey, PAUSE_NO_CARD, STATE_BLOCK_PREFIX } from '../../orchestrator-v5/agent-lane/core/sdk-turn.js';
+import { corePromptCacheKey, PAUSE_NO_CARD, PAUSE_SUPERSEDED, STATE_BLOCK_PREFIX } from '../../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { PROGRAM_TOOL_DESCRIPTIONS, programInstructions } from '../../orchestrator-v5/core-route/instructions.js';
 import { TOOL_DESCRIPTIONS } from '../../orchestrator-v5/path-b/tools/index.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
@@ -738,6 +738,44 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     outputs = [[{ type: 'message', text: 'That Run is the one I described.' }]];
     expect((await typed('What did that Run say?')).statusCode).toBe(200);
     expect(calls.at(-1)!.conversation).toBe(conversation);
+  });
+
+  it('C12 (alpha spec §7, 27 Oct): a Run press while a card waits: the host\'s reply joins the scenario\'s Conversation, after the waiting call is answered as not applied; the card stays held, unchanged, and its own press still applies it once', async () => {
+    // A Run stored by an earlier engine, so the press makes a new Run, whose save is refused below: the reply is the host's own words.
+    const engine = String((persisted!.living_model.runs as Json[]).at(-1)!.receipt.versions.engine);
+    persisted = JSON.parse(JSON.stringify(persisted).split(engine).join('mp-a04e2cebf944')) as Json;
+    const approve = await propose();
+    outputs = [[{ type: 'message', text: 'Press its card to save it.' }, { type: 'function_call', name: 'apply_change', call_id: 'held' }]];
+    const waiting = (await typed('Go ahead with it.')).json() as Json;
+    expect(pausedRun, 'the SDK run waits on the card').toMatchObject({ proposal_id: preparedId, call_id: 'held', tool: 'apply_change' });
+    const conversation = String(calls.at(-1)!.conversation);
+    const card = (waiting.cards as Json[]).find((c) => c.proposal_id === preparedId)!;
+    calls = []; conversationItems = [];
+    registerRefusal = { schema: 'error.v1', code: 'BAD_INPUT', message: 'Refused.', details: {} };
+    const ran = await post({ turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } });
+    expect(ran.statusCode, ran.body).toBe(200);
+    expect((ran.json() as Json).assistant_text).toBe('The model could not be saved (refused). Nothing was changed.');
+    expect(calls, 'the host\'s words: no model call').toHaveLength(0);
+    // In that Conversation, in ONE request: the waiting call answered as not applied, then the press and the reply as shown.
+    expect(conversationItems).toEqual([{ conversation, items: [
+      { type: 'function_call_output', call_id: 'held', output: PAUSE_SUPERSEDED },
+      { type: 'message', role: 'user', content: 'Run the analysis' },
+      { type: 'message', role: 'assistant', content: 'The model could not be saved (refused). Nothing was changed.' },
+    ] }]);
+    // The card stays held, byte for byte; only the SDK's waiting run was answered.
+    expect((ran.json() as Json).cards).toEqual([card]);
+    expect(pausedRun).toBeNull();
+    // The next typed turn continues that Conversation, and the waiting call is never answered a second time.
+    calls = []; conversationItems = []; registerRefusal = null;
+    outputs = [[{ type: 'message', text: 'That Run could not be saved.' }]];
+    expect((await typed('What did that Run say?')).statusCode).toBe(200);
+    expect(calls.map((c) => c.conversation)).toEqual([conversation]);
+    expect(conversationItems).toEqual([]);
+    // The card's own press still applies it, once.
+    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved.' }]];
+    expect((await post(approve)).statusCode).toBe(200);
+    expect(figure('oven_price')).toBe(2500);
+    expect(registered).toHaveLength(1);
   });
 
   it('two turns at once: the second waits on the scenario’s slot and starts from what the first saved', async () => {
