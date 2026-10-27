@@ -10,6 +10,8 @@
  */
 import Anthropic from '@anthropic-ai/sdk';
 import { assertProviderAllowed, recordProviderAttempt, recordProviderReturnedModel, recordProviderUsage } from '../../adapters/llm/provider-policy.js';
+import { readFileSync } from 'node:fs';
+import { DRAFTING_INSTRUCTIONS } from './prompt.js';
 import type { CallOutput, ResponsesCall } from './draft.js';
 
 export const mcDraftModel = (): string | null =>
@@ -40,7 +42,13 @@ export function anthropicResponsesCall(model: string): ResponsesCall {
   const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY'], maxRetries: 0 });
   return async (body): Promise<CallOutput> => {
     const format = body.text?.format as { name?: string; schema?: Record<string, unknown> } | undefined;
-    const system = `${String(body.instructions)}\n\nReply with ONE JSON object and nothing else (no prose, no code fences). It must conform exactly to this JSON schema "${format?.name ?? 'canonical_model'}" (strict: every property is required, no other properties; use null where the schema allows it):\n${JSON.stringify(format?.schema ?? {})}`;
+    // MC_PROMPT_FILE (stage 2, Claude-tuned): the whole system text from that file, {{TODAY}} = the request's today line, {{SCHEMA}} =
+    // the same schema JSON; only a first draft or its repair (instructions that start with the drafting prompt) is swapped.
+    const tuned = process.env['MC_PROMPT_FILE'];
+    const base = String(body.instructions);
+    const system = tuned && base.startsWith(DRAFTING_INSTRUCTIONS)
+      ? readFileSync(tuned, 'utf8').replace('{{TODAY}}', base.slice(DRAFTING_INSTRUCTIONS.length).trim()).replace('{{SCHEMA}}', JSON.stringify(format?.schema ?? {}))
+      : `${String(body.instructions)}\n\nReply with ONE JSON object and nothing else (no prose, no code fences). It must conform exactly to this JSON schema "${format?.name ?? 'canonical_model'}" (strict: every property is required, no other properties; use null where the schema allows it):\n${JSON.stringify(format?.schema ?? {})}`;
     const params = {
       model,
       max_tokens: body.max_output_tokens ?? 32_000,
