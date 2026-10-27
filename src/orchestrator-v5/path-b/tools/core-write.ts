@@ -9,8 +9,7 @@
 import { createHash } from 'node:crypto';
 import type { InternalDispatch } from '../../core-route/internal-dispatch.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
-import { computeGraphIdentityHash } from '../../context/graph-identity.js';
-import { computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
+import { computeGraphIdentityHash } from '../../context/graph-identity-normalise.js';
 import type { AtomicCommittedModelVersionReceipt } from '../../session/store.js';
 import { approvedGraphHeld, isSavedRead, readSaved, type SavedRead } from '../../model-program-turn/saved-read.js';
 import { unavailable, OUTCOME_TRACE, type DraftVerification, type ToolOutcome } from './outcome.js';
@@ -85,8 +84,9 @@ export async function writeCorePostimage(deps: { readonly dispatch: InternalDisp
   const identity = computeGraphIdentityHash(after.graph as never)?.value;
   if (identity !== ack) return unknown('not_verified', { check: 'hash_mismatch', field: 'read_identity', expected: hashPrefix(ack), actual: hashPrefix(identity) });
   if (reg.json.graph_hash !== after.graphHash) return unknown('not_verified', { check: 'revision_mismatch', field: 'graph_hash', expected: hashPrefix(reg.json.graph_hash), actual: hashPrefix(after.graphHash) });
-  const analysisHash = computeAnalysisAffectingGraphHashSha256(after.graph as never);
-  if (receipt.analysis_affecting_hash !== analysisHash) return unknown('not_verified', { check: 'hash_mismatch', field: 'analysis_hash', expected: hashPrefix(analysisHash), actual: hashPrefix(receipt.analysis_affecting_hash) });
+  // The legacy analysis-affecting hash is not compared (W5, 27 Oct): it is a projection of the same graph the identity hash
+  // above already binds to the acknowledgement, the receipt and the read-back, so it adds no proof, and computing it loaded
+  // the old readiness code onto the alpha path.
   if (!approvedGraphHeld(w.graph, after.graph)) return unknown('not_verified', { check: 'postimage_diff',
     keys: Object.keys(w.graph).filter((key) => !approvedGraphHeld(w.graph, { ...w.graph, [key]: after.graph[key] })).slice(0, 8),
   });

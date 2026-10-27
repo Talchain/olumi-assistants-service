@@ -1,8 +1,11 @@
 /**
  * The identity normalisation of a graph (contract §8–§10), on its own so the model-program path can read a saved
  * graph's identity without loading the legacy analysis code `graph-identity.ts` also holds (W5, alpha wall).
- * `graph-identity.ts` re-exports everything here; nothing in the normalisation changed, so no persisted hash moves.
+ * `graph-identity.ts` re-exports everything here; nothing in the normalisation changed, so no persisted hash moves. The identity
+ * hash itself lives here too, so the program's save (`core-write.ts`) reads it without loading that module either.
  */
+import { createHash } from 'node:crypto';
+
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { goalScopeMeaning } from '../../schemas/goal-scope.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
@@ -290,5 +293,57 @@ export function normaliseGraphForIdentity(
     normaliser_version: IDENTITY_NORMALISER_VERSION,
     projection_version: IDENTITY_PROJECTION_VERSION,
     graph: stripped,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// A2 — the identity hash.
+// ---------------------------------------------------------------------------
+
+export const HASH_ALGORITHM = 'sha256' as const;
+
+export interface GraphIdentityHash {
+  readonly kind: 'graph_identity_hash';
+  readonly value: string;
+  readonly algorithm: typeof HASH_ALGORITHM;
+  readonly projection_version: string;
+  readonly graph_schema_version: string;
+  readonly normaliser_version: string;
+}
+
+function sha256Hex(input: string): string {
+  return createHash(HASH_ALGORITHM).update(input).digest('hex');
+}
+
+/**
+ * A2: CEE-local `graphIdentityHash`. Full 64-char SHA-256 over the versioned
+ * identity normalisation (contract §9.2). Returns `null` for an absent or
+ * identity-empty graph.
+ *
+ * Distinct from — and MUST NOT be confused with — the topology-only
+ * `computeDeterministicGraphHash` (graph-hash.ts), which hashes node/edge
+ * identity only and is a telemetry marker, not an identity hash (contract
+ * §2.2 forbids reusing the topology hash as graphIdentityHash).
+ *
+ * Values are assumed JSON-safe, i.e. wire-originated. Like the sanctioned
+ * analysis-affecting hash (both go through `stableStringify` → `JSON.stringify`),
+ * a property explicitly set to `undefined` is indistinguishable from an absent
+ * one, and `NaN`/`Infinity` serialise as `null`. `JSON.parse` never produces
+ * these, so they are unreachable on the real ingress path; only hand-built
+ * `GraphStateIngress` objects could carry them.
+ */
+export function computeGraphIdentityHash(
+  graph: GraphStateIngress | null | undefined,
+): GraphIdentityHash | null {
+  const normalised = normaliseGraphForIdentity(graph);
+  if (normalised === null) return null;
+
+  return {
+    kind: 'graph_identity_hash',
+    value: sha256Hex(stableStringify(normalised)),
+    algorithm: HASH_ALGORITHM,
+    projection_version: IDENTITY_PROJECTION_VERSION,
+    graph_schema_version: GRAPH_SCHEMA_VERSION,
+    normaliser_version: IDENTITY_NORMALISER_VERSION,
   };
 }

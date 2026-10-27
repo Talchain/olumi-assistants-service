@@ -161,7 +161,7 @@ describe('L26B verifier diagnostics never change the outcome bytes or effects', 
     ['receipt-identity', { check: 'hash_mismatch', field: 'receipt_identity' }],
     ['read-identity', { check: 'hash_mismatch', field: 'read_identity' }],
     ['revision', { check: 'revision_mismatch', field: 'graph_hash' }],
-    ['analysis', { check: 'hash_mismatch', field: 'analysis_hash' }],
+    // No 'analysis' row: #3851 removed the analysis-hash comparison (see the row after this table).
     ['postimage', { check: 'postimage_diff', keys: ['nodes'] }],
     ['readback', { check: 'readback_unavailable', code: 'read_failed' }],
   ] as const;
@@ -194,10 +194,6 @@ describe('L26B verifier diagnostics never change the outcome bytes or effects', 
       reg.json.graph_hash = 'a'.repeat(16);
       extra = { expected: 'a'.repeat(12), actual: hash(read.json.graph_hash) };
     }
-    if (fault === 'analysis') {
-      receipt.analysis_affecting_hash = 'a'.repeat(64);
-      extra = { expected: hash(computeAnalysisAffectingGraphHashSha256(graph as never)), actual: 'a'.repeat(12) };
-    }
     if (fault === 'postimage' || fault === 'receipt-postimage') {
       (graph.nodes as Rec[])[0]!.label = 'Unrelated private content';
       reg.json.graph_identity_hash = read.json.graph_identity_hash = computeGraphIdentityHash(graph as never);
@@ -215,6 +211,22 @@ describe('L26B verifier diagnostics never change the outcome bytes or effects', 
     expect(JSON.stringify(detail)).not.toMatch(/Bearer|synthetic-secret|Unrelated private content/);
     expect(registerCalls(p)).toHaveLength(1);
     expect(p.onModelRegistered).not.toHaveBeenCalled();
+  });
+
+  // #3851 (W5, 27 Oct) removed the save's legacy analysis-hash comparison from core-write.ts. The receipt's
+  // analysis_affecting_hash is a projection of the same graph that the identity hash already binds to the acknowledgement, the
+  // receipt and the read-back; the program's identity and its Run proof never read receipt.analysis_affecting_hash; and
+  // computing it loaded the retired readiness code onto the alpha path. So a receipt carrying a different one is now saved on
+  // that identity proof (this row was the 'analysis' first-failed-check row). Every other row in the table above still refuses.
+  it('#3851: a receipt whose analysis_affecting_hash differs is saved on its identity proof (the comparison was removed)', async () => {
+    const reg = structuredClone(SAVED);
+    (reg.json.model_version as Rec).analysis_affecting_hash = 'a'.repeat(64);
+    const p = product({ graph: [EMPTY, structuredClone(MODEL)], register: [reg] });
+    const out = await buildModel(p, ctx, ARGS);
+    expect(out).toMatchObject({ status: 'ok', mutated: true, data: { save_outcome: 'VERIFIED_SAVED', model_version: reg.json.model_version } });
+    expect(traceRow('build_model_from_brief', out)).not.toHaveProperty('draft_verification');
+    expect(registerCalls(p)).toHaveLength(1);
+    expect(p.onModelRegistered).toHaveBeenCalledTimes(1);
   });
 
   it.each([202, 409, 500, null])('ACK %s retains its UNKNOWN bytes', async (status) => {

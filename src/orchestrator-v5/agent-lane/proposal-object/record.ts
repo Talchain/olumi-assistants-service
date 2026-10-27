@@ -37,7 +37,8 @@ import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember } from '../../rout
 import { eventRiskCardLine } from '../stated-event-risk-draft.js';
 import { heldReliesOnRiskLines, readReliesOnRisk } from '../../routing/relies-on-risk.js';
 import { whoSized } from '../strength-authorship-words.js';
-import { computeProposalId, type ProposalChange, type ProposalOperation, type StructuredProposal } from '../proposal.js';
+import type { ProposalChange, ProposalOperation } from '../proposal.js';
+import { agentProposalOf, heldProposalId, PROP_RE } from '../durable-proposal.js';
 import { heldCardAppliesAt, heldCardUnderReview } from './still-applies.js';
 import { reviewChipFor } from './reply.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
@@ -68,7 +69,6 @@ export function shownAsHeldNow(shown: ReadonlyMap<string, string | undefined>, p
   return shown.has(proposalId) && (revisionNow === undefined || shown.get(proposalId) === revisionNow);
 }
 const GMH_RE = /^gmh_[0-9a-f]{12}$/;
-const PROP_RE = /^prop_[0-9a-f]{32}$/;
 /** The held proposal a typed decline press names, or undefined. */
 export function declinedProposalOf(chipId: unknown): string | undefined {
   if (typeof chipId !== 'string' || !chipId.startsWith(DECLINE_PREFIX)) return undefined;
@@ -400,17 +400,8 @@ export function productHoldRecord(pa: PendingAction, graph: unknown, nowMs: numb
   };
 }
 
-/** Integrity and carrier identity are checked before a typed Agent payload is projected. */
-export function agentProposalOf(pa: PendingAction): StructuredProposal | undefined {
-  if (pa.action.kind !== 'apply_proposed_change') return undefined;
-  const p = pa.action.inline_patch['agent_proposal'] as StructuredProposal | undefined;
-  if (!p || typeof p.proposal_id !== 'string' || !PROP_RE.test(p.proposal_id)
-    || pa.chip_id !== `${APPROVE_PREFIX}${p.proposal_id}` || p.scenario_id !== pa.scenario_id
-    || p.base_graph_identity_hash !== pa.preconditions.graph_hash) return undefined;
-  try { return computeProposalId(p) === p.proposal_id ? p : undefined; } catch { return undefined; }
-}
+export { agentProposalOf, heldProposalId } from '../durable-proposal.js';
 export const isHeldProposal = (pa: PendingAction): boolean => isProductHold(pa) || agentProposalOf(pa) !== undefined;
-export const heldProposalId = (pa: PendingAction): string => agentProposalOf(pa)?.proposal_id ?? pa.chip_id;
 
 export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = Date.now()): ProposalRecord | undefined {
   const p = agentProposalOf(pa);

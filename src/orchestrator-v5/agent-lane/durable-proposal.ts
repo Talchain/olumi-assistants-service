@@ -36,10 +36,9 @@
 import { randomUUID } from 'node:crypto';
 
 import { type PendingAction } from '../session/pending-action.js';
-import { HELD_PROPOSAL_TURN_BUDGET, PROPOSAL_IDLE_TTL_MS } from './proposal-object/lifecycle.js';
+import { approvalChipIdFor, HELD_PROPOSAL_TURN_BUDGET, PROPOSAL_IDLE_TTL_MS } from '../model-program-turn/program-card.js';
 import { log } from '../../utils/telemetry.js';
-import { approvalChipIdFor, readingOfLinkEffectApproval } from './approval-chips.js';
-import { readingOfIdentityApproval } from './identity-card.js';
+import { readingOfIdentityApproval, readingOfLinkEffectApproval } from './approval-words.js';
 import { computeProposalId, type ProposalStore, type StructuredProposal } from './proposal.js';
 
 /**
@@ -97,6 +96,24 @@ function carriedChipOf(pa: PendingAction): ApproveChip | undefined {
     ?? readingOfLinkEffectApproval(message) ?? readingOfIdentityApproval(message);
   return { id: pa.chip_id, label, message, ...(detail !== undefined ? { detail } : {}) };
 }
+
+/** A stored proposal's id: `prop_` and its content hash. */
+export const PROP_RE = /^prop_[0-9a-f]{32}$/;
+
+/**
+ * Integrity and carrier identity are checked before a typed Agent payload is projected. Beside the carrier's writer
+ * ({@link proposalPendingAction}) so the program's card turn reads a carrier without loading the card record (W5, alpha wall);
+ * `proposal-object/record.ts` re-exports it and `heldProposalId`.
+ */
+export function agentProposalOf(pa: PendingAction): StructuredProposal | undefined {
+  if (pa.action.kind !== 'apply_proposed_change') return undefined;
+  const p = pa.action.inline_patch['agent_proposal'] as StructuredProposal | undefined;
+  if (!p || typeof p.proposal_id !== 'string' || !PROP_RE.test(p.proposal_id)
+    || pa.chip_id !== approvalChipIdFor(p.proposal_id) || p.scenario_id !== pa.scenario_id
+    || p.base_graph_identity_hash !== pa.preconditions.graph_hash) return undefined;
+  try { return computeProposalId(p) === p.proposal_id ? p : undefined; } catch { return undefined; }
+}
+export const heldProposalId = (pa: PendingAction): string => agentProposalOf(pa)?.proposal_id ?? pa.chip_id;
 
 /** The pending action that carries one offered proposal with its answer row. */
 export function proposalPendingAction(

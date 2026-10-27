@@ -54,19 +54,7 @@ export function identityReadingOf(proposal: StructuredProposal): IdentityProposa
     ...(levels !== undefined ? { part_levels: parts } : {}) };
 }
 
-/**
- * ⭐ THE PRESSED CARD CARRIES ITS WORDS (the link-effect rule, AIQ 5885290014): the approval request carries exactly what
- * the user saw, and the durable carrier keeps it, so a card put back after a restart shows the same reading.
- */
-const IDENTITY_APPROVE_PREFIX = 'Yes — ';
-export const identityApproveMessage = (words: string): string => `${IDENTITY_APPROVE_PREFIX}${words}`;
-/** The card words an identity approval carries, or `undefined` for any other words. */
-export function readingOfIdentityApproval(message: unknown): string | undefined {
-  if (typeof message !== 'string' || !message.startsWith(IDENTITY_APPROVE_PREFIX) && !message.startsWith('No — ')) return undefined;
-  const words = message.slice(message.startsWith('No — ') ? 'No — '.length : IDENTITY_APPROVE_PREFIX.length);
-  return words.startsWith('Is “') || (words.startsWith('Olumi reads ‘') && words.endsWith('. Is that how you work it out?'))
-    ? words : undefined;
-}
+export { identityApproveMessage, readingOfIdentityApproval } from './approval-words.js';
 
 /** The held line when an issued card carries neither words nor a public label (COPY-SHAPE: never "undefined"). */
 export const IDENTITY_ISSUED_FALLBACK = 'I’ve prepared that confirmation for you to approve. Nothing changes until you approve it.';

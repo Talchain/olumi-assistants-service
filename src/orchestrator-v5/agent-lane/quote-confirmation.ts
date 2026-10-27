@@ -12,7 +12,7 @@
  *      message or another card. The write records a NEW selection ({@link confirmedSelection}) made at the press, linked to the
  *      source line and to Olumi's reading of it; the source is unchanged and never relabelled as an earlier human fact.
  */
-import { quoteSpansIn } from './stated-by-user.js';
+import { quoteSpansIn } from './quote-spans.js';
 
 /** The user's complete source line, exactly as typed (qualifiers, negation, bounds kept), and the words quoted from it. */
 export interface QuoteConfirmation {
