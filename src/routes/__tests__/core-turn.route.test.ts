@@ -625,7 +625,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
         outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved: the oven costs £2,500.' }]];
         let originalAnswered = false;
         const original = post(press).then((r) => { originalAnswered = true; return r; });
-        await vi.waitFor(() => expect(registered).toHaveLength(1));
+        // The original is held inside its next provider call, already counted, so the count below is the resend's alone (CI ran
+        // the original's call during the resend's claim wait when this read only the write).
+        await vi.waitFor(() => expect([registered.length, holdProvider]).toEqual([1, undefined]));
         const callsBefore = calls.length;
         const resend = await post(press);
         expect(originalAnswered, 'no freeze: the resend answers while the original still runs').toBe(false);
