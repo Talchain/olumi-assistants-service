@@ -143,10 +143,12 @@ export async function readProgramContext(deps: ProgramToolDeps, ctx: Ctx): Promi
     ...(Array.isArray(compile['blockers']) ? { blockers: compile['blockers'] }
       : { open_questions: Array.isArray(compile['asks']) ? compile['asks'] : [], coaching: Array.isArray(compile['coaching']) ? compile['coaching'] : [] }),
     run: shown === undefined ? null : { ...runWords(shown.run, { current: shown.current && shown.engine_current, updated: shown.updated }), current: shown.current, engine_current: shown.engine_current },
-    // The program cards held for this person's approval, newest first, as each card shows them (C12, alpha spec §3): every
-    // continuation reads the held proposal it would apply.
+    // The program cards held for this person's approval that still apply to this saved model, newest first, as each card shows
+    // them (C12, alpha spec §3): every continuation reads the held proposal it would apply, by the rule the route offers cards
+    // by (`program-card-turn.ts` holdsOn). A reading card says so: confirming it adds nothing the model does not hold.
     awaiting_approval: deps.proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id).map((o) => deps.proposals.get(o.proposal_id)).filter(isProgramProposal)
-      .map((p) => ({ proposal_id: p.proposal_id, public_label: p.public_label, changes: p.changes ?? [], base_revision: p.base_graph_identity_hash })),
+      .filter((p) => programCardApplies(p, base.saved.graph) ?? p.base_graph_identity_hash === base.saved.graphHash)
+      .map((p) => ({ proposal_id: p.proposal_id, public_label: p.public_label, changes: p.changes ?? [], base_revision: p.base_graph_identity_hash, ...(p.reading === true ? { reading: true } : {}) })),
   });
 }
 
