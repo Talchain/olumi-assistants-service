@@ -97,7 +97,10 @@ export function deepseekResponsesCall(model: string): ResponsesCall {
     for (let tries = 0; ; tries += 1) {
       const handle = assertProviderAllowed('deepseek' as never, 'model-program.draft', { model, purpose: 'canonical_draft' });
       try {
-        const r = await client.chat.completions.create({ model, messages, response_format: { type: 'json_object' }, max_tokens: 32_000 });
+        // MC_DRAFT_EFFORT (low | high | max): DeepSeek's reasoning effort; unset = its default (high, per GET /models, 27 Oct).
+        const effort = process.env['MC_DRAFT_EFFORT'];
+        const r = await client.chat.completions.create({ model, messages, response_format: { type: 'json_object' }, max_tokens: 32_000,
+          ...(effort ? { reasoning_effort: effort } : {}) } as OpenAI.ChatCompletionCreateParamsNonStreaming);
         const u = (r.usage ?? {}) as unknown as Record<string, number>;
         const raw = r.choices[0]?.message?.content ?? '';
         const bare = raw === '' ? null : bareJson(raw);
