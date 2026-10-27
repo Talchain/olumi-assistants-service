@@ -74,15 +74,16 @@ describe('the Run admission limit (alpha G11)', () => {
 
   it('C14 (27 Oct): every pair of options is counted (SC2 compares each pair in every draw), so many options are refused before any work', () => {
     const withOptions = (k: number): ExecutableModel => ({ ...tiny(), options: Array.from({ length: k }, (_, i) => ({ id: `o${i}`, label: `o${i}`, sets: [] })) });
-    // By hand, 10 draws: one option is 10 × (32 + sorts 4 × 2) = 400 (no pair; 32 = 12 reads, the window's 4 and the walk's 16);
-    // two are 10 × (2 × 32 + sorts 4 × 3 + their 1 pair).
-    expect(costOf(withOptions(1), 10).operations).toBe(400);
-    expect(costOf(withOptions(2), 10).operations).toBe(10 * (2 * 32 + 4 * 3 + 1));
-    // 300 options: their own work is 10,000 × (300 × 32 + 14 × 301) = 138,140,000 (under the limit), but their 44,850 pairs
-    // are 448,500,000 more, so the Run is refused by name before anything is allocated.
-    expect(costOf(withOptions(300), 10_000).operations).toBe(10_000 * (300 * 32 + 14 * 301) + 10_000 * 44_850);
-    expect(10_000 * (300 * 32 + 14 * 301), 'their own work alone is admitted').toBeLessThanOrEqual(MAX_OPERATIONS);
-    expect(admission(withOptions(300))).toEqual({ ok: false, over: 'operations' });
+    // By hand, 10 draws: one option is 10 × (35 + sorts 4 × 3) = 470 (no pair; 35 = 12 reads, the window's 4, the walk's 16 and
+    // SC7's met and two thirds; sorts over b, the goal's quantiles and its misses, SC7); k options sort 1 + 2k, and from two
+    // options SC4 passes over b, 2k + 4. Two are 10 × (2 × 35 + sorts 4 × 5 + their 1 pair + SC4's 8).
+    expect(costOf(withOptions(1), 10).operations).toBe(470);
+    expect(costOf(withOptions(2), 10).operations).toBe(10 * (2 * 35 + 4 * 5 + 1 + 8));
+    // 200 options: their own work is 10,000 × (200 × 35 + 14 × 401 + 404) = 130,180,000 (under the limit), but their 19,900
+    // pairs are 199,000,000 more, so the Run is refused by name before anything is allocated.
+    expect(costOf(withOptions(200), 10_000).operations).toBe(10_000 * (200 * 35 + 14 * 401 + 404) + 10_000 * 19_900);
+    expect(10_000 * (200 * 35 + 14 * 401 + 404), 'their own work alone is admitted').toBeLessThanOrEqual(MAX_OPERATIONS);
+    expect(admission(withOptions(200))).toEqual({ ok: false, over: 'operations' });
     // CONTRAST: a few options, as a model holds them, stay admitted.
     expect(admission(withOptions(5))).toMatchObject({ ok: true });
   });
@@ -130,22 +131,24 @@ describe('the Run admission limit (alpha G11)', () => {
 
 /**
  * C14 (alpha spec §7, bounded operation, 27 Oct): THE ADMISSION BOUNDARY, on the real evaluation path. The club's cost over an
- * N-month window is 10,000 × (42N + 219) operations (hand arithmetic; 42 more a draw for each month the 2 options visit and
+ * N-month window is 10,000 × (42N + 263) operations (hand arithmetic; 42 more a draw for each month the 2 options visit and
  * the goal's window reads, 1 for their one pair, and 96 for each option's goal and limit walking the 3 values that can leave:
- * the promotion's ranged effect, the joins it works out and the members stock, 2 × 2 × 3 × 8), so N = 351 is the largest
- * admitted (149,610,000 ≤ MAX_OPERATIONS 150,000,000) and N = 352 the first refused (150,030,000). Each figure is checked on
+ * the promotion's ranged effect, the joins it works out and the members stock, 2 × 2 × 3 × 8; SC7's 36, each option's 2
+ * conditions' met and the effect's two thirds, 2 × 4, and the goal's misses sorted, 14 × 2; SC4's 8, the effect's pass for 2
+ * options, 2 × 2 + 4), so N = 350 is the largest admitted (149,630,000 ≤ MAX_OPERATIONS 150,000,000) and N = 351 the first
+ * refused (150,050,000). Each figure is checked on
  * the executable evaluateCanonical itself compiled.
  * Elapsed time is printed, never asserted.
  */
 describe('C14: the Run admission boundary on the real evaluation path (club, RUN_DRAWS draws)', () => {
-  it('351 months, the largest admitted: costOf is 149,610,000 operations; the headline is simulated once and both options show a figure; the sweep is not run', () => {
-    const { m, src } = clubOver(351);
+  it('350 months, the largest admitted: costOf is 149,630,000 operations; the headline is simulated once and both options show a figure; the sweep is not run', () => {
+    const { m, src } = clubOver(350);
     const t0 = performance.now();
     const e = evaluateCanonical(m, { sourceText: src, seed: 7 });
-    console.log('C14 elapsed ms', 'evaluateCanonical club 351 months (admitted)', Math.round(performance.now() - t0));
+    console.log('C14 elapsed ms', 'evaluateCanonical club 350 months (admitted)', Math.round(performance.now() - t0));
     const cost = costOf(e.compiled.executable!, RUN_DRAWS);
-    expect(cost.operations).toBe(10_000 * (42 * 351 + 219));
-    expect(cost.operations).toBe(149_610_000);
+    expect(cost.operations).toBe(10_000 * (42 * 350 + 263));
+    expect(cost.operations).toBe(149_630_000);
     expect(cost.operations).toBeLessThanOrEqual(MAX_OPERATIONS);
     expect(cost.operations + 10_000 * 42, 'one more month passes the limit').toBeGreaterThan(MAX_OPERATIONS);
     expect(cost.bytes, 'operations, not memory, is the limit at this edge').toBeLessThan(MAX_BYTES);
@@ -158,18 +161,18 @@ describe('C14: the Run admission boundary on the real evaluation path (club, RUN
     expect((v.options as Json[]).map((o) => o.main_driver)).toEqual([notMeasured, notMeasured]);
   }, 60_000);
 
-  it('352 months, the first refused: costOf is 150,030,000 operations; refused by name, the simulator never called', () => {
-    const { m, src } = clubOver(352);
+  it('351 months, the first refused: costOf is 150,050,000 operations; refused by name, the simulator never called', () => {
+    const { m, src } = clubOver(351);
     const e = evaluateCanonical(m, { sourceText: src, seed: 7 });
     const cost = costOf(e.compiled.executable!, RUN_DRAWS);
-    expect(cost.operations).toBe(10_000 * (42 * 352 + 219));
-    expect(cost.operations).toBe(150_030_000);
+    expect(cost.operations).toBe(10_000 * (42 * 351 + 263));
+    expect(cost.operations).toBe(150_050_000);
     expect(cost.operations).toBeGreaterThan(MAX_OPERATIONS);
     expect(cost.bytes).toBeLessThan(MAX_BYTES);
     expect(admission(e.compiled.executable!)).toEqual({ ok: false, over: 'operations' });
     expect(calls).toBe(0);
     expect(e.sim).toBeNull();
-    const why = 'This model is too large to work out in one run: 352 months ahead for 2 options. Counting in longer periods, looking less far ahead or comparing fewer options reduces the work.';
+    const why = 'This model is too large to work out in one run: 351 months ahead for 2 options. Counting in longer periods, looking less far ahead or comparing fewer options reduces the work.';
     const v = e.view as Json;
     expect(v.options.map((o: Json) => o.option_id)).toEqual(['promotion', 'carry_on']);
     for (const o of v.options as Json[]) {
@@ -270,18 +273,19 @@ describe('C14: the walk over values that left their domain is counted (condition
   it('400 conditions over 900 values that leave are refused by name before the Run; the boundary by hand; on the real path the simulator is never called', () => {
     // By hand, RUN_DRAWS = 10,000 draws, 1 option, 2 times, ⌈log2 10,001⌉ = 14: reads 2L + 4 at each time (a, t and each x 1,
     // s 1 + L + 1 parts), each goal's window 4 and sorts 14, and 8 for each goal and each of the L + 1 values that can leave
-    // (each x and s): 10,000 × (4L + 8 + 26C + 8CL). Without the walk, 400 × 900 was 10,000 × 10,808 = 108,080,000: admitted.
-    expect(costOf(leaving(400, 900), RUN_DRAWS)).toEqual({ operations: 10_000 * (3_608 + 10_400 + 2_880_000), bytes: 10_000 * (9 * 400 + 4 + 8) + 8 * 2 * 903 + 72 * 400 * 901 });
-    expect(costOf(leaving(400, 900), RUN_DRAWS).operations).toBe(28_940_080_000);
+    // (each x and s), and SC7's 15 for each goal (its met, and its misses sorted, 14): 10,000 × (4L + 8 + 41C + 8CL). Without the
+    // walk, 400 × 900 was 10,000 × 10,808 = 108,080,000: admitted.
+    expect(costOf(leaving(400, 900), RUN_DRAWS)).toEqual({ operations: 10_000 * (3_608 + 16_400 + 2_880_000), bytes: 10_000 * (9 * 400 + 4 + 8) + 8 * 2 * 903 + 72 * 400 * 901 });
+    expect(costOf(leaving(400, 900), RUN_DRAWS).operations).toBe(29_000_080_000);
     expect(admission(leaving(400, 900))).toEqual({ ok: false, over: 'operations' });
     // A ratio (a divisor of 0) is a calculation like any other: tiny's s as a ÷ b, the same two parts, costs what tiny does.
     const ratio: ExecutableModel = { ...tiny(), quantities: tiny().quantities.map((x) => (x.id === 's' ? { ...x, equation: { form: 'definition', op: 'ratio', parts: ['a', 'b'] } } : x)) };
-    expect(costOf(ratio, 10)).toEqual({ operations: 400, bytes: 578 });
-    // The boundary at 40 conditions: 10,000 × (324L + 1,048), so 43 values is the most admitted (149,800,000 ≤ 150,000,000) and
-    // 44 the first refused (153,040,000).
-    expect(admission(leaving(40, 43))).toEqual({ ok: true, operations: 149_800_000 });
-    expect(costOf(leaving(40, 44), RUN_DRAWS).operations).toBe(153_040_000);
-    expect(admission(leaving(40, 44))).toEqual({ ok: false, over: 'operations' });
+    expect(costOf(ratio, 10)).toEqual({ operations: 470, bytes: 578 });
+    // The boundary at 40 conditions: 10,000 × (324L + 1,648), so 41 values is the most admitted (149,320,000 ≤ 150,000,000) and
+    // 42 the first refused (152,560,000).
+    expect(admission(leaving(40, 41))).toEqual({ ok: true, operations: 149_320_000 });
+    expect(costOf(leaving(40, 42), RUN_DRAWS).operations).toBe(152_560_000);
+    expect(admission(leaving(40, 42))).toEqual({ ok: false, over: 'operations' });
     // The real path: the compiler gives each floored shortfall its domain, and the club's 52 conditions over them, for 2 options,
     // are refused by name before the Run (unmodified, it was admitted and its headline alone took about 5 s on the Mac).
     const floored = compile(shortfalls(50, 50, 0)).executable!;
@@ -296,15 +300,16 @@ describe('C14: the walk over values that left their domain is counted (condition
   it('Codex AMEND: values with no floor, ceiling, chance or ratio whose arithmetic overflows are counted, and 400 conditions over 900 of them are refused by name', () => {
     // By hand, as for `leaving`: reads 4n + 5 at each time (a, t, big 1; each y 1 + 2 parts; s 1 + n + 1 parts), each goal's
     // window 4 and sorts 14, and 8 for each goal and each of the n + 1 values that can leave (each y and s; a, t and big are
-    // figures with no end): 10,000 × (8n + 10 + 26C + 8Cn). Counting only declared ends, chances and ratios, the walk was
-    // 0 and 400 × 900 was 10,000 × (7,210 + 7,200) = 144,100,000: admitted, with 400 goals walking 900 values in every draw.
-    expect(costOf(overflowing(400, 900), RUN_DRAWS)).toEqual({ operations: 10_000 * (7_210 + 10_400 + 2_880_000),
+    // figures with no end), and SC7's 15 for each goal: 10,000 × (8n + 10 + 41C + 8Cn). Counting only declared ends, chances and
+    // ratios, the walk was 0 and 400 × 900 was 10,000 × (7,210 + 7,200) = 144,100,000: admitted, with 400 goals walking 900
+    // values in every draw.
+    expect(costOf(overflowing(400, 900), RUN_DRAWS)).toEqual({ operations: 10_000 * (7_210 + 16_400 + 2_880_000),
       bytes: 10_000 * (9 * 400 + 4 + 8) + 8 * 2 * 904 + 72 * 400 * 901 });
-    expect(costOf(overflowing(400, 900), RUN_DRAWS).operations).toBe(28_976_100_000);
+    expect(costOf(overflowing(400, 900), RUN_DRAWS).operations).toBe(29_036_100_000);
     expect(admission(overflowing(400, 900))).toEqual({ ok: false, over: 'operations' });
-    // A small one is admitted at its hand count, 10,000 × (40 + 10 + 780 + 1,200), and its Run shows the walk is real: no value
+    // A small one is admitted at its hand count, 10,000 × (40 + 10 + 1,230 + 1,200), and its Run shows the walk is real: no value
     // has an end, yet every product is not a finite number in every draw, so every goal is withheld in all 10,000 draws, naming them.
-    expect(admission(overflowing(30, 5))).toEqual({ ok: true, operations: 20_300_000 });
+    expect(admission(overflowing(30, 5))).toEqual({ ok: true, operations: 24_800_000 });
     const sim = simulate(overflowing(30, 5), { seed: 7, draws: RUN_DRAWS });
     for (const [i, g] of sim.options[0]!.per_goal.entries()) {
       expect(g).toEqual({ goal_id: `g${i}`, withheld: { reason: 'invalid_domain', count: 10_000, quantities: ['s', 'y0', 'y1', 'y2', 'y3', 'y4'] } });
@@ -324,8 +329,8 @@ describe('C14: the walk over values that left their domain is counted (condition
   });
 
   it('contrast: a realistic model (30 conditions, 5 values that can leave) is admitted, and its Run walks them in every draw', () => {
-    // 10,000 × (4 × 5 + 8 + 26 × 30 + 8 × 30 × 5) = 10,000 × 2,008.
-    expect(admission(leaving(30, 5))).toEqual({ ok: true, operations: 20_080_000 });
+    // 10,000 × (4 × 5 + 8 + 41 × 30 + 8 × 30 × 5) = 10,000 × 2,458.
+    expect(admission(leaving(30, 5))).toEqual({ ok: true, operations: 24_580_000 });
     const t0 = performance.now();
     const sim = simulate(leaving(30, 5), { seed: 7, draws: RUN_DRAWS });
     console.log('C14 elapsed ms', 'simulate 30 conditions × 5 values that leave (admitted)', Math.round(performance.now() - t0));
@@ -345,12 +350,14 @@ describe('C14: the walk over values that left their domain is counted (condition
     expect([x.quantities.length, x.periods, x.goals.length, x.limits.length, x.options.map((o) => o.sets.length), x.risks.length]).toEqual([21, 3, 1, 0, [1, 1], 0]);
     expect(x.quantities.filter((v) => v.dist?.kind === 'range').length).toBe(4);
     expect(x.quantities.filter((v) => v.dist?.kind === 'fixed' && v.domain === undefined).map((v) => v.id)).toEqual(['productivity_target', 'tech_leads_added__base', 'developers_added__base']);
-    // By hand, a draw: 2 options × (4 times × 53 reads + the window's 8 + the goal's walk 8 × 18) + 2 sets × 5 + sorts 14 × (4 + 2)
-    // + 1 pair = 2 × 364 + 10 + 84 + 1 = 823. Its sweep: 3 settings × 4 ranges × 4,000 draws × 811 (sorts 12 × 6). Counting
-    // only declared ends, chances and ratios (13 values) it was 7,430,000 and 35,088,000 (42,518,000); now 8,230,000 and 38,928,000.
-    expect(admission(x)).toEqual({ ok: true, operations: 8_230_000 });
-    expect(driverSweepOperations(x, RUN_DRAWS)).toBe(3 * 4 * 4_000 * 811);
-    expect(8_230_000 + 38_928_000).toBeLessThanOrEqual(MAX_OPERATIONS);
+    // By hand, a draw: 2 options × (4 times × 53 reads + the window's 8 + the goal's walk 8 × 18 + SC7's met and 2 × 4 thirds) +
+    // 2 sets × 5 + sorts 14 × (4 + 2 × 2, each option's goal quantiles and misses) + 1 pair + SC4's 4 × (2 × 2 + 4) = 2 × 373 +
+    // 10 + 112 + 1 + 32 = 901. Its sweep: 3 settings × 4 ranges × 4,000 draws × 885 (sorts 12 × 8). Counting only declared
+    // ends, chances and ratios (13 values) it was 7,430,000 and 35,088,000 (42,518,000); C14 made it 8,230,000 and 38,928,000;
+    // with SC7 and SC4, 9,010,000 and 42,480,000.
+    expect(admission(x)).toEqual({ ok: true, operations: 9_010_000 });
+    expect(driverSweepOperations(x, RUN_DRAWS)).toBe(3 * 4 * 4_000 * 885);
+    expect(9_010_000 + 42_480_000).toBeLessThanOrEqual(MAX_OPERATIONS);
     const e = evaluateCanonical(m, { sourceText: s.brief, seed: 7 });
     expect(calls, 'the headline and its sweep: 3 settings of each of the 4 ranges').toBe(13);
     for (const o of (e.view as Json).options as Json[]) {
