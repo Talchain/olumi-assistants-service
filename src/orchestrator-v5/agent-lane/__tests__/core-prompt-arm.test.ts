@@ -48,7 +48,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(b).not.toContain(NOTE_ON_ITEM_INSTRUCTION);
     expect(b.endsWith(CORE_REPLY_RULES)).toBe(true);
     // 23 Oct (ALPHA): the model-program prompt replaces arm B's assembled reference (055841368f…, 29,512 characters sent).
-    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('2bbd64ec18df611f9f624eef078f46275b0e4c827a233db6461413ed285855ec'); // 27 Oct: round 1, the first-model questions lead with the premise that could change the comparison (DL). 27 Oct: T1, each caveat once per conversation and no "not a recommendation" disclaimer. 26 Oct: integrated review words#7, the "on Olumi’s reading of …" basis. 25 Oct: alpha G10, no threshold sentences. 25 Oct: alpha G5, no note_on_item sentence on the program path. 24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
+    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('e1e01c5e5848dafb2c195afd4ac742b42367bfc674a2ddf70b9976f2e970e41f'); // 27 Oct: round 1, the first-model questions lead with the premise that could change the comparison (DL). 27 Oct: T1, each caveat once per conversation and no "not a recommendation" disclaimer. 26 Oct: integrated review words#7, the "on Olumi’s reading of …" basis. 25 Oct: alpha G10, no threshold sentences. 25 Oct: alpha G5, no note_on_item sentence on the program path. 24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
     // Candidate-3 witness kept (21 Oct): WHEN to build. Text only, not behaviour.
     expect(b).toContain('draft the first model from their brief in that same turn, even when figures are missing');
   });
@@ -74,7 +74,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   });
 
   it('THE PROMPTS (DL 22 Oct, priority change): the coach\u2019s reply rules and the drafter\u2019s rules, adapted as ruled; the old constants are gone', () => {
-    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('9607f2b0d95df9e7be7e040c975cd13a12ba7f60120d39c8c5fab6d2016d87dc'); // 23 Oct (ALPHA): the reply rules for the model program; P1: at most three questions a reply, each once.
+    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('267a328992db7b649b069c7f9c6a763a603177ee4f04fe3a963b1c6ee376a26f'); // 23 Oct (ALPHA): the reply rules for the model program; P1: at most three questions a reply, each once.
     // The model-program drafter's text (23 Oct, P1–P5: three questions at most, every option reaches
     // every measured goal, a deadline is its goal's window, options named in full). Prompt text changes only with this pin.
     // 24 Oct (DL, combined measure + funding dead end + science rulings r3-r5): their fact asked; a link Olumi's estimate by
@@ -128,7 +128,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       // Round 1 (DL 27 Oct): the first question is chosen by what could change the comparison, never by what unblocks the arithmetic.
       '2. The questions, at most three, as one numbered list they can answer in one reply, each asking one thing. The first is about the missing premise on the main causal route (a fact, the framing, the measure or a condition) whose answer could most change which option is most likely to achieve the aim, with a few words on why it could change that, never a claimed sensitivity; where the aim or its measure is Olumi\'s reading, confirming it comes first. Inputs needed only to finish the arithmetic come after.',
       'If a question asks for something their words already state or answer, do not ask it: put it in with the edit tools, quoting them, and say so.',
-      'Ask at most three questions in a reply, each once, the blocking ones first;',
+      'Ask at most three questions in a reply, each once, the one that could most change which option is most likely to achieve the aim first;',
       // 2. a chance as the code words it, what it rests on, the limit lines, and ONE next step
       // Integrated review 26 Oct (words#7, adopted): the third basis #3769 serves, quoted as the result words it, never shortened.
       'report each option\u2019s chance as the result words it: the figure, the goal, target and horizon it answers, and what it rests on, "on your figures", "on Olumi\u2019s reading of \u2026" or "if" with Olumi\'s assumptions (name them briefly; quote "on Olumi\u2019s reading of \u2026" as the result words it, with any "(not yet confirmed)", never shortened to "on your figures"; never drop the "if" or turn it into a forecast).',
@@ -147,7 +147,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'Name an option as the most likely to meet the goal only when the result itself names one, as a finding in this model, never as what they should choose;',
     ]) expect(count(b, rule), rule.slice(0, 60)).toBe(1);
     // Round 1 (DL 27 Oct): the arithmetic-unblocking order is gone from the first-model questions.
-    for (const old of ['the one that unblocks the most first', 'Only the questions that block a goal or a limit']) expect(b, old).not.toContain(old);
+    for (const old of ['the one that unblocks the most first', 'Only the questions that block a goal or a limit', 'the blocking ones first']) expect(b, old).not.toContain(old);
     // Kept from the old reply rule, each once: what the reply must report of saves and approvals, and the AIE's scope rule (K3).
     for (const kept of ['In this mode Olumi adds nothing to your reply and rewrites none of it: the user reads exactly your words.',
       'never your tools or what a tool returned', 'approving an estimate adopts it but does not make them its author',
