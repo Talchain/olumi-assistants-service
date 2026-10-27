@@ -6,8 +6,9 @@
 import { describe, expect, it } from 'vitest';
 import type { ExecutableModel, FixedAuthor, Goal, Limit, Option, Quantity, Reading, Withheld } from '../../executable.js';
 import { simulate } from '../../simulate/simulate.js';
+import type { WhenMissed } from '../../simulate/missed.js';
 import { separated } from '../../simulate/paired.js';
-import { NO_DRIVER_REASON, NO_RANGE_REASON, presentAnalysisView, type PresentInput, type PresentQuantity } from '../present.js';
+import { NO_DRIVER_REASON, NO_RANGE_REASON, presentAnalysisView, SHARE_BASIS_WORDS, uncertaintyShare, type PresentInput, type PresentQuantity } from '../present.js';
 
 type Rec = Record<string, any>;
 const ONE: Goal['window'] = { start_period: 0, periods: 1 };
@@ -193,14 +194,36 @@ describe('present: the canonical analysis view from a simulated model', () => {
     [goal('g', 'mrr', '>=', 'target')], [option('hold', 'Hold')], [{ id: 'l', label: 'Budget limit', quantity: 'cost', cmp: '<=', bound: 'budget', aggregation: 'end', window: ONE }]);
     const labels: Record<string, PresentQuantity> = { price: person('Price'), customers: person('Customers'), mrr: person('Monthly recurring revenue', true),
       unit_cost: person('Cost per customer'), cost: person('Customer cost', true), target: person('Target'), budget: person('Budget') };
-    const pounds = JSON.stringify(present(build(1), labels, {}, 20000));
-    const thousands = JSON.stringify(present(build(1000), labels, {}, 20000));
+    // SC7's what-a-miss-looks-like holds the values where a goal falls short, which no fixed swap below can name: it is checked
+    // on its own after (counts and shares identical, values × 1000, words identical but for the money figures); every other
+    // field is compared byte for byte, as before.
+    const apart = (v: ReturnType<typeof present>) => {
+      const { when_missed, ...rest } = v.goal_chance!;
+      return { view: { ...v, goal_chance: rest }, missed: when_missed };
+    };
+    const inPounds = apart(present(build(1), labels, {}, 20000)), inThousands = apart(present(build(1000), labels, {}, 20000));
+    const pounds = JSON.stringify(inPounds.view);
+    const thousands = JSON.stringify(inThousands.view);
     // The main driver's record holds its ends in the quantity's own unit, so they are the unit's own difference too.
     const swapped = [['£39', '0.039 £k'], ['£59', '0.059 £k'], ['£5,000', '5 £k'], ['£1,100', '1.1 £k'], ['"value":39,', '"value":0.039,'], ['"value":59,', '"value":0.059,'],
       ['(£49)', '(0.049 £k)'], ['"value":49,', '"value":0.049,'], ['£49 as the middle value', '0.049 £k as the middle value']]
       .reduce((s, [a, b]) => s.split(a!).join(b!), pounds);
     expect(swapped).not.toBe(pounds);
     expect(thousands).toBe(swapped);
+    type Missed = { readonly found: WhenMissed; readonly words: readonly string[] };
+    const [p, k] = [inPounds.missed.options[0], inThousands.missed.options[0]] as [Missed, Missed];
+    if (p.found.kind !== 'summary' || k.found.kind !== 'summary') throw new Error('no summary of the misses');
+    expect(p.found.outcomes.length).toBeGreaterThan(0);
+    expect({ ...k.found, outcomes: [] }).toEqual({ ...p.found, outcomes: [] });
+    const before = p.found.outcomes;
+    k.found.outcomes.forEach((o, i) => {
+      expect([o.goal_id, o.failed]).toEqual([before[i]!.goal_id, before[i]!.failed]);
+      expect(o.middle * 1000).toBeCloseTo(before[i]!.middle, 6);
+      expect(o.bad_end * 1000).toBeCloseTo(before[i]!.bad_end, 6);
+    });
+    const money = (w: readonly string[]) => w.map((x) => x.replace(/£\d{1,3}(,\d{3})*(\.\d+)?|\d+(\.\d+)? £k/g, '£#'));
+    expect(money(k.words)).toEqual(money(p.words));
+    expect(inThousands.missed.basis).toBe(inPounds.missed.basis);
   });
 
   it('simulation precision is labelled as precision, never as the chance’s band; no win share, verdict or forecast is said', () => {
@@ -618,10 +641,11 @@ describe('present: which option is most likely to achieve the goal, in this mode
     expect(v.leader.words.startsWith(`In this model, ‘Hold’ (${hold.display}) and ‘Nudge’ (${nudge.display}) are too close to call: for their chances of `
       + '‘Total’ being at least 5 tickets at 1 month from the start of this model, the simulation cannot tell them apart on its shared draws, ')).toBe(true);
     // Contrast: NUDGE shares x, so Nudge meets the target wherever Hold does. Its two intervals overlap just as much, yet the
-    // shared draws separate them, so (the 10-point gate off, S1) Nudge is named, and the words never say "cannot tell".
+    // shared draws separate them, so (the 10-point gate off, S1) Nudge is named, and the words never say "cannot tell". The gap
+    // is about 2 points, under SMALL_GAP, so it is named with the caveat (SC2's middle tier).
     const coupled = present(NUDGE(0.2), NUDGE_LABELS);
     expect(cell(coupled, 'hold').detail.precision_95[0]).toBeLessThanOrEqual(cell(coupled, 'nudge').detail.precision_95[1]);
-    expect([coupled.leader_licence, coupled.leader.goal_chance_leader]).toEqual(['permitted', 'nudge']);
+    expect([coupled.leader_licence, coupled.leader.goal_chance_leader]).toEqual(['permitted_with_caveat', 'nudge']);
     expect(coupled.leader.words).not.toMatch(/cannot tell/);
   });
 
@@ -643,22 +667,23 @@ describe('present: which option is most likely to achieve the goal, in this mode
     // Target 120 (W10: at the old 115, Add's 1 − Φ(15/7.8030) = 2.7% is no longer under 1%): Add needs c ≥ 40 − d, c read as
     // 10 to 30 eight times out of 10 (median 20, sd 7.8030): 1 − Φ(20/7.8030 = 2.5631) = 0.52% (table Φ(2.56) = 0.99477,
     // Φ(2.57) = 0.99492), shown "less than 1%"; Keep (80 + d) never reaches it. On 10,000 draws Add's interval (about 52
-    // draws) sits above Keep's (none): the difference is real in this model, so Add is named (only the interval condition stands).
+    // draws) sits above Keep's (none): the difference is real in this model, so Add is named (only the interval condition stands),
+    // with SC2's caveat, as it is about half a point ahead.
     const v = present(HIRE(120), SPEC_LABELS, {}, 10_000);
     const add = cell(v, 'add'), keep = cell(v, 'keep');
     expect([add.display, keep.display]).toEqual(['less than 1%', 'less than 1%']);
     expect(add.detail.precision_95[0]).toBeGreaterThan(keep.detail.precision_95[1]);
-    expect(v.leader_licence).toBe('permitted');
+    expect(v.leader_licence).toBe('permitted_with_caveat');
     expect(v.leader.goal_chance_leader).toBe('add');
-    expect(v.leader.words.startsWith('In this model, ‘Add one specialist’ is the option most likely to achieve the goal: less than 1% chance of ‘Weekly capacity’ being at least 120 tickets')).toBe(true);
+    expect(v.leader.words.startsWith('In this model, ‘Add one specialist’ is slightly more likely than ‘Keep’ to achieve the goal: less than 1% chance of ‘Weekly capacity’ being at least 120 tickets')).toBe(true);
     expect(v.leader.words).toContain('Even so, in this model it is more likely to miss the goal than to meet it.');
     expect(v.leader.words).not.toContain('no option is likely');
   });
 
   it('S1 strip (the 10-point gate off): a displayed gap under 10 points with distinct precision intervals names the leader (the probe "about 54% against about 50%")', () => {
-    // Nudge adds 0.5: P(x ≥ 4.5) = Φ(0.5 / 3.9015) = Φ(0.1282) ≈ 55% against P(x ≥ 5) = 50% (W10; before it, 57%); on 10,000
-    // draws each interval is about ±1 point.
-    const v = present(NUDGE(0.5), NUDGE_LABELS, {}, 10_000);
+    // Nudge adds 0.8: P(x ≥ 4.2) = Φ(0.8 / 3.9015) = Φ(0.2050) ≈ 58% against P(x ≥ 5) = 50%; on 10,000 draws each interval is
+    // about ±1 point. The gap (about 8 points) is over SMALL_GAP, so no caveat.
+    const v = present(NUDGE(0.8), NUDGE_LABELS, {}, 10_000);
     const hold = cell(v, 'hold'), nudge = cell(v, 'nudge');
     expect(nudge.detail.precision_95[0]).toBeGreaterThan(hold.detail.precision_95[1]);
     expect(pctOf(nudge.display) - pctOf(hold.display)).toBeGreaterThan(0);
@@ -667,11 +692,60 @@ describe('present: which option is most likely to achieve the goal, in this mode
     expect(v.leader.goal_chance_leader).toBe('nudge');
     expect(v.leader.words.startsWith(`In this model, ‘Nudge’ is the option most likely to achieve the goal: ${nudge.display} chance of `)).toBe(true);
     expect(v.leader.words).not.toContain('points apart');
+    expect(v.leader.words).not.toContain('slightly more likely');
     // Contrast: Nudge adds 3, P(x ≥ 2) = Φ(3/3.9015) = Φ(0.7689) ≈ 78% against 50% (W10; before it, 85%): distinct, so it is named too.
     const apart = present(NUDGE(3), NUDGE_LABELS, {}, 10_000);
     expect(apart.leader_licence).toBe('permitted');
     expect(apart.leader.goal_chance_leader).toBe('nudge');
     expect(apart.leader.words.startsWith(`In this model, ‘Nudge’ is the option most likely to achieve the goal: ${cell(apart, 'nudge').display} chance of `)).toBe(true);
+  });
+
+  it('SC2 middle tier: separated on the shared draws but under 5 points ahead is "slightly more likely", with the gap the draws measured', () => {
+    // Nudge adds 0.2: it meets the target wherever Hold does, plus where 4.8 ≤ x < 5, about Φ(0.2/3.9015) − ½ = 2.0 points.
+    const draws = 10_000, v = present(NUDGE(0.2), NUDGE_LABELS, {}, draws);
+    const hold = cell(v, 'hold'), nudge = cell(v, 'nudge');
+    // The gap is bound by identity to the Run's own paired difference (paired.ts), oriented Nudge − Hold.
+    const p = simulate(NUDGE(0.2), { seed: 20261023, draws }).paired!.find((x) => [x.a, x.b].sort().join() === 'hold,nudge')!;
+    const g = p.joint_within_limits as Extract<typeof p.joint_within_limits, { kind: 'sampled' }>;
+    expect(g.kind).toBe('sampled');
+    const sign = p.a === 'nudge' ? 1 : -1, ends = [sign * g.precision_95[0], sign * g.precision_95[1]].sort((a, b) => a - b);
+    const pts = (x: number) => (Math.round(x * 1000) / 10).toFixed(1);
+    expect(sign * g.difference).toBeGreaterThan(0.01);
+    expect(sign * g.difference).toBeLessThan(0.05);
+    expect(v.leader_licence).toBe('permitted_with_caveat');
+    expect(v.leader).toMatchObject({ licence: 'permitted_with_caveat', option_id: null, goal_chance_leader: 'nudge', similar_option_ids: [] });
+    expect(v.leader.words.startsWith(`In this model, ‘Nudge’ is slightly more likely than ‘Hold’ to achieve the goal: ${nudge.display} chance of `
+      + `‘Total’ being at least 5 tickets at 1 month from the start of this model, against ${hold.display}, if `)).toBe(true);
+    expect(v.leader.words).toContain(`. The gap is small: about ${pts(sign * g.difference)} points (${pts(ends[0]!)} to ${pts(ends[1]!)}) on the same simulated draws, under 5 points.`);
+    expect(v.leader.words).not.toMatch(FORBIDDEN);
+    expect(v.leader.words).not.toContain('most likely to achieve');
+  });
+
+  it('SC3: the share of the variation that goes with a figure\'s third, by hand, bound to the Run\'s drivers; a figure that cannot move it is not said', () => {
+    // Add meets 95 where c ≥ 15 − d (d within ±0.1). c is read as median 20, sd 7.8030 (W10), so its thirds split at 20 ∓ 0.4307 ×
+    // 7.8030 = 16.64 and 23.36. Lowest third: met where 15 ≤ c < 16.64, (1/3 − Φ(−0.6408) = 0.2608) / (1/3) = 0.2176; middle and
+    // highest: 1. p = 0.7392. Var(E[met | third]) = ⅓ (0.5216² + 2 × 0.2608²) = 0.1360; Var(met) = 0.7392 × 0.2608 = 0.1928:
+    // a share of 0.706. Keep never meets it (p = 0): nothing to share.
+    const draws = 10_000, run = { run_id: 'r1', graph_hash_at_run: 'h1', computed_at: '2026-10-27T12:00:00Z' };
+    const v = present(HIRE(95), SPEC_LABELS, { run, current: true }, draws);
+    const sim = simulate(HIRE(95), { seed: 20261023, draws }), add = sim.options.find((o) => o.option_id === 'add')!;
+    const c = add.drivers.find((d) => d.quantity === 'c')!, dd = add.drivers.find((d) => d.quantity === 'd')!;
+    const share = uncertaintyShare((add.joint_within_limits as { chance: number }).chance, draws, c.joint_if_low, c.joint_if_high)!;
+    expect(Math.abs(share - 0.706)).toBeLessThan(0.02);
+    expect(uncertaintyShare((add.joint_within_limits as { chance: number }).chance, draws, dd.joint_if_low, dd.joint_if_high)!).toBeLessThan(0.01);
+    expect(v.goal_chance.uncertainty_share).toEqual({ basis: SHARE_BASIS_WORDS, options: [{ option_id: 'add', figures: [{ quantity: 'c', share: Math.round(share * 1000) / 1000 }],
+      words: `For ‘Add one specialist’, of the variation in whether a simulated draw meets the goal, the third ‘Capacity per specialist’ falls in accounts for about ${Math.round(share * 100)}%.` }] });
+    expect(SHARE_BASIS_WORDS).toContain('never that the figure causes it');
+    expect(JSON.stringify(v.goal_chance.uncertainty_share)).not.toMatch(FORBIDDEN);
+    // Contrast: the same Run, known not to be current, says no share.
+    expect(present(HIRE(95), SPEC_LABELS, { run, current: false }, draws).goal_chance.uncertainty_share).toBeUndefined();
+    // Nor while a limit is not yet checked: the chance leaves it out, so it is not the whole aim (Codex r1).
+    const limits = [{ limit_id: 'cost', label: 'Within budget', status: 'asks' as const, reasons: ['It needs the cost.'], asks: ['price'] }];
+    expect(present(HIRE(95), SPEC_LABELS, { run, current: true, limits, asks: [{ quantity_id: 'price', label: 'Specialist cost', unit: '£' }] }, draws)
+      .goal_chance.uncertainty_share).toBeUndefined();
+    // A step at the figure's median: its middle third is split, so the third alone accounts for 2/3, by hand, less the 2/n bias.
+    expect(uncertaintyShare(0.5, 9000, 0, 1)).toBeCloseTo(2 / 3 - 2 / 9000, 10);
+    expect([uncertaintyShare(0, 9000, 0, 0), uncertaintyShare(1, 9000, 1, 1), uncertaintyShare(0.5, 2, 0, 1)]).toEqual([undefined, undefined, undefined]);
   });
 
   it('B2: while a limit is not yet checked no option is named; the words say why, with each chance', () => {
