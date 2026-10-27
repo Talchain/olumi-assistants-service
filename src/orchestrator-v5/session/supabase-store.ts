@@ -2261,7 +2261,8 @@ export class SupabaseSessionStore implements SessionStore {
    */
   private async runGraphCasHook(write: SessionTurnWrite): Promise<void> {
     const mode = this.options.graphCasMode ?? 'off';
-    if (mode === 'off' || write.graph == null) return;
+    // A model program's save (W5): decided by the RPC's identity and revision CAS, never by the legacy analysis projection.
+    if (mode === 'off' || write.graph == null || write.programSave === true) return;
 
     const { evaluation, select_ms, select_failed } = await this.evaluateGraphCas(write);
 

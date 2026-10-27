@@ -22,7 +22,7 @@ import { GraphStateIngressSchema } from "../orchestrator-v5/boundary/request-ext
 import { eventRiskIngressIssues } from "../schemas/event-risk.js";
 import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
-import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
+import { computeExpectedGraphCasHashes, computeExpectedGraphIdentityHash } from "../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectCorePostimageForPersistence, projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
 import { clearInheritedInterventionSourceQuotes, hasNewInterventionRanges } from "../orchestrator/tools/encode-option-interventions.js";
 import { admitInterventionRange, interventionPoint } from "../orchestrator-v5/intervention-range.js";
@@ -786,7 +786,11 @@ export default async function route(app: FastifyInstance) {
           base = await store.loadGraph(scenarioId);
         }
         baseGraphForInvariants = base;
-        const hashes = computeExpectedGraphCasHashes(base);
+        // A model program's save is decided by its identity and revision compare-and-set alone (W5, DL 27 Oct): the legacy
+        // analysis hash is not computed for its base, so it can neither decide the save nor, by throwing, null the identity.
+        const hashes = programSave
+          ? { expectedGraphIdentityHash: computeExpectedGraphIdentityHash(base), expectedGraphAnalysisHash: null }
+          : computeExpectedGraphCasHashes(base);
         expectedGraphIdentityHash = hashes.expectedGraphIdentityHash;
         expectedGraphAnalysisHash = hashes.expectedGraphAnalysisHash;
       } catch (err) {
@@ -1309,6 +1313,8 @@ export default async function route(app: FastifyInstance) {
             expectedGraphIdentityHash,
             expectedGraphAnalysisHash,
             ...(expectedRevision !== undefined ? { expectedRevision } : {}),
+            // The program save's mark, carried to the store, whose app-side analysis CAS hook it skips (W5).
+            ...(programSave ? { programSave: true as const } : {}),
           },
           });
         };

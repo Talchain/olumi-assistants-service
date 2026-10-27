@@ -59,10 +59,13 @@ export async function writeCorePostimage(deps: { readonly dispatch: InternalDisp
     return unknown('not_confirmed', { check: 'ack_status', status: null });
   }
   const code = (reg.json.details as { code?: unknown } | undefined)?.code;
-  if (reg.status === 409 && (code === 'GRAPH_STALE' || code === 'OPERATION_ID_REUSED')) {
+  // v6's revision compare-and-set refusing the write (409 `revision_conflict`) is the same fact as GRAPH_STALE: the model moved
+  // since the base read, and nothing was written (W5, DL 27 Oct).
+  const moved = code === 'GRAPH_STALE' || code === 'revision_conflict';
+  if (reg.status === 409 && (moved || code === 'OPERATION_ID_REUSED')) {
     const prior = await w.ownVersion().catch(() => null);
     if (prior !== null) return { status: 'already_saved', receipt: prior };
-    if (code === 'GRAPH_STALE') return { status: 'stale' };
+    if (moved) return { status: 'stale' };
     return unknown('not_confirmed', { check: 'ack_status', status: reg.status });
   }
   if (reg.status >= 400 && reg.status < 500) return { status: 'refused', code: typeof code === 'string' ? code : null };
