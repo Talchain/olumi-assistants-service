@@ -134,25 +134,26 @@ async function scenarioConversation(scenarioId: string, store: ConversationIdSto
  * A HOST-WRITTEN REPLY GOES INTO THE SCENARIO'S CONVERSATION (C12, assessor 26 Oct). A program's Run press is answered by the
  * host with no model call, so its words were in no Conversation, and the next typed turn could not refer to them. Once the
  * scenario has a Conversation, the press and the reply are added to it as the person saw them; before then, the turns that
- * open it carry them (`earlierTurns`). While a run waits on a card, its tool call must be answered first, so nothing is added
- * (logged). One request, no retry of ours: a failure is logged and the reply the person saw stands.
+ * open it carry them (`earlierTurns`). While a run waits on a card, its tool call is answered first, in the same request, as
+ * the AI's own reply on a Run press answers it (`runCoreTurn`: a turn that withholds apply_change): not applied, superseded.
+ * The card stays held for its own press (C12, 27 Oct; before, nothing was added and the reply was in no Conversation). One
+ * request, no retry of ours: a failure is logged and the reply the person saw stands.
  */
 export async function addHostTurnToConversation(input: {
   readonly scenarioId: string; readonly userText: string; readonly assistantText: string;
   readonly conversationStore?: ConversationIdStore; readonly pausedRunStore?: PausedRunStore; readonly client?: OpenAI;
-}): Promise<'added' | 'empty' | 'no_conversation' | 'held' | 'failed'> {
+}): Promise<'added' | 'empty' | 'no_conversation' | 'failed'> {
   const said = input.assistantText.trim();
   if (said === '') return 'empty';
   try {
     const id = await input.conversationStore?.read(input.scenarioId);
     if (typeof id !== 'string' || id === '') return 'no_conversation';
-    if ((await input.pausedRunStore?.read(input.scenarioId)) != null) {
-      log.info({ event: 'core_turn.host_reply_to_conversation', scenario_id: input.scenarioId, outcome: 'held' }, 'core-turn: host reply not added (a run waits on a card)');
-      return 'held';
-    }
+    const held = await input.pausedRunStore?.read(input.scenarioId);
+    if (held != null && (await input.pausedRunStore!.take(input.scenarioId, held.pause_id)) !== true) throw new CoreStateUnavailableError('pause_not_resumable');
     const client = input.client ?? ledgeredAgentsClient({ site: 'agent-core.host-reply', conversationBound: true,
       detailOf: (body) => ({ model: String(body['model'] ?? ''), purpose: 'conversation', ...agentRequestIdentity('agent.converse', body) }) });
     await client.conversations.items.create(id, { items: [
+      ...(held != null ? [{ type: 'function_call_output' as const, call_id: held.call_id, output: PAUSE_SUPERSEDED }] : []),
       ...(input.userText.trim() === '' ? [] : [{ type: 'message' as const, role: 'user' as const, content: input.userText }]),
       { type: 'message' as const, role: 'assistant' as const, content: said },
     ] }, { maxRetries: 0 });
