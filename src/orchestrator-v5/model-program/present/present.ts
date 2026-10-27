@@ -361,7 +361,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       const kept = `, kept to Olumi’s reading of what it can be (${canBe(x.id, x.unit, domain)})`;
       if (reading.ends === 'hard_bounds') {
         const held = reading.lower === d.low && reading.upper === d.high ? ', held within those bounds' : Number.isFinite(reading.lower) || Number.isFinite(reading.upper) ? kept : '';
-        return [`${name} follows Olumi’s provisional conversion of ${whose}, ${ends}, into a bell-shaped spread${held}`];
+        return [`${name} follows Olumi’s provisional reading of ${whose}, ${ends}${held}: values near its middle are likelier than values near its ends`];
       }
       const at = (v: number): string => sayOf(x.id, v, x.unit);
       const never = [...(reading.edge_below ? [`below ${at(reading.lower)}`] : []), ...(reading.edge_above ? [`above ${at(reading.upper)}`] : [])];
