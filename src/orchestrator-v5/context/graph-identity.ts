@@ -16,7 +16,8 @@ import { runAnalysisProjectionNeedsStamp } from './analysis-projection-policy.js
  *
  *   graphIdentityHash      — full persisted-graph identity for strict CAS,
  *                            version identity, restore safety and compare
- *                            baseline identity (contract §9.2). Built here,
+ *                            baseline identity (contract §9.2). Built in
+ *                            graph-identity-normalise.ts, re-exported here,
  *                            CEE-local. Designed for later promotion to
  *                            `@talchain/schemas` once package skew is resolved
  *                            (contract §6.4/§6.5) — NOT promoted this slice.
@@ -37,17 +38,15 @@ import { runAnalysisProjectionNeedsStamp } from './analysis-projection-policy.js
  * hashing on hot paths).
  */
 
-import { createHash } from 'node:crypto';
-
-import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import {
   computeAnalysisAffectingGraphHash,
   computeAnalysisAffectingGraphHashSha256,
 } from './graph-hash.js';
-import { GRAPH_SCHEMA_VERSION, IDENTITY_NORMALISER_VERSION, IDENTITY_PROJECTION_VERSION, normaliseGraphForIdentity } from './graph-identity-normalise.js';
-export { GRAPH_SCHEMA_VERSION, IDENTITY_NORMALISER_VERSION, IDENTITY_PROJECTION_VERSION, TRANSIENT_UI_KEYS, isIdentityEmptyGraph,
-  orderGraphEntriesForComparison, normaliseGraphForIdentity, type NormalisedGraphIdentity } from './graph-identity-normalise.js';
+import { computeGraphIdentityHash, GRAPH_SCHEMA_VERSION, HASH_ALGORITHM } from './graph-identity-normalise.js';
+export { computeGraphIdentityHash, GRAPH_SCHEMA_VERSION, IDENTITY_NORMALISER_VERSION, IDENTITY_PROJECTION_VERSION, TRANSIENT_UI_KEYS,
+  isIdentityEmptyGraph, orderGraphEntriesForComparison, normaliseGraphForIdentity, type GraphIdentityHash,
+  type NormalisedGraphIdentity } from './graph-identity-normalise.js';
 
 // ---------------------------------------------------------------------------
 // Versioned projection metadata (contract §8 "Normalisation must be versioned",
@@ -131,8 +130,6 @@ export function matchesHistoricalRunAnalysisIdentity(
   });
 }
 
-const HASH_ALGORITHM = 'sha256' as const;
-
 // ---------------------------------------------------------------------------
 // Contract-shaped hash envelopes (contract §9.1 / §9.2).
 // ---------------------------------------------------------------------------
@@ -146,56 +143,10 @@ export interface AnalysisAffectingHash {
   readonly normaliser_version: string;
 }
 
-export interface GraphIdentityHash {
-  readonly kind: 'graph_identity_hash';
-  readonly value: string;
-  readonly algorithm: typeof HASH_ALGORITHM;
-  readonly projection_version: string;
-  readonly graph_schema_version: string;
-  readonly normaliser_version: string;
-}
-
 
 // ---------------------------------------------------------------------------
 // A2 — hashes.
 // ---------------------------------------------------------------------------
-
-function sha256Hex(input: string): string {
-  return createHash(HASH_ALGORITHM).update(input).digest('hex');
-}
-
-/**
- * A2: CEE-local `graphIdentityHash`. Full 64-char SHA-256 over the versioned
- * identity normalisation (contract §9.2). Returns `null` for an absent or
- * identity-empty graph.
- *
- * Distinct from — and MUST NOT be confused with — the topology-only
- * `computeDeterministicGraphHash` (graph-hash.ts), which hashes node/edge
- * identity only and is a telemetry marker, not an identity hash (contract
- * §2.2 forbids reusing the topology hash as graphIdentityHash).
- *
- * Values are assumed JSON-safe, i.e. wire-originated. Like the sanctioned
- * analysis-affecting hash (both go through `stableStringify` → `JSON.stringify`),
- * a property explicitly set to `undefined` is indistinguishable from an absent
- * one, and `NaN`/`Infinity` serialise as `null`. `JSON.parse` never produces
- * these, so they are unreachable on the real ingress path; only hand-built
- * `GraphStateIngress` objects could carry them.
- */
-export function computeGraphIdentityHash(
-  graph: GraphStateIngress | null | undefined,
-): GraphIdentityHash | null {
-  const normalised = normaliseGraphForIdentity(graph);
-  if (normalised === null) return null;
-
-  return {
-    kind: 'graph_identity_hash',
-    value: sha256Hex(stableStringify(normalised)),
-    algorithm: HASH_ALGORITHM,
-    projection_version: IDENTITY_PROJECTION_VERSION,
-    graph_schema_version: GRAPH_SCHEMA_VERSION,
-    normaliser_version: IDENTITY_NORMALISER_VERSION,
-  };
-}
 
 /**
  * Typed §9.1 envelope over the EXISTING analysis-affecting hash. Delegates to

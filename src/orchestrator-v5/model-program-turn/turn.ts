@@ -6,7 +6,6 @@
  *  · a Run press: no model call. The stored Run when it is current for this model and engine, else a new Run, saved.
  * Every other turn is the core agent's own native chat, with its tools on the program (`program-tools.ts`).
  */
-import { CONFIRM_READING } from '../agent-lane/approval-chips.js';
 import type { ProposalStore } from '../agent-lane/proposal.js';
 import type { InternalDispatch } from '../core-route/internal-dispatch.js';
 import type { ToolResult } from '../agent-lane/runtime/agent-tools.js';
@@ -16,6 +15,7 @@ import { draftCanonicalModel, ledgeredResponsesCall, type ResponsesCall } from '
 import { seedOf } from './evaluate.js';
 import { asDrafted, readingOf, verbatimIn } from './postimage.js';
 import { holdProgramCard } from './program-tools.js';
+import { CONFIRM_READING } from './program-card.js';
 import { isSaved, programOperationId, savePostimage, withNewRun } from './program-save.js';
 import { MODEL_PROGRAM, reopenProgram, savedProgramOf, type SavedProgram } from './program-store.js';
 import { CANONICAL_SCHEMA_SHA256, DRAFTING_PROMPT_SHA256 } from './prompt.js';

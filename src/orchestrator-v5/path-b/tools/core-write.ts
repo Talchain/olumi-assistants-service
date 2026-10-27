@@ -9,7 +9,7 @@
 import { createHash } from 'node:crypto';
 import type { InternalDispatch } from '../../core-route/internal-dispatch.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
-import { computeGraphIdentityHash } from '../../context/graph-identity.js';
+import { computeGraphIdentityHash } from '../../context/graph-identity-normalise.js';
 import { computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
 import type { AtomicCommittedModelVersionReceipt } from '../../session/store.js';
 import { approvedGraphHeld, isSavedRead, readSaved, type SavedRead } from '../../model-program-turn/saved-read.js';

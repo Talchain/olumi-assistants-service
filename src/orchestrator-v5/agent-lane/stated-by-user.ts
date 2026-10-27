@@ -50,6 +50,8 @@ import { isProportionScaledFactor } from '../tools/handlers/d1-shared/evaluate-f
 import type { StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
 import { readCount } from './same-unit.js';
 import { periodNoun } from '../../utils/unit-alphabet.js';
+import { quoteSpansIn } from './quote-spans.js';
+export { quoteSpansIn } from './quote-spans.js';
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
@@ -1414,27 +1416,6 @@ export function levelDenominatorOf(node: unknown): string[] {
 /** Keep the exact sentence, including its terminal punctuation, for the approval and provenance quote. */
 const sentencesOf = (q: string): string[] => (q.match(/(?:[^.!?;:\n]|(?<=\d)\.(?=\d))+[.!?;:]?/g) ?? [])
   .map(x => x.trim()).filter(x => x !== '');
-/**
- * Where `quote` occurs in the user's text as whole words and whole numbers (Codex buddy r1 HIGH): never starting or ending
- * inside a word or a number, so "1 percentage points…" is not the user's words when they wrote "11 percentage points…",
- * and "5 points" is not cut from "0.5 points" or "1,5 points".
- */
-export function quoteSpansIn(userText: string, quote: string): number[] {
-  if (quote === '') return [];
-  const isWordChar = (c: string | undefined): boolean => c !== undefined && /[\p{L}\p{N}]/u.test(c);
-  const spans: number[] = [];
-  for (let at = userText.indexOf(quote); at >= 0; at = userText.indexOf(quote, at + 1)) {
-    const before = userText[at - 1]; const first = quote[0]; const last = quote[quote.length - 1];
-    const after = userText[at + quote.length];
-    // A separator inside a number is never an edge either: ",500 …" from "1,500" (Codex r2 HIGH), "… 1," from "1,500".
-    const cutBefore = (isWordChar(before) && isWordChar(first)) || (/[.,]/.test(before ?? '') && /\d/.test(userText[at - 2] ?? '') && /\d/.test(first ?? ''))
-      || (/\d/.test(before ?? '') && /[.,]/.test(first ?? '') && /\d/.test(quote[1] ?? ''));
-    const cutAfter = (isWordChar(after) && isWordChar(last)) || (/\d/.test(last ?? '') && /[.,]/.test(after ?? '') && /\d/.test(userText[at + quote.length + 1] ?? ''))
-      || (/[.,]/.test(last ?? '') && /\d/.test(after ?? '') && /\d/.test(quote[quote.length - 2] ?? ''));
-    if (!cutBefore && !cutAfter) spans.push(at);
-  }
-  return spans;
-}
 /** The whole sentence (".", "!", "?" or a line break; never a decimal point) around each place the quote occurs. */
 function enclosingSentences(userText: string, quote: string): string[] {
   const ends = [...userText.matchAll(/[!?\n]|(?<!\d)\.|\.(?!\d)/g)].map(m => m.index!);

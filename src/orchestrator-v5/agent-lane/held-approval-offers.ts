@@ -2,6 +2,7 @@
 import type { SuggestedAction } from '../compose/types.js';
 import { heldGoalHorizonMonths } from '../goal-target/goal-horizon-verdict.js';
 import { ProposalStore } from './proposal.js';
+import { agentProposals, HELD_OFFER_ROWS_READ_CAP } from './agent-proposals.js';
 import { AMEND_CHIP, typedApprovalOf } from './approval-chips.js';
 import { offeredApproveChipOnRow, rehydrateProposals } from './durable-proposal.js';
 import { isPendingActionExpired, parsePendingAction, type PendingAction } from '../session/pending-action.js';
@@ -9,6 +10,7 @@ import { identityReadingOf } from './identity-card.js';
 import { identityCardOfferable } from '../system-events/identity-confirm-edit.js';
 import type { StructuredProposal } from './proposal.js';
 import { heldCardStillApplies, heldCardSubjectMoved, heldCardUnderReviewIn } from './proposal-object/still-applies.js';
+export { agentProposals, HELD_OFFER_ROWS_READ_CAP } from './agent-proposals.js';
 
 /**
  * ⛔ A HELD IDENTITY CARD IS SHOWN ONLY WHILE IT IS STILL OFFERABLE (#2851 Codex buddy r1 P1-1): a card held from before
@@ -31,8 +33,6 @@ export function identityProposalOfferable(proposal: StructuredProposal | undefin
   return identityCardOfferable(graph, reading.part_levels, reading);
 }
 
-/** The SAME process store the turn route authorises and settles. */
-export const agentProposals = new ProposalStore();
 const proposals = agentProposals;
 
 /** The other half of the press's rule (#3024): a card whose own subject moved while the analysis hash did not (a renamed goal). */
@@ -81,9 +81,6 @@ export interface HeldProposalOfferRead {
   readonly proposal_id: string;
   readonly suggested_actions: readonly SuggestedAction[];
 }
-
-/** At most eight per-turn durable reads per opt-in graph request. */
-export const HELD_OFFER_ROWS_READ_CAP = 8;
 
 /**
  * Latest-carrier membership/expiry and integrity FIRST; then the turn's own executable authority.

@@ -28,6 +28,7 @@ import type { InfluenceBand } from '../format/influence-bands.js';
 import type { ToolResult } from './runtime/agent-tools.js';
 import { SCOPE_APPROVE_PREFIX } from './goal-scope.js';
 import { identityApproveMessage, identityReadingOf } from './identity-card.js';
+import { linkEffectApproveMessage } from './approval-words.js';
 import { linkEffectSourceLevels } from './link-effect-figures.js';
 import { namesSourceOf } from './stated-by-user.js';
 import { POINTS_SPELLINGS } from '../../utils/unit-alphabet.js';
@@ -646,19 +647,7 @@ export function linkEffectReadingsOf(
   return readings.every((reading): reading is string => reading !== undefined) ? readings.join('\n') : undefined;
 }
 
-/**
- * ⭐ THE PRESSED CARD CARRIES ITS READING (AIQ 5885290014: "a forged approval without a reading token → the writer
- * refuses"). The card's words ARE its reading, so the approval request carries exactly what the user saw; the durable
- * carrier keeps those words, so a card put back after a restart shows the same reading ({@link readingOfLinkEffectApproval}).
- */
-const LINK_EFFECT_APPROVE_PREFIX = 'Yes \u2014 ';
-export const linkEffectApproveMessage = (reading: string): string => `${LINK_EFFECT_APPROVE_PREFIX}${reading}`;
-/** The reading a link-effect card's words carry, or `undefined` for any other words. */
-export function readingOfLinkEffectApproval(message: unknown): string | undefined {
-  return typeof message === 'string' && (message.startsWith(`${LINK_EFFECT_APPROVE_PREFIX}Record: `)
-    || /^Yes \u2014 REVERSAL: this changes the link from (positive|negative) to (positive|negative)\. Record: /.test(message))
-    ? message.slice(LINK_EFFECT_APPROVE_PREFIX.length) : undefined;
-}
+export { linkEffectApproveMessage, readingOfLinkEffectApproval } from './approval-words.js';
 
 /** The tools whose proposal can carry Olumi's reading of the user's own words for a link's band (slice C3). */
 const READING_TOOLS: ReadonlySet<string> = new Set(['propose_link_strength', 'propose_model_change']);

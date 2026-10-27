@@ -5,9 +5,9 @@
  * results as the legacy reconcile and reload offer gave a program card (`__tests__/program-card-turn.test.ts`).
  */
 import { ProposalStore } from '../agent-lane/proposal.js';
-import { offeredApproveChipOnRow, rehydrateProposals } from '../agent-lane/durable-proposal.js';
-import { agentProposals, HELD_OFFER_ROWS_READ_CAP, type HeldProposalOfferRead } from '../agent-lane/held-approval-offers.js';
-import { agentProposalOf, heldProposalId } from '../agent-lane/proposal-object/record.js';
+import { agentProposalOf, heldProposalId, offeredApproveChipOnRow, rehydrateProposals } from '../agent-lane/durable-proposal.js';
+import { agentProposals, HELD_OFFER_ROWS_READ_CAP } from '../agent-lane/agent-proposals.js';
+import type { HeldProposalOfferRead } from '../agent-lane/held-approval-offers.js';
 import { isPendingActionExpired, parsePendingAction, type PendingAction } from '../session/pending-action.js';
 import { AMEND_CHIP, HELD_PROPOSAL_TURN_BUDGET, heldCardForReview, heldCardUnderReviewIn, programCardApplies, PROPOSAL_IDLE_TTL_MS,
   typedApprovalOf } from './program-card.js';
