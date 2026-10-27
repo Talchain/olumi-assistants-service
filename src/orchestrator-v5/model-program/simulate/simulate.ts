@@ -787,9 +787,12 @@ function withheldList(options: readonly OptionResult[]): WithheldChanceEntry[] {
  * counts runOption's work in every draw for every option: at each time 0..periods, each quantity's visit and every value it
  * reads (an equation's parts or terms, a stock's start and flows, the option's sets, and eight for each risk on it, more
  * than its timing, its fired state read three times and its severity); each condition's window, read twice for a ratio;
- * each condition's walk over the values that left their domain (Tally.add), eight for each value that can leave (a declared
- * floor or ceiling, a risk's chance, a ratio, whose divisor may be 0; the shape cannot say whether it does): its read and reach
- * test, its name and this draw's cause (added, read and set) and its cause over the draws (read, combined and set) (C14, 27 Oct);
+ * each condition's walk over the values that left their domain (Tally.add), eight for each value that can leave: its read and reach
+ * test, its name and this draw's cause (added, read and set) and its cause over the draws (read, combined and set) (C14, 27 Oct).
+ * runOption tests every value, and any that is outside its ends or not a finite number joins `left`, so every value can leave
+ * (a calculation or a stock can overflow with no end declared, 1e200 × 1e200; a range's draw can too; a ratio's divisor may be
+ * 0; the shape cannot say whether one does) except a figure (finite, compile) with no floor or ceiling, not a risk's chance and
+ * with no risk on it: a set gives it another value that is inside its own ends or already outside (Codex, C14, 27 Oct);
  * each set's timing; eight a draw for each risk (its reset, timing, occurrence, chance, uniform and severity); and the sorts (each ranged input's terciles, each
  * condition's quantiles per option); and each pair of options compared once in every draw (SC2's paired differences, k(k−1)/2
  * pairs: their work grows with the square of the option count, C14, 27 Oct). `bytes` is what the run holds at once: each ranged input's draws with its terciles
@@ -800,9 +803,9 @@ function withheldList(options: readonly OptionResult[]): WithheldChanceEntry[] {
 export function costOf(model: ExecutableModel, draws: number): { readonly operations: number; readonly bytes: number } {
   const times = model.periods + 1, options = model.options.length, checks = [...model.goals, ...model.limits];
   const ranged = model.quantities.filter((q) => q.dist?.kind === 'range').length;
-  const chances = new Set(model.risks.map((r) => r.occurrence));
-  const walks = checks.length * model.quantities.filter((q) => q.domain?.min !== undefined || q.domain?.max !== undefined || chances.has(q.id)
-    || (q.equation?.form === 'definition' && q.equation.op === 'ratio')).length;
+  const chances = new Set(model.risks.map((r) => r.occurrence)), shocked = new Set(model.risks.map((r) => r.effect_on));
+  const walks = checks.length * model.quantities.filter((q) => q.dist?.kind !== 'fixed' || q.domain?.min !== undefined || q.domain?.max !== undefined
+    || chances.has(q.id) || shocked.has(q.id)).length;
   const reads = 8 * model.risks.length + model.quantities.reduce((s, q) => s + 1
     + (q.equation === undefined ? 0 : q.equation.form === 'definition' ? q.equation.parts.length : 1 + 2 * q.equation.terms.length)
     + (q.stock === undefined ? 0 : 1 + q.stock.inflows.length + q.stock.outflows.length), 0);
