@@ -24,7 +24,7 @@ import { corePromptCacheKey, PAUSE_NO_CARD, PAUSE_SUPERSEDED, STATE_BLOCK_PREFIX
 import { PROGRAM_TOOL_DESCRIPTIONS, programInstructions } from '../../orchestrator-v5/core-route/instructions.js';
 import { TOOL_DESCRIPTIONS } from '../../orchestrator-v5/path-b/tools/index.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
-import { ASK_CHALLENGE_CHIP_ID } from '../../orchestrator-v5/core-route/turn-request.js';
+import { ASK_CHALLENGE_CHIP_ID, OWN_SAVE_READ_MS, recordedRunsOf, typedRowProof } from '../../orchestrator-v5/core-route/turn-request.js';
 import { bakery, BRIEF as BAKERY_BRIEF, club, CLUB_BRIEF, q, updateOf } from '../../orchestrator-v5/model-program-turn/__tests__/bakery.fixture.js';
 import type { CanonicalQuantityT } from '../../orchestrator-v5/model-program/canonical.js';
 import { DRAFTING_INSTRUCTIONS } from '../../orchestrator-v5/model-program-turn/prompt.js';
@@ -76,6 +76,13 @@ let otherRun: string | undefined;
 const registered: Json[] = [];
 /** The register's refusal for every write, as the real register sends it (a 422 body), or none. */
 let registerRefusal: Json | null = null;
+/** When set, every versions read waits for it (a read that never answers until released), counted in `versionsHeld`. */
+let holdVersions: Promise<void> | undefined;
+let versionsHeld = 0;
+/** A guest's write, as the register commits one: saved, but no version minted (`append_turn_atomic_v5`), so no receipt. */
+let guestWrites = false;
+/** The next write's acknowledgement is lost (a 503), after its commit or before it: once, then cleared. */
+let loseAck: 'after_commit' | 'before_commit' | null = null;
 const turnRows = new Map<string, any>();
 /** The scenario's turn fence (`v5_turn_fence`): a claim takes the next generation; a Stop sets the row's tombstone. */
 const fenceRows = new Map<string, { generation: number; stopped_at: string | null }>();
@@ -129,6 +136,8 @@ const store = {
     fenceRows.set(`${sid}:${tid}`, { generation: row?.generation ?? ++fenceGeneration, stopped_at: '2026-10-23T10:00:00.000Z' });
     return { stopped: true, claimed: row !== undefined, alreadyCommitted: false };
   }),
+  /** This turn's own fence row carries a Stop's tombstone (`v5_turn_fence.stopped_at`). */
+  isTurnStopped: vi.fn(async (sid: string, tid: string) => (fenceRows.get(`${sid}:${tid}`)?.stopped_at ?? null) !== null),
 };
 vi.mock('../../orchestrator-v5/session/index.js', () => ({ getSessionStore: () => store, resetSessionStoreForTests: () => {}, SessionReadError: class SessionReadError extends Error {} }));
 vi.mock('../../orchestrator/user-identity.js', async (original) => ({
@@ -277,6 +286,12 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const next = outputs.shift() ?? [{ type: 'message', text: ANSWER }];
       // A refused call (a 400: never retried), so the turn ends with no reply.
       if (next[0]?.type === 'refuse') return json({ error: { message: 'Refused.', type: 'invalid_request_error', param: null, code: null } }, 400);
+      // A stream that ends after its first event, with no terminal one (served `stream_without_terminal_event`): delivery unknown.
+      if (next[0]?.type === 'cut') {
+        return new Response(`event: response.created\ndata: ${JSON.stringify({ type: 'response.created', sequence_number: 0,
+          response: { id: 'resp_cut', object: 'response', model: 'gpt-scripted', status: 'in_progress', output: [] } })}\n\n`,
+        { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      }
       return json(responsesBody(next));
     })));
     vi.resetModules();
@@ -299,17 +314,20 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       }
       const current = persisted === null ? null : computeGraphIdentityHash(persisted as never)!.value;
       if ((b.expected_graph_identity_hash ?? null) !== current) return reply.code(409).send({ details: { code: 'GRAPH_STALE' } });
+      if (loseAck === 'before_commit') { loseAck = null; return reply.code(503).send({ code: 'upstream_unavailable' }); }
       persisted = b.graph as Json;
+      if (guestWrites) return { registered: true, graph_identity_hash: computeGraphIdentityHash(persisted as never)!, graph_hash: hashOf(persisted) };
       registered.push(b);
+      if (loseAck === 'after_commit') { loseAck = null; return reply.code(503).send({ code: 'upstream_unavailable' }); }
       const identity = computeGraphIdentityHash(persisted as never)!;
       return { registered: true, graph_identity_hash: identity, graph_hash: hashOf(persisted),
         model_version: { version_id: `v_${registered.length}`, version_number: registered.length, mutation_id: `m_${registered.length}`,
           creation_kind: registered.length === 1 ? 'initial' : 'committed_mutation', graph_identity_hash: identity.value,
           analysis_affecting_hash: computeAnalysisAffectingGraphHashSha256(persisted as never) } };
     });
-    app.post('/assist/v1/scenarios/:id/versions', async (req) => ({ versions: registered.map((b, i) => ({
+    app.post('/assist/v1/scenarios/:id/versions', async (req) => { if (holdVersions !== undefined) { versionsHeld += 1; await holdVersions; } return { versions: registered.map((b, i) => ({
       version_id: `v_${i + 1}`, sequence: i + 1, created_at: '2026-10-22T10:00:00.000Z',
-      creation: { kind: 'committed_mutation', mutation_id: `m_${i + 1}`, source_turn_id: registrationTurnId((req.params as { id: string }).id, String(b.operation_id)) } })) }));
+      creation: { kind: 'committed_mutation', mutation_id: `m_${i + 1}`, source_turn_id: registrationTurnId((req.params as { id: string }).id, String(b.operation_id)) } })) }; });
     // The real Stop handler (route-v2's `/orchestrate/v2/turn/stop` body), over the same store.
     const { recordExplicitTurnStop } = await import('../turn-stop.js');
     app.post('/orchestrate/v2/turn/stop', async (req, reply) => { const r = await recordExplicitTurnStop(req, 'req-stop'); return reply.code(r.status).send(r.body as never); });
@@ -321,6 +339,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     SCENARIO = randomUUID(); persisted = programGraph(); canonicalDraft = undefined; canonicalDrafts = []; registered.length = 0; fenceRows.clear(); turnRows.clear(); conversationIds.clear();
     readiness = { status: 'blocked', may_run: false, options: [], blockers: [] }; runState = undefined; carriedResult = undefined; otherRun = undefined;
     pausedRun = null; calls = []; conversationItems = []; outputs = []; preparedId = ''; holdProvider = undefined; holdWhen = undefined; registerRefusal = null;
+    holdVersions = undefined; versionsHeld = 0; guestWrites = false; loseAck = null;
   });
   const post = (payload: Json) => app.inject({ method: 'POST', url: '/agent/v1/core-turn',
     payload: { kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', ...payload } });
@@ -417,7 +436,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(fenceRows.get(`${SCENARIO}:${press.turn_id}`)?.stopped_at, 'the tombstone').not.toBeNull();
     release();
     const a = (await approval).json() as Json;
-    expect(calls.at(-2)?.tool_choice, 'control: the AI did send its apply').toMatchObject({ type: 'function', name: 'apply_change' });
+    expect(calls.at(-1)?.tool_choice, 'control: the AI did send its apply').toMatchObject({ type: 'function', name: 'apply_change' });
+    // C14 (27 Oct): that call is the turn's last: once stopped, no reply call is made.
+    expect(calls).toHaveLength(before + 1);
     expect(registered, 'nothing committed after the Stop').toHaveLength(0);
     expect(figure('oven_price')).toBeNull();
     expect(a.receipts).toEqual([]);
@@ -449,6 +470,12 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     const OUTCOME_UNKNOWN = { code: 'TURN_OUTCOME_UNKNOWN', retry_safe: false, nothing_saved: false,
       message: 'This message is already being handled, or an earlier attempt ran and its reply was not recorded. Nothing was run again; reload to see the current model.' };
     const STOPPED_REPLY = 'That change was stopped before it was saved.';
+    /** A stopped turn that had sent a write: it may have saved (its receipt says so), and is never said to be undone. */
+    const STOPPED_AFTER_WRITE = { code: 'TURN_STOPPED', message: 'You stopped this turn. Anything it had already saved is kept; reload to see your model.',
+      retry_safe: false, nothing_saved: false };
+    /** A stopped turn whose every write the fence refused (the register's TURN_STOPPED: nothing written), or that sent none. */
+    const STOPPED = { code: 'TURN_STOPPED', message: 'You stopped this turn before it changed anything. Nothing in your model was changed.',
+      retry_safe: false, nothing_saved: true };
     /** A press whose first provider call is held, then stopped there: admitted, nothing written yet. */
     const stoppedBeforeWrite = async () => {
       const press = await propose();
@@ -461,8 +488,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const stop = await stopAsTheRpcDerives(String(press.turn_id));
       release();
       const turn = await pending;
-      // What the AI read of its own apply after the Stop: the tool answer on the reply call.
-      const told = ((calls.at(-1)!.input ?? []) as Json[]).filter((i) => i.type === 'function_call_output' && i.call_id === 'apply')
+      // What the AI is told of its own apply after the Stop: the tool answer, put into the scenario's Conversation (C14, 27 Oct:
+      // no reply call is made after a Stop, so the next call reads it there).
+      const told = conversationItems.flatMap((c) => c.items).filter((i) => i.type === 'function_call_output' && i.call_id === 'apply')
         .map((i) => JSON.parse(String(i.output)) as Json);
       return { press, stop, turn, told };
     };
@@ -474,7 +502,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       holdWhen = afterTool;
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved: the oven costs £2,500.' }]];
       const pending = post(press);
-      await vi.waitFor(() => expect(registered).toHaveLength(1));
+      // The change has committed and its reply call is held (the hold taken): the Stop lands while the reply is written.
+      await vi.waitFor(() => expect([registered.length, holdProvider]).toEqual([1, undefined]));
       const runs = storedRuns();
       const stop = await stopAsTheRpcDerives(String(press.turn_id));
       release();
@@ -488,16 +517,17 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(stop.json()).toEqual({ stopped: true, claimed: true, already_committed: false, scenario_id: SCENARIO, turn_id: press.turn_id, request_id: 'req-stop' });
       expect(turn.statusCode, turn.body).toBe(200);
       const t = turn.json() as Json;
-      // Today the stopped turn answers as a recorded turn with no error of its own; the refused write is typed on its tool call,
-      // and the reply is the AI's words, untouched.
-      expect(t).toMatchObject({ durability: 'recorded', error: null, receipts: [], assistant_text: STOPPED_REPLY });
+      // C14 (27 Oct): the stopped turn's answer is typed TURN_STOPPED. Its one write was sent and the fence refused it (409
+      // TURN_STOPPED: nothing written), so nothing changed: nothing_saved true, no receipt. The refused write is typed on its tool
+      // call. No reply call is made after the Stop, so there are no words (STOPPED_REPLY was scripted for one).
+      expect(t).toMatchObject({ durability: 'recorded', error: STOPPED, receipts: [], assistant_text: '' });
       expect(t._agent.tool_calls).toEqual([{ name: 'apply_change', outcome: 'refused', refusal: 'registration_refused' }]);
       expect(told).toEqual([expect.objectContaining({ status: 'refused', reason: 'registration_refused', data: { code: 'TURN_STOPPED', written: false } })]);
       expect([registered.length, figure('oven_price')]).toEqual([0, null]);
       const callsBefore = calls.length;
       const again = await post(press);
       expect(again.statusCode, again.body).toBe(200);
-      expect(again.json()).toMatchObject({ durability: 'replayed', error: null, receipts: [], assistant_text: STOPPED_REPLY });
+      expect(again.json()).toMatchObject({ durability: 'replayed', error: STOPPED, receipts: [], assistant_text: '' });
       expect([calls.length, registered.length], 'a resend calls no model and writes nothing').toEqual([callsBefore, 0]);
       // The Stop ended that turn only: the card is still held, and a new press applies it once, with the person's receipt.
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_again' }], [{ type: 'message', text: 'Saved.' }]];
@@ -562,14 +592,15 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(fenceRows.get(`${SCENARIO}:${press.turn_id}`)?.stopped_at, 'the tombstone').not.toBeNull();
       expect(turn.statusCode, turn.body).toBe(200);
       const t = turn.json() as Json;
-      expect(t).toMatchObject({ durability: 'recorded', error: null, assistant_text: 'Saved: the oven costs £2,500.' });
+      // C14 (27 Oct): typed as stopped, and never said to be undone: the saved change is kept, with its own receipt.
+      expect(t).toMatchObject({ durability: 'recorded', error: STOPPED_AFTER_WRITE, assistant_text: 'Saved: the oven costs £2,500.' });
       expect(t.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', mutation_id: 'm_1', authorised_by: 'person' })]);
       expect([registered.length, storedRuns(), figure('oven_price')], 'the committed change stands: one revision, its own Run').toEqual([1, runs, 2500]);
       const callsBefore = calls.length;
       const again = await post(press);
       expect(again.statusCode, again.body).toBe(200);
       // A replay's receipts are an open item (ALPHA-PLAN C14 (8), order 4): not pinned here.
-      expect(again.json()).toMatchObject({ durability: 'replayed', error: null, assistant_text: 'Saved: the oven costs £2,500.' });
+      expect(again.json()).toMatchObject({ durability: 'replayed', error: STOPPED_AFTER_WRITE, assistant_text: 'Saved: the oven costs £2,500.' });
       expect([calls.length, registered.length], 'a resend calls no model and writes nothing').toEqual([callsBefore, 1]);
       // CONTRAST, on the RPC's derivation: once the turn's own answer row exists, a Stop reads already_committed true.
       expect((await stopAsTheRpcDerives(String(press.turn_id))).json()).toMatchObject({ stopped: true, claimed: true, already_committed: true });
@@ -585,7 +616,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(stop.json()).toMatchObject({ already_committed: true });
     });
 
-    it('C14 (8, 9): a resend of the same press while the original still holds its claim past the wait: 409 TURN_OUTCOME_UNKNOWN, durability unknown, never "nothing saved", answered while the original still runs; the original then records its one write, and a later resend replays it', async () => {
+    it('C14 (8, 9): a resend of the same press while the original still holds its claim past the wait: 409 TURN_OUTCOME_UNKNOWN, durability unknown, never "nothing saved", with the change’s own receipt (C7), answered while the original still runs; the original then records its one write, and a later resend replays it', async () => {
       await withShortClaimWait(async () => {
         const press = await propose();
         let release!: () => void;
@@ -594,12 +625,16 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
         outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved: the oven costs £2,500.' }]];
         let originalAnswered = false;
         const original = post(press).then((r) => { originalAnswered = true; return r; });
-        await vi.waitFor(() => expect(registered).toHaveLength(1));
+        // The original is held inside its next provider call, already counted, so the count below is the resend's alone (CI ran
+        // the original's call during the resend's claim wait when this read only the write).
+        await vi.waitFor(() => expect([registered.length, holdProvider]).toEqual([1, undefined]));
         const callsBefore = calls.length;
         const resend = await post(press);
         expect(originalAnswered, 'no freeze: the resend answers while the original still runs').toBe(false);
         expect(resend.statusCode, resend.body).toBe(409);
-        expect(resend.json()).toMatchObject({ durability: 'unknown', receipts: [], error: OUTCOME_UNKNOWN });
+        // C7 (27 Oct): what the press has saved so far is said, with that change's own receipt; the outcome stays unknown.
+        expect(resend.json()).toMatchObject({ durability: 'unknown', error: OUTCOME_UNKNOWN });
+        expect((resend.json() as Json).receipts).toEqual([expect.objectContaining({ version_id: 'v_1', mutation_id: 'm_1', authorised_by: 'person' })]);
         expect([calls.length, registered.length], 'the resend runs nothing again').toEqual([callsBefore, 1]);
         release();
         const o = await original;
@@ -610,7 +645,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       });
     });
 
-    it('C14 (8) + C7: the change committed, its reply failed, and the failed continuation could not be recorded: 502, durability unknown, the saved receipt, never "nothing saved"; a resend writes nothing again and calls no model (409 TURN_OUTCOME_UNKNOWN)', async () => {
+    it('C14 (8) + C7: the change committed, its reply failed, and the failed continuation could not be recorded: 502, durability unknown, the saved receipt, never "nothing saved"; a resend writes nothing again and calls no model (409 TURN_OUTCOME_UNKNOWN, with that receipt)', async () => {
       await withShortClaimWait(async () => {
         const press = await propose();
         outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'refuse' }]];
@@ -632,8 +667,43 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
         const callsBefore = calls.length;
         const again = await post(press);
         expect(again.statusCode, again.body).toBe(409);
-        expect(again.json()).toMatchObject({ durability: 'unknown', receipts: [], error: OUTCOME_UNKNOWN });
+        expect(again.json()).toMatchObject({ durability: 'unknown', error: OUTCOME_UNKNOWN });
+        expect((again.json() as Json).receipts).toEqual([expect.objectContaining({ version_id: 'v_1', mutation_id: 'm_1', authorised_by: 'person' })]);
         expect([calls.length, registered.length, figure('oven_price')], 'nothing run or written again').toEqual([callsBefore, 1, 2500]);
+      });
+    });
+
+    it('C7: a resend while the turn still runs (the UI’s stillFinishing re-send): a first draft that has saved answers 409 TURN_OUTCOME_UNKNOWN with the draft’s own receipt (Olumi’s), sent exactly or as the chipless retry; a typed turn that has saved nothing answers 409 with none, though the model has a version', async () => {
+      await withShortClaimWait(async () => {
+        SCENARIO = randomUUID(); persisted = null;
+        canonicalDraft = JSON.stringify(bakery());
+        let release!: () => void;
+        // The draft's reply call is held: the draft is saved and the turn still runs.
+        holdProvider = new Promise<void>((resolve) => { release = resolve; });
+        const turnId = randomUUID();
+        const draft = typed(BAKERY_BRIEF, turnId);
+        await vi.waitFor(() => expect([registered.length, holdProvider]).toEqual([1, undefined]));
+        const exact = await typed(BAKERY_BRIEF, turnId);
+        const retry = await post({ turn_id: turnId, message: BAKERY_BRIEF, source: 'retry' });
+        for (const r of [exact, retry]) {
+          expect(r.statusCode, r.body).toBe(409);
+          expect(r.json()).toMatchObject({ durability: 'unknown', error: OUTCOME_UNKNOWN });
+          expect((r.json() as Json).receipts).toEqual([expect.objectContaining({ version_id: 'v_1', mutation_id: 'm_1', authorised_by: 'olumi',
+            source_turn_id: registrationTurnId(SCENARIO, programOperationId(SCENARIO, `turn:${turnId}`)) })]);
+        }
+        release();
+        expect((await draft).statusCode).toBe(200);
+        // CONTRAST: a typed turn whose first call is held has saved nothing; the model's version 1 is not its save.
+        holdProvider = new Promise<void>((resolve) => { release = resolve; });
+        const typedId = randomUUID();
+        const asked = typed('What does the model hold for the oven?', typedId);
+        await vi.waitFor(() => expect(holdProvider).toBeUndefined());
+        const resend = await typed('What does the model hold for the oven?', typedId);
+        expect(resend.statusCode, resend.body).toBe(409);
+        expect(resend.json()).toMatchObject({ durability: 'unknown', receipts: [], error: OUTCOME_UNKNOWN });
+        release();
+        expect((await asked).statusCode).toBe(200);
+        expect(registered, 'each resend wrote nothing').toHaveLength(1);
       });
     });
   });
@@ -1990,6 +2060,337 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
         + 'Show the operands and units, label it as simple arithmetic, and identify the saved setting or clearly labelled what-if used. This permission excludes every engine-owned result named above and never permits inventing a response law between quantities.\n'
         + 'If the requested implication requires modelled relationships, use only supplied current engine output. If that output is unavailable, stale or blocked, identify the missing input or offer the appropriate model/run action instead of estimating the result.\n\n'
       )).toHaveLength(2);
+    });
+  });
+
+  describe('C7 + C14 core outcomes (alpha, 27 Oct): what a turn saved stays said, and a Stop is typed', () => {
+    const SAVED_LOST = 'The saved change is kept, but the reply didn’t arrive. Send a new message to continue.';
+    /** A receipt by its identity: the saved version, its mutation and who authorised it. */
+    const idsOf = (receipts: Json[]) => receipts.map((x) => [x.version_id, x.mutation_id, x.authorised_by]);
+    /** The bakery's stored Run as an earlier engine computed it, so a Run now evaluates and saves a new one. */
+    const staleEngine = () => {
+      const engine = String((persisted!.living_model.runs as Json[]).at(-1)!.receipt.versions.engine);
+      persisted = JSON.parse(JSON.stringify(persisted).split(engine).join('mp-a04e2cebf944')) as Json;
+    };
+
+    it('C7: a typed turn whose Run the AI started saves a new Run, then its reply fails: the 502 says it was saved, with that Run’s own receipt (Olumi’s); one write', async () => {
+      staleEngine();
+      const runs = storedRuns();
+      outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run', args: { reason: 'they asked for it' } }], [{ type: 'refuse' }]];
+      const r = await typed('Run the analysis again, please.');
+      expect(r.statusCode, r.body).toBe(502);
+      const j = r.json() as Json;
+      expect([registered.length, storedRuns()], 'the Run was saved, once').toEqual([1, runs + 1]);
+      expect(j.error).toEqual({ code: 'UPSTREAM_ERROR', message: SAVED_LOST, retry_safe: false, nothing_saved: false });
+      // The Run's own version (the one write's version and mutation): never a later or unrelated receipt.
+      expect(idsOf(j.receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      expect(UI_CORE_TURN.safeParse(j).success).toBe(true);
+    });
+
+    it('C7: that typed turn’s resend replays the same Run’s own receipt (Olumi’s), found by the operation the Run saved under (recorded on its answer row), never a later write by another operation; a typed Run that replied replays its own too', async () => {
+      staleEngine();
+      outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run', args: { reason: 'they asked for it' } }], [{ type: 'refuse' }]];
+      const turnId = randomUUID();
+      const r = await typed('Run the analysis again, please.', turnId);
+      expect(r.statusCode, r.body).toBe(502);
+      expect(idsOf((r.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      // An unrelated later write, by another operation: the person's own figure edit on the canvas, version 2.
+      expect((await canvasEdit(randomUUID())).statusCode).toBe(200);
+      expect(registered).toHaveLength(2);
+      const callsBefore = calls.length;
+      const again = await typed('Run the analysis again, please.', turnId);
+      expect(again.statusCode, again.body).toBe(200);
+      const j = again.json() as Json;
+      expect(j).toMatchObject({ durability: 'replayed', error: { code: 'REPLY_NOT_DELIVERED', message: SAVED_LOST, retry_safe: false, nothing_saved: false } });
+      expect(idsOf(j.receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      expect(j.receipts[0].source_turn_id, 'the Run’s own operation').toBe(registrationTurnId(SCENARIO, String(registered[0]!.operation_id)));
+      expect([calls.length, registered.length], 'a replay calls no model and writes nothing').toEqual([callsBefore, 2]);
+      // A typed Run whose reply arrived replays its own receipt the same way.
+      staleEngine();
+      outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_2', args: { reason: 'again' } }], [{ type: 'message', text: 'Done.' }]];
+      const second = randomUUID();
+      const replied = await typed('And once more.', second);
+      expect(replied.statusCode, replied.body).toBe(200);
+      expect(idsOf((replied.json() as Json).receipts)).toEqual([['v_3', 'm_3', 'olumi']]);
+      expect(idsOf(((await typed('And once more.', second)).json() as Json).receipts)).toEqual([['v_3', 'm_3', 'olumi']]);
+      // Its answer row records that Run's operation, by identity, and its words stay provably typed to the next turn (`typedRowProof`).
+      expect(recordedRunsOf(String(turnRows.get(second)!.request_hash))).toEqual([String(registered[2]!.operation_id)]);
+      expect(typedRowProof(SCENARIO, null)(turnRows.get(second)!)).toBe(true);
+    });
+
+    it('C7: a typed Run whose register acknowledgement was lost, its save proved by its own operation’s version and a complete readback, then whose reply failed: the resend replays exactly that Run’s receipt, never a later write’s; CONTRAST: a lost acknowledgement with nothing committed stays unknown, with no receipt recorded or replayed', async () => {
+      staleEngine();
+      loseAck = 'after_commit';
+      outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run', args: { reason: 'they asked for it' } }], [{ type: 'refuse' }]];
+      const turnId = randomUUID();
+      const r = await typed('Run the analysis again, please.', turnId);
+      expect(r.statusCode, r.body).toBe(502);
+      expect((r.json() as Json).error).toEqual({ code: 'UPSTREAM_ERROR', message: SAVED_LOST, retry_safe: false, nothing_saved: false });
+      // The Run's own version, found by its own operation (the 503 carried no receipt): one commit, never a second revision.
+      expect(idsOf((r.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      expect(registered).toHaveLength(1);
+      const runOp = String(registered[0]!.operation_id);
+      expect(recordedRunsOf(String(turnRows.get(turnId)!.request_hash)), 'its answer row records that Run’s operation').toEqual([runOp]);
+      // An unrelated later write, by another operation: version 2.
+      expect((await canvasEdit(randomUUID())).statusCode).toBe(200);
+      expect(registered).toHaveLength(2);
+      const again = await typed('Run the analysis again, please.', turnId);
+      expect(again.statusCode, again.body).toBe(200);
+      expect(again.json()).toMatchObject({ durability: 'replayed', error: { code: 'REPLY_NOT_DELIVERED', message: SAVED_LOST, nothing_saved: false } });
+      expect(idsOf((again.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      expect((again.json() as Json).receipts[0].source_turn_id).toBe(registrationTurnId(SCENARIO, runOp));
+      // CONTRAST: the acknowledgement lost with nothing committed: the save is not proved, so it stays unknown and no Run is recorded.
+      staleEngine();
+      loseAck = 'before_commit';
+      outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_2', args: { reason: 'again' } }], [{ type: 'refuse' }]];
+      const unproved = randomUUID();
+      const u = await typed('And once more.', unproved);
+      expect(u.statusCode, u.body).toBe(502);
+      expect(u.json()).toMatchObject({ receipts: [], error: { nothing_saved: false } });
+      expect(registered, 'nothing committed').toHaveLength(2);
+      expect(recordedRunsOf(String(turnRows.get(unproved)!.request_hash))).toEqual([]);
+      expect(((await typed('And once more.', unproved)).json() as Json).receipts).toEqual([]);
+    });
+
+    it('C7: a press whose change committed, then whose answer row is refused (another answer holds the turn id; the ownership read fails): each refusal carries that change’s own receipt, never "nothing saved"', async () => {
+      const append = store.append.getMockImplementation()!;
+      const owner = store.getScenarioOwner;
+      try {
+        const press = await propose();
+        outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved.' }]];
+        // The answer row (this turn id, response_emitted) meets another answer already recorded under it.
+        store.append.mockImplementation(async (write: Json) => (write.turn_id === press.turn_id && write.response_emitted === true
+          ? { id: 'row-other', priorTurnConflict: true as const } : append(write)));
+        const conflict = await post(press);
+        expect(conflict.statusCode, conflict.body).toBe(409);
+        expect((conflict.json() as Json).error).toMatchObject({ code: 'TURN_ID_REUSED', retry_safe: false, nothing_saved: false });
+        expect(idsOf((conflict.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'person']]);
+        store.append.mockImplementation(append);
+        // A second change on the same model: its save commits, then the owner read for its answer row fails.
+        const second = await propose('Make the oven £3,000.', answer(3000, '£3,000'));
+        outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_2' }], [{ type: 'message', text: 'Saved.' }]];
+        store.getScenarioOwner = async () => { if (registered.length === 2) throw new Error('owner read down'); return null; };
+        const refused = await post(second);
+        expect(refused.statusCode, refused.body).toBe(403);
+        expect((refused.json() as Json).error).toMatchObject({ retry_safe: false, nothing_saved: false });
+        expect(idsOf((refused.json() as Json).receipts)).toEqual([['v_2', 'm_2', 'person']]);
+        expect([registered.length, figure('oven_price')], 'each change was saved once').toEqual([2, 3000]);
+      } finally {
+        store.append.mockImplementation(append);
+        store.getScenarioOwner = owner;
+      }
+    });
+
+    it('C7: a streamed first draft that saved, then outlived the stream before its reply: the stream’s COMPLETE says it was saved, with the draft’s own receipt (Olumi’s); the turn then finishes with no second write', async () => {
+      const { streamTurnAsStagedSse } = await import('../streamed-turn-sse.js');
+      const { config } = await import('../../config/index.js');
+      persisted = null;
+      canonicalDraft = JSON.stringify(bakery());
+      let release!: () => void;
+      // The draft's reply call is held: the draft is saved and the reply has not come.
+      holdProvider = new Promise<void>((resolve) => { release = resolve; });
+      const turnId = randomUUID();
+      const writes: string[] = [];
+      const reply = { raw: { destroyed: false, writableEnded: false, setHeader: () => {}, writeHead: () => {},
+        write(chunk: string) { writes.push(chunk); return true; }, end() { this.writableEnded = true; } }, getHeaders: () => ({}) };
+      // The stream's budget timer (a distinct budget, so it is the one caught) fires once the draft has streamed its saved graph.
+      const kept = config.proxy.browserProxyTimeoutMs;
+      const budget = 98_765;
+      config.proxy.browserProxyTimeoutMs = budget;
+      const realSetTimeout = globalThis.setTimeout;
+      let fire: (() => void) | undefined;
+      const timers = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
+        (ms === budget && fire === undefined ? (fire = fn, realSetTimeout(() => {}, 0)) : Reflect.apply(realSetTimeout, globalThis, [fn, ms, ...rest]))) as never);
+      try {
+        const streamed = streamTurnAsStagedSse({ app, reply: reply as never, requestId: 'req-stream', internalHeaders: { 'content-type': 'application/json' },
+          payload: JSON.stringify({ kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BAKERY_BRIEF, source: 'composer' }),
+          featureVersion: 'test', endpoint: '/proxy/v5/turn/stream', internalTarget: '/agent/v1/core-turn' });
+        await vi.waitFor(() => expect(writes.some((w) => w.includes('"stage":"GRAPH_READY"'))).toBe(true));
+        fire!();
+        await streamed;
+      } finally {
+        timers.mockRestore();
+        config.proxy.browserProxyTimeoutMs = kept;
+      }
+      const frames = writes.filter((w) => w.startsWith('event: stage')).map((w) => JSON.parse(w.slice(w.indexOf('data: ') + 6)) as Json);
+      expect(frames.map((f) => f.stage)).toEqual(['DRAFTING', 'GRAPH_READY', 'COMPLETE']);
+      const complete = frames.at(-1)!;
+      expect(complete.status_code).toBe(504);
+      expect(complete.payload).toMatchObject({ turn_id: turnId, durability: 'unknown', error: { code: 'TURN_STILL_RUNNING', retry_safe: false, nothing_saved: false } });
+      expect(registered).toHaveLength(1);
+      // The draft's own version, found by its own operation (turn:<turn id>), as a replay finds it.
+      expect(idsOf(complete.payload.receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      expect(complete.payload.receipts[0].source_turn_id).toBe(registrationTurnId(SCENARIO, programOperationId(SCENARIO, `turn:${turnId}`)));
+      expect(UI_CORE_TURN.safeParse(complete.payload).success).toBe(true);
+      // The turn runs on to its own answer, and writes nothing again.
+      release();
+      await vi.waitFor(() => expect(turnRows.has(turnId)).toBe(true));
+      expect(registered).toHaveLength(1);
+    });
+
+    it('C7: the same streamed draft, outliving the stream while its own versions read never answers: the read is bounded (OWN_SAVE_READ_MS), so the COMPLETE frame still ends the stream, 504 TURN_STILL_RUNNING with no receipt', async () => {
+      const { streamTurnAsStagedSse } = await import('../streamed-turn-sse.js');
+      const { config } = await import('../../config/index.js');
+      persisted = null;
+      canonicalDraft = JSON.stringify(bakery());
+      let release!: () => void;
+      holdProvider = new Promise<void>((resolve) => { release = resolve; });
+      let answerVersions: (() => void) | undefined;
+      const turnId = randomUUID();
+      const writes: string[] = [];
+      const reply = { raw: { destroyed: false, writableEnded: false, setHeader: () => {}, writeHead: () => {},
+        write(chunk: string) { writes.push(chunk); return true; }, end() { this.writableEnded = true; } }, getHeaders: () => ({}) };
+      const kept = config.proxy.browserProxyTimeoutMs;
+      const budget = 98_765;
+      config.proxy.browserProxyTimeoutMs = budget;
+      const realSetTimeout = globalThis.setTimeout;
+      // The stream's budget timer, then (once it has fired) the bound on the versions read: each caught, and fired by the row.
+      let fire: (() => void) | undefined;
+      let bound: (() => void) | undefined;
+      let fired = false;
+      const timers = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
+        (ms === budget && fire === undefined ? (fire = fn, realSetTimeout(() => {}, 0))
+          : fired && ms === OWN_SAVE_READ_MS && bound === undefined ? (bound = fn, realSetTimeout(() => {}, 0))
+          : Reflect.apply(realSetTimeout, globalThis, [fn, ms, ...rest]))) as never);
+      try {
+        const streamed = streamTurnAsStagedSse({ app, reply: reply as never, requestId: 'req-stream', internalHeaders: { 'content-type': 'application/json' },
+          payload: JSON.stringify({ kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BAKERY_BRIEF, source: 'composer' }),
+          featureVersion: 'test', endpoint: '/proxy/v5/turn/stream', internalTarget: '/agent/v1/core-turn' });
+        // The draft is saved and its reply call is held; from here every versions read waits.
+        await vi.waitFor(() => expect([writes.some((w) => w.includes('"stage":"GRAPH_READY"')), holdProvider]).toEqual([true, undefined]));
+        holdVersions = new Promise<void>((resolve) => { answerVersions = resolve; });
+        fired = true;
+        fire!();
+        await vi.waitFor(() => expect(versionsHeld).toBe(1));
+        bound?.();
+        await streamed;
+      } finally {
+        answerVersions?.();
+        timers.mockRestore();
+        config.proxy.browserProxyTimeoutMs = kept;
+      }
+      const frames = writes.filter((w) => w.startsWith('event: stage')).map((w) => JSON.parse(w.slice(w.indexOf('data: ') + 6)) as Json);
+      expect(frames.map((f) => f.stage)).toEqual(['DRAFTING', 'GRAPH_READY', 'COMPLETE']);
+      const complete = frames.at(-1)!;
+      expect(complete.status_code).toBe(504);
+      expect(complete.payload).toMatchObject({ turn_id: turnId, durability: 'unknown', receipts: [], error: { code: 'TURN_STILL_RUNNING', retry_safe: false, nothing_saved: false } });
+      expect(UI_CORE_TURN.safeParse(complete.payload).success).toBe(true);
+      release();
+      await vi.waitFor(() => expect(turnRows.has(turnId)).toBe(true));
+      expect(registered).toHaveLength(1);
+    });
+
+    it('C7: a signed-in first draft that saved, then whose reply call ended with no terminal event: the 502 says it was saved, with the draft’s own receipt (Olumi’s), durability recorded (its continuation row is written); a resend replays that receipt. CONTRAST: a guest’s draft mints no version: the same words, no receipt', async () => {
+      const draftThenCut = async () => {
+        SCENARIO = randomUUID(); persisted = null;
+        canonicalDraft = JSON.stringify(bakery());
+        outputs = [[{ type: 'cut' }]];
+        const turnId = randomUUID();
+        return { turnId, r: await typed(BAKERY_BRIEF, turnId) };
+      };
+      const LOST = { code: 'UPSTREAM_ERROR', message: SAVED_LOST, retry_safe: false, nothing_saved: false };
+      const { turnId, r } = await draftThenCut();
+      expect(r.statusCode, r.body).toBe(502);
+      const j = r.json() as Json;
+      expect(j).toMatchObject({ durability: 'recorded', error: LOST });
+      expect(idsOf(j.receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      expect(registered.map((b) => b.operation_id), 'the draft’s own operation').toEqual([programOperationId(SCENARIO, `turn:${turnId}`)]);
+      expect(turnRows.get(turnId)?.request_hash, 'what was proven: its continuation row').toMatch(/#outcome:reply_lost_saved$/);
+      expect(UI_CORE_TURN.safeParse(j).success).toBe(true);
+      const again = await typed(BAKERY_BRIEF, turnId);
+      expect(again.json()).toMatchObject({ durability: 'replayed', error: { code: 'REPLY_NOT_DELIVERED', message: SAVED_LOST, nothing_saved: false } });
+      expect(idsOf((again.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      expect(registered, 'one write').toHaveLength(1);
+      // CONTRAST: the same turn by a guest. Its draft is saved (the model is there) but mints no version, so there is no receipt.
+      registered.length = 0;
+      guestWrites = true;
+      const guest = await draftThenCut();
+      expect(guest.r.statusCode, guest.r.body).toBe(502);
+      expect(savedProgramOf(persisted), 'the guest’s draft is saved').toBeDefined();
+      expect(guest.r.json()).toMatchObject({ durability: 'recorded', error: LOST, receipts: [] });
+    });
+
+    it('C14: a typed turn stopped while its call runs answers with the typed Stop outcome (TURN_STOPPED, nothing saved), recorded on its row, and a resend replays it with no call or write; an unstopped turn answers with none', async () => {
+      let release!: () => void;
+      holdProvider = new Promise<void>((resolve) => { release = resolve; });
+      outputs = [[{ type: 'message', text: 'The model holds the oven price as a question.' }]];
+      const turnId = randomUUID();
+      const pending = typed('What does the model hold for the oven?', turnId);
+      await vi.waitFor(() => expect(calls).toHaveLength(1));
+      const stop = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn/stop', payload: { scenario_id: SCENARIO, turn_id: turnId } });
+      expect(stop.json()).toMatchObject({ stopped: true, claimed: true });
+      release();
+      const r = await pending;
+      expect(r.statusCode, r.body).toBe(200);
+      const STOPPED = { code: 'TURN_STOPPED', message: 'You stopped this turn before it changed anything. Nothing in your model was changed.', retry_safe: false, nothing_saved: true };
+      expect(r.json()).toMatchObject({ durability: 'recorded', error: STOPPED, receipts: [] });
+      expect(UI_CORE_TURN.safeParse(r.json()).success).toBe(true);
+      expect(registered).toHaveLength(0);
+      const again = await typed('What does the model hold for the oven?', turnId);
+      expect(again.json()).toMatchObject({ durability: 'replayed', error: STOPPED, receipts: [] });
+      expect([calls.length, registered.length], 'a resend calls no model and writes nothing').toEqual([1, 0]);
+      // CONTRAST: the same turn not stopped answers with no error.
+      outputs = [[{ type: 'message', text: 'Still a question.' }]];
+      expect((await typed('What does the model hold for the oven?')).json()).toMatchObject({ durability: 'recorded', error: null });
+    });
+
+    it('C14: a press stopped while its conversation is read (after its fence claim, before the agent’s first call) makes no provider call and runs no tool: TURN_STOPPED, nothing saved, recorded; the card stays held', async () => {
+      const press = await propose();
+      const before = calls.length;
+      const recent = store.readRecent.getMockImplementation()!;
+      // The press's history read (`programHistoryOf`'s rows): the Stop lands there, once the turn holds its place in the fence.
+      store.readRecent.mockImplementationOnce(async (...args: Parameters<typeof recent>) => {
+        const stop = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn/stop', payload: { scenario_id: SCENARIO, turn_id: press.turn_id } });
+        expect(stop.json()).toMatchObject({ stopped: true, claimed: true });
+        return recent(...args);
+      });
+      const r = await post(press);
+      expect(r.statusCode, r.body).toBe(200);
+      const j = r.json() as Json;
+      expect(calls.length, 'no provider call').toBe(before);
+      expect(j._provider_calls).toEqual([]);
+      expect(j._agent.tool_calls).toEqual([]);
+      expect(j).toMatchObject({ durability: 'recorded', assistant_text: '', receipts: [],
+        error: { code: 'TURN_STOPPED', message: 'You stopped this turn before it changed anything. Nothing in your model was changed.', retry_safe: false, nothing_saved: true } });
+      expect([registered.length, figure('oven_price')]).toEqual([0, null]);
+      expect((j.cards as Json[]).map((c) => c.proposal_id), 'the card stays held').toEqual([preparedId]);
+    });
+
+    it('C14: once a turn is stopped its reply call is never made: a press stopped during its first call makes no second call, writes nothing and answers its apply in the Conversation; a first draft stopped after its save makes no reply call and keeps its save, with its receipt', async () => {
+      const stopTurn = (turnId: string) => app.inject({ method: 'POST', url: '/orchestrate/v2/turn/stop', payload: { scenario_id: SCENARIO, turn_id: turnId } });
+      // (1) The agent's run: a press whose first call is held, then stopped there.
+      const press = await propose();
+      let release!: () => void;
+      holdProvider = new Promise<void>((resolve) => { release = resolve; });
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'A reply written after the Stop.' }]];
+      const before = calls.length;
+      const pending = post(press);
+      await vi.waitFor(() => expect(calls.length).toBe(before + 1));
+      expect((await stopTurn(String(press.turn_id))).json()).toMatchObject({ stopped: true, claimed: true });
+      release();
+      const r = await pending;
+      expect(r.statusCode, r.body).toBe(200);
+      expect(calls.length, 'the apply call only: no reply call after the Stop').toBe(before + 1);
+      // Its apply was refused by the fence (nothing written), so nothing changed.
+      expect(r.json()).toMatchObject({ assistant_text: '', receipts: [], error: { code: 'TURN_STOPPED', retry_safe: false, nothing_saved: true } });
+      expect([registered.length, figure('oven_price')]).toEqual([0, null]);
+      // The apply's own answer is in the Conversation, so the next turn finds no call left unanswered.
+      const answered = conversationItems.flatMap((c) => c.items).filter((i) => i.type === 'function_call_output' && i.call_id === 'apply');
+      expect(answered.map((i) => (JSON.parse(String(i.output)) as Json).data)).toEqual([{ code: 'TURN_STOPPED', written: false }]);
+      // (2) The host's turn: a first draft saved, then stopped before its reply call (the Stop lands on the read for that reply).
+      SCENARIO = randomUUID(); persisted = null; registered.length = 0; turnRows.clear(); pausedRun = null;
+      canonicalDraft = JSON.stringify(bakery());
+      const turnId = randomUUID();
+      const read = program.read.getMockImplementation()!;
+      program.read.mockImplementationOnce(async (...args: Parameters<typeof read>) => { await stopTurn(turnId); return read(...args); });
+      const callsBefore = calls.length;
+      const drafted = await app.inject({ method: 'POST', url: '/agent/v1/core-turn',
+        payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BAKERY_BRIEF, source: 'composer' } });
+      expect(drafted.statusCode, drafted.body).toBe(200);
+      expect(calls.slice(callsBefore).map((c) => c.text?.format?.name ?? null), 'the drafting call only: no reply call').toEqual(['canonical_model']);
+      expect(drafted.json()).toMatchObject({ assistant_text: '', error: { code: 'TURN_STOPPED', retry_safe: false, nothing_saved: false } });
+      expect(idsOf((drafted.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
+      expect(registered, 'the save stands, once: nothing undone').toHaveLength(1);
     });
   });
 });

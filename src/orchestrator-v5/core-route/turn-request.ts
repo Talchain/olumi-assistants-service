@@ -51,6 +51,18 @@ export const AGENT_TURN_CLAIM_WAIT = {
 };
 
 /**
+ * C7 (27 Oct): how long an answer that says "still running" (the stream's timeout, the claim wait's 409) waits on the turn's own
+ * save lookup (up to 5 pages of versions). A read slower than this says no receipt, never holds the answer back.
+ */
+export const OWN_SAVE_READ_MS = 3_000;
+export async function withinOwnSaveRead<T>(read: Promise<T>, none: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([read.catch(() => none), new Promise<T>((resolve) => { timer = setTimeout(() => resolve(none), OWN_SAVE_READ_MS); })]);
+  } finally { clearTimeout(timer); }
+}
+
+/**
  * What makes two Agent turns "the same request": the scenario, WHO is asking,
  * and the message itself (trimmed). Stored as the turn row's `request_hash`, so
  * an exact retry replays and a reused id carrying a different message refuses.
@@ -89,7 +101,7 @@ const CHIP_HASH_SEP = '#chip:';
  * answer carries none, so its row and its replay are exactly as before.
  */
 const OUTCOME_SEP = '#outcome:';
-export const RECORDED_OUTCOMES = ['reply_lost_saved', 'reply_lost_may_finish', 'reply_lost', 'reply_empty'] as const;
+export const RECORDED_OUTCOMES = ['reply_lost_saved', 'reply_lost_may_finish', 'reply_lost', 'reply_empty', 'stopped', 'stopped_after_write'] as const;
 export type RecordedOutcome = (typeof RECORDED_OUTCOMES)[number];
 export const withRecordedOutcome = (requestHash: string, outcome: RecordedOutcome): string => `${requestHash}${OUTCOME_SEP}${outcome}`;
 export function recordedOutcomeOf(stored: string): RecordedOutcome | undefined {
@@ -97,9 +109,26 @@ export function recordedOutcomeOf(stored: string): RecordedOutcome | undefined {
   const outcome = at < 0 ? '' : stored.slice(at + OUTCOME_SEP.length);
   return (RECORDED_OUTCOMES as readonly string[]).includes(outcome) ? outcome as RecordedOutcome : undefined;
 }
-/** The request a stored answer row answers: its hash, less any recorded outcome. */
-export const requestHashOfAnswer = (stored: string): string =>
-  (recordedOutcomeOf(stored) === undefined ? stored : stored.slice(0, stored.lastIndexOf(OUTCOME_SEP)));
+/**
+ * C7 (27 Oct): the operation each Run the AI started saved under (`run:<digest>:<runs>`, keyed by no turn), typed on the answer
+ * row's hash before any outcome, so the turn's replay finds that Run's own version as it finds its draft's. None ran, none typed.
+ */
+const RAN_SEP = '#ran:';
+const OPERATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const withRecordedRuns = (requestHash: string, operationIds: readonly string[]): string =>
+  (operationIds.length === 0 ? requestHash : `${requestHash}${RAN_SEP}${operationIds.join(',')}`);
+const lessOutcome = (stored: string): string => (recordedOutcomeOf(stored) === undefined ? stored : stored.slice(0, stored.lastIndexOf(OUTCOME_SEP)));
+export function recordedRunsOf(stored: string): string[] {
+  const s = lessOutcome(stored);
+  const at = s.lastIndexOf(RAN_SEP);
+  const ids = at < 0 ? [] : s.slice(at + RAN_SEP.length).split(',');
+  return ids.length > 0 && ids.every((id) => OPERATION_ID.test(id)) ? ids : [];
+}
+/** The request a stored answer row answers: its hash, less any recorded outcome and Runs. */
+export const requestHashOfAnswer = (stored: string): string => {
+  const s = lessOutcome(stored);
+  return recordedRunsOf(s).length === 0 ? s : s.slice(0, s.lastIndexOf(RAN_SEP));
+};
 /**
  * Restart continuity (DL 17:18Z, 14 Oct): a durable answer row's words were TYPED when its stored hash is this subject's
  * PLAIN hash of them: no `#chip:` suffix and no operation in the digest, the same rule as `typedByUser`. The reseed holds

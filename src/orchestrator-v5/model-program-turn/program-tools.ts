@@ -337,7 +337,8 @@ export async function runProgram(deps: ProgramToolDeps, ctx: Ctx): Promise<ToolO
   const operationId = programOperationId(ctx.scenario_id, `run:${next.run.receipt.revision_digest}:${base.program.runs.length}`);
   const { write } = await savePostimage(deps.dispatch, { scenarioId: ctx.scenario_id, operationId, expectedIdentity: base.saved.identity }, next.graph);
   if (!isSaved(write)) return write.status === 'unknown' ? write.outcome : refused(write.status === 'stale' ? 'superseded' : 'registration_refused');
-  return ok({ run: runWords(next.run), stored: false }, { mutated: true, ran: true });
+  // Its own receipt, as every writer reports one: a turn that fails after this Run still says what it saved (C7).
+  return ok({ run: runWords(next.run), stored: false, receipt: 'receipt' in write ? write.receipt : null }, { mutated: true, ran: true });
 }
 
 /**

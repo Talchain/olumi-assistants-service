@@ -619,6 +619,15 @@ export interface SessionStore {
    */
   wasLatestScenarioTurnStopped?(scenarioId: string, excludeTurnId: string): Promise<boolean>;
   /**
+   * C14 (27 Oct) — has the person explicitly stopped THIS turn? True iff its own
+   * `v5_turn_fence` row carries a Stop tombstone. Read by the core turn before
+   * work a Stop makes pointless (its reply) and to type its answer as stopped;
+   * its graph writes stay refused at the commit either way. Best-effort, as
+   * {@link wasLatestScenarioTurnStopped}: implementations MUST resolve `false`
+   * on any read failure. Optional for the same reason as {@link claimTurnFence}.
+   */
+  isTurnStopped?(scenarioId: string, turnId: string): Promise<boolean>;
+  /**
    * Load handler facts for a set of prior conversation turns.
    *
    * **Important:** `conversationTurnRowIds` must be the `v5_conversation_turns.id`

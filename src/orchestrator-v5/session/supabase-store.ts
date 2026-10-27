@@ -1070,6 +1070,33 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   /**
+   * C14 — this turn's own Stop: one primary-key read of its fence row's
+   * tombstone, as {@link turnFenceRowExists} reads its generation. Best-effort
+   * per the interface: a failed read resolves `false` (the commit's fence still
+   * refuses the turn's graph writes).
+   */
+  async isTurnStopped(scenarioId: string, turnId: string): Promise<boolean> {
+    try {
+      const { data, error } = await this.client
+        .from('v5_turn_fence')
+        .select('stopped_at')
+        .eq('scenario_id', scenarioId)
+        .eq('turn_id', turnId)
+        .maybeSingle();
+      if (error) {
+        log.warn({ event: 'v5.turn_fence.stop_read_failed', scenario_id: scenarioId, err: errMessage(error) },
+          'V5 turn fence — this turn\'s Stop read failed; treating as not stopped');
+        return false;
+      }
+      return data != null && (data as { stopped_at?: unknown }).stopped_at != null;
+    } catch (err) {
+      log.warn({ event: 'v5.turn_fence.stop_read_failed', scenario_id: scenarioId, err: errMessage(err) },
+        'V5 turn fence — this turn\'s Stop read threw; treating as not stopped');
+      return false;
+    }
+  }
+
+  /**
    * V5 TURN FENCE / ROADMAP 2.171 — post-explicit-Stop state read.
    *
    * One indexed select on the fence table this store already owns (the
