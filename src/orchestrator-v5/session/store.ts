@@ -342,6 +342,12 @@ export interface CommittedTurnRecord {
    * the row recorded none (a legacy row, or a store without the migration): the original narration is then unknown.
    */
   readonly run_narration?: AnswerRunNarration | null;
+  /**
+   * The row's atomic version marker, as `append_turn_atomic_v5` set it in the commit's own transaction: `true` minted a
+   * version, `false` committed and minted none (a guest's save: C8 reads its receipt from the row, by this marker), `null`
+   * never marked (a write without a version plan). Absent from a store that does not read it.
+   */
+  readonly model_version_created?: boolean | null;
 }
 
 /** A final answer's narration: which Run it was about (16-hex key) and where its explanation stood. */

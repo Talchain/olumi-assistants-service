@@ -23,6 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SupabaseSessionStore } from '../supabase-store.js';
 import type { SessionTurnWrite } from '../store.js';
+import { registrationRequestHash, registrationRequestOf, unversionedSaveOf } from '../../graph-registration/registration-identity.js';
 import { setTestSink } from '../../../utils/telemetry.js';
 
 afterEach(() => setTestSink(null));
@@ -198,5 +199,55 @@ describe('the store reports a replay, verified by request_hash', () => {
     const outcome = await store().append(write());
     expect(rpc).toHaveBeenCalled();
     expect(outcome.id).toBe('turn-row');
+  });
+});
+
+/**
+ * ⭐ C8 (27 Oct): a registration's stored hash carries its save (`#saved:<identity.v1>[:<Run>]`). The classifier, the store's
+ * half of every replay, compares the REQUEST exactly with that suffix aside, and the row reader returns the RPC's own marker.
+ */
+describe('C8: the store classifies a registration by its request, its #saved carrier aside, and reads the row’s version marker', () => {
+  const GRAPH = { nodes: [{ id: 'n1', kind: 'factor', label: 'Budget', observed_state: { value: 0.5 } }], edges: [] };
+  const mine = registrationRequestHash(GRAPH, undefined);
+
+  it('(6) a row written BEFORE the carrier, for the same request, is a replay', async () => {
+    expect(mine).toContain('#saved:');
+    priorRows = [{ request_hash: registrationRequestOf(mine) }];
+    const outcome = await store().append(write({ request_hash: mine }));
+    expect([outcome.replayedPriorTurn, outcome.priorTurnConflict]).toEqual([true, undefined]);
+  });
+
+  it('(5) a DIFFERENT brief over the same graph (the same #saved identity) is a conflict, never a replay; so is a different graph', async () => {
+    const otherBrief = registrationRequestHash(GRAPH, 'another brief');
+    expect(otherBrief.slice(otherBrief.indexOf('#saved:'))).toBe(mine.slice(mine.indexOf('#saved:')));
+    for (const stored of [otherBrief, registrationRequestHash({ ...GRAPH, nodes: [{ ...GRAPH.nodes[0]!, label: 'Risk' }] }, undefined)]) {
+      priorRows = [{ request_hash: stored }];
+      const outcome = await store().append(write({ request_hash: mine }));
+      expect([outcome.replayedPriorTurn, outcome.priorTurnConflict], stored).toEqual([undefined, true]);
+    }
+  });
+
+  it('(9) a MALFORMED carrier is compared whole: a conflict, never a replay', async () => {
+    priorRows = [{ request_hash: `${registrationRequestOf(mine)}#saved:not-a-hash` }];
+    const outcome = await store().append(write({ request_hash: mine }));
+    expect([outcome.replayedPriorTurn, outcome.priorTurnConflict]).toEqual([undefined, true]);
+  });
+
+  it('CONTROL: the same request with its carrier is a replay; a non-registration hash is still compared whole', async () => {
+    priorRows = [{ request_hash: mine }];
+    expect((await store().append(write({ request_hash: mine }))).replayedPriorTurn).toBe(true);
+    priorRows = [{ request_hash: `${REQUEST_HASH}#saved:${'a'.repeat(64)}` }];
+    expect((await store().append(write())).priorTurnConflict).toBe(true);
+  });
+
+  it('(8) readCommittedTurn returns the row’s atomic marker exactly (true, false or never marked), which the unversioned reader keys on', async () => {
+    const cases: Array<[unknown, boolean | null]> = [[false, false], [true, true], [null, null], ['false', null]];
+    for (const [stored, read] of cases) {
+      priorRows = [{ id: 'row-1', request_hash: mine, model_version_created: stored, user_id: 'stamped-by-claim' }];
+      const row = await store().readCommittedTurn('s', 't');
+      expect(row?.model_version_created, String(stored)).toBe(read);
+      expect(unversionedSaveOf(row, 'graph_registration:t') !== null, String(stored)).toBe(read === false);
+    }
+    expect(selectedColumns.some((c) => c.includes('model_version_created')), 'the read selects the marker').toBe(true);
   });
 });

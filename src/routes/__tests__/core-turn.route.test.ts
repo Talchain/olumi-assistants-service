@@ -12,7 +12,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { z } from 'zod';
 import { computeGraphIdentityHash } from '../../orchestrator-v5/context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../orchestrator-v5/context/graph-hash.js';
-import { registrationTurnId } from '../../orchestrator-v5/graph-registration/registration-identity.js';
+import { registrationRequestHash, registrationRequestOf, registrationTurnId, unversionedSaveOf } from '../../orchestrator-v5/graph-registration/registration-identity.js';
 import { toOutboundGraph } from '../../orchestrator-v5/goal-target/outbound-graph.js';
 import { mapLivingModel } from '../../orchestrator-v5/path-b/living-model/mapper.js';
 import { KNOWN_ANSWER } from '../../orchestrator-v5/path-b/living-model/__tests__/fixtures.js';
@@ -79,8 +79,16 @@ let registerRefusal: Json | null = null;
 /** When set, every versions read waits for it (a read that never answers until released), counted in `versionsHeld`. */
 let holdVersions: Promise<void> | undefined;
 let versionsHeld = 0;
-/** A guest's write, as the register commits one: saved, but no version minted (`append_turn_atomic_v5`), so no receipt. */
+/** A guest's write, as the register commits one: saved, but no version minted (`append_turn_atomic_v5`), so no version receipt. */
 let guestWrites = false;
+/**
+ * C8: each guest registration's own row (`v5_conversation_turns` under `registrationTurnId`), as the RPC commits it with the
+ * graph: `request_hash` from the ONE carrier definition (`registrationRequestHash`) and `model_version_created: false`. Kept
+ * apart from `turnRows` (whose latest row the held-card reader reads); the store's `readCommittedTurn` reads both.
+ */
+const registrationRows = new Map<string, Json>();
+/** When set, a guest registration row is written as before C8: its request hash with no `#saved` carrier. */
+let preCarrierRows = false;
 /** The next write's acknowledgement is lost (a 503), after its commit or before it: once, then cleared. */
 let loseAck: 'after_commit' | 'before_commit' | null = null;
 const turnRows = new Map<string, any>();
@@ -109,7 +117,7 @@ const store = {
   // Newest first, claims included, as the store reads them (`supabase-store.ts` readRecent: created_at descending).
   readRecent: vi.fn(async () => [...turnRows.values()].reverse()),
   readFactsWithTurnFor: async () => [],
-  readCommittedTurn: vi.fn(async (_sid: string, id: string) => turnRows.get(id) ?? null),
+  readCommittedTurn: vi.fn(async (_sid: string, id: string) => turnRows.get(id) ?? registrationRows.get(id) ?? null),
   readMostRecentPendingActions: vi.fn(async () => [...turnRows.values()].filter((r) => !String(r.turn_id).endsWith(':claim')).at(-1)?.pending_actions ?? []),
   releaseTurnClaim: vi.fn(async (_sid: string, id: string, hash: string) => { if (turnRows.get(id)?.request_hash === hash) turnRows.delete(id); }),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
@@ -315,8 +323,26 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const current = persisted === null ? null : computeGraphIdentityHash(persisted as never)!.value;
       if ((b.expected_graph_identity_hash ?? null) !== current) return reply.code(409).send({ details: { code: 'GRAPH_STALE' } });
       if (loseAck === 'before_commit') { loseAck = null; return reply.code(503).send({ code: 'upstream_unavailable' }); }
+      if (guestWrites) {
+        // The register's guest commit: the graph and its own row in one transaction (no version minted); a same-request resend
+        // replays (writes nothing), a different one under the same operation is refused; the receipt is read BACK from the row.
+        const regTurn = registrationTurnId((req.params as { id: string }).id, String(b.operation_id));
+        const hash = registrationRequestHash(b.graph, typeof b.brief_text === 'string' ? b.brief_text : undefined);
+        const prior = registrationRows.get(regTurn);
+        if (prior !== undefined && registrationRequestOf(String(prior.request_hash)) !== registrationRequestOf(hash)) {
+          return reply.code(409).send({ details: { code: 'OPERATION_ID_REUSED' } });
+        }
+        if (prior === undefined) {
+          persisted = b.graph as Json;
+          registrationRows.set(regTurn, { id: `reg-${registrationRows.size + 1}`, turn_id: regTurn, user_id: null, model_version_created: false,
+            request_hash: preCarrierRows ? registrationRequestOf(hash) : hash });
+        }
+        if (loseAck === 'after_commit') { loseAck = null; return reply.code(503).send({ code: 'upstream_unavailable' }); }
+        const carried = unversionedSaveOf(registrationRows.get(regTurn), regTurn);
+        return { registered: true, ...(prior !== undefined ? { replayed: true } : {}), graph_identity_hash: computeGraphIdentityHash(b.graph as never)!,
+          graph_hash: hashOf(b.graph), ...(carried === null ? {} : { unversioned_save: carried }) };
+      }
       persisted = b.graph as Json;
-      if (guestWrites) return { registered: true, graph_identity_hash: computeGraphIdentityHash(persisted as never)!, graph_hash: hashOf(persisted) };
       registered.push(b);
       if (loseAck === 'after_commit') { loseAck = null; return reply.code(503).send({ code: 'upstream_unavailable' }); }
       const identity = computeGraphIdentityHash(persisted as never)!;
@@ -339,7 +365,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     SCENARIO = randomUUID(); persisted = programGraph(); canonicalDraft = undefined; canonicalDrafts = []; registered.length = 0; fenceRows.clear(); turnRows.clear(); conversationIds.clear();
     readiness = { status: 'blocked', may_run: false, options: [], blockers: [] }; runState = undefined; carriedResult = undefined; otherRun = undefined;
     pausedRun = null; calls = []; conversationItems = []; outputs = []; preparedId = ''; holdProvider = undefined; holdWhen = undefined; registerRefusal = null;
-    holdVersions = undefined; versionsHeld = 0; guestWrites = false; loseAck = null;
+    holdVersions = undefined; versionsHeld = 0; guestWrites = false; loseAck = null; registrationRows.clear(); preCarrierRows = false;
   });
   const post = (payload: Json) => app.inject({ method: 'POST', url: '/agent/v1/core-turn',
     payload: { kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', ...payload } });
@@ -2280,7 +2306,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(registered).toHaveLength(1);
     });
 
-    it('C7: a signed-in first draft that saved, then whose reply call ended with no terminal event: the 502 says it was saved, with the draft’s own receipt (Olumi’s), durability recorded (its continuation row is written); a resend replays that receipt. CONTRAST: a guest’s draft mints no version: the same words, no receipt', async () => {
+    it('C7: a signed-in first draft that saved, then whose reply call ended with no terminal event: the 502 says it was saved, with the draft’s own receipt (Olumi’s), durability recorded (its continuation row is written); a resend replays that receipt. C8: a guest’s draft mints no version: the same words, with the save its own registration row carries (Olumi’s)', async () => {
       const draftThenCut = async () => {
         SCENARIO = randomUUID(); persisted = null;
         canonicalDraft = JSON.stringify(bakery());
@@ -2301,13 +2327,17 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(again.json()).toMatchObject({ durability: 'replayed', error: { code: 'REPLY_NOT_DELIVERED', message: SAVED_LOST, nothing_saved: false } });
       expect(idsOf((again.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
       expect(registered, 'one write').toHaveLength(1);
-      // CONTRAST: the same turn by a guest. Its draft is saved (the model is there) but mints no version, so there is no receipt.
+      // C8: the same turn by a guest. Its draft is saved (the model is there) but mints no version: its receipt is the one its
+      // own registration row carries (before C8 this was [], the gap C8 closes).
       registered.length = 0;
       guestWrites = true;
       const guest = await draftThenCut();
       expect(guest.r.statusCode, guest.r.body).toBe(502);
       expect(savedProgramOf(persisted), 'the guest’s draft is saved').toBeDefined();
-      expect(guest.r.json()).toMatchObject({ durability: 'recorded', error: LOST, receipts: [] });
+      expect(guest.r.json()).toMatchObject({ durability: 'recorded', error: LOST });
+      const draftRow = registrationTurnId(SCENARIO, programOperationId(SCENARIO, `turn:${guest.turnId}`));
+      expect((guest.r.json() as Json).receipts).toEqual([{ ...unversionedSaveOf(registrationRows.get(draftRow), draftRow), authorised_by: 'olumi' }]);
+      expect(UI_CORE_TURN.safeParse(guest.r.json()).success).toBe(true);
     });
 
     it('C14: a typed turn stopped while its call runs answers with the typed Stop outcome (TURN_STOPPED, nothing saved), recorded on its row, and a resend replays it with no call or write; an unstopped turn answers with none', async () => {
@@ -2391,6 +2421,191 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(drafted.json()).toMatchObject({ assistant_text: '', error: { code: 'TURN_STOPPED', retry_safe: false, nothing_saved: false } });
       expect(idsOf((drafted.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'olumi']]);
       expect(registered, 'the save stands, once: nothing undone').toHaveLength(1);
+    });
+  });
+
+  /**
+   * ⭐ C8 (alpha, 27 Oct; DL + PL): every save has its own receipt, a GUEST's too. A guest's save mints no version, so its
+   * receipt is the one its own registration row carries (`#saved:` on the row's immutable request hash, marker
+   * `model_version_created === false`), read back from that row on the live answer, a lost acknowledgement, a resend and a
+   * stream: `{ kind: 'unversioned', scenario_revision, run_id, source_turn_id, authorised_by }`, with NO version keys.
+   */
+  describe('C8 (alpha, 27 Oct): a guest’s saved change is said as saved, with its own receipt, and a retry never saves twice', () => {
+    const SAVED_LOST = 'The saved change is kept, but the reply didn’t arrive. Send a new message to continue.';
+    const RECEIPT_KEYS = ['kind', 'scenario_revision', 'run_id', 'source_turn_id', 'authorised_by'];
+    const VERSION_KEYS = ['version', 'version_id', 'mutation_id'];
+    /** The receipt an operation's own registration row carries, exactly as stored (the ONE reader). */
+    const carrierOf = (operationId: string): Json | null => {
+      const row = registrationTurnId(SCENARIO, operationId);
+      return unversionedSaveOf(registrationRows.get(row), row);
+    };
+    const staleEngine = () => {
+      const engine = String((persisted!.living_model.runs as Json[]).at(-1)!.receipt.versions.engine);
+      persisted = JSON.parse(JSON.stringify(persisted).split(engine).join('mp-a04e2cebf944')) as Json;
+    };
+    /** The registration rows the route read through the store (the row reader), by turn id. */
+    const registrationReads = () => store.readCommittedTurn.mock.calls.map((c) => String(c[1])).filter((id) => id.startsWith('graph_registration:'));
+
+    it('(1, 10) a guest’s card press: ONE save, said with the receipt its own registration row stores (the person’s), naming the bytes it wrote and their newest Run, with no version key; a resend of the press replays that receipt and saves nothing', async () => {
+      guestWrites = true;
+      const press = await propose();
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved: the oven costs £2,500.' }]];
+      const r = await post(press);
+      expect(r.statusCode, r.body).toBe(200);
+      const j = r.json() as Json;
+      const op = programOperationId(SCENARIO, `proposal:${preparedId}`);
+      expect([...registrationRows.keys()], 'one save, under the card’s own operation').toEqual([registrationTurnId(SCENARIO, op)]);
+      expect(figure('oven_price')).toBe(2500);
+      expect(j.receipts).toEqual([{ ...carrierOf(op), authorised_by: 'person' }]);
+      // What the receipt says is what was written: the stored bytes' identity.v1 and their newest stored Run.
+      expect(j.receipts[0]).toEqual({ kind: 'unversioned', scenario_revision: computeGraphIdentityHash(persisted as never)!.value,
+        run_id: savedProgramOf(persisted)!.runs.at(-1)!.run_id, source_turn_id: registrationTurnId(SCENARIO, op), authorised_by: 'person' });
+      // (10) The keys the UI refuses on an unversioned receipt are ABSENT, never null.
+      expect(Object.keys(j.receipts[0])).toEqual(RECEIPT_KEYS);
+      for (const k of VERSION_KEYS) expect(j.receipts[0], k).not.toHaveProperty(k);
+      expect(UI_CORE_TURN.safeParse(j).success).toBe(true);
+      const again = (await post(press)).json() as Json;
+      expect(again).toMatchObject({ durability: 'replayed', error: null });
+      expect(again.receipts).toEqual(j.receipts);
+      expect(registrationRows.size, 'a resend saves nothing').toBe(1);
+    });
+
+    it('(2, 3, 4) a guest’s typed Run whose acknowledgement was lost AFTER it committed, then whose reply failed: reconciled from its own row’s carrier (Olumi’s), one save; after an unrelated later save the resend replays THAT carrier, never the later one or today’s revision; CONTRAST: lost before it committed stays unknown, no receipt', async () => {
+      guestWrites = true;
+      staleEngine();
+      loseAck = 'after_commit';
+      outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run', args: { reason: 'they asked for it' } }], [{ type: 'refuse' }]];
+      const turnId = randomUUID();
+      const r = await typed('Run the analysis again, please.', turnId);
+      expect(r.statusCode, r.body).toBe(502);
+      const j = r.json() as Json;
+      expect(j.error).toEqual({ code: 'UPSTREAM_ERROR', message: SAVED_LOST, retry_safe: false, nothing_saved: false });
+      expect(registrationRows.size, 'one save').toBe(1);
+      const [runRow] = [...registrationRows.keys()];
+      const runOp = recordedRunsOf(String(turnRows.get(turnId)!.request_hash));
+      expect(runOp.map((op) => registrationTurnId(SCENARIO, op)), 'its answer row records the Run’s own operation').toEqual([runRow]);
+      const original: Json = { ...carrierOf(runOp[0]!), authorised_by: 'olumi' };
+      expect(j.receipts).toEqual([original]);
+      expect(original.run_id, 'the Run it saved').toBe(savedProgramOf(persisted)!.runs.at(-1)!.run_id);
+      // (4) An unrelated later save, by another operation: the person's own figure on the canvas.
+      const edit = await canvasEdit(randomUUID());
+      expect(edit.statusCode, edit.body).toBe(200);
+      expect((edit.json() as Json).receipts).toEqual([expect.objectContaining({ kind: 'unversioned', authorised_by: 'person' })]);
+      expect(registrationRows.size).toBe(2);
+      const now = computeGraphIdentityHash(persisted as never)!.value;
+      expect(now, 'the model moved on').not.toBe(original.scenario_revision);
+      // (3) The resend replays the Run's own carrier, as stored: not the later save's, not today's revision.
+      const callsBefore = calls.length;
+      const again = await typed('Run the analysis again, please.', turnId);
+      expect(again.statusCode, again.body).toBe(200);
+      expect(again.json()).toMatchObject({ durability: 'replayed', error: { code: 'REPLY_NOT_DELIVERED', message: SAVED_LOST, nothing_saved: false } });
+      expect((again.json() as Json).receipts).toEqual([original]);
+      expect([calls.length, registrationRows.size], 'a replay calls no model and saves nothing').toEqual([callsBefore, 2]);
+      // CONTRAST: the acknowledgement lost before anything committed: no row, so no receipt, recorded or replayed.
+      staleEngine();
+      loseAck = 'before_commit';
+      outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_2', args: { reason: 'again' } }], [{ type: 'refuse' }]];
+      const unproved = randomUUID();
+      const u = await typed('And once more.', unproved);
+      expect(u.statusCode, u.body).toBe(502);
+      expect(u.json()).toMatchObject({ receipts: [], error: { nothing_saved: false } });
+      expect(registrationRows.size, 'nothing committed').toBe(2);
+      expect(((await typed('And once more.', unproved)).json() as Json).receipts).toEqual([]);
+    });
+
+    it('(1, stream) a guest’s streamed first draft that saved, then outlived the stream: the COMPLETE frame says it was saved with the receipt its own row carries (Olumi’s); the turn finishes with no second save', async () => {
+      const { streamTurnAsStagedSse } = await import('../streamed-turn-sse.js');
+      const { config } = await import('../../config/index.js');
+      guestWrites = true;
+      persisted = null;
+      canonicalDraft = JSON.stringify(bakery());
+      let release!: () => void;
+      holdProvider = new Promise<void>((resolve) => { release = resolve; });
+      const turnId = randomUUID();
+      const writes: string[] = [];
+      const reply = { raw: { destroyed: false, writableEnded: false, setHeader: () => {}, writeHead: () => {},
+        write(chunk: string) { writes.push(chunk); return true; }, end() { this.writableEnded = true; } }, getHeaders: () => ({}) };
+      const kept = config.proxy.browserProxyTimeoutMs;
+      const budget = 98_766;
+      config.proxy.browserProxyTimeoutMs = budget;
+      const realSetTimeout = globalThis.setTimeout;
+      let fire: (() => void) | undefined;
+      const timers = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
+        (ms === budget && fire === undefined ? (fire = fn, realSetTimeout(() => {}, 0)) : Reflect.apply(realSetTimeout, globalThis, [fn, ms, ...rest]))) as never);
+      try {
+        const streamed = streamTurnAsStagedSse({ app, reply: reply as never, requestId: 'req-stream', internalHeaders: { 'content-type': 'application/json' },
+          payload: JSON.stringify({ kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BAKERY_BRIEF, source: 'composer' }),
+          featureVersion: 'test', endpoint: '/proxy/v5/turn/stream', internalTarget: '/agent/v1/core-turn' });
+        await vi.waitFor(() => expect(writes.some((w) => w.includes('"stage":"GRAPH_READY"'))).toBe(true));
+        fire!();
+        await streamed;
+      } finally {
+        timers.mockRestore();
+        config.proxy.browserProxyTimeoutMs = kept;
+      }
+      const complete = writes.filter((w) => w.startsWith('event: stage')).map((w) => JSON.parse(w.slice(w.indexOf('data: ') + 6)) as Json).at(-1)!;
+      expect(complete.payload).toMatchObject({ turn_id: turnId, durability: 'unknown', error: { code: 'TURN_STILL_RUNNING', nothing_saved: false } });
+      const draftOp = programOperationId(SCENARIO, `turn:${turnId}`);
+      expect(complete.payload.receipts).toEqual([{ ...carrierOf(draftOp), authorised_by: 'olumi' }]);
+      expect(Object.keys(complete.payload.receipts[0])).toEqual(RECEIPT_KEYS);
+      expect(UI_CORE_TURN.safeParse(complete.payload).success).toBe(true);
+      release();
+      await vi.waitFor(() => expect(turnRows.has(turnId)).toBe(true));
+      expect(registrationRows.size, 'one save').toBe(1);
+    });
+
+    it('(6) a guest’s row written BEFORE the carrier (no #saved): the save stays unknown on a lost acknowledgement and on its resend; this retry’s revision and Run are never claimed as its receipt', async () => {
+      guestWrites = true;
+      preCarrierRows = true;
+      staleEngine();
+      loseAck = 'after_commit';
+      outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run', args: { reason: 'they asked for it' } }], [{ type: 'refuse' }]];
+      const turnId = randomUUID();
+      const r = await typed('Run the analysis again, please.', turnId);
+      expect(r.statusCode, r.body).toBe(502);
+      expect(registrationRows.size, 'it did commit').toBe(1);
+      expect(String([...registrationRows.values()][0]!.request_hash)).not.toContain('#saved:');
+      expect(r.json()).toMatchObject({ receipts: [], error: { nothing_saved: false } });
+      expect(((await typed('Run the analysis again, please.', turnId)).json() as Json).receipts).toEqual([]);
+    });
+
+    it('(7) CONTRAST: a signed-in save is said exactly as before: its version’s receipt, no `kind`; on its resend the version is found first and its registration row is never read', async () => {
+      const press = await propose();
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved.' }]];
+      const r = (await post(press)).json() as Json;
+      const op = programOperationId(SCENARIO, `proposal:${preparedId}`);
+      // Live: the register's own `model_version` (it names no source turn); replayed: the version found by its operation.
+      const SIGNED_IN = { version: 1, version_id: 'v_1', mutation_id: 'm_1', source_turn_id: null, authorised_by: 'person' };
+      expect(r.receipts).toEqual([SIGNED_IN]);
+      expect(Object.keys(r.receipts[0])).toEqual(['version', 'version_id', 'mutation_id', 'source_turn_id', 'authorised_by']);
+      store.readCommittedTurn.mockClear();
+      const again = (await post(press)).json() as Json;
+      expect(again).toMatchObject({ durability: 'replayed' });
+      expect(again.receipts).toEqual([{ ...SIGNED_IN, source_turn_id: registrationTurnId(SCENARIO, op) }]);
+      expect(store.readCommittedTurn, 'control: the probe sees the reads the resend does make').toHaveBeenCalled();
+      // The card's save has a version, so its row is never read; an operation of the turn's that saved nothing (no version) is.
+      expect(registrationReads(), 'control: the probe sees a row read the resend does make').toContain(registrationTurnId(SCENARIO, programOperationId(SCENARIO, `turn:${press.turn_id}`)));
+      expect(registrationReads(), 'the version is found first: its row is never read').not.toContain(registrationTurnId(SCENARIO, op));
+    });
+
+    it('(8) the guest’s row once claim_guest_scenario has stamped it with the new owner (user_id set, marker still false) still says its save; CONTRAST: a row the RPC never marked (null) or one marked true has no unversioned receipt', async () => {
+      guestWrites = true;
+      staleEngine();
+      outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run', args: { reason: 'they asked for it' } }], [{ type: 'refuse' }]];
+      const turnId = randomUUID();
+      const r = await typed('Run the analysis again, please.', turnId);
+      expect(r.statusCode, r.body).toBe(502);
+      const original = (r.json() as Json).receipts as Json[];
+      expect(original).toEqual([expect.objectContaining({ kind: 'unversioned', authorised_by: 'olumi' })]);
+      const row = [...registrationRows.values()][0]!;
+      // Login: the claim stamps the guest's rows with the owner (20260710190000 lines 198–200/236–238); the marker is untouched.
+      row.user_id = '0f8a1b2c-3d4e-4f50-9a6b-7c8d9e0f1a2b';
+      const resend = () => typed('Run the analysis again, please.', turnId).then((x) => (x.json() as Json).receipts);
+      expect(await resend()).toEqual(original);
+      row.model_version_created = null;
+      expect(await resend(), 'never marked: unknown').toEqual([]);
+      row.model_version_created = true;
+      expect(await resend(), 'marked as a version: not an unversioned save').toEqual([]);
     });
   });
 });

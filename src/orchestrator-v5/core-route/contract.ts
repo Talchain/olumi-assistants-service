@@ -14,7 +14,7 @@
  * its own schema. Underscore keys are diagnostics for the witness scripts, never read by the UI.
  */
 import type { ProposalFieldsWire } from '../agent-lane/proposal-object/record.js';
-import type { TurnReceipt } from '../agent-lane/turn-receipts.js';
+import type { TurnReceipt, UnversionedTurnReceipt } from '../agent-lane/turn-receipts.js';
 import type { CardId } from '../session/store.js';
 
 /** One held proposal's card: the `_proposal_fields` record the UI already reads (`proposalFieldsWire`), its own type. */
@@ -34,7 +34,8 @@ export interface CoreTurnRun {
 
 /** Who authorised a saved version: the person (a card approval or their own canvas edit) or Olumi (its drafted first model). */
 export type AuthorisedBy = 'person' | 'olumi';
-export type CoreTurnReceipt = TurnReceipt & { readonly authorised_by: AuthorisedBy };
+/** A version's receipt, or (C8) a save that minted none: `{ kind: 'unversioned', scenario_revision, run_id, source_turn_id }`. */
+export type CoreTurnReceipt = (TurnReceipt | UnversionedTurnReceipt) & { readonly authorised_by: AuthorisedBy };
 
 export interface CoreTurnError {
   readonly code: string;

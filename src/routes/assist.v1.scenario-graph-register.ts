@@ -38,7 +38,7 @@ import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { isAgentSubturnFor } from "../orchestrator-v5/session/agent-subturn-context.js";
 import { useAppendV6 } from "../orchestrator-v5/session/supabase-store.js";
-import { registrationRequestHash, registrationTurnId } from "../orchestrator-v5/graph-registration/registration-identity.js";
+import { registrationRequestHash, registrationRequestOf, registrationTurnId, unversionedSaveOf, type UnversionedSaveReceipt } from "../orchestrator-v5/graph-registration/registration-identity.js";
 import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
 import { readRevisionConflictDetails, withRevisionConflictWire } from "../orchestrator-v5/graph-revision-conflict.js";
 import { currentTurnFence, runWithPendingTurnFence, runWithTurnFence, TurnFenceRejectedError } from "../orchestrator-v5/session/turn-fence.js";
@@ -860,7 +860,8 @@ export default async function route(app: FastifyInstance) {
           const committed = await store.readCommittedTurn(scenarioId, registrationTurnId(scenarioId, operationId));
           if (committed === null) return false;
           const bytes = withEntityRefs(persistable(graphToRegister));
-          return committed.request_hash === registrationRequestHash(bytes, brief.value);
+          // The request, exactly, its `#saved` carrier aside (C8): a row from before the carrier still replays.
+          return registrationRequestOf(committed.request_hash) === registrationRequestOf(registrationRequestHash(bytes, brief.value));
         } catch {
           return false;
         }
@@ -1453,6 +1454,25 @@ export default async function route(app: FastifyInstance) {
 
       const identity = computeGraphIdentityHash(graphForStore as GraphStateIngress);
 
+      /**
+       * ⭐ C8: A SAVE THAT MINTED NO VERSION IS SAID FROM ITS OWN ROW. The RPC was asked for a version and returned none, so
+       * it committed this row with `model_version_created = false` (a guest's save). That row's immutable `request_hash`
+       * carries what the save wrote (`#saved:…`), and its receipt is read BACK from the row, never built from this
+       * request: a replay of a row written before the carrier has none, and is not given this retry's. The request must be
+       * this one, exactly. Only for a named operation (only it can be looked up again); a read that fails says none.
+       */
+      let unversionedSave: UnversionedSaveReceipt | null = null;
+      if (versionPlan.kind === "plan" && appendOutcome?.modelVersionReceipt === undefined && operationId !== undefined
+        && typeof store.readCommittedTurn === "function") {
+        try {
+          const row = await store.readCommittedTurn(scenarioId, turnId);
+          unversionedSave = row !== null && registrationRequestOf(row.request_hash) === registrationRequestOf(requestHash)
+            ? unversionedSaveOf(row, turnId) : null;
+        } catch {
+          unversionedSave = null;
+        }
+      }
+
       log.info(
         {
           event: "v5.scenario_graph_register.registered",
@@ -1501,6 +1521,8 @@ export default async function route(app: FastifyInstance) {
                   appendOutcome.modelVersionReceipt.analysis_affecting_hash,
               },
             }),
+        // ADDITIVE (C8): present only when this registration minted no version and its own row carries its save.
+        ...(unversionedSave === null ? {} : { unversioned_save: unversionedSave }),
         node_count: parsed.data.nodes.length,
         edge_count: parsed.data.edges.length,
         kind_fields_normalised: normalised.changedNodeCount,

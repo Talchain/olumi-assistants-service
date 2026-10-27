@@ -2,13 +2,15 @@
  * THIN CORE: THE ONE WRITE (20 Oct 2026). A core postimage (the graph regenerated from its living model, with the living
  * model on it) is registered as `thin_core` under its operation's own id and CAS base, then verified INDEPENDENTLY: saved
  * only when THIS registration's own receipt and hashes match a fresh read AND that read holds the complete postimage
- * (`approvedGraphHeld`). A guest's write mints no version, so its proof is the acknowledgement plus that read alone. A lost
+ * (`approvedGraphHeld`). A guest's write mints no version, so its proof is the acknowledgement plus that read alone, and its
+ * receipt is the one its own registration row carries (C8, `unversioned_save`; found again by `findOperationSave`). A lost
  * response or a concurrent copy is recovered as the operation's own version, never a second write. Matching values never
  * count as proof; an unverifiable save stays UNKNOWN.
  */
 import { createHash } from 'node:crypto';
 import type { InternalDispatch } from '../../core-route/internal-dispatch.js';
-import { registrationTurnId } from '../../graph-registration/registration-identity.js';
+import { registrationTurnId, unversionedSaveOf, type UnversionedSaveReceipt } from '../../graph-registration/registration-identity.js';
+import { unversionedReceiptOf } from '../../agent-lane/turn-receipts.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity-normalise.js';
 import type { AtomicCommittedModelVersionReceipt } from '../../session/store.js';
 import { approvedGraphHeld, isSavedRead, readSaved, type SavedRead } from '../../model-program-turn/saved-read.js';
@@ -30,7 +32,8 @@ export interface CoreWriteRequest {
 }
 
 export type CoreWrite =
-  | { readonly status: 'saved'; readonly receipt: Receipt; readonly after: SavedRead }
+  /** `receipt`: the version's, or (a write that minted none) its row's own unversioned receipt, or its bare acknowledgement. */
+  | { readonly status: 'saved'; readonly receipt: Receipt | UnversionedSaveReceipt; readonly after: SavedRead }
   | { readonly status: 'already_saved'; readonly receipt: unknown }
   /** The model moved since the base read, and not by this operation. */
   | { readonly status: 'stale' }
@@ -104,7 +107,12 @@ function acknowledged(w: CoreWriteRequest, json: Rec, ack: unknown, after: Await
   if (json.graph_hash !== after.graphHash) return unknown('not_verified', { check: 'revision_mismatch', field: 'graph_hash', expected: hashPrefix(json.graph_hash), actual: hashPrefix(after.graphHash) });
   if (!approvedGraphHeld(w.graph, after.graph)) return unknown('not_verified', { check: 'postimage_diff',
     keys: Object.keys(w.graph).filter((key) => !approvedGraphHeld(w.graph, { ...w.graph, [key]: after.graph[key] })).slice(0, 8) });
-  const receipt: Receipt = { graph_identity_hash: ack };
+  // C8: its own receipt, as its registration row stores it (the register reads it back), when it is THIS operation's row and
+  // names exactly the bytes acknowledged; otherwise (a row with no carrier) the acknowledgement alone, as before: never a
+  // receipt built here.
+  const carrier = unversionedReceiptOf(json.unversioned_save);
+  const receipt: Receipt | UnversionedSaveReceipt = carrier !== null && carrier.scenario_revision === ack
+    && carrier.source_turn_id === registrationTurnId(w.scenarioId, w.operationId) ? carrier : { graph_identity_hash: ack };
   return json.replayed === true ? { status: 'already_saved', receipt } : { status: 'saved', receipt, after };
 }
 
@@ -119,11 +127,17 @@ export function changeOperationId(scenarioId: string, proposalId: string): strin
 
 /** The version this operation committed, if any: found by its own registration turn id in the newest-first history. */
 export async function findOperationVersion(dispatch: InternalDispatch, scenarioId: string, operationId: string): Promise<Rec | null> {
+  const found = await operationVersionLookup(dispatch, scenarioId, operationId);
+  return found === 'none' || found === 'unread' ? null : found;
+}
+
+/** The history's answer for one operation: its version, `none` (every page read, no version of it), or `unread`. */
+async function operationVersionLookup(dispatch: InternalDispatch, scenarioId: string, operationId: string): Promise<Rec | 'none' | 'unread'> {
   const turnId = registrationTurnId(scenarioId, operationId);
   let cursor: string | undefined;
   for (let page = 0; page < 5; page += 1) {
     const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/versions`, { limit: 200, ...(cursor === undefined ? {} : { cursor }) });
-    if (r.status !== 200) return null;
+    if (r.status !== 200) return 'unread';
     const versions = Array.isArray(r.json.versions) ? (r.json.versions as Rec[]) : [];
     const hit = versions.find((v) => (v.creation as { source_turn_id?: unknown } | undefined)?.source_turn_id === turnId);
     if (hit !== undefined) {
@@ -132,7 +146,34 @@ export async function findOperationVersion(dispatch: InternalDispatch, scenarioI
         mutation_id: typeof creation.mutation_id === 'string' ? creation.mutation_id : null, source_turn_id: String(creation.source_turn_id) };
     }
     cursor = typeof r.json.next_cursor === 'string' ? r.json.next_cursor : undefined;
-    if (cursor === undefined) return null;
+    if (cursor === undefined) return 'none';
   }
-  return null;
+  return 'unread';
+}
+
+/** The store's read of one committed row (`SessionStore.readCommittedTurn`): its request hash and atomic version marker. */
+export type RegistrationRowRead = (scenarioId: string, turnId: string) =>
+  Promise<{ readonly request_hash: string; readonly model_version_created?: boolean | null } | null>;
+
+/**
+ * ⭐ C8: the save this operation committed WITHOUT a version (a guest's), as its own registration row carries it
+ * (`unversionedSaveOf`: the RPC's `model_version_created === false` marker and the row's `#saved` suffix). The stored carrier,
+ * never a receipt built from today's graph or a resend: a row with no carrier (written before it) stays unknown.
+ */
+export async function readUnversionedSave(read: RegistrationRowRead, scenarioId: string, operationId: string): Promise<UnversionedSaveReceipt | null> {
+  const turnId = registrationTurnId(scenarioId, operationId);
+  return unversionedSaveOf(await read(scenarioId, turnId), turnId);
+}
+
+/**
+ * The save this operation committed: its version (exactly as `findOperationVersion` finds it, so a signed-in save is said as
+ * before), else its unversioned save. The row is read only once the caller's own history read has answered, in full, that
+ * there is no version of it: the authenticated read's authority stands, and an unreadable history stays unknown.
+ */
+export async function findOperationSave(dispatch: InternalDispatch, read: RegistrationRowRead | undefined, scenarioId: string,
+  operationId: string): Promise<Rec | UnversionedSaveReceipt | null> {
+  const found = await operationVersionLookup(dispatch, scenarioId, operationId);
+  if (found === 'unread') return null;
+  if (found !== 'none') return found;
+  return read === undefined ? null : readUnversionedSave(read, scenarioId, operationId);
 }
