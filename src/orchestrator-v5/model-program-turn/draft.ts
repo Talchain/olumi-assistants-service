@@ -17,6 +17,23 @@ import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, CanonicalUpdate, DRAFTING
   type CanonicalUpdateT } from './prompt.js';
 
 export const MAX_REPAIRS = 2;
+/**
+ * Q EXPERIMENT (27 Oct, not for merge): one critic call on a compiling first draft, then one revision in the drafting
+ * conversation. The critic only reviews; the drafter revises; what does not compile keeps the first draft.
+ */
+export const CRITIC_INSTRUCTIONS = [
+  'You review ONE draft model that Olumi, a reasoning partner, built from a person\'s brief. You do not rewrite it. List what a revision must change, most important first, at most eight lines, each one concrete and naming the record ids it concerns. Check:',
+  '1. Faithful: every figure, word, goal, limit and option of theirs is as they said it, quoted exactly, and nothing of Olumi\'s is presented as theirs.',
+  '2. Aim: the aim they stated is a goal; where their request presumes its answer, the aim behind it is surfaced as Olumi\'s working aim or question.',
+  '3. Options: carry on as now is an option; where they named none, one, or only two opposites, there are one or two materially different options of Olumi\'s (staged, reversible, smaller scope, partner or buy, learn first) within their limits.',
+  '4. Mechanism: each option\'s main reason to succeed and main reason to fail is in the structure (quantities, relations, risks) and reaches a measured goal or limit, not only in records.',
+  '5. Concerns and risks: every concern, obstacle or doubt they name feeds a mechanism or a risk; at least one plausible risk that could materially weaken an option is modelled, its chance Olumi\'s estimate with a range unless only they can know it.',
+  '6. Questions: the first questions ask for what most changes the result, in figures they can give or look up; nothing they already said is asked again.',
+  '7. Nothing decorative, nothing said twice, and no figure invented for their own situation.',
+  'If nothing needs to change, reply exactly: NO CHANGES.',
+].join('\n');
+export const REVISE_PREFIX = 'A reviewer read this draft. Return the whole model again, revised where each point below is right; keep everything else exactly as it was, and keep every rule of the drafting instructions.';
+export const CRITIC_MAX_OUTPUT_TOKENS = 6_000;
 export const DRAFT_REASONING_EFFORT = 'medium' as const;
 /** Room for a whole canonical model plus its reasoning (phase 0b's largest draft used 11.7k of 16k on a smaller format). */
 export const DRAFT_MAX_OUTPUT_TOKENS = 32_000;
@@ -56,6 +73,8 @@ export type DraftOutcome = {
   readonly attempts: readonly DraftAttempt[];
   /** Today (Europe/London) as the drafter was told it, once for the whole drafting conversation, repairs included (alpha G14). */
   readonly today: string;
+  /** Q experiment: the critic's points and whether the revision was kept. */
+  readonly review?: { readonly critique: string | null; readonly revised: boolean; readonly why: string; readonly ms: number };
 };
 
 /**
@@ -153,6 +172,7 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
   const attempts: DraftAttempt[] = [];
   let model: CanonicalModelT | null = null;
   let compiled: CompileResult | null = null;
+  let lastText: string | null = null;
   for (let a = 0; a <= MAX_REPAIRS; a += 1) {
     const t0 = Date.now();
     let out: CallOutput;
@@ -165,6 +185,7 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
       attempts.push({ attempt: a, errors: null, failed: `no output (${out.status ?? 'unknown'}${out.incomplete ? `: ${out.incomplete}` : ''})`, status: out.status, usage: out.usage, ms });
       break;
     }
+    lastText = out.text;
     let json: unknown;
     try { json = withHostFields(JSON.parse(out.text), onto === undefined); } catch { attempts.push({ attempt: a, errors: null, failed: 'output is not JSON', status: out.status, usage: out.usage, ms }); break; }
     // An update returns only its changes: the model it proposes is the saved one with them merged by id.
@@ -184,7 +205,36 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
     if (result.errors.length === 0 || a === MAX_REPAIRS) break;
     input.push({ role: 'assistant', content: out.text }, { role: 'user', content: repairMessage(result.errors, onto === undefined ? REPAIR_PREFIX : UPDATE_REPAIR_PREFIX) });
   }
+  if (onto === undefined && typeof brief === 'string' && model !== null && compiled !== null && compiled.errors.length === 0 && lastText !== null) {
+    return { model, compiled, attempts, today, ...(await reviewOnce(brief, input, lastText, model, compiled, call, today, periodZero, sourceText, opts.interpret === true)) };
+  }
   return { model, compiled, attempts, today };
+}
+
+async function reviewOnce(brief: string, input: readonly InputMessage[], draftText: string, model: CanonicalModelT, compiled: CompileResult, call: ResponsesCall,
+  today: string, periodZero: string, sourceText: string, interpret: boolean): Promise<{ model: CanonicalModelT; compiled: CompileResult; review: NonNullable<DraftOutcome['review']> }> {
+  const t0 = Date.now();
+  const keep = (critique: string | null, why: string) => ({ model, compiled, review: { critique, revised: false, why, ms: Date.now() - t0 } });
+  let critique: string | null;
+  try {
+    critique = (await call({ model: coreBudget(DRAFT_REASONING_EFFORT).model, instructions: CRITIC_INSTRUCTIONS,
+      input: [{ role: 'user', content: `The person's brief:\n${brief}\n\nThe draft model (JSON):\n${draftText}` }],
+      reasoning: { effort: DRAFT_REASONING_EFFORT }, max_output_tokens: CRITIC_MAX_OUTPUT_TOKENS, store: false })).text;
+  } catch { return keep(null, 'critic call failed'); }
+  if (critique === null || critique.trim() === '') return keep(null, 'critic returned nothing');
+  if (/^\s*NO CHANGES\.?\s*$/i.test(critique)) return keep(critique, 'critic: no changes');
+  let out: CallOutput;
+  try { out = await call(draftRequestBody([...input, { role: 'assistant', content: draftText }, { role: 'user', content: `${REVISE_PREFIX}\n${critique}` }], false, today, periodZero)); }
+  catch { return keep(critique, 'revision call failed'); }
+  if (out.text === null) return keep(critique, 'revision returned nothing');
+  let json: unknown;
+  try { json = withHostFields(JSON.parse(out.text), true); } catch { return keep(critique, 'revision is not JSON'); }
+  const parsed = CanonicalModel.safeParse(json);
+  if (!parsed.success) return keep(critique, 'revision fails the schema');
+  const read = interpret ? normalise(parsed.data) : parsed.data;
+  const result = compile(read, { sourceText, asksNeedQuestions: false });
+  if (result.errors.length > 0) return keep(critique, `revision has ${result.errors.length} compile error(s); first draft kept`);
+  return { model: read, compiled: result, review: { critique, revised: true, why: 'revision compiles', ms: Date.now() - t0 } };
 }
 
 /**
