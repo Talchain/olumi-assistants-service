@@ -150,7 +150,9 @@ export const SOURCED_STATED_KINDS: readonly StatedKind[] = STATED_KINDS.filter(
 export interface NotModelledItem {
   /** The exact bytes as the user wrote them. */
   readonly literal: string;
-  readonly kind: QuantityKind;
+  /** The regex scan's label for the figure. Absent on a program read, whose items are the person's own quotes from the
+   *  canonical model (DL 27 Oct, option 2): nothing reads it to decide what is shown. */
+  readonly kind?: QuantityKind;
   /** Character offset into `brief_text`. With `literal`, this is the item's
    *  IDENTITY — consumers must address items by it, never by value. */
   readonly char_offset: number;
@@ -2265,9 +2267,11 @@ export interface ProgramManifestRecords {
  * its horizon was still asked, tied "£500k" to a structural zero, reported no exclusions over a stated `left_out`, and
  * listed the model's own structure as Olumi's inferences).
  *
- * The brief's figures are still found by the same extractor (they are the person's exact words, by offset). Each is in
- * the model only when a person's canonical quantity whose quote covers it holds a figure; it is matched to that record,
- * by id, when the board draws it. What the model leaves out is the model's own `left_out`, then each goal or limit the
+ * The brief's figures are the person's own canonical quantities (DL 27 Oct, option 2): one item per person-authored
+ * quantity whose quote appears verbatim in the brief, its text the quote, at the quote's place in the brief, with no
+ * `kind`. The regex scan never runs here. An item is in the model when its quantity holds a figure, and is matched to that
+ * record, by id, when the board draws it. Two quantities quoting the same words are one item (one place in the brief).
+ * What the model leaves out is the model's own `left_out`, then each goal or limit the
  * newest Run's chance leaves out (`leavesOut`, by id). Olumi's inferences are the quantities Olumi gave a figure. Pure.
  */
 export function deriveProgramNotModelledManifest(
@@ -2279,27 +2283,33 @@ export function deriveProgramNotModelledManifest(
   if (typeof briefText !== "string" || briefText.trim().length === 0) return UNAVAILABLE("no_brief_text");
   const holds = (q: ProgramManifestRecords["quantities"][number]) =>
     q.status !== "asked" && (q.value !== null || (q.low !== null && q.high !== null));
-  const spans = records.quantities.flatMap((q) => {
-    const at = q.author === "person" && typeof q.quote === "string" && q.quote.length > 0 ? briefText.indexOf(q.quote) : -1;
-    return at < 0 ? [] : [{ q, at, end: at + q.quote!.length }];
-  });
   const bounds = new Set(records.limits.flatMap((l) => (l.measure?.bound ? [l.measure.bound] : [])));
+  const byPlace = new Map<string, { literal: string; at: number; held: boolean; matched: string | null; constraint: boolean }>();
+  for (const q of records.quantities) {
+    if (q.author !== "person" || typeof q.quote !== "string" || q.quote.length === 0) continue;
+    const at = briefText.indexOf(q.quote);
+    if (at < 0) continue;
+    const held = holds(q);
+    const matched = held && drawn.has(q.id) ? q.id : null;
+    const key = `${at}:${q.quote}`;
+    const prev = byPlace.get(key);
+    byPlace.set(key, prev === undefined
+      ? { literal: q.quote, at, held, matched, constraint: bounds.has(q.id) }
+      : { ...prev, held: prev.held || held, matched: prev.matched ?? matched, constraint: prev.constraint || bounds.has(q.id) });
+  }
+  const stated = [...byPlace.values()].sort((x, y) => x.at - y.at || x.literal.length - y.literal.length);
   const tally = Object.fromEntries(STATED_KINDS.map((k) => [k, 0])) as Record<StatedKind, number>;
-  const found = extractStatedQuantities(briefText);
   const items: NotModelledItem[] = [];
   let inModel = 0;
   let anchored = 0;
-  for (const f of found) {
-    const covering = spans.filter((s) => s.at <= f.at && f.at + f.literal.length <= s.end).map((s) => s.q);
-    const holder = covering.find(holds);
-    const matched = holder !== undefined && drawn.has(holder.id) ? holder.id : null;
-    if (holder !== undefined) inModel += 1;
-    if (matched !== null) anchored += 1;
+  for (const f of stated) {
+    if (f.held) inModel += 1;
+    if (f.matched !== null) anchored += 1;
     if (items.length < MAX_ITEMS) {
-      const statedKind: StatedKind = covering.some((q) => bounds.has(q.id)) ? "constraint" : "figure";
+      const statedKind: StatedKind = f.constraint ? "constraint" : "figure";
       tally[statedKind] += 1;
-      items.push({ literal: f.literal, kind: f.kind, char_offset: f.at, verdict: holder !== undefined ? "in_model" : "absent",
-        matched_node_id: matched, stated_kind: statedKind });
+      items.push({ literal: f.literal, char_offset: f.at, verdict: f.held ? "in_model" : "absent",
+        matched_node_id: f.matched, stated_kind: statedKind });
     }
   }
   const label = new Map([...records.goals, ...records.limits].map((r) => [r.id, r.label] as const));
@@ -2310,16 +2320,17 @@ export function deriveProgramNotModelledManifest(
     unavailable_reason: null,
     scope: { ...SCOPE, model_surface: ["the canonical model's quantities: whose words each figure is, and whether it holds one"] },
     quantities: {
-      total: found.length,
+      total: stated.length,
       in_model: inModel,
       in_model_anchored: anchored,
       in_model_unanchored: inModel - anchored,
       prose_only: 0,
-      absent: found.length - inModel,
-      truncated: found.length > items.length,
+      absent: stated.length - inModel,
+      truncated: stated.length > items.length,
       items,
     },
-    stated_kinds: { status: "derived", tally, sourced: SOURCED_STATED_KINDS, unsourced: UNSOURCED_STATED_KINDS, producers: STATED_KIND_PRODUCERS },
+    stated_kinds: { status: "derived", tally, sourced: SOURCED_STATED_KINDS, unsourced: UNSOURCED_STATED_KINDS,
+      producers: { ...STATED_KIND_PRODUCERS, figure: "deriveProgramNotModelledManifest (this module) — the person's own quoted quantities in the canonical model" } },
     declared_exclusions: { status: excluded.length > 0 ? "reported" : "none_reported", items: excluded },
     inferred_factors: {
       status: "derived",
