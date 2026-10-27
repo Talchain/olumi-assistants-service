@@ -10,6 +10,7 @@ import * as coreInstructions from '../../core-route/instructions.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX } from '../../model-program-turn/prompt.js';
 import * as programDraft from '../../model-program-turn/draft.js';
 import { PROGRAM_TURN_GUIDANCE } from '../../model-program-turn/program-tools.js';
+import { APPROXIMATE_FIGURE } from '../../model-program/canonical.js';
 
 const { CORE_DRAFTER_RULES } = drafting;
 
@@ -47,7 +48,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(b).not.toContain(NOTE_ON_ITEM_INSTRUCTION);
     expect(b.endsWith(CORE_REPLY_RULES)).toBe(true);
     // 23 Oct (ALPHA): the model-program prompt replaces arm B's assembled reference (055841368f…, 29,512 characters sent).
-    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('ef5655cb40b60676cea666da0195ccd5a73bd907d330f5a67836facc01300c0f'); // 27 Oct: T1, each caveat once per conversation and no "not a recommendation" disclaimer. 26 Oct: integrated review words#7, the "on Olumi’s reading of …" basis. 25 Oct: alpha G10, no threshold sentences. 25 Oct: alpha G5, no note_on_item sentence on the program path. 24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
+    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('2bbd64ec18df611f9f624eef078f46275b0e4c827a233db6461413ed285855ec'); // 27 Oct: round 1, the first-model questions lead with the premise that could change the comparison (DL). 27 Oct: T1, each caveat once per conversation and no "not a recommendation" disclaimer. 26 Oct: integrated review words#7, the "on Olumi’s reading of …" basis. 25 Oct: alpha G10, no threshold sentences. 25 Oct: alpha G5, no note_on_item sentence on the program path. 24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
     // Candidate-3 witness kept (21 Oct): WHEN to build. Text only, not behaviour.
     expect(b).toContain('draft the first model from their brief in that same turn, even when figures are missing');
   });
@@ -91,15 +92,20 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(DRAFTING_INSTRUCTIONS).toContain('A measure tracks the outcome the aim names');
     expect(DRAFTING_INSTRUCTIONS).toContain('never derived from the terms it is combined with; otherwise leave it null');
     expect(DRAFTING_INSTRUCTIONS).toContain('a durable asset or level it adds (an oven\'s capacity, members gained) may drive output every period');
-    expect(DRAFTING_INSTRUCTIONS).toContain('reaching no effect or the opposite sign where that is plausible, never only the direction that favours one option');
-    expect(DRAFTING_INSTRUCTIONS).toContain('A record of theirs holds only what they said');
+    // Round 1 (27 Oct, the PL's candidate wording, adopted by the DL): the Mechanisms and Faithful bullets are replaced. A record
+    // of theirs never gains a unit, period or reference point they did not give (it is asked); an estimate needs a supported
+    // scale. The candidate drops the two-sided-range sentence; the replaced wording is gone.
+    expect(DRAFTING_INSTRUCTIONS).toContain('never supply a missing unit, period or reference point');
+    expect(DRAFTING_INSTRUCTIONS).toContain('Estimate a causal response only when a stated relation or established mechanism supports its scale');
+    for (const old of ['reaching no effect or the opposite sign where that is plausible, never only the direction that favours one option', 'A record of theirs holds only what they said'])
+      expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
     expect(DRAFTING_INSTRUCTIONS).not.toContain('sets ad_spend to its own value 1000');
     // 27 Oct (Paul, approved): a short title for the situation and for each goal, limit and risk card, their words staying in its
     // quote; at most three coaching questions that test the reasoning, never a request for a figure.
     for (const rule of ['- Titles: title is a short title of a few words for the whole situation ("Second oven or wholesale?"); question stays the one plain sentence. Every goal, limit and risk label is a short title of a few words for its card, never a sentence; their words stay in its quote.',
       '- Coaching questions: at most three, each one plain question to the person that tests their reasoning: the aim behind the request, an alternative they have not weighed, the assumption the result leans on most, or a priority, constraint or commitment only they know that could change which option is most likely to achieve the aim (how long they can wait, what they have already promised). Never a request for a figure (that is asked on its own item), never leading, never answerable yes or no.'])
       expect(count(DRAFTING_INSTRUCTIONS, rule), rule).toBe(1);
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('cf68d6d040ad16909f4fc2264d7fd4daa93d9bbd83a2112a6046188b592e5a5e'); // 27 Oct: titles and coaching questions (Paul approved). 27 Oct: W1 + PL AMEND (no quota on Olumi's options; a risk in the structure only with a defensible mechanism; an unsizable chance stays unknown), think before writing (extract, widen, select, frame; ported from the benchmarked v202 prompt), carry on as now always an option, a risk's chance an estimate unless only they can know it (prompt test 27 Oct: carry-on 2/9 -> 8/8, Olumi options 7 -> 15). 27 Oct: W2, no "history is []" (history is the host's, never in the first draft's schema). 27 Oct: T3, a relative change's floor is −100 % (science on Paul's hiring Run), an estimated range is two-sided where plausible, a one-off amount happens once (a stock's start, never a per-period driver), a measure tracks the aim, a record of theirs holds only their words; the example's ads are a weekly spend into a 'spent' stock. // 25 Oct: alpha G21, the reach rule is the compiler's (at least one goal or limit, only when every goal has a measure)
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('209824f6202f32dfa5e7b6f610c7355057769e70a130a8f350c323fdb5b7a35c'); // 27 Oct: round 1, the PL's candidate wording (DL): step 5 removed, the approximate-figure mark for rough figures, missing periods asked, the deciding driver on the path, benefits and harms apart, a share a fact, questions by what could change the comparison. 27 Oct: titles and coaching questions (Paul approved). 27 Oct: W1 + PL AMEND (no quota on Olumi's options; a risk in the structure only with a defensible mechanism; an unsizable chance stays unknown), think before writing (extract, widen, select, frame; ported from the benchmarked v202 prompt), carry on as now always an option, a risk's chance an estimate unless only they can know it (prompt test 27 Oct: carry-on 2/9 -> 8/8, Olumi options 7 -> 15). 27 Oct: W2, no "history is []" (history is the host's, never in the first draft's schema). 27 Oct: T3, a relative change's floor is −100 % (science on Paul's hiring Run), an estimated range is two-sided where plausible, a one-off amount happens once (a stock's start, never a per-period driver), a measure tracks the aim, a record of theirs holds only their words; the example's ads are a weekly spend into a 'spent' stock. // 25 Oct: alpha G21, the reach rule is the compiler's (at least one goal or limit, only when every goal has a measure)
     // 24 Oct (DL, DoD-G classes 12 and 4): an update returns only the records it changes or adds; the host merges them by id.
     expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('b54257c11969f65208dfead1d0006e17a88c65d20f0e0880588c650b58d8e4c8');
     expect(createHash('sha256').update(UPDATE_REPAIR_PREFIX, 'utf8').digest('hex')).toBe('1b52b62678cfab1b06670bc026504a9e63e186e458fec752c4b56ba9df918daf');
@@ -116,9 +122,11 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       expect(`${CORE_REPLY_RULES}${CORE_DRAFTER_RULES}`, line).not.toContain(line);
     // ALPHA (the brief's five behaviours), each said once in what is sent.
     for (const rule of [
-      // 1. after a draft: what Olumi understood, then only the blocking questions, grouped, the most consequential first, never re-asked
+      // 1. after a draft: what Olumi understood, then at most three questions, grouped: first the missing premise that could most change which
+      // option is most likely to achieve the aim (confirming Olumi's reading of the aim or its measure first), arithmetic-only inputs after; never re-asked
       "1. What Olumi understood, in two to four short lines: the question, the goals and limits, the options and the main figures. Keep their figures in their words, say which figures are Olumi's starting estimates, and say what was left out of the calculation and why.",
-      '2. Only the questions that block a goal or a limit, at most three, as one numbered list they can answer in one reply: the one that unblocks the most first, each asking one thing, with a few words on why it matters.',
+      // Round 1 (DL 27 Oct): the first question is chosen by what could change the comparison, never by what unblocks the arithmetic.
+      '2. The questions, at most three, as one numbered list they can answer in one reply, each asking one thing. The first is about the missing premise on the main causal route (a fact, the framing, the measure or a condition) whose answer could most change which option is most likely to achieve the aim, with a few words on why it could change that, never a claimed sensitivity; where the aim or its measure is Olumi\'s reading, confirming it comes first. Inputs needed only to finish the arithmetic come after.',
       'If a question asks for something their words already state or answer, do not ask it: put it in with the edit tools, quoting them, and say so.',
       'Ask at most three questions in a reply, each once, the blocking ones first;',
       // 2. a chance as the code words it, what it rests on, the limit lines, and ONE next step
@@ -138,6 +146,8 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'Never recommend or choose an option for the user, and never call one "best", the "winner" or the one to "go with".',
       'Name an option as the most likely to meet the goal only when the result itself names one, as a finding in this model, never as what they should choose;',
     ]) expect(count(b, rule), rule.slice(0, 60)).toBe(1);
+    // Round 1 (DL 27 Oct): the arithmetic-unblocking order is gone from the first-model questions.
+    for (const old of ['the one that unblocks the most first', 'Only the questions that block a goal or a limit']) expect(b, old).not.toContain(old);
     // Kept from the old reply rule, each once: what the reply must report of saves and approvals, and the AIE's scope rule (K3).
     for (const kept of ['In this mode Olumi adds nothing to your reply and rewrites none of it: the user reads exactly your words.',
       'never your tools or what a tool returned', 'approving an estimate adopts it but does not make them its author',
@@ -204,19 +214,11 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
 
   it('the model-program drafter (DL 24 Oct): only their facts wait, link sizes stay Olumi\u2019s estimates, quotes are copied exactly, and an update keeps every option reaching every goal', () => {
     for (const rule of [
-      'its quote is their words copied exactly, one unbroken stretch, never reworded or joined.',
       'what they know or decide: current levels, prices, costs, budgets and how they split them, headcount, dates, durations, targets.',
-      'Never ask them for a link\'s size or an option\'s effect.',
       // DL 24 Oct (blind score of 1510a008, mrr structure): an identity is a definition; a missing figure is asked on its item.
-      'Mechanism: each option reaches, through relations from what it sets, at least one measured goal or limit it plausibly affects, never a link added only to connect it; a quantity that is by definition a product or sum of others is a definition, never an effect; each other link is sized by their coefficient or Olumi\'s estimate.',
       // AIE 6386018855 §5 (DL 24 Oct): the capture-only clauses replaced, each permission once, attributed and grounded.
       // Candidate A: the update's own goal-or-limit rule is said once, in UPDATE_PREFIX (pinned below), which every update sends.
       'Olumi\'s own additions (a working aim, a suggested measure, options, drivers, risks) are made when the model is first drafted; a repair or an update changes only what it asks.',
-      'What Olumi adds is author "olumi", quote null, never presented as theirs.',
-      'Model the main reason each option could succeed and the main reason it could fail.',
-      'Every driver, constraint and current state they mention feeds the calculation or the record that fits it.',
-      'Where the brief leaves out a driver, countereffect, side effect or risk that is plausible and could change the result, add it as Olumi\'s hypothesis (author olumi, with a basis and its direction); plausibility alone never justifies a figure, so size it like any other link.',
-      'Only what is materially useful: no quota, nothing merely conceivable.',
       // Paul 26 Oct (1): no aim stated -> one provisional working aim of Olumi's, its target asked, never invented.
       'No aim stated: ONE working aim of Olumi\'s (a short plain label), the outcome the brief most plainly points to, measured the same way, its target asked by a question offering the aim to confirm or change',
       'An aim they state without a measure stays theirs: where a measure can responsibly track it, suggest one (measure_by "olumi":',
@@ -229,7 +231,6 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'option "Weekly local ads", olumi (they named only one; reversible, lower-commitment): sets ad_spend to its own value 50, olumi',
       'left_out holds only what matters to the result but cannot be calculated, with the reason;',
       // AMEND (DL 24 Oct, blind score of #3735): a lever only the options set, and a whole, are structure; a stated limit stays a limit.
-      'So are the starting level of a setting only the options change, when they gave none (0, an Olumi division\'s share included), and a whole such as 100 %: never asked.',
       // Codex buddy AMEND (26 Oct): one statement, one record; assertion vs evidence and value vs assumed relationship stay distinct.
       'One statement, one record, never paraphrased into a second; an assertion and its evidence, or a figure and the relationship assumed about it, stay two.',
       'the rest goes in the record that fits: a condition the plan must not break → limits, a disagreement → dissent,',
@@ -237,22 +238,56 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'goal "to grow the bakery", measure_by olumi (a suggested measure): sales change_abs from now >= grow_target, end, window null,',
       // Codex BLOCK on #3735: the exclusion is Olumi's reading, marked as canonical.ts attribution requires.
       'exclusions: left_out "growth beyond loaf sales, such as new lines", why "not in this model", author olumi, quote null',
-      'the reply asks at most three, and every other missing fact stays asked on its item.',
       // DL 24 Oct (P7 hiring blind score, classes 2 and 4): a stated threshold is theirs; a goal against today is relative to today.
-      'Every figure a goal or limit rests on stays in, and a threshold they state is theirs, never Olumi\'s unknown ("no worse" is today\'s level).',
       // Buddy 24 Oct 08:48Z (accepted): the frame follows their words, as canonical.ts GOAL_FRAMES and compile.lowerChange do.
-      'A goal\'s frame follows their words: a change stated as a percentage or share ("8 % more") is change_rel from now, and where they give no figure for today, today is 1, carrying on keeps it there (an assumption) and each effect is a proportional change, so today\'s level is not asked;',
-      'a change stated in units ("12 more parcels a day than now") is change_abs in those units; a target stated as a level stays a level.',
-      'A level the result does need is their fact, asked as a recent measured figure ("last month\'s"), saying how they could measure it.',
       // DL 24 Oct (milestone blind score, effects-not-estimated): a range is defensible when its order of magnitude is knowable.
-      'A link or effect (an option\'s added effect included) is theirs or, by default, Olumi\'s provisional estimate with a defensible range in natural units and a plain basis.',
       // Buddy 24 Oct 08:17Z (accepted): capacity is not output.
-      'A range is defensible when general knowledge of how such things work gives its order of magnitude, however wide the span (a second matched, staffed van roughly doubles available vehicle capacity, give or take; completed deliveries also depend on demand and other bottlenecks).',
       // DL 24 Oct (with S3's issue 39): an unsized link's direction goes in direction; one with no direction anyone can give is a note.
-      'Only an effect with no knowable scale keeps its size unknown, its direction in direction (raises or lowers) and what would size it in its basis; an effect whose direction no one can say is a note, not a link. Never force a number to get a chance.',
       'A stock\'s level after n periods is its start plus n periods of its flows.',
       'sets ovens_added to one_oven, starts_after_periods 0;',
     ]) expect(count(DRAFTING_INSTRUCTIONS, rule), rule).toBe(1);
+    // Round 1 (27 Oct, the PL's candidate wording, adopted by the DL): seven bullets replaced and step 5 removed. Each successor
+    // rule is sent once, and every replaced sentence above is gone. Two earlier rulings are REVERSED by the candidate, not kept:
+    // an option-only setting's starting level and a current share are now asked, never 0 by default (DL AMEND 24 Oct); and a
+    // relative goal with no figure for today no longer assumes today is 1 with carrying on keeping it there (buddy 24 Oct).
+    for (const rule of [
+      'Their statements are author "person", with one unbroken exact quote. Normalise notation only where meaning is unchanged; never supply a missing unit, period or reference point.',
+      'Keep a stated amount separate from a rate that needs an unstated period, and ask for that period.',
+      'A suggested measure uses measure_by "olumi"; an unclear measure or reference stays unresolved, with measure null and a goal question.',
+      'Olumi\'s proposed settings are author "olumi", quote null, including settings that use a quantity whose figure came from the person. Attribution never licenses an invented premise.',
+      'Zero may mean no additional activity; it never supplies an unstated current level or share. A missing current level or share is asked.',
+      'A current share, mix or allocation is a fact, asked when missing, even when it multiplies another quantity.',
+      'Plausibility of the direction alone gives no numerical bounds: use unknown, with direction and what evidence would size it. Ask for observable inputs, never a speculative effect or probability.',
+      `For an approximate single figure: author "person", status "known", value the stated figure, low/high/range_kind null, exact quote, basis "${APPROXIMATE_FIGURE}".`,
+      '- Mechanism: identify what could reverse the comparison. Represent each such driver as a quantity on a defensible path from an option setting to a goal or limit.',
+      'Missing facts stay asked and unsized coefficients stay unknown on that path; missing numbers alone never send a mechanism to prose or left_out.',
+      'Keep separately changeable benefits and harms as separate quantities and paths, never one net coefficient: extra sales and extra waste, for example.',
+      'Definitions remain sums or products; causal effects use coefficients. Add materially useful missing mechanisms as explicit Olumi hypotheses, without inventing their size.',
+      'A missing duration is an asked quantity wherever the relation can express it; otherwise retain the limitation in left_out. Never invent a duration or let an effect run for ever by default.',
+      'Then prioritise the observable unknown whose answer could reverse which option is most likely to achieve that aim. A missing date or target comes first only when it could change that comparison; being needed to calculate a chance is insufficient.',
+      'Keep all missing facts asked.',
+      'Preserve stated targets and reference points; never substitute an unstated baseline or assume that carrying on leaves it unchanged.',
+    ]) expect(count(DRAFTING_INSTRUCTIONS, rule), rule).toBe(1);
+    for (const old of [
+      'its quote is their words copied exactly, one unbroken stretch, never reworded or joined.',
+      'Never ask them for a link\'s size or an option\'s effect.',
+      'Mechanism: each option reaches, through relations from what it sets, at least one measured goal or limit it plausibly affects, never a link added only to connect it; a quantity that is by definition a product or sum of others is a definition, never an effect; each other link is sized by their coefficient or Olumi\'s estimate.',
+      'What Olumi adds is author "olumi", quote null, never presented as theirs.',
+      'Model the main reason each option could succeed and the main reason it could fail.',
+      'Every driver, constraint and current state they mention feeds the calculation or the record that fits it.',
+      'Where the brief leaves out a driver, countereffect, side effect or risk that is plausible and could change the result, add it as Olumi\'s hypothesis (author olumi, with a basis and its direction); plausibility alone never justifies a figure, so size it like any other link.',
+      'Only what is materially useful: no quota, nothing merely conceivable.',
+      'So are the starting level of a setting only the options change, when they gave none (0, an Olumi division\'s share included), and a whole such as 100 %: never asked.',
+      'the reply asks at most three, and every other missing fact stays asked on its item.',
+      'Every figure a goal or limit rests on stays in, and a threshold they state is theirs, never Olumi\'s unknown ("no worse" is today\'s level).',
+      'A goal\'s frame follows their words: a change stated as a percentage or share ("8 % more") is change_rel from now, and where they give no figure for today, today is 1, carrying on keeps it there (an assumption) and each effect is a proportional change, so today\'s level is not asked;',
+      'a change stated in units ("12 more parcels a day than now") is change_abs in those units; a target stated as a level stays a level.',
+      'A level the result does need is their fact, asked as a recent measured figure ("last month\'s"), saying how they could measure it.',
+      'A link or effect (an option\'s added effect included) is theirs or, by default, Olumi\'s provisional estimate with a defensible range in natural units and a plain basis.',
+      'A range is defensible when general knowledge of how such things work gives its order of magnitude, however wide the span (a second matched, staffed van roughly doubles available vehicle capacity, give or take; completed deliveries also depend on demand and other bottlenecks).',
+      'Only an effect with no knowable scale keeps its size unknown, its direction in direction (raises or lowers) and what would size it in its basis; an effect whose direction no one can say is a note, not a link. Never force a number to get a chance.',
+      '5. Check, before writing each record of theirs', 'a rough figure stays a range', 'A figure they give as approximate is a plausible range around it',
+    ]) expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
     // Alpha G21: the old universal reach rule, stricter than the compiler's (compile.ts set_reaches_nothing / option_reaches_no_goal), is gone.
     expect(DRAFTING_INSTRUCTIONS).not.toContain('every option reaches every measured goal');
     // Candidate A: the capture-only clauses are gone (no aim -> no goal; options only where none named; exact names; the goal precondition).
@@ -288,14 +323,14 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(PROGRAM_TURN_GUIDANCE).not.toContain('an answer to a listed question goes in answers, on that item\'s id; any other change goes in request,');
     for (const old of ['If only its direction can be defended', 'uncertainty alone is not a reason to withhold', 'what they expect without the options included', 'roughly doubles daily deliveries',
       'A goal or limit stated against today is relative to today']) expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
-    // Buddy 08:48Z: a level target and a change in units are never turned into a ratio. Only the change_rel clause sets today
-    // to 1 or makes effects proportional; the change_abs and level clauses carry neither.
-    const frames = DRAFTING_INSTRUCTIONS.slice(DRAFTING_INSTRUCTIONS.indexOf('A goal\'s frame follows their words:'));
-    const [relClause, absClause, levelClause] = frames.slice(0, frames.indexOf(' A level the result does need')).split('; ');
-    expect(relClause).toContain('is change_rel from now'); expect(relClause).toContain('today is 1'); expect(relClause).toContain('each effect is a proportional change');
-    expect(absClause).toContain('is change_abs in those units'); expect(levelClause).toBe('a target stated as a level stays a level.');
-    for (const clause of [absClause, levelClause]) for (const ratio of ['today is 1', 'proportional', 'change_rel', 'relative to today']) expect(clause, ratio).not.toContain(ratio);
-    expect(count(DRAFTING_INSTRUCTIONS, 'today is 1')).toBe(1);
+    // Buddy 08:48Z: a level target and a change in units are never turned into a ratio. Round 1 (27 Oct): the prompt's frame
+    // clauses are gone with the old Questions bullet (the schema's frame descriptions say level, change_abs and change_rel), so
+    // no sentence of the prompt sets today to 1 or makes effects proportional, for any frame.
+    for (const ratio of ['today is 1', 'proportional', 'relative to today']) expect(DRAFTING_INSTRUCTIONS, ratio).not.toContain(ratio);
+    const sentFrame = (CANONICAL_JSON_SCHEMA as { properties: { goals: { items: { properties: { measure: { anyOf: { properties?: { frame?: { description: string } } }[] } } } } } })
+      .properties.goals.items.properties.measure.anyOf.find((s) => s.properties?.frame)!.properties!.frame!.description;
+    for (const frame of ['level: the quantity itself reaches the target', 'change_abs: its change from the reference, in its own unit', 'change_rel: its change from the reference as a fraction of the reference'])
+      expect(count(sentFrame, frame), frame).toBe(1);
     expect(Object.keys(programDraft)).not.toContain('UPDATE_PREFIX');
     // The schema is prompt text too (sent on every drafting call): `unknown` only where nothing rests on it (served funding dead end).
     const sentSchema = JSON.stringify(CANONICAL_JSON_SCHEMA);

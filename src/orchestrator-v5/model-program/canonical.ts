@@ -96,7 +96,7 @@ export const UNIT_RULES = 'The unit in singular words: a currency as GBP, USD or
  */
 export const RANGE_KINDS = ['bounds', 'plausible'] as const;
 const RANGE_KIND = z.enum(RANGE_KINDS).nullable().describe(
-  'For a range only. bounds: the words fix hard ends ("between 80 and 150", "no more than", "at least"), so it cannot fall outside them. plausible: a rough span ("about", "roughly", "likely", "somewhere around"); Olumi\'s own estimates are plausible. Null when there is no range, or when the person\'s words do not say which (it is then asked).');
+  'For a range with endpoints only. bounds: hard ends. plausible: a rough span, including Olumi\'s supported coefficient estimates. An approximate single figure supplies no endpoints: value holds that figure, low/high/range_kind stay null, and basis preserves its approximate status. Null also when a stated range\'s meaning is unresolved (then asked).');
 
 export const CanonicalQuantity = z.object({
   id,
@@ -110,7 +110,7 @@ export const CanonicalQuantity = z.object({
   ceiling: z.number().nullable().describe('Olumi\'s reading of the highest physically possible value, in this quantity\'s unit. Null when no upper bound is justified. Not the person\'s stated range.'),
   kind: z.enum(QUANTITY_KINDS).describe(
     'fact: a figure about the person\'s own situation (their price, costs, headcount, members today, dates, targets): only they can give it, so a missing fact is asked, never estimated. '
-    + 'coefficient: the size of a mechanism (each extra oven adds so many loaves; the share of visitors who join; a rate): Olumi may estimate it, labelled, with low and high; a link\'s size stays a coefficient even when it is worked out by a relation. '
+    + 'coefficient: a causal response per unit of driver; estimate only with a supported scale, otherwise unknown. An observed share, mix or allocation in their situation is a fact, asked when missing, even when used as a multiplier. A link\'s size stays a coefficient when derived. '
     + 'derived: worked out by its relation and not a link\'s size (profit, total members): its status is derived. A structural constant is a fact.'),
   status: z.enum(QUANTITY_STATUSES).describe(
     'known: a figure in hand that is not an estimate: the person\'s (quoted), a structural constant (author structure), or Olumi\'s reading of a stated calendar date as a window\'s whole number of periods (basis names the date). '
@@ -122,7 +122,7 @@ export const CanonicalQuantity = z.object({
     + 'unsupported: the person stated it but these forms cannot express it: every figure null, basis says what is missing.'),
   question: z.string().nullable().describe('For asked: the one plain question to the person that would give this figure, in their words, never internal terms. Null otherwise.'),
   basis: z.string().nullable().describe(
-    'For estimated: one plain sentence on what the estimate rests on. For structure: what the constant is ("12 months in a year"). For unknown, not_applicable or unsupported: why. Null otherwise.'),
+    `For a person's approximate single figure, exactly: "${APPROXIMATE_FIGURE}". For estimated: what supports the numerical scale. For structure: what the constant is ("12 months in a year"). For unknown, not_applicable or unsupported: why and what would resolve it. Null otherwise.`),
   direction: z.enum(['raises', 'lowers']).nullable().describe(
     'For a link\'s size (a coefficient), used only when no figure is given (no most likely figure, and no range or one that spans zero): raises when more of the driver means more of what it moves, lowers when it means less; null when no one can say which. Null for every other quantity.'),
   author: z.enum(QUANTITY_AUTHORS).describe(
@@ -306,7 +306,7 @@ export const CanonicalOptionSet = z.object({
   range_kind: RANGE_KIND,
   question: z.string().nullable().describe('With to null and no figure: the one question to the person for this option\'s value. Null otherwise.'),
   starts_after_periods: timing,
-  author: z.enum(QUANTITY_AUTHORS).describe('Who gave the inline value: person, olumi, or structure (a switch: 1 for on).'),
+  author: z.enum(QUANTITY_AUTHORS).describe('Who proposed this setting, with either to or an inline value. Olumi\'s proposed option settings are olumi, quote null, even when to names the person\'s figure. structure only for a mathematical off/on switch.'),
   quote: attribution.quote,
 }).strict().describe('What the option changes, and to what: a quantity id in to, or the option\'s own inline value (value, or low and high), with who gave it. An inline value compiles into a named quantity of its own.');
 export type CanonicalOptionSetT = z.infer<typeof CanonicalOptionSet>;
