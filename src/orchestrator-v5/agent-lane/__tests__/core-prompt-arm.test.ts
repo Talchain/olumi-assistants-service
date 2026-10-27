@@ -86,7 +86,15 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // 26 Oct (drafter candidate A, Paul's rulings + Codex buddy AMENDs): no aim stated -> ONE working aim of Olumi's, its target asked;
     // short neutral option names with their words as the quote; one or two lower-commitment options of Olumi's where they name none,
     // one or only opposites; additions materially useful, never a quota; one statement, one record.
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('fbdeb5fe9c102a642760d922be72eeaf20bec699ee7a25d0de0a6ee4499fadb8'); // 25 Oct: alpha G21, the reach rule is the compiler's (at least one goal or limit, only when every goal has a measure)
+    // T3 (27 Oct): the three rules by problem type, by their own words.
+    expect(DRAFTING_INSTRUCTIONS).toContain('A one-off payment (a purchase, an investment, a campaign\'s total) is counted once');
+    expect(DRAFTING_INSTRUCTIONS).toContain('A measure tracks the outcome the aim names');
+    expect(DRAFTING_INSTRUCTIONS).toContain('never derived from the terms it is combined with; otherwise leave it null');
+    expect(DRAFTING_INSTRUCTIONS).toContain('a durable asset or level it adds (an oven\'s capacity, members gained) may drive output every period');
+    expect(DRAFTING_INSTRUCTIONS).toContain('reaching no effect or the opposite sign where that is plausible, never only the direction that favours one option');
+    expect(DRAFTING_INSTRUCTIONS).toContain('A record of theirs holds only what they said');
+    expect(DRAFTING_INSTRUCTIONS).not.toContain('sets ad_spend to its own value 1000');
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('02d7435e8d0b5665725ba4f3f1c0c780f4461d40fd86f268d1f00f5b323d72ef'); // 27 Oct: T3, a relative change's floor is −100 % (science on Paul's hiring Run), an estimated range is two-sided where plausible, a one-off amount happens once (a stock's start, never a per-period driver), a measure tracks the aim, a record of theirs holds only their words; the example's ads are a weekly spend into a 'spent' stock. // 25 Oct: alpha G21, the reach rule is the compiler's (at least one goal or limit, only when every goal has a measure)
     // 24 Oct (DL, DoD-G classes 12 and 4): an update returns only the records it changes or adds; the host merges them by id.
     expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('b54257c11969f65208dfead1d0006e17a88c65d20f0e0880588c650b58d8e4c8');
     expect(createHash('sha256').update(UPDATE_REPAIR_PREFIX, 'utf8').digest('hex')).toBe('1b52b62678cfab1b06670bc026504a9e63e186e458fec752c4b56ba9df918daf');
@@ -212,7 +220,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       // Paul 26 Oct (2) and (3): short neutral names, their words the quote; Olumi's lower-commitment options where they name none, one or only opposites.
       'Options: every option they named, each under a short neutral name ("Second oven"), their words as its quote.',
       'Where they name none or one, only two opposites (do it or not), or ask what they can do, add one or two materially different options of Olumi\'s, lower-commitment where it fits (staged, partial, reversible or learn-first); where the question is how to divide something (money, staff, hours), a small set of feasible divisions (a design, not a fact about today). Olumi\'s options stay within their stated budgets, exclusions and scope.',
-      'option "Local ads", olumi (they named only one; reversible, lower-commitment): sets ad_spend to its own value 1000, olumi',
+      'option "Weekly local ads", olumi (they named only one; reversible, lower-commitment): sets ad_spend to its own value 50, olumi',
       'left_out holds only what matters to the result but cannot be calculated, with the reason;',
       // AMEND (DL 24 Oct, blind score of #3735): a lever only the options set, and a whole, are structure; a stated limit stays a limit.
       'So are the starting level of a setting only the options change, when they gave none (0, an Olumi division\'s share included), and a whole such as 100 %: never asked.',
