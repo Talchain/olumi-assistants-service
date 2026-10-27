@@ -12,6 +12,7 @@ import { coreBudget } from '../agent-lane/model-budgets.js';
 import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
 import { todayInLondon } from '../goal-target/deadline-date.js';
+import { mcInstructions, mcSchema, mcShim } from './mc-format.js';
 import { compile, compileJson, normalise, type CompileError, type CompileResult } from '../model-program/compile.js';
 import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, CanonicalUpdate, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, todayLine, UPDATE_JSON_SCHEMA, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX,
   type CanonicalUpdateT } from './prompt.js';
@@ -65,12 +66,12 @@ export type DraftOutcome = {
 export function draftRequestBody(input: readonly InputMessage[], update: boolean, today: string, periodZero: string = today): StreamedResponsesBody {
   return {
     model: coreBudget(DRAFT_REASONING_EFFORT).model,
-    instructions: `${DRAFTING_INSTRUCTIONS}\n\n${todayLine(today, periodZero)}`,
+    instructions: `${mcInstructions(DRAFTING_INSTRUCTIONS)}\n\n${todayLine(today, periodZero)}`,
     input: input.map((m) => ({ role: m.role, content: m.content })),
     reasoning: { effort: DRAFT_REASONING_EFFORT },
     max_output_tokens: DRAFT_MAX_OUTPUT_TOKENS,
     store: false,
-    text: { format: { type: 'json_schema', name: CANONICAL_SCHEMA_NAME, strict: true, schema: update ? UPDATE_JSON_SCHEMA : CANONICAL_JSON_SCHEMA } },
+    text: { format: { type: 'json_schema', name: CANONICAL_SCHEMA_NAME, strict: true, schema: update ? UPDATE_JSON_SCHEMA : mcSchema(CANONICAL_JSON_SCHEMA) } },
   };
 }
 
@@ -166,7 +167,7 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
       break;
     }
     let json: unknown;
-    try { json = withHostFields(JSON.parse(out.text), onto === undefined); } catch { attempts.push({ attempt: a, errors: null, failed: 'output is not JSON', status: out.status, usage: out.usage, ms }); break; }
+    try { json = withHostFields(onto === undefined ? mcShim(JSON.parse(out.text), sourceText, a) : JSON.parse(out.text), onto === undefined); } catch { attempts.push({ attempt: a, errors: null, failed: 'output is not JSON', status: out.status, usage: out.usage, ms }); break; }
     // An update returns only its changes: the model it proposes is the saved one with them merged by id.
     const update = onto === undefined ? null : CanonicalUpdate.safeParse(json);
     const whole = update?.success ? mergeUpdate(onto!, update.data) : json;

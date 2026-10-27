@@ -78,7 +78,7 @@ export type CanonicalUpdateT = z.infer<typeof CanonicalUpdate>;
  * bounds `.int()` adds (S1: "no number carries a bound"; the compiler checks bounds in sentences), and the host's own fields
  * (`HOST_OWNED_FIELDS`, from every object's properties and required), which the drafter never writes (Paul 26 Oct).
  */
-function strictSchema(schema: z.ZodType): Record<string, unknown> {
+export function strictSchema(schema: z.ZodType): Record<string, unknown> {
   const host: ReadonlySet<string> = new Set(HOST_OWNED_FIELDS);
   const walk = (n: unknown): unknown => {
     if (Array.isArray(n)) return n.map(walk);
