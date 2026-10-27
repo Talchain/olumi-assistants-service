@@ -253,7 +253,9 @@ function programCell(e: Evaluation, canonical: CanonicalModelT, optionId: string
   const behind = restsOn(x, roots, optionId);
   const olumis = x.quantities.some((q) => behind.has(q.id) && q.dist !== undefined
     && (q.dist.kind === 'fixed' ? q.dist.author === 'olumi' : q.dist.basis === 'olumi_estimate'));
-  const windows = [...canonical.goals, ...canonical.limits].flatMap((a) => [a.measure?.window?.periods, a.measure?.window?.origin_offset])
+  // Only the aims this Run computed (a limit left out of the Run is not behind its chances: Codex HC5 r2).
+  const inRun = new Set([...x.goals, ...x.limits].map((a) => a.id));
+  const windows = [...canonical.goals, ...canonical.limits].filter((a) => inRun.has(a.id)).flatMap((a) => [a.measure?.window?.periods, a.measure?.window?.origin_offset])
     .filter((id): id is string => typeof id === 'string');
   const timed = canonical.quantities.some((q) => windows.includes(q.id) && q.author === 'olumi');
   return { display: cell.display, provisional: olumis || timed, not_shown: null };

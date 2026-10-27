@@ -94,6 +94,17 @@ describe('HC5: a what-if on a model program, on the same draws, nothing saved', 
     expect(mine.kind).toBe('ran');
     expect(flags(mine)).toEqual([false, false, false, false]);
     expect(flags(olumis)).toEqual([true, true, true, true]);
+    // A limit left out of the Run (its bound unanswered) with a window of Olumi's is not behind any chance (Codex r2).
+    const outside = (): Rec => {
+      const g = theirs('person'), m = g.living_model.canonical;
+      m.quantities = [...m.quantities.map((x: Rec) => (x.id === 'budget' ? { ...x, value: null, quote: null, status: 'asked', question: 'What can you spend?' } : x)),
+        { ...m.quantities.find((x: Rec) => x.id === 'months'), id: 'cap_months', author: 'olumi', status: 'estimated', quote: null, basis: 'A quarter.' }];
+      m.limits = m.limits.map((l: Rec) => ({ ...l, measure: { ...l.measure, window: { origin_event: null, origin_offset: null, start: 0, periods: 'cap_months' } } }));
+      return g;
+    };
+    const left = (await whatIf(outside(), [joins(24)])).result;
+    expect(left.kind).toBe('ran');
+    expect(flags(left)).toEqual([false, false, false, false]);
   });
 
   it('crux: each change is also run alone against the same saved Run', async () => {
