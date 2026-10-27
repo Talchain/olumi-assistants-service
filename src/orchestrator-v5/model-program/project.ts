@@ -536,6 +536,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     if (!has(sev.low) || !has(sev.high)) return null;
     return side(sev.high) === -1 ? -1 : side(sev.low) === 1 ? 1 : null;
   };
+  /** A risk's start given by a figure, with that figure: it is folded onto this card, so the card says it (PL #3859 AMEND). */
+  const riskStartWords = (id: string): string => { const t = Q.get(id); return t ? `from "${t.label}" (${display(t)})` : `from "${id}"`; };
   for (const k of model.risks) {
     const inCalc = xr.has(k.id);
     const who = whoOf(k, k.id);
@@ -544,7 +546,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     nodes.push({
       id: k.id, kind: 'risk', label: k.label, ...provenanceOf(k), ...quoteOf(k, k.id), ...participation(inCalc || (!notCompiling && inModel.has(k.effect_on))),
       ...eventRiskOf(occ),
-      description: `Chance: ${occ ? display(occ) : 'not given'}. If it happens: ${k.mode === 'add' ? 'adds' : 'multiplies by'} ${sev ? display(sev) : 'not given'}, ${typeof k.starts_after_periods === 'number' ? (k.starts_after_periods === 0 ? 'from the start' : `after ${k.starts_after_periods} ${model.period}s`) : `from "${Q.get(k.starts_after_periods)?.label ?? k.starts_after_periods}"`}.`,
+      description: `Chance: ${occ ? display(occ) : 'not given'}. If it happens: ${k.mode === 'add' ? 'adds' : 'multiplies by'} ${sev ? display(sev) : 'not given'}, ${typeof k.starts_after_periods === 'number' ? (k.starts_after_periods === 0 ? 'from the start' : `after ${k.starts_after_periods} ${model.period}s`) : riskStartWords(k.starts_after_periods)}.`,
     });
     items.push({ record_id: k.id, family: 'risk', shown_as: { node: k.id }, in_calculation: inCalc, why_out: why(inCalc, 'What it affects is not used by anything that can be worked out yet.'), author: who, approval: k.approval });
     // How it acts if it happens (adds, or multiplies), so the link can say "−" or "×" (C13, 27 Oct).

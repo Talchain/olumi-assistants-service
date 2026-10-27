@@ -259,6 +259,12 @@ describe('C13 (27 Oct, the design session on Paul\'s board): the board draws wha
     // Asked, it asks on that card.
     withQ(m, 'promo_delay', { value: null, status: 'asked', question: 'When could the promotion start?' });
     expect(nodeOf(projected(m, CLUB_BRIEF), 'promotion').user_questions).toEqual(['When could the promotion start?']);
+    // A risk's start given by a figure is folded onto the risk card, and the card says the figure (PL #3859 AMEND).
+    const r = rival();
+    r.quantities.push(q('rival_delay', 'month', { value: 2 }));
+    r.risks[0]!.starts_after_periods = 'rival_delay';
+    const rp = projected(r, CLUB_BRIEF);
+    expect([(rp.graph.nodes as Rec[]).some((n) => n.id === 'rival_delay'), nodeOf(rp, 'rival_opens').description]).toEqual([false, expect.stringMatching(/from "rival delay" \(2\b[^)]*month/)]);
     // Contrast (right before): a start given as a count is the option's own number, with nothing folded.
     const own = nodeOf(projected(club(), CLUB_BRIEF), 'promotion').interventions.promo_on;
     expect([own.from_period, 'from_period_display' in own]).toEqual([0, false]);
