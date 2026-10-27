@@ -1101,6 +1101,29 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect([calls.length, registered.length], 'replays call no model and write nothing').toEqual([callsBefore, 1]);
     });
 
+    it('C7 across the tag change: a Run press recorded before RUN_PRESS_HASH_TAG (untagged), resent exactly, replays with no call or write; other words under that turn id stay refused', async () => {
+      const engine = String((persisted!.living_model.runs as Json[]).at(-1)!.receipt.versions.engine);
+      persisted = JSON.parse(JSON.stringify(persisted).split(engine).join('mp-a04e2cebf944')) as Json;
+      const press = { turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } };
+      outputs = [[{ type: 'message', text: 'The new Run, in my words.' }]];
+      expect((await post(press)).statusCode).toBe(200);
+      // As a deploy before the tag recorded it: the same row, its #chip: suffix untagged.
+      const row = turnRows.get(press.turn_id)!;
+      expect(String(row.request_hash)).toContain('#chip:run:');
+      row.request_hash = String(row.request_hash).replace('#chip:run:', '#chip:');
+      const callsBefore = calls.length;
+      const again = await post(press);
+      expect(again.statusCode, again.body).toBe(200);
+      expect(again.json()).toMatchObject({ durability: 'replayed' });
+      expect(idsOf((again.json() as Json).receipts)).toEqual([['v_1', 'm_1', 'person']]);
+      expect([calls.length, registered.length], 'no call, no write').toEqual([callsBefore, 1]);
+      // CONTRAST: other words under that turn id are another request.
+      const other = await post({ ...press, message: 'Run it again with fewer draws' });
+      expect(other.statusCode).toBe(409);
+      expect((other.json() as Json).error).toMatchObject({ code: 'TURN_ID_REUSED' });
+      expect(registered).toHaveLength(1);
+    });
+
     it('CONTRAST (C7): a chipless retry of a recorded chip press whose hash carries no Run tag (recorded before it) claims no save: unproven stays unknown', async () => {
       const { recordedRunPress, recordedWithChip } = await import('../../orchestrator-v5/core-route/turn-request.js');
       const untagged = 'agent_turn:abc#chip:0123456789abcdef0123456789abcdef';

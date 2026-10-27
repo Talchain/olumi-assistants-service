@@ -301,7 +301,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
      */
     const claimTurnId = claimTurnIdOf(turnId);
     let claimAppendSucceeded = false;
-    const takeClaim = async (forRequest: string, chipless: boolean): Promise<{ readonly held: 'mine'; readonly claimHash: string }
+    const takeClaim = async (forRequest: string, chipless: boolean, alsoAccepts?: string): Promise<{ readonly held: 'mine'; readonly claimHash: string }
       | { readonly held: 'same' } | { readonly held: 'refused'; readonly sent: unknown }> => {
       const claimHash = claimHashFor(forRequest, randomUUID());
       let owner: CommittedTurnRecord | null;
@@ -326,7 +326,9 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         return { held: 'refused', sent: fail(503, { code: 'TURN_STATE_UNVERIFIABLE', message: 'Could not confirm this turn was reserved. Nothing was run; please try again.', retry_safe: true, nothing_saved: true }) };
       }
       if (owner.request_hash === claimHash) return { held: 'mine', claimHash };
-      return sameAgentTurnRequest(requestHashOfClaim(owner.request_hash), forRequest, chipless) ? { held: 'same' } : { held: 'refused', sent: reused() };
+      const held = requestHashOfClaim(owner.request_hash);
+      return sameAgentTurnRequest(held, forRequest, chipless) || (alsoAccepts !== undefined && sameAgentTurnRequest(held, alsoAccepts, chipless))
+        ? { held: 'same' } : { held: 'refused', sent: reused() };
     };
 
     if (canvasEdit) {
@@ -398,6 +400,11 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
     const requestHash = withChipOperation(agentTurnRequestHash(scenarioId, userId, message, operation),
       approvedProposal === undefined ? chipOperationOf(body) : undefined, runPress ? RUN_PRESS_HASH_TAG : '');
     const chiplessRetry = isChiplessRetry(body);
+    // The same Run press recorded before RUN_PRESS_HASH_TAG (its #chip: suffix untagged) is this request too: its form changed,
+    // not the work (buddy on #3843). Recomputed from this exact body, never reversed from a digest; any other body stays refused.
+    const untaggedRunHash = runPress ? withChipOperation(agentTurnRequestHash(scenarioId, userId, message, operation), chipOperationOf(body)) : undefined;
+    const sameRequest = (stored: string): boolean => sameAgentTurnRequest(stored, requestHash, chiplessRetry)
+      || (untaggedRunHash !== undefined && sameAgentTurnRequest(stored, untaggedRunHash, chiplessRetry));
 
     /**
      * A replay: the recorded reply, byte for byte, on today's saved state. No model call and no Run. A row whose outcome is
@@ -439,8 +446,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: prior-turn read failed; refusing rather than re-running');
       return fail(503, { code: 'TURN_STATE_UNVERIFIABLE', message: 'Could not check whether this turn already ran. Nothing was run; please try again.', retry_safe: true, nothing_saved: true });
     }
-    if (prior !== null) return sameAgentTurnRequest(requestHashOfAnswer(prior.request_hash), requestHash, chiplessRetry) ? replayed(prior) : reused();
-    const claim = await takeClaim(requestHash, chiplessRetry);
+    if (prior !== null) return sameRequest(requestHashOfAnswer(prior.request_hash)) ? replayed(prior) : reused();
+    const claim = await takeClaim(requestHash, chiplessRetry, untaggedRunHash);
     if (claim.held === 'refused') return claim.sent;
     if (claim.held === 'same') {
       // Another request holds this turn: wait for its answer and replay it, never run it again.
@@ -448,7 +455,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       for (;;) {
         let answer: CommittedTurnRecord | null = null;
         try { answer = await readTurn(scenarioId, turnId); } catch { answer = null; }
-        if (answer !== null) return sameAgentTurnRequest(requestHashOfAnswer(answer.request_hash), requestHash, chiplessRetry) ? replayed(answer) : reused();
+        if (answer !== null) return sameRequest(requestHashOfAnswer(answer.request_hash)) ? replayed(answer) : reused();
         if (Date.now() >= deadline) break;
         await new Promise((r) => setTimeout(r, AGENT_TURN_CLAIM_WAIT.everyMs));
       }
