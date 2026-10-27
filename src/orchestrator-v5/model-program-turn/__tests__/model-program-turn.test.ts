@@ -1552,13 +1552,14 @@ describe('the model-program turn on the real core route', () => {
     it('a partial approval saves exactly the ticked ids (an Olumi estimate stays Olumi\'s), the rest stay proposed, with no AI call; the card is offered again for what is open; it survives a cold reopen and a resend', async () => {
       const card = await drafted();
       const before = persisted!.living_model.canonical as CanonicalModelT;
-      const [calls, writes] = [sent.length, registered.length];
+      // Counted from before the tick: the first draft now opens its own Conversation (staging f49f50e1); the tick opens none.
+      const [calls, conversations, writes] = [sent.length, creates.length, registered.length];
       const turnId = randomUUID();
       const res = await tick(card, ['sell_through', 'more_loaves'], { turn_id: turnId });
       expect(res.statusCode, res.body).toBe(200);
       const body = res.json();
       // No AI call and no Conversation; ONE write, receipted as the person's.
-      expect([sent.length, creates.length, registered.length]).toEqual([calls, 0, writes + 1]);
+      expect([sent.length, creates.length, registered.length]).toEqual([calls, conversations, writes + 1]);
       expect(registered.at(-1)!.expected_graph_identity_hash).toBe(computeGraphIdentityHash(registered.at(-2)!.graph as never)!.value);
       expect(body.receipts.map((x: Json) => x.authorised_by)).toEqual(['person']);
       // Exactly those two are approved; every other record is still Olumi's reading, proposed.
@@ -1587,15 +1588,17 @@ describe('the model-program turn on the real core route', () => {
       const cold = reopenProgram(JSON.parse(JSON.stringify(persisted)))!;
       expect([cold.current, cold.run!.run_id]).toEqual([true, persisted!.living_model.runs[1].run_id]);
       const later = (await turn({ message: 'Run the analysis', chip: { id: 'run', action_type: 'run_analysis', label: 'Run' } })).json();
+      // A Run press while the card waits answers in the conversation (one AI call on staging f49f50e1); the ticks around it call none.
+      const callsAfterRun = sent.length;
       expect(later.cards.map((c: Json) => c.proposal_id)).toEqual([body.cards[0].proposal_id]);
       expect(approvals()).toEqual(Object.fromEntries(ids.map((id) => [id, ['sell_through', 'more_loaves'].includes(id) ? 'approved' : 'proposed'])));
       // The same press resent is that press: replayed, never a second write.
       const replay = await tick(card, ['sell_through', 'more_loaves'], { turn_id: turnId });
-      expect([replay.statusCode, replay.json().durability, registered.length, sent.length]).toEqual([200, 'replayed', writes + 1, calls]);
+      expect([replay.statusCode, replay.json().durability, registered.length, sent.length]).toEqual([200, 'replayed', writes + 1, callsAfterRun]);
       // The rest ticked on the card offered again: all approved, no card left, still no AI call.
       const rest = await tick(body.cards[0], ids.filter((id) => !['sell_through', 'more_loaves'].includes(id)));
       expect(rest.statusCode, rest.body).toBe(200);
-      expect([rest.json().cards, rest.json().assistant_text, sent.length, registered.length]).toEqual([[], `Saved: ${ids.length - 2} items confirmed.`, calls, writes + 2]);
+      expect([rest.json().cards, rest.json().assistant_text, sent.length, registered.length]).toEqual([[], `Saved: ${ids.length - 2} items confirmed.`, callsAfterRun, writes + 2]);
       expect(new Set(Object.values(approvals()))).toEqual(new Set(['approved']));
       expect(withoutHostFields(persisted!.living_model.canonical)).toEqual(withoutHostFields(before));
     });
@@ -1617,7 +1620,7 @@ describe('the model-program turn on the real core route', () => {
 
     it('a stale base is refused: the model moved since the card was offered, so nothing is saved (contrast: the same press on the unmoved model saves)', async () => {
       const card = await drafted();
-      const moved = await applyCanvasFigure({ dispatch }, SCENARIO, { target: { quantity_id: 'base_sales' }, value: 320, operation_key: randomUUID() });
+      const moved = await applyCanvasFigure({ dispatch }, SCENARIO, { target: { quantity_id: 'base_sales' }, value: 320, operation_key: randomUUID(), approver: null });
       expect(moved.status).toBe('saved');
       const [snapshot, writes, calls] = [JSON.stringify(persisted), registered.length, sent.length];
       const res = await tick(card, ['sell_through']);
