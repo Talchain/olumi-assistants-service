@@ -137,6 +137,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const uses = new Map<string, Set<string>>();
   const use = (id: string, how: string) => { if (Q.has(id)) uses.set(id, new Set([...(uses.get(id) ?? []), how])); };
   const hostOf = new Map<string, { node?: string; edge?: string }>();
+  /** An asked figure said on another card or link: its question goes on that card (C13, 27 Oct: a goal's asked target was asked nowhere). */
+  const foldedQuestions: { host: { node?: string; edge?: string }; question: string }[] = [];
   /** A window's length or origin timing is consumed into its window, so it is in the calculation exactly when one of its
    *  owners is (a goal and a limit read over the same window both own it: the limit's never replaces the goal's). */
   const windowOwners = new Map<string, string[]>();
@@ -166,8 +168,11 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     for (const t of [lm.bound, lm.window?.periods, lm.window?.origin_offset]) if (has(t)) { use(t, 'on_limit'); hostOf.set(t, { node: lm.quantity }); }
     for (const t of [lm.window?.periods, lm.window?.origin_offset]) if (has(t)) ownWindow(t, l.id);
   }
-  for (const o of model.options) for (const s of o.sets) { use(s.quantity, 'node'); if (has(s.to)) { use(s.to, 'on_option'); hostOf.set(s.to, { node: o.id }); } }
-  for (const k of model.risks) { use(k.effect_on, 'node'); for (const t of [k.occurrence, k.severity]) { use(t, 'on_risk'); hostOf.set(t, { node: k.id }); } }
+  // A start timing given by a quantity ("when the extension opens") is said on the card whose start it sets, never a loose
+  // card (C13, 27 Oct). Keyed per card, so one timing shared by two cards stays its own card.
+  const ownTiming = (t: number | string, card: string) => { if (typeof t === 'string') { use(t, `starts:${card}`); hostOf.set(t, { node: card }); } };
+  for (const o of model.options) for (const s of o.sets) { use(s.quantity, 'node'); if (has(s.to)) { use(s.to, 'on_option'); hostOf.set(s.to, { node: o.id }); } ownTiming(s.starts_after_periods, o.id); }
+  for (const k of model.risks) { use(k.effect_on, 'node'); for (const t of [k.occurrence, k.severity]) { use(t, 'on_risk'); hostOf.set(t, { node: k.id }); } ownTiming(k.starts_after_periods, k.id); }
   const folded = (id: string) => { const u = uses.get(id); return u !== undefined && u.size === 1 && !u.has('node') && hostOf.has(id); };
   /** A coefficient sizes a mechanism: drawn as one wherever it has a card, given or worked out, never as an outcome. */
   const isCoefficient = (id: string) => uses.get(id)?.has('coefficient') === true;
@@ -345,7 +350,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const interventions: Rec = {};
     for (const s of o.sets) {
       const to = has(s.to) ? Q.get(s.to) : undefined;
-      if (to) interventions[s.quantity] = { value: to.value, unit: to.unit, display: display(to), from_period: s.starts_after_periods, ...settingSource(to, o) };
+      const starts = typeof s.starts_after_periods === 'string' ? Q.get(s.starts_after_periods) : undefined;
+      if (to) interventions[s.quantity] = { value: to.value, unit: to.unit, display: display(to), from_period: s.starts_after_periods, ...(starts ? { from_period_display: display(starts) } : {}), ...settingSource(to, o) };
     }
     nodes.push({
       id: o.id, kind: 'option', label: o.label, ...provenanceOf(o), ...quoteOf(o, o.id), ...participation(inCalc || (o.status === 'live' && kept(per))),
@@ -386,6 +392,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       ? 'Nothing that can be worked out yet uses it.' : `${q.status.replace('_', ' ')}: ${q.basis}`;
     if (folded(q.id)) {
       const host = hostOf.get(q.id)!;
+      if (q.status === 'asked' && has(q.question)) foldedQuestions.push({ host, question: q.question });
       items.push({ record_id: q.id, family: 'quantity', shown_as: host.edge ? { on_edge: host.edge } : { on_node: host.node }, in_calculation: inCalc, why_out: why(inCalc, reason), author: who, approval: q.approval, ...lawOf(q) });
       continue;
     }
@@ -408,7 +415,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const mid = c ? (c.value ?? (has(c.low) && has(c.high) ? (c.low + c.high) / 2 : null)) : null;
     const straddles = c && has(c.low) && has(c.high) && c.low < 0 && c.high > 0;
     // A size with no figure (no value; no range, or one across zero) has no sign of its own: the link takes its stated
-    // direction (issue 39), and with none it has no sign (drawn unsigned, never hidden). A given value keeps its own sign.
+    // direction (issue 39); with none, a range's centre (the model's median) and with no range no sign (drawn unsigned,
+    // never hidden). A given value keeps its own sign. A range across zero also says its direction is not settled, so the
+    // canvas never draws it as settled (C13, 27 Oct).
     const stated = c && directionUsed(c) ? c.direction : null;
     const sign = stated === 'lowers' ? -1 : stated === 'raises' ? 1 : mid === null ? null : mid < 0 ? -1 : 1;
     const driverUnit = Q.get(driver)?.unit ?? '';
@@ -423,7 +432,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
         ...(has(c.low) && has(c.high) && c.low !== c.high ? { stated_range: { low: c.low * k, high: c.high * k, text: `${fmt(c.low)}–${fmt(c.high)}`, end: 'centre' } } : {}) } }
       : {};
     const reasoning = c ? `${display(c)} per ${driverUnit || 'unit'}${straddles ? '; its direction is not settled' : ''}${mid === null ? '; its size is not given yet' : ''}` : '';
-    return link(driver, defines, sign, who, inCalc, { ...natural, reasoning, ...(c ? { magnitude: c.author === 'olumi' ? 'olumi_estimate' : 'user_stated' } : {}) });
+    return { ...link(driver, defines, sign, who, inCalc, { ...natural, reasoning, ...(c ? { magnitude: c.author === 'olumi' ? 'olumi_estimate' : 'user_stated' } : {}) }),
+      ...(straddles ? { direction_settled: false } : {}) };
   };
 
   // ── relations and effect terms: links ──────────────────────────────────────────────────────────────────────────────
@@ -537,7 +547,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       description: `Chance: ${occ ? display(occ) : 'not given'}. If it happens: ${k.mode === 'add' ? 'adds' : 'multiplies by'} ${sev ? display(sev) : 'not given'}, ${typeof k.starts_after_periods === 'number' ? (k.starts_after_periods === 0 ? 'from the start' : `after ${k.starts_after_periods} ${model.period}s`) : `from "${Q.get(k.starts_after_periods)?.label ?? k.starts_after_periods}"`}.`,
     });
     items.push({ record_id: k.id, family: 'risk', shown_as: { node: k.id }, in_calculation: inCalc, why_out: why(inCalc, 'What it affects is not used by anything that can be worked out yet.'), author: who, approval: k.approval });
-    if (Q.has(k.effect_on)) edges.push({ ...link(k.id, k.effect_on, riskSign(k, sev), who, inCalc, { reasoning: 'if it happens' }), id: edgeId(k.id, k.effect_on) });
+    // How it acts if it happens (adds, or multiplies), so the link can say "−" or "×" (C13, 27 Oct).
+    if (Q.has(k.effect_on)) edges.push({ ...link(k.id, k.effect_on, riskSign(k, sev), who, inCalc, { reasoning: 'if it happens' }), effect_mode: k.mode, id: edgeId(k.id, k.effect_on) });
   }
 
   // ── qualitative records: not cards; the canvas draws them by id from the model ────────────────────────────────────────
@@ -545,6 +556,10 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     items.push({ record_id: rec.id, family: f, shown_as: {}, in_calculation: false, why_out: 'A note: shown beside the model, never calculated.', author: whoOf(rec, rec.id), approval: rec.approval, concerns: [...rec.concerns] });
   }
 
+  for (const { host, question } of foldedQuestions) {
+    const on = host.node !== undefined ? nodes.find((n) => n.id === host.node) : edges.find((e) => e.id === host.edge);
+    if (on) on.user_questions = [...new Set([...((on.user_questions as string[] | undefined) ?? []), question])];
+  }
   return { graph: { nodes, edges, goal_constraints }, items };
 }
 
