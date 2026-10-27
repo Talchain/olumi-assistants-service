@@ -788,7 +788,8 @@ function withheldList(options: readonly OptionResult[]): WithheldChanceEntry[] {
  * reads (an equation's parts or terms, a stock's start and flows, the option's sets, and eight for each risk on it, more
  * than its timing, its fired state read three times and its severity); each condition's window, read twice for a ratio;
  * each set's timing; eight a draw for each risk (its reset, timing, occurrence, chance, uniform and severity); and the sorts (each ranged input's terciles, each
- * condition's quantiles per option). `bytes` is what the run holds at once: each ranged input's draws with its terciles
+ * condition's quantiles per option); and each pair of options compared once in every draw (SC2's paired differences, k(k−1)/2
+ * pairs: their work grows with the square of the option count, C14, 27 Oct). `bytes` is what the run holds at once: each ranged input's draws with its terciles
  * (16 per draw, the sort's index included), each risk's uniforms, every option's tallies and kept headline, one quantile copy and one
  * option's values.
  */
@@ -801,7 +802,8 @@ export function costOf(model: ExecutableModel, draws: number): { readonly operat
   const windows = checks.reduce((s, k) => s + 2 * (k.window.periods + 1), 0);
   const sets = model.options.reduce((s, o) => s + o.sets.length, 0);
   const sorts = Math.ceil(Math.log2(draws + 1)) * (ranged + options * checks.length);
-  return { operations: draws * (options * (times * reads + windows + 8 * model.risks.length) + sets * (times + 1) + sorts),
+  const pairs = (options * (options - 1)) / 2;
+  return { operations: draws * (options * (times * reads + windows + 8 * model.risks.length) + sets * (times + 1) + sorts + pairs),
     bytes: draws * (16 * ranged + 8 * model.risks.length + options * (9 * checks.length + 4) + 8) + 8 * times * model.quantities.length };
 }
 

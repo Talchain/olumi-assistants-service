@@ -61,6 +61,19 @@ describe('the Run admission limit (alpha G11)', () => {
     expect(admission(tiny())).toEqual({ ok: true, operations: costOf(tiny(), 10_000).operations });
   });
 
+  it('C14 (27 Oct): every pair of options is counted (SC2 compares each pair in every draw), so many options are refused before any work', () => {
+    const withOptions = (k: number): ExecutableModel => ({ ...tiny(), options: Array.from({ length: k }, (_, i) => ({ id: `o${i}`, label: `o${i}`, sets: [] })) });
+    // By hand, 10 draws: one option is 10 × (16 + sorts 4 × 2) = 240 (no pair); two are 10 × (2 × 16 + sorts 4 × 3 + their 1 pair).
+    expect(costOf(withOptions(1), 10).operations).toBe(240);
+    expect(costOf(withOptions(2), 10).operations).toBe(10 * (2 * 16 + 4 * 3 + 1));
+    // 400 options: their own work is 10,000 × (400 × 16 + 14 × 401) = 120,140,000 (under the limit), but their 79,800 pairs
+    // are 798,000,000 more, so the Run is refused by name before anything is allocated.
+    expect(costOf(withOptions(400), 10_000).operations).toBe(10_000 * (400 * 16 + 14 * 401) + 10_000 * 79_800);
+    expect(admission(withOptions(400))).toEqual({ ok: false, over: 'operations' });
+    // CONTRAST: a few options, as a model holds them, stay admitted.
+    expect(admission(withOptions(5))).toMatchObject({ ok: true });
+  });
+
   it('a Run over the limit (club over 5000 months) is refused by name, the simulator is never called, and readiness says blocked', () => {
     const { m, src } = clubOver(5000);
     const e = evaluateCanonical(m, { sourceText: src, seed: 7 });
@@ -104,20 +117,20 @@ describe('the Run admission limit (alpha G11)', () => {
 
 /**
  * C14 (alpha spec §7, bounded operation, 27 Oct): THE ADMISSION BOUNDARY, on the real evaluation path. The club's cost over an
- * N-month window is 10,000 × (42N + 122) operations (hand arithmetic; 42 more a draw for each month the 2 options visit and
- * the goal's window reads), so N = 354 is the largest admitted (149,900,000 ≤ MAX_OPERATIONS 150,000,000) and N = 355 the
- * first refused (150,320,000). Each figure is checked on the executable evaluateCanonical itself compiled.
+ * N-month window is 10,000 × (42N + 123) operations (hand arithmetic; 42 more a draw for each month the 2 options visit and
+ * the goal's window reads, and 1 for their one pair), so N = 354 is the largest admitted (149,910,000 ≤ MAX_OPERATIONS
+ * 150,000,000) and N = 355 the first refused (150,330,000). Each figure is checked on the executable evaluateCanonical itself compiled.
  * Elapsed time is printed, never asserted.
  */
 describe('C14: the Run admission boundary on the real evaluation path (club, RUN_DRAWS draws)', () => {
-  it('354 months, the largest admitted: costOf is 149,900,000 operations; the headline is simulated once and both options show a figure; the sweep is not run', () => {
+  it('354 months, the largest admitted: costOf is 149,910,000 operations; the headline is simulated once and both options show a figure; the sweep is not run', () => {
     const { m, src } = clubOver(354);
     const t0 = performance.now();
     const e = evaluateCanonical(m, { sourceText: src, seed: 7 });
     console.log('C14 elapsed ms', 'evaluateCanonical club 354 months (admitted)', Math.round(performance.now() - t0));
     const cost = costOf(e.compiled.executable!, RUN_DRAWS);
-    expect(cost.operations).toBe(10_000 * (42 * 354 + 122));
-    expect(cost.operations).toBe(149_900_000);
+    expect(cost.operations).toBe(10_000 * (42 * 354 + 123));
+    expect(cost.operations).toBe(149_910_000);
     expect(cost.operations).toBeLessThanOrEqual(MAX_OPERATIONS);
     expect(cost.operations + 10_000 * 42, 'one more month passes the limit').toBeGreaterThan(MAX_OPERATIONS);
     expect(cost.bytes, 'operations, not memory, is the limit at this edge').toBeLessThan(MAX_BYTES);
@@ -130,12 +143,12 @@ describe('C14: the Run admission boundary on the real evaluation path (club, RUN
     expect((v.options as Json[]).map((o) => o.main_driver)).toEqual([notMeasured, notMeasured]);
   }, 60_000);
 
-  it('355 months, the first refused: costOf is 150,320,000 operations; refused by name, the simulator never called', () => {
+  it('355 months, the first refused: costOf is 150,330,000 operations; refused by name, the simulator never called', () => {
     const { m, src } = clubOver(355);
     const e = evaluateCanonical(m, { sourceText: src, seed: 7 });
     const cost = costOf(e.compiled.executable!, RUN_DRAWS);
-    expect(cost.operations).toBe(10_000 * (42 * 355 + 122));
-    expect(cost.operations).toBe(150_320_000);
+    expect(cost.operations).toBe(10_000 * (42 * 355 + 123));
+    expect(cost.operations).toBe(150_330_000);
     expect(cost.operations).toBeGreaterThan(MAX_OPERATIONS);
     expect(cost.bytes).toBeLessThan(MAX_BYTES);
     expect(admission(e.compiled.executable!)).toEqual({ ok: false, over: 'operations' });
