@@ -1512,7 +1512,7 @@ const ConfigSchema = z.object({
     // ⛔ AN ENUM, NEVER A PATH FROM THE ENVIRONMENT.
     proxyV5Target: z.enum(['orchestrator', 'agent']).default('orchestrator'),
     browserProxyAllowedOrigins: z.string().optional(), // BROWSER_PROXY_ALLOWED_ORIGINS — comma-separated origin allowlist
-    browserProxyTimeoutMs: z.coerce.number().int().min(5_000).max(300_000).default(125_000), // BROWSER_PROXY_TIMEOUT_MS — proxy-to-CEE timeout (5s headroom above DRAFT_REQUEST_BUDGET_MS=120s, must be < ROUTE_TIMEOUT_MS)
+    browserProxyTimeoutMs: z.coerce.number().int().min(5_000).max(1_200_000).default(125_000), // BROWSER_PROXY_TIMEOUT_MS — proxy-to-CEE timeout (5s headroom above DRAFT_REQUEST_BUDGET_MS=120s, must be < ROUTE_TIMEOUT_MS)
   }).default({}),
 }).superRefine((data, ctx) => {
   // CEE_REQUIRE_USER_JWT=true requires configured service auth, in every
