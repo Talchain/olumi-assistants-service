@@ -710,6 +710,8 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       ['a later change it does not rest on', timed(0, (m) => { m.quantities.push(person('hours', 'hour/week', 50, '50 hours a week'), person('fewer_hours', 'hour/week', 40, 'cut to 40 hours'));
         m.options.push(option('cut_hours', 'Cut my hours', [set('hours', 'fewer_hours', 'cut to 40 hours', { starts_after_periods: 4 })], 'Cut my hours')); })],
       ['a known 0-week start held in a figure', timed('lead_time', (m) => m.quantities.push(person('lead_time', 'week', 0, 'it arrives straight away')))],
+      ['a later risk on what it does not rest on', timed(0, (m) => { m.quantities.push(person('hours', 'hour/week', 50, '50 hours a week'), olumi('strain_chance', '1', 0.05, 0.2), olumi('lost_hours', 'hour/week', -10, -2, -5));
+        m.risks.push({ id: 'strain', label: 'Burnout cuts my hours', occurrence: 'strain_chance', severity: 'lost_hours', effect_on: 'hours', mode: 'add', starts_after_periods: 4, author: 'olumi', quote: null, ...base }); })],
       ['a later start on a ruled-out option', timed(0, (m) => m.options.push({ ...option('second_hand', 'A second-hand oven', [set('ovens_added', 'one_oven', 'a used one', { starts_after_periods: 4 })], 'a used one'), status: 'ruled_out' }))]] as const) {
       expect(r.errors, what).toEqual([]);
       expect(r.blockers, what).toEqual([]);
@@ -933,6 +935,13 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       return compile(g); })();
     expect(out.errors).toEqual([]);
     expect(out.executable!.options.map((o) => o.id)).toEqual(['carry_on']);
+    // The same on a timing that does not apply: a ruled-out option is never built, so it is no error (review on #3849).
+    const outNa = (() => { const g = gymFilled();
+      g.quantities.push(qty('opens', 'month', { status: 'not_applicable', author: 'olumi', basis: 'Nothing sets when it opens.' }));
+      g.options = g.options.map((o) => (o.id === 'promo' ? { ...o, status: 'ruled_out' as const, sets: o.sets.map((s) => ({ ...s, starts_after_periods: 'opens' })) } : o));
+      return compile(g); })();
+    expect(outNa.errors).toEqual([]);
+    expect(outNa.executable!.options.map((o) => o.id)).toEqual(['carry_on']);
     // Contrast: an asked timing is asked of them (the option waits on it), never an error and never period 0.
     const asked = timed({ status: 'asked', question: 'When does it open?' });
     expect(asked.errors).toEqual([]);
