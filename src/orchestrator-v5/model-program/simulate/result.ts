@@ -2,6 +2,7 @@
 import type { Withheld } from '../executable.js';
 import type { WhenMissed } from './missed.js';
 import type { PairedDifference } from './paired.js';
+import type { WorthKnowing } from './worth-knowing.js';
 
 export type Chance = { chance: number; precision_95: [number, number] };                         // Wilson interval = SIMULATION precision, never the chance's meaning band
 // ── Changed from the interface block (DL ruling 3, 23 Oct): a nonfinite draw (NaN or ±Infinity) in what a condition reads is
@@ -51,6 +52,8 @@ export type SimResult = {
   per_draw?: PerDraw;
   /** SC2: every pair of options compared on the same draws, a − b, in model order (paired.ts). */
   paired: { a: string; b: string; joint_within_limits: PairedDifference }[];
+  /** SC4: the value of knowing each uncertain figure's third before choosing (worth-knowing.ts). */
+  worth_knowing: WorthKnowing;
 };
 /**
  * SC0: every draw's own results on the Run's shared draws, for the methods that read them (a paired comparison, value of

@@ -61,6 +61,8 @@
  *     a goal's value where it falls short, and the figures (by those same thirds) and risks that go clearly more with a miss
  *     than with the draws where it does not miss. Counted from what each draw already holds: no extra run, and nothing new
  *     held per draw.
+ *   - What is most worth finding out (SC4, `worth-knowing.ts`), always, with two options or more: for each uncertain figure,
+ *     the value of knowing which third of its draws it falls in before choosing, cross-fitted on the headlines.
  *   - Per-draw results (SC0), only when `perDraw` asks: every draw's own value, target and met for each goal and limit, the
  *     headline per draw, which risks fired, and each ranged input's draws, all on the same draw indices (`result.ts` PerDraw).
  *     They are what the paired comparison, value of information, uncertainty share, failure summaries and a tipping point
@@ -68,6 +70,7 @@
  */
 import type { Aggregation, Cmp, ExecutableModel, Goal, Limit, Option, OptionSet, Quantity, Reading, Risk, Window } from '../executable.js';
 import { summariseMisses } from './missed.js';
+import { worthKnowing } from './worth-knowing.js';
 import { pairedDifference, wilson95, type PairedDifference } from './paired.js';
 import { standardNormals, uniforms } from './prng.js';
 import { fromStandardNormal, fromUniform, rangeLaw, truncatedStandardNormal, type RangeDist, type SpreadReading } from './range-law.js';
@@ -818,12 +821,13 @@ function withheldList(options: readonly OptionResult[]): WithheldChanceEntry[] {
  * each set's timing; ten a draw for each risk (its reset, timing, occurrence, chance, uniform and severity, and SC7's two
  * counts); a draw's read of each condition's met and two of each ranged input's thirds (the drivers' and SC7's misses); the
  * sorts (each ranged input's terciles, each condition's quantiles per option, and each goal's values where it falls short,
- * SC7); and each pair of options compared once in every draw (SC2's paired differences, k(k−1)/2
- * pairs: their work grows with the square of the option count, C14, 27 Oct). `bytes` is what the run holds at once: each ranged input's draws with its terciles
+ * SC7); each pair of options compared once in every draw (SC2's paired differences, k(k−1)/2
+ * pairs: their work grows with the square of the option count, C14, 27 Oct); and, with two options or more, SC4's pass over
+ * each ranged input. `bytes` is what the run holds at once: each ranged input's draws with its terciles
  * (16 per draw, the sort's index included), each risk's uniforms, every option's tallies and kept headline, one quantile copy (SC7's
- * values where a goal falls short are fewer, and sorted before it) and one option's values; and, for each condition of each
- * option, 72 for each value that can leave (its badIds and causes entries and the two name lists its chance and summary keep,
- * as measured).
+ * values where a goal falls short are fewer, and sorted before it), SC4's band and two choices for one input (3 per draw, with
+ * two options or more) and one option's values; and, for each condition of each option, 72 for each value that can leave (its
+ * badIds and causes entries and the two name lists its chance and summary keep, as measured).
  */
 export function costOf(model: ExecutableModel, draws: number): { readonly operations: number; readonly bytes: number } {
   const times = model.periods + 1, options = model.options.length, checks = [...model.goals, ...model.limits];
@@ -838,8 +842,11 @@ export function costOf(model: ExecutableModel, draws: number): { readonly operat
   const sets = model.options.reduce((s, o) => s + o.sets.length, 0);
   const sorts = Math.ceil(Math.log2(draws + 1)) * (ranged + options * (checks.length + model.goals.length));
   const pairs = (options * (options - 1)) / 2;
-  return { operations: draws * (options * (times * reads + windows + 8 * walks + 10 * model.risks.length + checks.length + 2 * ranged) + sets * (times + 1) + sorts + pairs),
-    bytes: draws * (16 * ranged + 8 * model.risks.length + options * (9 * checks.length + 4) + 8) + 8 * times * model.quantities.length + 72 * options * walks };
+  // SC4, with two options or more: for each ranged input, its band per draw, every option's headline twice (counted, then
+  // scored) and the two choices compared; one band and two choice bytes a draw, one input at a time.
+  const worth = options < 2 ? 0 : ranged * (2 * options + 4);
+  return { operations: draws * (options * (times * reads + windows + 8 * walks + 10 * model.risks.length + checks.length + 2 * ranged) + sets * (times + 1) + sorts + pairs + worth),
+    bytes: draws * (16 * ranged + 8 * model.risks.length + options * (9 * checks.length + 4) + 8 + (options < 2 ? 0 : 3)) + 8 * times * model.quantities.length + 72 * options * walks };
 }
 
 export function simulate(model: ExecutableModel, opts: SimulateOptions): SimResult {
@@ -862,10 +869,13 @@ export function simulate(model: ExecutableModel, opts: SimulateOptions): SimResu
   const exactHeadline = (o: OptionResult): boolean => !('withheld' in o.joint_within_limits) && o.joint_within_limits.precision_95[0] === o.joint_within_limits.precision_95[1];
   const paired: { a: string; b: string; joint_within_limits: PairedDifference }[] = options.flatMap((oa, i) => options.slice(i + 1).map((ob, k) => ({
     a: oa.option_id, b: ob.option_id, joint_within_limits: pairedDifference(headlines[i]!, headlines[i + 1 + k]!, exactHeadline(oa) && exactHeadline(ob)) })));
+  // SC4: each uncertain figure any option's aims rest on (no switch), in model order: the value of knowing its third first.
+  const worth_knowing = worthKnowing({ draws, options: options.map((o) => o.option_id), headlines,
+    figures: [...new Set(plans.flatMap((p) => p.drivers))].sort((a, b) => a - b).map((slot) => ({ quantity: c.ids[c.ranged[slot]!.q]!, low: thirds[slot]!.low, high: thirds[slot]!.high })) });
   // The compiler's withheld[] is echoed unchanged (executable.ts r3); an older model without it echoes none.
   const echoed = (model.withheld ?? []).map((x) => ({ ...x }));
   const per_draw: PerDraw | undefined = perDraw === undefined ? undefined
     : { inputs: Object.fromEntries(c.ranged.map((r, slot) => [c.ids[r.q]!, inputs.drawn[slot]!] as const)), options: perDraw };
-  return { draws, seed: opts.seed, options, withheld: echoed, withheld_chances: withheldList(options), paired, ...(opts.record !== undefined ? { recorded } : {}),
+  return { draws, seed: opts.seed, options, withheld: echoed, withheld_chances: withheldList(options), paired, worth_knowing, ...(opts.record !== undefined ? { recorded } : {}),
     ...(per_draw !== undefined ? { per_draw } : {}) };
 }
