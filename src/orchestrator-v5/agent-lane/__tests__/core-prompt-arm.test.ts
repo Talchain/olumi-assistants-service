@@ -97,7 +97,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // one or only opposites; additions materially useful, never a quota; one statement, one record.
     // T3 (27 Oct): the three rules by problem type, by their own words. Round 2 (27 Oct, consolidation): in the shortened steps;
     // a coefficient's own bound is the schema's floor description, as sent.
-    expect(count(DRAFTING_INSTRUCTIONS, 'Count a one-off payment once, through a total or stock start; model lasting assets through their capacity and ongoing activity through spending over a bounded window.')).toBe(1);
+    // Drafter v2 (28 Oct, PL SOURCE ACCEPT 5ecbf93e; Paul's test 4d6dcbc6): the one-off/stock plumbing rule is gone; only the minimal
+    // structure a stated mechanism or valid calculation needs is kept.
+    expect(count(DRAFTING_INSTRUCTIONS, 'keep only the minimal structure a stated mechanism, cumulative budget, entry or exit, or a valid calculation needs')).toBe(1);
+    expect(DRAFTING_INSTRUCTIONS).not.toContain('Count a one-off payment once');
     // Round 3 (27 Oct): the release-bar sentence is the goal measure's own description, as sent.
     expect(count(DRAFTING_INSTRUCTIONS, 'Suggest a measure only when it tracks that aim, with exclusions for what it misses.')).toBe(1);
     expect(DRAFTING_INSTRUCTIONS).not.toContain('release bar');
@@ -107,7 +110,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // of theirs never gains a unit, period or reference point they did not give (it is asked); an estimate needs a supported
     // scale. The candidate drops the two-sided-range sentence; the replaced wording is gone.
     // Round 2 (27 Oct): step 5 of the shortened steps; the estimate rule is the schema's kind description, as sent.
-    expect(count(DRAFTING_INSTRUCTIONS, 'never invent a unit, period or reference, turn a stated amount into an unsupported rate, or assume carry-on leaves a reference unchanged.')).toBe(1);
+    expect(count(DRAFTING_INSTRUCTIONS, 'without inventing a unit, period or reference, turning an amount into an unsupported rate, or assuming carry-on leaves a reference unchanged.')).toBe(1);
     expect(count(JSON.stringify(CANONICAL_JSON_SCHEMA), 'estimate only when a stated relation or established mechanism supports numerical scale, otherwise unknown even if direction is plausible.')).toBe(1);
     for (const old of ['reaching no effect or the opposite sign where that is plausible, never only the direction that favours one option', 'A record of theirs holds only what they said'])
       expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
@@ -116,9 +119,9 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // quote; at most three coaching questions that test the reasoning, never a request for a figure. Round 2 (27 Oct, consolidation): the
     // titles are the schema's labels (pinned below, as sent); coaching questions are chosen with the item questions by one priority
     // (step 6), and the schema's description gives their form. The two bullets are gone.
-    expect(count(DRAFTING_INSTRUCTIONS, 'Put each missing input\'s question on its item; order item arrays and select coaching_questions by this priority.')).toBe(1);
+    expect(count(DRAFTING_INSTRUCTIONS, 'Put a needed input\'s question on its item and select at most three coaching_questions.')).toBe(1);
     for (const old of ['- Titles:', '- Coaching questions:']) expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('0caeb57fba9157373361ec96ef73cc4179f247fe9584a21ff149674aaf8fa7bc'); // 27 Oct: round 3 (Paul approved): a stated loss to avoid is an aim; missing numbers stay on the causal path; questions by what could change feasibility or the comparison; the one-statement line is the schema's; before it bac3de97…. 27 Oct: round 2, the consolidation (DL): ten entries (the workflow, enrichment, temporal choices and question selection); field definitions are the schema's; before it 209824f6…. 27 Oct: round 1, the PL's candidate wording (DL): step 5 removed, the approximate-figure mark for rough figures, missing periods asked, the deciding driver on the path, benefits and harms apart, a share a fact, questions by what could change the comparison. 27 Oct: titles and coaching questions (Paul approved). 27 Oct: W1 + PL AMEND (no quota on Olumi's options; a risk in the structure only with a defensible mechanism; an unsizable chance stays unknown), think before writing (extract, widen, select, frame; ported from the benchmarked v202 prompt), carry on as now always an option, a risk's chance an estimate unless only they can know it (prompt test 27 Oct: carry-on 2/9 -> 8/8, Olumi options 7 -> 15). 27 Oct: W2, no "history is []" (history is the host's, never in the first draft's schema). 27 Oct: T3, a relative change's floor is −100 % (science on Paul's hiring Run), an estimated range is two-sided where plausible, a one-off amount happens once (a stock's start, never a per-period driver), a measure tracks the aim, a record of theirs holds only their words; the example's ads are a weekly spend into a 'spent' stock. // 25 Oct: alpha G21, the reach rule is the compiler's (at least one goal or limit, only when every goal has a measure)
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('79e6763dd4675c27721148a088c104f6f34930c5dd3af2af4d2b625a9c186152'); // 28 Oct: drafter v2 (PL SOURCE ACCEPT 5ecbf93e), a small model of the situation with its risks; before it 0caeb57f, 27 Oct: 27 Oct: round 3 (Paul approved): a stated loss to avoid is an aim; missing numbers stay on the causal path; questions by what could change feasibility or the comparison; the one-statement line is the schema's; before it bac3de97…. 27 Oct: round 2, the consolidation (DL): ten entries (the workflow, enrichment, temporal choices and question selection); field definitions are the schema's; before it 209824f6…. 27 Oct: round 1, the PL's candidate wording (DL): step 5 removed, the approximate-figure mark for rough figures, missing periods asked, the deciding driver on the path, benefits and harms apart, a share a fact, questions by what could change the comparison. 27 Oct: titles and coaching questions (Paul approved). 27 Oct: W1 + PL AMEND (no quota on Olumi's options; a risk in the structure only with a defensible mechanism; an unsizable chance stays unknown), think before writing (extract, widen, select, frame; ported from the benchmarked v202 prompt), carry on as now always an option, a risk's chance an estimate unless only they can know it (prompt test 27 Oct: carry-on 2/9 -> 8/8, Olumi options 7 -> 15). 27 Oct: W2, no "history is []" (history is the host's, never in the first draft's schema). 27 Oct: T3, a relative change's floor is −100 % (science on Paul's hiring Run), an estimated range is two-sided where plausible, a one-off amount happens once (a stock's start, never a per-period driver), a measure tracks the aim, a record of theirs holds only their words; the example's ads are a weekly spend into a 'spent' stock. // 25 Oct: alpha G21, the reach rule is the compiler's (at least one goal or limit, only when every goal has a measure)
     // 24 Oct (DL, DoD-G classes 12 and 4): an update returns only the records it changes or adds; the host merges them by id.
     // Round 2 (27 Oct): the quote sentence is gone; who asserted a record and its quote are the schema's (author, quote).
     // 28 Oct (Paul, blocking: "an update must never delete a figure you supplied"; the PL's sentence from db73db4f, alone):
@@ -260,26 +263,18 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       // DL 24 Oct (blind score of 1510a008, mrr structure): an identity is a definition; a missing figure is asked on its item.
       // AIE 6386018855 §5 (DL 24 Oct): the capture-only clauses replaced, each permission once, attributed and grounded.
       // Candidate A: the update's own goal-or-limit rule is said once, in UPDATE_PREFIX (pinned below), which every update sends.
-      'Draft ONE canonical model. The expansion steps below apply only to a first draft.',
+      // Drafter v2 (28 Oct, PL SOURCE ACCEPT 5ecbf93e): a small model of the situation; sizes are guidance, never limits on what
+      // they supplied; their options kept; the class-studio sketch (synthetic) replaces the bakery's plumbing.
+      'Draft ONE small model of the person\'s situation, not its arithmetic.',
       // Paul 26 Oct (1): no aim stated -> one provisional working aim of Olumi's, its target asked, never invented.
       'With no stated aim, offer ONE Olumi working aim supported by the brief for confirmation or change.',
       '2. Aim: retain every stated aim, including avoiding a stated loss.',
-      // Paul 26 Oct (2) and (3): short neutral names, their words the quote; Olumi's lower-commitment options where they name none, one or only opposites.
-      '3. Alternatives: retain every named option and carry on as now;',
-      'with none, one, only two opposites, or an open request, add one or two materially different routes, lower-commitment where useful; for allocations, offer feasible divisions.',
-      'option "Weekly local ads", olumi (they named only one; reversible, lower-commitment): sets ad_spend to its own value 50, olumi',
-      // AMEND (DL 24 Oct, blind score of #3735): a lever only the options set, and a whole, are structure; a stated limit stays a limit.
-      // Codex buddy AMEND (26 Oct): one statement, one record. Round 3 (27 Oct): said once, in the sent schema (pinned above).
-      // DL 24 Oct: the one worked example shows the proposing half once (an aim with no measure, Olumi's suggested measure).
-      'goal "to grow the bakery", measure_by olumi (a suggested measure): sales change_abs from now >= grow_target, end, window null,',
-      // Codex BLOCK on #3735: the exclusion is Olumi's reading, marked as canonical.ts attribution requires.
-      'exclusions: left_out "growth beyond loaf sales, such as new lines", why "not in this model", author olumi, quote null',
-      // DL 24 Oct (P7 hiring blind score, classes 2 and 4): a stated threshold is theirs; a goal against today is relative to today.
-      // Buddy 24 Oct 08:48Z (accepted): the frame follows their words, as canonical.ts GOAL_FRAMES and compile.lowerChange do.
-      // DL 24 Oct (milestone blind score, effects-not-estimated): a range is defensible when its order of magnitude is knowable.
-      // Buddy 24 Oct 08:17Z (accepted): capacity is not output.
-      // DL 24 Oct (with S3's issue 39): an unsized link's direction goes in direction; one with no direction anyone can give is a note.
-      'sets ovens_added to one_oven, starts_after_periods 0;',
+      'this guides what Olumi adds and never limits what they supplied.',
+      'Retain named options; include carry on as now where meaningful, and propose a materially different or lower-commitment route when useful within the budget and stated constraints.',
+      'If their stated options or essential figures already exceed the budget, preserve them, disclose the excess and ask what to focus on; never silently discard their content or refuse to draft.',
+      '- classes 6 class/week fact known "run 6 classes a week"; target 8 class/week fact known "at least 8"; goal classes >= target, level, end, window null.',
+      'option "Own Saturday session" sets classes to inline 8; option "Partner" sets classes to inline 8, both supported by "either route would bring us to 8";',
+      '- risk "Illness cancels classes", person "Illness might cancel classes", effect_on classes; chance and harm unknown, no numbers invented.',
     ]) expect(count(DRAFTING_INSTRUCTIONS, rule), rule).toBe(1);
     // Round 1 (27 Oct, the PL's candidate wording, adopted by the DL): seven bullets replaced and step 5 removed. Each successor
     // rule is sent once, and every replaced sentence above is gone. Two earlier rulings are REVERSED by the candidate, not kept:
@@ -305,16 +300,18 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     }
     expect(schemaText).toContain('An approximate single figure is known with its stated value, low/high/range_kind null and the approximate basis; never manufacture endpoints from about, roughly or ~.');
     for (const rule of [
-      'turn a stated amount into an unsupported rate',
-      '6. Unknowns and questions: confirm an ambiguous or suggested aim, measure or reference;',
-      'Ask for evidence, not invented effects or probabilities; never re-ask supplied information.',
+      'turning an amount into an unsupported rate',
+      '7. Questions: confirm an ambiguous or suggested aim, measure or reference;',
+      'Ask for evidence, never invented effects or probabilities; never re-ask supplied information.',
       'Ask for a range when a supplied approximate point feeds a goal or limit.',
-      '4. Causal paths: for each consequential concern or plausible outside force, trace each affected option setting to a goal or limit,',
-      'retaining separately changeable bottlenecks, delays, benefits and harms as distinct quantities and relations with missing facts asked and unsized coefficients unknown on the path; missing numbers alone never send a mechanism to prose or left_out;',
-      'omit only an unrepresentable mechanism or measure, saying why and what would enable it.',
-      'Ask missing durations wherever representable; otherwise explain the limitation.',
-      'then select observable unknowns most able to change route feasibility or comparison through causal evidence, rival explanations, capacity, timing, permissions or commitments; a needed figure is arithmetic-only only if it cannot change that comparison.',
-      'or assume carry-on leaves a reference unchanged.',
+      '4. Structure: connect each option to the goal through as few named links as faithfully express it, usually one or two;',
+      'Retain supplied causal meaning and uncertainty; do not add links merely to connect.',
+      'Preserve other stated mechanisms as attributed qualitative records rather than expand arithmetic scaffolding.',
+      'Ask for a missing duration only when a stated goal, limit or mechanism needs that window;',
+      'then ask about the unknown most likely to change the reasoning.',
+      'or assuming carry-on leaves a reference unchanged.',
+      '6. Risks: each distinct downside stated or clearly implied by the brief belongs in risks, not a condition labelled "risk".',
+      'Unknown chance or size is legitimate: never invent numbers to make a risk calculable.',
     ]) expect(count(DRAFTING_INSTRUCTIONS, rule), rule).toBe(1);
     for (const old of [
       'its quote is their words copied exactly, one unbroken stretch, never reworded or joined.',
@@ -416,10 +413,12 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(sent.properties['title']!.description).toContain('A short title of a few words for the situation');
     expect(sent.properties['coaching_questions']!.description).toBe('Ordered first-screen questions, up to three, each plain, non-leading, open and asking one thing; a selected item question uses its exact wording. [] when none would help.');
     for (const f of ['goals', 'limits', 'preferences', 'options']) expect(sent.properties[f]!.description, f).toBeUndefined();
-    expect(['goals', 'limits', 'risks'].map((f) => sent.properties[f]!.items!.properties['label']!.description.startsWith('A short title of a few words for '))).toEqual([true, true, true]);
+    expect(['goals', 'limits'].map((f) => sent.properties[f]!.items!.properties['label']!.description.startsWith('A short title of a few words for '))).toEqual([true, true]);
+    // Drafter v2: a risk's title is a possible future downside, still short ("Oven breaks down").
+    expect(sent.properties['risks']!.items!.properties['label']!.description.startsWith('A short title for a possible future downside')).toBe(true);
     for (const old of ['The aim in the person\'s own words', 'The condition in the person\'s own words']) expect(sentSchema, old).not.toContain(old);
     // Contrast: an option's name is a short neutral name; their words are in the shared quote field (round 3).
-    expect(sent.properties['options']!.items!.properties['label']!.description).toBe('A short neutral name ("Second oven").');
+    expect(sent.properties['options']!.items!.properties['label']!.description).toBe('A short neutral name ("Second oven"). In a first draft, aim for about 3 options; every option they name is kept.');
     for (const old of ['Never an aim they did not state', 'by its exact name', 'exact name as the person wrote it']) expect(sentSchema, old).not.toContain(old);
     for (const old of ['nobody can give or responsibly estimate it yet', 'is never unknown', 'basis says why. ', 'whenever one is supportable', 'order of magnitude']) expect(sentSchema, old).not.toContain(old);
     for (const old of ['when one is supportable, else', 'not even its direction or order of magnitude', 'a wide range is supportable', 'At most three questions asked now']) expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);

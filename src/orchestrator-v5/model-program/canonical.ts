@@ -395,7 +395,7 @@ export const CanonicalModel = z.object({
   limits: z.array(CanonicalLimit),
   preferences: z.array(CanonicalPreference),
   options: z.array(CanonicalOption),
-  risks: z.array(CanonicalRisk).describe('Every distinct stated or clearly implied future downside, with stated versus Olumi-inferred authorship kept separate. When simplifying, keep supported risks, re-expressed more simply; follow an explicit correction or retraction, with its history. Unsized never means absent.'),
+  risks: z.array(CanonicalRisk).describe('Every distinct stated or clearly implied future downside, with stated versus Olumi-inferred authorship kept separate. When simplifying, keep supported risks, re-expressed more simply; follow an explicit correction or retraction. Unsized never means absent.'),
   claims: z.array(CanonicalClaim),
   evidence: z.array(CanonicalEvidence),
   assumptions: z.array(CanonicalAssumption),
