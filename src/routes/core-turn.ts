@@ -36,7 +36,7 @@ import { FRESH_READ, turnReadCache } from '../orchestrator-v5/agent-lane/turn-re
 import { agentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import { PROGRAM_HISTORY_ROWS_READ, programHistoryOf } from '../orchestrator-v5/model-program-turn/program-history.js';
 import { agentProposals as proposals } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
-import { programChipsFor, programHoldApplies, typedApprovalOf } from '../orchestrator-v5/model-program-turn/program-card.js';
+import { CONFIRM_READING, programChipsFor, programHoldApplies, typedApprovalOf } from '../orchestrator-v5/model-program-turn/program-card.js';
 import { reconcileProgramCards, refreshedProgramHold } from '../orchestrator-v5/model-program-turn/program-card-turn.js';
 import { proposalPendingAction, rehydrateProposals, withApprovalOfferedOnRow } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import {
@@ -73,7 +73,7 @@ import { CONVERSATION_ROWS_READ } from './assist.v1.scenario-graph.js';
 import { runModelProgramTurn } from '../orchestrator-v5/model-program-turn/turn.js';
 import { isProgramGraph, programReadOf, reopenProgram, savedProgramOf, sourceTextOf, unreadableWords } from '../orchestrator-v5/model-program-turn/program-store.js';
 import { compile } from '../orchestrator-v5/model-program/compile.js';
-import { applyCanvasFigure, DRAFT_REPLY_GUIDANCE, HOST_REPLY_WITHHELD_TOOLS, PROGRAM_TURN_GUIDANCE, readProgramContext, RUN_REPLY_GUIDANCE } from '../orchestrator-v5/model-program-turn/program-tools.js';
+import { applyCanvasFigure, draftReplyGuidance, HOST_REPLY_WITHHELD_TOOLS, PROGRAM_TURN_GUIDANCE, readProgramContext, RUN_REPLY_GUIDANCE } from '../orchestrator-v5/model-program-turn/program-tools.js';
 import { programOperationId } from '../orchestrator-v5/model-program-turn/program-save.js';
 import { findOperationSave } from '../orchestrator-v5/path-b/tools/core-write.js';
 import { registrationTurnId } from '../orchestrator-v5/graph-registration/registration-identity.js';
@@ -736,7 +736,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
                 const freshRevision = isRec(fresh.data.revision) ? str(fresh.data.revision.graph_hash) : null;
                 const freshRun = isRec(fresh.data.run) ? str(fresh.data.run.run_id) : null;
                 const reply = await runCoreTurn({ ...agentTurn(),
-                  turnGuidance: [PROGRAM_TURN_GUIDANCE, runPress ? RUN_REPLY_GUIDANCE : DRAFT_REPLY_GUIDANCE],
+                  // A draft names its reading card only when this turn holds one (`turn.ts`: a refused reading holds none).
+                  turnGuidance: [PROGRAM_TURN_GUIDANCE, runPress ? RUN_REPLY_GUIDANCE : draftReplyGuidance(result.tool_calls.some((c) => c.name === CONFIRM_READING && c.ok === true))],
                   briefText: saved.graph === null ? undefined : saved.briefText,
                   canonicalState: fresh.data, withheldTools: [...HOST_REPLY_WITHHELD_TOOLS],
                   ...(freshRevision !== null ? { traceMeta: { revision: freshRevision, ...(freshRun !== null ? { run_id: freshRun } : {}) } } : {}) });

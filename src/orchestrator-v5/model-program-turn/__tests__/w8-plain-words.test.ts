@@ -9,6 +9,7 @@ import { compile } from '../../model-program/compile.js';
 import { project } from '../../model-program/project.js';
 import { evaluateCanonical } from '../evaluate.js';
 import { readingOf } from '../postimage.js';
+import { draftReplyGuidance } from '../program-tools.js';
 import { readingGroups } from '../reading-groups.js';
 import { at, q } from './bakery.fixture.js';
 
@@ -62,19 +63,34 @@ describe('W8 c7: the words a person reads, at their producers', () => {
     expect(card().some((c) => c.id === 'hire__extra_mechanics')).toBe(false);
   });
 
-  it('card, W8 run 3 (no reading card: unshown_change on sets.0.to): an option whose own setting is still asked shows on the card; its question is said once, on the setting\'s own row', () => {
-    // Olumi's option sets a figure to its OWN setting (`inlineQuantityId`), which has no figure yet and asks the person for it.
+  it('card, W8 run 3 (no reading card: unshown_change on sets.0.to): an option whose own setting has no figure shows on the card, saying its status; an asked one\'s question is said once, on its own row', () => {
+    // Olumi's option sets a figure to its OWN setting (`inlineQuantityId`), which has no figure.
     const m = shop();
-    const own = q('share__extra_mechanics', 'mechanic', { author: 'olumi', status: 'asked', question: 'How many mechanics could you share with the other branch?' });
-    const share = { ...m.options[0]!, id: 'share', label: 'Share a mechanic', author: 'olumi' as const, quote: null, developed_from: 'hire',
-      sets: [{ ...m.options[0]!.sets[0]!, to: 'share__extra_mechanics', value: null, author: 'olumi' as const, quote: null }] };
-    const v = readingOf({ ...m, quantities: [...m.quantities, own], options: [...m.options, share] } as CanonicalModelT, { words: [BRIEF], approver: null });
-    expect(v.ok ? 'ok' : `${v.code} ${JSON.stringify(v.ids)}`).toBe('ok');
-    if (!v.ok) return;
-    expect(v.changes.find((c) => c.id === 'share')?.after).toBe('a variant of "Hire one mechanic", sets "extra mechanics" to a figure still to be given (in mechanics) from the start');
+    const card = (status: 'asked' | 'unknown' | 'not_applicable' | 'unsupported') => {
+      const own = q('share__extra_mechanics', 'mechanic', { author: 'olumi', status, question: status === 'asked' ? 'How many mechanics could you share with the other branch?' : null });
+      const share = { ...m.options[0]!, id: 'share', label: 'Share a mechanic', author: 'olumi' as const, quote: null, developed_from: null,
+        sets: [{ ...m.options[0]!.sets[0]!, to: 'share__extra_mechanics', value: null, author: 'olumi' as const, quote: null }] };
+      const v = readingOf({ ...m, quantities: [...m.quantities, own], options: [...m.options, share] } as CanonicalModelT, { words: [BRIEF], approver: null });
+      if (!v.ok) throw new Error(`${v.code} ${JSON.stringify(v.ids)}`);
+      return v.changes;
+    };
+    const line = (status: Parameters<typeof card>[0]) => card(status).find((c) => c.id === 'share')?.after;
+    expect(line('asked')).toBe('sets "extra mechanics" to a figure still to be given (in mechanics) from the start');
+    expect(line('unknown')).toBe('sets "extra mechanics" to a figure not known yet (in mechanics) from the start');
+    expect(line('not_applicable')).toBe('sets "extra mechanics" to no figure, as it does not apply (in mechanics) from the start');
+    expect(line('unsupported')).toBe('sets "extra mechanics" to no figure the model can use (in mechanics) from the start');
     // Asked, it keeps its own row (`foldedInto`), which asks the question; the option's line does not ask it again.
-    const asks = v.changes.filter((c) => (c.after ?? '').includes('How many mechanics could you share'));
-    expect(asks.map((c) => c.id)).toEqual(['share__extra_mechanics']);
+    expect(card('asked').filter((c) => (c.after ?? '').includes('How many mechanics could you share')).map((c) => c.id)).toEqual(['share__extra_mechanics']);
+  });
+
+  it('reply, W8 run 3: the first reply is asked to name the reading card only when the turn holds one', () => {
+    const held = draftReplyGuidance(true), none = draftReplyGuidance(false);
+    expect(held).toContain('a card asks them to confirm or change Olumi\'s reading of their brief');
+    expect(held).toContain('End by asking them to confirm the reading on the card or say what to change.');
+    expect(none).not.toMatch(/card/);
+    // Everything else the reply is asked for is the same words either way.
+    expect(none.replace('. Reply', '; X. Reply')).toBe(held.replace('; a card asks them to confirm or change Olumi\'s reading of their brief. Reply', '; X. Reply')
+      .replace('End by asking them to confirm the reading on the card or say what to change. ', ''));
   });
 
   it('card, c7.1 and c7.7: a worked-out figure is one line with its relation, said as a short sentence by name, never "X is Y 0 multiplied by Z"', () => {
