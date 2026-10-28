@@ -34,6 +34,16 @@
  *     it is withheld, its words naming each option's chance and why: the options are too close to call (`similar_option_ids`), or a limit is not yet checked
  *     (a target-only chance is not the whole goal). Its `words` say both chances, the basis and what the leading chance is most
  *     sensitive to. A model-relative finding: never "best", a winner, a recommendation or a win share (`option_id` is null).
+ *   - WHAT A MISS LOOKS LIKE (SC7, the computed half of "If it failed", Paul D11 A): per option with a chance shown,
+ *     `goal_chance.when_missed` says, from the Run's own draws (`missed.ts`), in how many draws it misses, how often each aim
+ *     fails there, a goal's typical value where it falls short with its 1-in-10 bad end, and each figure and risk that goes
+ *     clearly more with a miss than with the draws that do not miss (or that none does); too few misses are said as too
+ *     few. Its basis, once: an association in this model, never a cause (`WHEN_MISSED_BASIS`). The AI reads it as the Run's
+ *     facts.
+ *   - WHAT IS MOST WORTH FINDING OUT (SC4): where the leader could be said (every option's chance shown, the Run not known
+ *     to be stale, every limit checked), `goal_chance.worth_knowing` names each figure whose third, known before choosing,
+ *     would meet the goal clearly more often than the option most likely overall (`worth-knowing.ts`), with the option most
+ *     likely in each third. Once, its basis: no cost of finding out is weighed, and it never says which to choose.
  *   - Fields with nothing true to say are absent: no `leader` with one option, a chance not shown or a Run known not to be
  *     current, no `status_quo`, no `historical_figures`. `run` is null and currentness unknown unless the caller passes the Run's facts.
  */
@@ -43,6 +53,8 @@ import { comparatorWords, displayRoundingFor, sayDisplayedPct, unitWords } from 
 import type { Aggregation, Cmp, Domain, ExecutableModel, FixedAuthor, Goal, Limit, Quantity, Window } from '../executable.js';
 import { separated, type PairedDifference } from '../simulate/paired.js';
 import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
+import type { WhenMissed } from '../simulate/missed.js';
+import type { WorthKnowing } from '../simulate/worth-knowing.js';
 import { isWithheld, type Chance, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
 import { costOf, readingOf, restsOn, simulate } from '../simulate/simulate.js';
 
@@ -142,6 +154,8 @@ export interface PresentInput {
   readonly revision?: number;
   /** False when the driver sweep would pass the Run's admission limit (alpha G11): no driver is measured, and that is said. */
   readonly sweep?: boolean;
+  /** Each risk's label, by id (the executable model's risks carry none): named where it goes with a miss (SC7). */
+  readonly risk_labels?: Readonly<Record<string, string>>;
 }
 
 export type PresentCell =
@@ -177,6 +191,10 @@ export interface PresentedAnalysisView {
     readonly unchecked_limits?: readonly { readonly limit_id: string; readonly words: string }[];
     /** Everything the result waits on, by label, with the figure its answer box fills where there is one. */
     readonly waits_on?: readonly PresentBlocker[];
+    /** SC7: per option with a chance shown, what a miss looks like in this model, in words and numbers (`missed.ts`). */
+    readonly when_missed?: { readonly basis: string; readonly options: readonly { readonly option_id: string; readonly words: readonly string[]; readonly found: WhenMissed }[] };
+    /** SC4: the figures whose third, known before choosing, could change which option is most likely, in words and numbers (`worth-knowing.ts`). */
+    readonly worth_knowing?: { readonly basis: string; readonly figures: readonly { readonly quantity: string; readonly words: string; readonly found: WorthKnowing['figures'][number] }[] };
   };
 }
 
@@ -243,6 +261,10 @@ export const NOT_SWEPT_REASON = 'This model is too large to test each figure one
 export const EIGHT_IN_TEN_WORDS = 'the range it falls in 8 times out of 10';
 /** Codex B1 on #3801: an end's 1 in 10 is said only where its domain edge is at least this many of that half's σ beyond it. */
 const TAIL_ROOM = 4;
+/** SC7: said once with what a miss looks like: an association in the model's own draws, never a cause or a forecast. */
+export const WHEN_MISSED_BASIS = 'These describe the misses among this model’s simulated draws: what goes with a miss, not what causes it, and only as far as the model’s figures and links hold.';
+/** SC4: said once with what is worth finding out: a value in this model, weighing no cost, never a choice. */
+export const WORTH_KNOWING_BASIS = 'This weighs no cost of finding out, and holds only as far as the model’s figures and links hold: it says which figures could change which option is most likely, not which to choose.';
 /** W10: once per result, where the chances shown rest on two or more uncertain inputs (each drawn on its own stream, prng.ts). */
 export const INDEPENDENCE_WORDS = 'Olumi treats these figures as varying independently, except where the model links them.';
 const whoseRange = (author: 'person' | 'olumi'): string => (author === 'person' ? '(your range)' : '(Olumi’s estimate)');
@@ -734,6 +756,64 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
         return s === undefined ? [] : [{ option_id: o.option_id, display: s.display }];
       }) }];
   });
+  // ── What a miss looks like, in this model (SC7, the computed half of "If it failed"): per option with a chance shown ──────
+  /** A share as a whole percentage, never rounded to 0% or 100% when it is not. */
+  const pctOf = (x: number): string => (x > 0 && x < 0.005 ? 'less than 1%' : x < 1 && x > 0.995 ? 'more than 99%' : `${Math.round(x * 100)}%`);
+  /** A computed value (a quantile of the draws), to 3 significant figures: never more precision than the draws hold. */
+  const rounded = (v: number): number => (v === 0 || !Number.isFinite(v) ? v : Number(v.toPrecision(3)));
+  const count = (k: number): string => k.toLocaleString('en-GB');
+  const aimLabel = (id: string): string => q([...model.goals, ...model.limits].find((c) => c.id === id)?.label ?? id);
+  /** A miss is any goal not met or any limit broken: the headline's complement. */
+  const missWhat = `${model.goals.length === 1 ? 'the goal' : 'one of its goals'}${model.limits.length === 0 ? '' : ` or ${model.limits.length === 1 ? 'the limit' : 'a limit'}`}`;
+  const whenMissedWords = (name: string, w: WhenMissed): string[] => {
+    if (w.kind === 'none') {
+      return w.reason === 'invalid_domain' ? [] : [w.reason === 'no_misses'
+        ? `In this model, ${name} misses ${missWhat} in none of the ${count(w.draws)} simulated draws, so there is no miss to describe.`
+        : `In this model, ${name} misses ${missWhat} in only ${count(w.misses)} of ${count(w.draws)} simulated draws, too few to describe what a miss looks like.`];
+    }
+    const lines = [`In this model, ${name} misses ${missWhat} in ${count(w.misses)} of ${count(w.draws)} simulated draws.`];
+    if (w.aims.length >= 2) lines.push(`In those misses, ${listWords(w.aims.map((a) => `${aimLabel(a.id)} is not met in ${pctOf(a.failed / w.misses)}`))}.`);
+    for (const o of w.outcomes) {
+      const g = model.goals.find((x) => x.id === o.goal_id)!, unitOf = byId.get(g.target)!.unit, target = boundWords(g.target);
+      const subject = label(g.quantity);
+      if (subject === undefined || target === undefined) continue;
+      // "At or below" its 10th percentile (at or above the 90th) holds even where many draws share one value; a bad end that
+      // says the same as the middle adds nothing and is not said (every miss at 0 is "typically 0").
+      const at = (v: number) => sayOf(g.target, rounded(v), unitOf), worse = g.cmp === '>=' || g.cmp === '>' ? 'at or below' : 'at or above';
+      const tail = at(o.bad_end) === at(o.middle) ? '' : `, and ${worse} ${at(o.bad_end)} in about 1 in 10 of those draws`;
+      lines.push(`Where ${aimLabel(g.id)} is not met, ${q(subject)}${g.no_deadline === true ? '' : ` ${whenWords(g)}`} is typically ${at(o.middle)}${tail}, against ${target}.`);
+    }
+    for (const f of w.figures) {
+      const x = byId.get(f.quantity), whose = x?.dist?.kind === 'range' ? ` ${whoseRange(x.dist.basis === 'person_range' ? 'person' : 'olumi')}` : '';
+      lines.push(`In ${pctOf(f.share)} of those misses, ${q(label(f.quantity) ?? f.quantity)}${whose} is in the ${f.third === 'low' ? 'lowest' : 'highest'} third of its draws, against ${pctOf(f.met_share)} of the draws where it does not miss.`);
+    }
+    for (const r of w.risks) lines.push(`${q(input.risk_labels?.[r.risk_id] ?? r.risk_id)} happens in ${pctOf(r.share)} of those misses, against ${pctOf(r.met_share)} of the draws where it does not miss.`);
+    if (w.misses === w.draws) lines.push('It misses in every simulated draw, so no figure or risk sets the misses apart.');
+    else if (w.figures.length === 0 && w.risks.length === 0 && w.looked_at > 0) lines.push('No single figure or risk goes clearly more with these misses than with the draws where it does not miss.');
+    return lines;
+  };
+  const missed = options.flatMap((o, at) => {
+    if (o.cell.kind !== 'figure') return [];
+    const w = result.options[at]!.when_missed, words = whenMissedWords(q(optionLabel.get(o.option_id) ?? o.option_id), w);
+    return words.length === 0 ? [] : [{ option_id: o.option_id, words, found: w }];
+  });
+  // ── What is most worth finding out, in this model (SC4): licensed as the leader is (every option's chance shown, the Run
+  // not known to be stale, every limit checked), since it says which option is most likely in each third of a figure ─────
+  const THIRD_WORDS = { low: 'lowest', middle: 'middle', high: 'highest' } as const;
+  const shownAll = options.length >= 2 && options.every((o) => o.cell.kind === 'figure');
+  const worthAim = `${model.goals.length === 1 ? 'the goal' : 'every goal together'}${model.limits.length === 0 ? '' : ' within the limits'}`;
+  const worth = !shownAll || input.current === false || unchecked.length > 0 ? [] : result.worth_knowing.figures.flatMap((f) => {
+    if (f.gain.kind !== 'sampled') return [];
+    const x = byId.get(f.quantity), whose = x?.dist?.kind === 'range' ? ` ${whoseRange(x.dist.basis === 'person_range' ? 'person' : 'olumi')}` : '';
+    const name = (id: string) => q(optionLabel.get(id) ?? id);
+    const bands = f.bands.map((b) => {
+      const ranked = [...b.met].sort((u, v) => v.met - u.met), top = ranked.find((m) => m.option_id === b.most_likely)!, next = ranked.find((m) => m.option_id !== b.most_likely)!;
+      return `in its ${THIRD_WORDS[b.third]} third, ${name(b.most_likely)} (${pctOf(top.met / b.draws)}, against ${pctOf(next.met / b.draws)} for ${name(next.option_id)})`;
+    });
+    const more = Math.round(f.gain.difference * 100);
+    return [{ quantity: f.quantity, found: f,
+      words: `In this model, knowing which third of its draws ${q(label(f.quantity) ?? f.quantity)}${whose} falls in before choosing, and taking the option most likely there, meets ${worthAim} in about ${more} more of every 100 simulated draws than ${name(f.overall)}, the option most likely overall. Most likely in each third: ${bands.join('; ')}.` }];
+  });
   const goal_chance = {
     ...(jointWords !== undefined && waiting.length === 0 ? { chance_words: `chance of ${jointWords}` } : {}),
     ...(notes.length > 0 ? { notes } : {}),
@@ -750,6 +830,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       }) }]) } : {}),
     ...(unchecked.length > 0 ? { unchecked_limits: unchecked.map((l, i) => ({ limit_id: l.limit_id, words: uncheckedWords[i]! })) } : {}),
     ...((input.blockers ?? []).length > 0 ? { waits_on: input.blockers!.map((b) => ({ ...b, label: inlineWords(b.label) })) } : {}),
+    ...(missed.length > 0 ? { when_missed: { basis: WHEN_MISSED_BASIS, options: missed } } : {}),
+    ...(worth.length > 0 ? { worth_knowing: { basis: WORTH_KNOWING_BASIS, figures: worth } } : {}),
   };
   // ── Which option is most likely to achieve the goal, in this model (Paul 6 and 14 Oct: say it; never choose for them) ──
   const leader = ((): PresentedLeader | undefined => {
