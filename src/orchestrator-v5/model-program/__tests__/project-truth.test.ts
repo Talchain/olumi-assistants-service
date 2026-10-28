@@ -50,15 +50,16 @@ describe('W3b 1 · links say what the model holds: no strength, a sign only wher
     expect(edgesOf(p).filter((e) => 'strength' in e).map((e) => e.id)).toEqual([]);
     // Contrast (right before, unchanged): every causal and definitional link's direction, and none on the goal's measure.
     // The question's and the options' links carry none (27 Oct, Paul's test): the model states no sign for them.
+    // Q1 (Paul, 28 Oct: the situation, not the arithmetic): Olumi's "additional capacity" total and its structural zero are
+    // said in the goal's workings, so the specialists link straight to the capacity they add to.
     expect(edgesOf(p).map((e) => [e.id, e.effect_direction ?? null])).toEqual([
       ['weekly_support_capacity__support_capacity_goal', null],
       ['mp:decision__keep_current_staffing', null], ['keep_current_staffing__additional_specialists', null],
       ['mp:decision__add_one_specialist', null], ['add_one_specialist__additional_specialists', null],
-      ['zero_additional_capacity__additional_capacity', 'positive'], ['additional_specialists__additional_capacity', 'positive'],
-      ['existing_capacity__weekly_support_capacity', 'positive'], ['additional_capacity__weekly_support_capacity', 'positive'],
+      ['existing_capacity__weekly_support_capacity', 'positive'], ['additional_specialists__weekly_support_capacity', 'positive'],
     ]);
     // The causal link's real size, in its own units and with the person's range; no β keyed to it.
-    const { reasoning, ...size } = edgesOf(p).find((e) => e.id === 'additional_specialists__additional_capacity')!.provenance;
+    const { reasoning, ...size } = edgesOf(p).find((e) => e.id === 'additional_specialists__weekly_support_capacity')!.provenance;
     expect(size).toEqual({ source: 'brief_extraction', magnitude: 'user_stated',
       natural_effect: { amount: 20, amount_unit: 'ticket/week', per_source_change: 1, per_source_change_unit: 'specialist', stated_range: { low: 10, high: 30, text: '10–30', end: 'centre' } } });
     expect(reasoning).toMatch(/^about 20, 10–30 ticket\/week\/specialist; /);
@@ -71,9 +72,10 @@ describe('W3b 1 · links say what the model holds: no strength, a sign only wher
     const p = draft('hiring-alpha3.saved.json');
     expect(edgesOf(p).filter((e) => 'strength' in e).map((e) => e.id)).toEqual([]);
     const parts = edgesOf(p).filter((e) => e.provenance?.definitional === true).map((e) => [e.id, e.effect_direction, e.provenance.reasoning]);
+    // Q1 (28 Oct): the hires each option sets are said on its card, so each product's lever part starts from that option.
     expect(parts).toEqual([
-      ['developers_hired__developer_spend', 'positive', 'multiplied'], ['developer_hiring_cost__developer_spend', 'positive', 'multiplied'],
-      ['tech_leads_hired__tech_lead_spend', 'positive', 'multiplied'], ['tech_lead_hiring_cost__tech_lead_spend', 'positive', 'multiplied'],
+      ['hire_two_developers__developer_spend', 'positive', 'multiplied'], ['developer_hiring_cost__developer_spend', 'positive', 'multiplied'],
+      ['hire_tech_lead__tech_lead_spend', 'positive', 'multiplied'], ['tech_lead_hiring_cost__tech_lead_spend', 'positive', 'multiplied'],
       ['developer_spend__total_hiring_spend', 'positive', 'added'], ['tech_lead_spend__total_hiring_spend', 'positive', 'added'],
     ]);
   });
@@ -220,14 +222,16 @@ describe('graph = model (alpha, 27 Oct): a card says the record came from the br
     // Contrast (right before, unchanged): every other card, by id, as the model holds it.
     expect(nodes.filter((n) => n.id !== 'staff_absence').map((n) => [n.id, n.provenance ?? null])).toEqual([
       ['mp:decision', null], ['support_capacity_goal', 'from_brief'], ['keep_current_staffing', 'from_brief'], ['add_one_specialist', 'from_brief'],
-      ['existing_capacity', 'from_brief'], ['additional_specialists', 'from_brief'], ['zero_additional_capacity', null],
-      ['additional_capacity', 'ai_inferred'], ['weekly_support_capacity', 'from_brief'],
+      ['existing_capacity', 'from_brief'], ['additional_specialists', 'from_brief'], ['weekly_support_capacity', 'from_brief'],
     ]);
+    // Q1 (28 Oct): Olumi's total and its structural zero are no cards; each is said on the goal, in its workings.
+    expect(['zero_additional_capacity', 'additional_capacity'].map((id) => nodes.some((n) => n.id === id))).toEqual([false, false]);
   });
 });
 
 describe('C13 (27 Oct, the design session on Paul\'s board): the board draws what the model holds', () => {
-  const promoLink = (m: CanonicalModelT) => edgesOf(projected(m, CLUB_BRIEF)).find((e) => e.id === 'promo_on__joins')!;
+  // Q1 (28 Oct): the promotion's on/off switch is said on its option card, so the promotion's own link carries the size.
+  const promoLink = (m: CanonicalModelT) => edgesOf(projected(m, CLUB_BRIEF)).find((e) => e.id === 'promotion__joins')!;
   const withQ = (m: CanonicalModelT, id: string, f: Partial<CanonicalQuantityT>) => { Object.assign(m.quantities.find((x) => x.id === id)!, f); return m; };
 
   it('1 · a range across zero says its direction is not settled, whatever sign it is drawn with', () => {
@@ -277,5 +281,63 @@ describe('C13 (27 Oct, the design session on Paul\'s board): the board draws wha
     expect(nodeOf(projected(risk, CLUB_BRIEF), 'rival_opens').user_questions).toEqual(['Is a rival likely to open?']);
     // Contrast (right before): a given target asks nothing.
     expect('user_questions' in nodeOf(projected(club(), CLUB_BRIEF), 'reach_340')).toBe(false);
+  });
+});
+
+describe('Q1 (Paul, 28 Oct: "the canvas shows the situation, not the arithmetic")', () => {
+  // Each row is RED on 8a5f322e's projection (the switch, the total and its zero were their own cards) and GREEN with this change.
+  const ids = (xs: Rec[]) => new Set(xs.map((x) => x.id as string));
+  it('an on/off switch an option sets is said on that option\'s card, in words, and the option\'s own link carries the size', () => {
+    const p = projected(club(), CLUB_BRIEF);
+    expect(nodeOf(p, 'promo_on')).toBeUndefined();
+    expect(p.items.find((i) => i.record_id === 'promo_on')!.shown_as).toEqual({ on_node: 'promotion' });
+    // Its figure in its own unit ("1 promotion"); a unitless 0/1 switch reads as words, as the reading card says it (yes / no).
+    expect(nodeOf(p, 'promotion').interventions.promo_on).toMatchObject({ label: 'promo on', display_value: '1 promotion', value: 1 });
+    const unitless = club();
+    const to = unitless.options.find((o) => o.id === 'promotion')!.sets[0]!.to!;
+    for (const x of unitless.quantities) if (x.id === 'promo_on' || x.id === to) x.unit = '1';
+    expect(nodeOf(projected(unitless, CLUB_BRIEF), 'promotion').interventions.promo_on).toMatchObject({ label: 'promo on', display_value: 'In use' });
+    expect(edgesOf(p).filter((e) => e.from === 'promo_on' || e.to === 'promo_on')).toEqual([]);
+    expect(edgesOf(p).find((e) => e.id === 'promotion__joins')).toMatchObject({ from: 'promotion', to: 'joins', coefficient_id: 'promo_effect' });
+    // Contrast (right before, unchanged): a mechanism with a base level of its own ("joins") stays its card.
+    expect(nodeOf(p, 'joins')).toMatchObject({ id: 'joins' });
+  });
+
+  it('an Olumi total and its structural zero are said in the goal\'s "worked out from", by name; the path from the option to the goal stays drawn', () => {
+    const p = draft('capacity-s4.saved.json');
+    expect(['additional_capacity', 'zero_additional_capacity'].map((id) => [nodeOf(p, id), p.items.find((i) => i.record_id === id)!.shown_as]))
+      .toEqual([[undefined, { on_node: 'support_capacity_goal' }], [undefined, { on_node: 'support_capacity_goal' }]]);
+    expect(nodeOf(p, 'support_capacity_goal').value_basis).toEqual({ kind: 'worked_out', from: ['existing_capacity', 'additional_capacity', 'zero_additional_capacity'],
+      words: 'Worked out from Existing team capacity and Additional specialist capacity; Additional specialist capacity: worked out from Additional capacity with no additional specialists and Additional specialists' });
+    expect(['add_one_specialist__additional_specialists', 'additional_specialists__weekly_support_capacity', 'weekly_support_capacity__support_capacity_goal']
+      .map((id) => ids(edgesOf(p)).has(id))).toEqual([true, true, true]);
+    // The size the specialists link carried into the total is the one it still says: per specialist, in tickets a week.
+    expect(edgesOf(p).find((e) => e.id === 'additional_specialists__weekly_support_capacity')).toMatchObject({ coefficient_id: 'capacity_per_specialist' });
+  });
+
+  it('a figure still to be given reads "?" on its card, its question kept beside it (contrast: a given figure keeps its words)', () => {
+    const p = draft('hiring-alpha3.saved.json');
+    expect(nodeOf(p, 'developer_hiring_cost')).toMatchObject({ display_value: '?', user_questions: [expect.stringContaining('total cost per new developer')] });
+    expect(nodeOf(p, 'current_developers').display_value).not.toBe('?');
+  });
+
+  it('never a figure of the person\'s: the same total, theirs, stays its own card (contrast to the row above)', () => {
+    const s = saved('capacity-s4.saved.json');
+    const m = structuredClone(s.model);
+    Object.assign(m.quantities.find((x) => x.id === 'additional_capacity')!, { author: 'person', quote: 'adding one specialist adds capacity' });
+    expect(nodeOf(projected(m, s.brief), 'additional_capacity')).toMatchObject({ id: 'additional_capacity' });
+  });
+
+  it('every saved board stays whole: each link joins two cards, each id is once, and every record is a card or said on one that is drawn', () => {
+    for (const file of ['capacity-s4.saved.json', 'hiring-alpha3.saved.json', 'hiring-paul-1027.saved.json']) {
+      const p = draft(file);
+      const nodes = ids(p.graph.nodes as Rec[]), edges = edgesOf(p);
+      expect(edges.filter((e) => !nodes.has(e.from) || !nodes.has(e.to)).map((e) => e.id), file).toEqual([]);
+      expect(new Set(edges.map((e) => e.id)).size, file).toBe(edges.length);
+      const edgeIds = ids(edges);
+      const lost = p.items.filter((i) => (i.shown_as.node !== undefined && !nodes.has(i.shown_as.node)) || (i.shown_as.on_node !== undefined && !nodes.has(i.shown_as.on_node))
+        || (i.shown_as.on_edge !== undefined && !edgeIds.has(i.shown_as.on_edge)) || (i.shown_as.edge !== undefined && i.shown_as.edge.split(' ').some((x) => !edgeIds.has(x))));
+      expect(lost.map((i) => [i.record_id, i.shown_as]), file).toEqual([]);
+    }
   });
 });

@@ -341,7 +341,8 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     ]);
     expect(p.graph.nodes.filter((n) => notes.some((i) => i.record_id === n.id))).toEqual([]);
     expect(p.graph.nodes.filter((n) => n.kind === 'action').map((n) => n.id)).toEqual(['mp:limit:maintain_code_quality']);
-    expect(p.graph.nodes).toHaveLength(16);
+    // Q1 (Paul, 28 Oct: the situation, not the arithmetic): the two hiring levers are said on their option cards (16 → 14).
+    expect(p.graph.nodes).toHaveLength(14);
   });
 
   it('W3 contrast (26 Oct), a saved draft with no notes projects exactly as before: the same cards, in order, no text card', () => {
@@ -350,9 +351,11 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     // The cards staging drew for this draft before W3 (13e6bd5d), bound as literals: a note-less model is untouched.
     expect(p.graph.nodes.map((n) => [n.id, n.kind])).toEqual([
       ['mp:decision', 'decision'], ['support_capacity_goal', 'goal'], ['keep_current_staffing', 'option'], ['add_one_specialist', 'option'],
-      ['existing_capacity', 'factor'], ['additional_specialists', 'factor'], ['zero_additional_capacity', 'factor'],
-      ['additional_capacity', 'outcome'], ['weekly_support_capacity', 'outcome'],
+      ['existing_capacity', 'factor'], ['additional_specialists', 'factor'], ['weekly_support_capacity', 'outcome'],
     ]);
+    // Q1 (Paul, 28 Oct): Olumi's total and its structural zero are said in the goal's workings, never their own cards.
+    expect(['zero_additional_capacity', 'additional_capacity'].map((id) => p.items.find((i) => i.record_id === id)!.shown_as))
+      .toEqual([{ on_node: 'support_capacity_goal' }, { on_node: 'support_capacity_goal' }]);
   });
 
   it('S1 strip (B8, B10 off): an Olumi figure without a range is no error: it calculates as Olumi\'s exact figure, as written', () => {
@@ -454,9 +457,13 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const r = compile(m);
     expect(r.errors).toEqual([]);
     expect(xq(r).get('ovens_added')!.dist).toEqual({ kind: 'fixed', value: 0, author: 'structure' });
-    const node = project(m, r).graph.nodes.find((n) => n.id === 'ovens_added')!;
-    expect(node).not.toHaveProperty('provenance');
-    expect(String(node.display_value)).not.toContain('Olumi');
+    // Q1 (Paul, 28 Oct): the switch an option sets is said on that option's card, with its own label, never as Olumi's.
+    const p = project(m, r);
+    expect(p.graph.nodes.find((n) => n.id === 'ovens_added')).toBeUndefined();
+    expect(p.items.find((i) => i.record_id === 'ovens_added')!.shown_as).toEqual({ on_node: 'buy_oven' });
+    const setting = (p.graph.nodes.find((n) => n.id === 'buy_oven')!.interventions as Record<string, Record<string, unknown>>).ovens_added!;
+    expect(setting.label).toBe(m.quantities.find((q) => q.id === 'ovens_added')!.label);
+    expect(String(setting.display_value)).not.toContain('Olumi');
     const hiding = bakery();
     hiding.quantities = hiding.quantities.map((q) => (q.id === 'costs' ? structure('costs', 'GBP/week', 612.5, 'Costs.') : q));
     // The structure rewrite (B2) is off the path: the AI's label passes through unchanged and the figure calculates as structure.

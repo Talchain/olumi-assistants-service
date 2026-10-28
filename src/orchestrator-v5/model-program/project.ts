@@ -351,7 +351,11 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     for (const s of o.sets) {
       const to = has(s.to) ? Q.get(s.to) : undefined;
       const starts = typeof s.starts_after_periods === 'string' ? Q.get(s.starts_after_periods) : undefined;
-      if (to) interventions[s.quantity] = { value: to.value, unit: to.unit, display: display(to), from_period: s.starts_after_periods, ...(starts ? { from_period_display: display(starts) } : {}), ...settingSource(to, o) };
+      // Its own label and words, so the card says the setting whether or not the set quantity has a card of its own (Q1, 28 Oct).
+      const set = Q.get(s.quantity);
+      const onOff = set !== undefined && (set.unit === '1' || set.unit === '') && (set.value === 0 || set.value === 1) && (to?.value === 0 || to?.value === 1);
+      if (to) interventions[s.quantity] = { value: to.value, unit: to.unit, display: display(to), display_value: onOff ? (to.value === 1 ? 'In use' : 'Not in use') : display(to),
+        label: set?.label ?? s.quantity, from_period: s.starts_after_periods, ...(starts ? { from_period_display: display(starts) } : {}), ...settingSource(to, o) };
     }
     nodes.push({
       id: o.id, kind: 'option', label: o.label, ...provenanceOf(o), ...quoteOf(o, o.id), ...participation(inCalc || (o.status === 'live' && kept(per))),
@@ -401,7 +405,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       ...participation(inCalc || (!notCompiling && inModel.has(q.id) && !OUT_OF_ANALYSIS.has(q.status))),
       ...(q.status !== 'derived' ? { category: controlled.has(q.id) ? 'controllable' : 'observable' } : {}),
       ...observedOf(q),
-      display_value: display(q),
+      // A figure still to be given or not known yet reads "?" on its card; its question and reason stay beside it (Q1, 28 Oct).
+      display_value: q.status === 'asked' || q.status === 'unknown' ? '?' : display(q),
       ...basisOf(q),
       ...(has(q.basis) ? { description: q.basis } : {}),
       ...(q.status === 'asked' && has(q.question) ? { user_questions: [q.question] } : {}),
@@ -558,8 +563,110 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     items.push({ record_id: rec.id, family: f, shown_as: {}, in_calculation: false, why_out: 'A note: shown beside the model, never calculated.', author: whoOf(rec, rec.id), approval: rec.approval, concerns: [...rec.concerns] });
   }
 
+  // ── the situation, not the arithmetic (Paul's Q1 ruling, 28 Oct) ────────────────────────────────────────────────────
+  // An on/off switch an option sets is said on that option's card, and an Olumi total worked out on the way to an aim is said
+  // in that aim's "worked out from"; neither is its own card. Each link through one is drawn straight from what feeds it to
+  // what it feeds, so every path from an option to an aim stays on the board. Never a figure of the person's, one with a
+  // question, a coefficient, or anything an aim or limit measures; the model and the calculation are unchanged.
+  const measured = new Set([...model.goals, ...model.limits].flatMap((g) => (g.measure ? [g.measure.quantity, g.measure.per] : [])).filter(has));
+  for (const g of model.goals) if (g.measure?.reference?.kind === 'value' && has(g.measure.reference.quantity)) measured.add(g.measure.reference.quantity);
+  const cardOf = new Map(nodes.map((n) => [n.id as string, n] as const));
+  const foldable = (q: CanonicalQuantityT) => cardOf.has(q.id) && q.author !== 'person' && !has(q.quote) && !has(q.party) && !has(q.question)
+    && !measured.has(q.id) && q.kind !== 'coefficient' && !isCoefficient(q.id);
+  /** Every quantity an aim's measure is worked out from, nearest first. */
+  const upstream = (id: string): string[] => { const seen: string[] = []; const walk = (x: string) => { for (const p of partsOf.get(x) ?? []) if (!seen.includes(p)) { seen.push(p); walk(p); } }; walk(id); return seen; };
+  const goalUpstream = new Map(model.goals.filter((g) => has(g.measure)).map((g) => [g.id, upstream(g.measure!.quantity)] as const));
+  const optionsSetting = (id: string) => model.options.filter((o) => o.sets.some((s) => s.quantity === id)).map((o) => o.id).sort();
+  const switches = new Map(model.quantities.filter((q) => q.author === 'structure' && q.status === 'known' && q.kind === 'fact' && controlled.has(q.id) && has(q.value)
+    && !(has(q.low) && has(q.high) && q.low !== q.high) && foldable(q)).map((q) => [q.id, optionsSetting(q.id)[0]!] as const));
+  /** A structural constant (a zero base, a unit conversion): arithmetic the model's form needs, never a lever. */
+  const isConstant = (q: CanonicalQuantityT | undefined) => q !== undefined && q.author === 'structure' && q.status === 'known' && q.kind === 'fact' && !controlled.has(q.id) && foldable(q);
+  const definedBy = new Map(model.relations.map((r) => [r.defines, r] as const));
+  /** A total: a sum or product, or an amount added on a structural zero; a mechanism with a real base level stays its card. */
+  const isTotal = (q: CanonicalQuantityT) => {
+    const r = definedBy.get(q.id);
+    return q.author === 'olumi' && q.status === 'derived' && q.kind === 'derived' && !controlled.has(q.id) && foldable(q) && r !== undefined
+      && (r.form === 'definition' || (r.form === 'effect' && isConstant(Q.get(r.base)) && Q.get(r.base)!.value === 0));
+  };
+  const totals = new Map(model.quantities.filter(isTotal)
+    .flatMap((q) => { const aim = [...goalUpstream].filter(([, up]) => up.includes(q.id)).map(([g]) => g).sort()[0]; return aim === undefined ? [] : [[q.id, aim] as const]; }));
+  /** A constant used only inside totals goes with them: said in the aim's workings, with no link of its own. */
+  const constants = new Map(model.quantities.filter((q) => isConstant(q) && model.relations.some((r) => partsOf.get(r.defines)?.includes(q.id))
+    && model.relations.every((r) => !partsOf.get(r.defines)?.includes(q.id) || totals.has(r.defines)))
+    .map((q) => [q.id, totals.get(model.relations.find((r) => partsOf.get(r.defines)?.includes(q.id))!.defines)!] as const));
+  const reasoningOf = (e: Rec) => String((e.provenance as Rec | undefined)?.['reasoning'] ?? '');
+  const definitionalLink = (e: Rec) => (e.provenance as Rec | undefined)?.['definitional'] === true;
+  /** A link that carries what feeds it one for one (a part added, a base, a starting level, an inflow). */
+  const oneForOne = (e: Rec) => definitionalLink(e) && e.effect_direction === 'positive' && /^(added|base level|starting level|inflow)/.test(reasoningOf(e));
+  /** Two links make one only when at most one of them has a size, so the straight link never claims a size the model lacks. */
+  const composable = (a: Rec, b: Rec) => oneForOne(a) || oneForOne(b) || (!has(a.coefficient_id) && !has(b.coefficient_id));
+  const usedIds = new Set(edges.map((e) => e.id as string));
+  const freshId = (from: string, to: string, via: string) => {
+    let id = `${from}__${to}`;
+    for (let n = 1; usedIds.has(id); n++) id = n === 1 ? `${from}__${to}__via__${via}` : `${from}__${to}__via__${via}__${n}`;
+    usedIds.add(id);
+    return id;
+  };
+  const replaced = new Map<string, string[]>();
+  const offBoard = new Map<string, string>();
+  for (const f of [...switches.keys(), ...totals.keys()].sort()) {
+    const all = edges.filter((e) => e.to === f), outs = edges.filter((e) => e.from === f);
+    // A constant's link into a total carries nothing to what the total feeds: it is said in the workings, never drawn.
+    const ins = all.filter((a) => !constants.has(a.from as string));
+    if (ins.length === 0 || outs.length === 0 || (totals.has(f) && !ins.every((a) => outs.every((b) => composable(a, b))))) continue;
+    for (const a of all) if (constants.has(a.from as string)) replaced.set(a.id as string, []);
+    const label = Q.get(f)?.label ?? f;
+    const made = ins.flatMap((a) => outs.map((b) => {
+      const id = freshId(a.from as string, b.to as string, f);
+      replaced.set(a.id as string, [...(replaced.get(a.id as string) ?? []), id]);
+      replaced.set(b.id as string, [...(replaced.get(b.id as string) ?? []), id]);
+      // A switch's link is the option's own (its size per the option's setting); a total's keeps the one size it can still say.
+      if (switches.has(f)) return { ...b, from: a.from, id };
+      // How a risk acts (adds, multiplies) is said of what it acts on, never of what that total then feeds.
+      const own = oneForOne(a) ? b : a;
+      const { effect_direction: _sign, effect_mode: _mode, ...rest } = own;
+      const sign = has(a.effect_direction) && has(b.effect_direction) ? (a.effect_direction === b.effect_direction ? 'positive' : 'negative') : null;
+      const { definitional: _def, ...provenance } = own.provenance as Rec;
+      return { ...rest, from: a.from, to: b.to, id, ...(sign === null ? {} : { effect_direction: sign }),
+        provenance: { ...provenance, reasoning: `${reasoningOf(a) || 'used'} in “${label}”${reasoningOf(b) ? `, then ${reasoningOf(b)}` : ''}`,
+          ...(definitionalLink(a) && definitionalLink(b) ? { definitional: true } : {}) } };
+    }));
+    // Where the link out of it was drawn: the replacements keep the drawing order of what they now reach.
+    const at = edges.findIndex((e) => e.from === f);
+    const kept = edges.filter((e) => e.to !== f && e.from !== f);
+    kept.splice(edges.slice(0, at).filter((e) => e.to !== f && e.from !== f).length, 0, ...made);
+    edges.splice(0, edges.length, ...kept);
+    offBoard.set(f, switches.get(f) ?? totals.get(f)!);
+  }
+  // A constant leaves the board with the totals it fed, once none of its links is drawn.
+  for (const [c, aim] of constants) if (!edges.some((e) => e.from === c) && [...offBoard.keys()].some((t) => partsOf.get(t)?.includes(c))) offBoard.set(c, aim);
+  const resolve = (id: string): string[] => (replaced.has(id) ? replaced.get(id)!.flatMap(resolve) : [id]);
+  if (offBoard.size > 0) {
+    nodes.splice(0, nodes.length, ...nodes.filter((n) => !offBoard.has(n.id as string)));
+    for (const it of items) {
+      if (it.shown_as.edge !== undefined) it.shown_as = { ...it.shown_as, edge: it.shown_as.edge.split(' ').flatMap(resolve).join(' ') };
+      // A link drawn only from a constant now drawn nowhere: the record is said where its total is.
+      const host = it.shown_as.edge === '' ? offBoard.get(model.relations.find((r) => r.id === it.record_id || it.record_id.startsWith(`${r.id}:`))?.defines ?? '') : undefined;
+      if (host !== undefined) it.shown_as = { on_node: host };
+      if (it.shown_as.on_edge !== undefined) it.shown_as = { ...it.shown_as, on_edge: resolve(it.shown_as.on_edge)[0]! };
+      if (it.family === 'quantity' && offBoard.has(it.record_id) && it.shown_as.node === it.record_id) it.shown_as = { on_node: offBoard.get(it.record_id)! };
+    }
+    // Each aim says the totals it is worked out through, by name, so nothing folded off the board goes unsaid.
+    for (const g of model.goals) {
+      const off = (goalUpstream.get(g.id) ?? []).filter((t) => offBoard.has(t) && !switches.has(t));
+      const inside = off.filter((t) => totals.has(t));
+      const m = g.measure?.quantity;
+      if (inside.length === 0 || !has(m)) continue;
+      const card = cardOf.get(g.id)!;
+      card.value_basis = { kind: 'worked_out', from: [...new Set([...(partsOf.get(m) ?? []), ...off])],
+        words: [workedOutWords(m), ...inside.map((t) => `${Q.get(t)?.label ?? t}: ${workedOutWords(t).replace(/^W/, 'w')}`)].join('; ') };
+    }
+  }
+
   for (const { host, question } of foldedQuestions) {
-    const on = host.node !== undefined ? nodes.find((n) => n.id === host.node) : edges.find((e) => e.id === host.edge);
+    const node = host.node !== undefined ? offBoard.get(host.node) ?? host.node : undefined;
+    const edge = host.edge !== undefined ? resolve(host.edge)[0] : undefined;
+    const on = node !== undefined ? nodes.find((n) => n.id === node) : edges.find((e) => e.id === edge);
     if (on) on.user_questions = [...new Set([...((on.user_questions as string[] | undefined) ?? []), question])];
   }
   return { graph: { nodes, edges, goal_constraints }, items };

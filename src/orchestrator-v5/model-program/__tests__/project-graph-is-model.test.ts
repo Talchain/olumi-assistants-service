@@ -35,8 +35,9 @@ describe('the board draws the saved model: Paul\'s hiring scenario, 27 Oct', () 
     expect(sizes.map((id) => [id, nodeOf(p, id).kind, nodeOf(p, id).value_basis?.kind])).toEqual([
       ['developer_productivity_gain', 'factor', 'worked_out'], ['lead_defect_effect', 'factor', 'worked_out'], ['developer_defect_effect', 'factor', 'worked_out'],
     ]);
+    // Q1 (28 Oct): the hires are said on the option cards, so each size's link starts from the option that hires.
     expect(sizes.map((id) => (p.graph.edges as Rec[]).filter((e) => e.coefficient_id === id).map((e) => e.id))).toEqual([
-      ['developers_added__productivity'], ['tech_leads_added__defect_rate'], ['developers_added__defect_rate'],
+      ['hire_two_developers__productivity'], ['hire_tech_lead__defect_rate'], ['hire_two_developers__defect_rate'],
     ]);
     // Contrast (right before, unchanged): what the model works out as a result is an outcome; the one with an exact figure
     // today carries it in the model's own unit (1 / 6 per developer); an estimated size used only on its link has no card.
@@ -44,7 +45,7 @@ describe('the board draws the saved model: Paul\'s hiring scenario, 27 Oct', () 
       .toEqual(['outcome', 'outcome', 'outcome', 'outcome', 'outcome', 'outcome']);
     expect(nodeOf(p, 'full_developer_contribution').observed_state).toEqual({ value: 1 / 6, raw_value: 1 / 6, unit: '1/developer' });
     expect(nodeOf(p, 'lead_productivity_gain')).toBeUndefined();
-    expect(itemOf(p, 'lead_productivity_gain').shown_as).toEqual({ on_edge: 'tech_leads_added__productivity' });
+    expect(itemOf(p, 'lead_productivity_gain').shown_as).toEqual({ on_edge: 'hire_tech_lead__productivity' });
   });
 
   it('2 · each limit is drawn once: the budget is the goal constraint the goal card draws, never also a card; the quality limit is its card', () => {
@@ -66,16 +67,20 @@ describe('the board draws the saved model: Paul\'s hiring scenario, 27 Oct', () 
       source_quote: 'Our budget is £200,000', provenance: 'explicit' }]);
   });
 
-  it('3 · the question\'s links to the options and the options\' links to what they set carry no sign; no link carries a strength', () => {
+  it('3 · the question\'s links to the options carry no sign; the hires each option sets are said on its card (Q1), no link carries a strength', () => {
     const p = paul();
-    const structural = ['mp:decision__hire_tech_lead', 'hire_tech_lead__tech_leads_added', 'mp:decision__hire_two_developers', 'hire_two_developers__developers_added'];
+    const structural = ['mp:decision__hire_tech_lead', 'mp:decision__hire_two_developers'];
     expect(structural.map((id) => [id, edgeOf(p, id).from, 'effect_direction' in edgeOf(p, id)])).toEqual([
-      ['mp:decision__hire_tech_lead', 'mp:decision', false], ['hire_tech_lead__tech_leads_added', 'hire_tech_lead', false],
-      ['mp:decision__hire_two_developers', 'mp:decision', false], ['hire_two_developers__developers_added', 'hire_two_developers', false],
+      ['mp:decision__hire_tech_lead', 'mp:decision', false], ['mp:decision__hire_two_developers', 'mp:decision', false],
     ]);
+    // Q1 (Paul, 28 Oct: the situation, not the arithmetic): "Tech leads hired" and "Developers hired" are the levers the
+    // options set, said on each option's card with their own label and figure, never their own cards.
+    expect(['tech_leads_added', 'developers_added'].map((id) => [nodeOf(p, id), itemOf(p, id).shown_as])).toEqual([
+      [undefined, { on_node: 'hire_tech_lead' }], [undefined, { on_node: 'hire_two_developers' }]]);
+    expect(nodeOf(p, 'hire_two_developers').interventions.developers_added).toMatchObject({ label: 'Developers hired', value: 2 });
     expect((p.graph.edges as Rec[]).filter((e) => 'strength' in e || 'strength_mean' in e || 'weight' in e).map((e) => e.id)).toEqual([]);
     // Contrast (right before, unchanged): every sign the model does state is kept, a negative estimate's included.
-    expect(['current_developers__full_developer_contribution', 'tech_leads_added__productivity', 'tech_leads_added__productivity__2', 'developers_added__productivity__2', 'lead_spend__total_spend']
+    expect(['current_developers__full_developer_contribution', 'hire_tech_lead__productivity', 'hire_tech_lead__productivity__via__tech_leads_added', 'hire_two_developers__productivity__via__developers_added', 'lead_spend__total_spend']
       .map((id) => edgeOf(p, id).effect_direction)).toEqual(['negative', 'positive', 'negative', 'negative', 'positive']);
   });
 

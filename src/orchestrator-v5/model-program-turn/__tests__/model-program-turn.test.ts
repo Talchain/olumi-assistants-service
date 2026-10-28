@@ -3769,15 +3769,17 @@ describe('the model-program turn on the real core route', () => {
     const shown = (form: 'effect' | 'product') => { const m = of(form); return project(m, compile(m, { sourceText: `${BRIEF}\n${words}` })); };
     const effect = shown('effect');
     const product = shown('product');
-    const rateLinks = (p: ReturnType<typeof project>) => p.graph.edges.filter((e) => e.to === 'extra_sales' && e.from !== 'no_extra');
+    // Q1 (Paul, 28 Oct: the situation, not the arithmetic): Olumi's "extra sales" total is said in the goal's workings, so the
+    // rate's link runs from the ovens straight to the sales it adds to, with the same size.
+    const rateLinks = (p: ReturnType<typeof project>) => p.graph.edges.filter((e) => e.coefficient_id === 'per_oven');
     // ONE link carries the rate in both forms: its id for the link editor, its size in natural units, its sign, whose it is.
     expect(rateLinks(product)).toEqual(rateLinks(effect));
-    expect(rateLinks(product)).toEqual([expect.objectContaining({ id: 'ovens_added__extra_sales', coefficient_id: 'per_oven', effect_direction: 'positive', origin: 'model_program:calculation',
+    expect(rateLinks(product)).toEqual([expect.objectContaining({ id: 'ovens_added__sales', from: 'ovens_added', to: 'sales', coefficient_id: 'per_oven', effect_direction: 'positive', origin: 'model_program:calculation',
       provenance: expect.objectContaining({ source: 'brief_extraction', magnitude: 'user_stated', natural_effect: expect.objectContaining({ amount: 100, amount_unit: 'loaf/week', per_source_change_unit: 'oven' }) }) })]);
     for (const p of [effect, product]) {
       expect(p.graph.nodes.find((n) => n.id === 'per_oven')).toBeUndefined();
       expect(p.graph.edges.filter((e) => e.from === 'per_oven')).toEqual([]);
-      expect(p.items.find((i) => i.record_id === 'per_oven')?.shown_as).toEqual({ on_edge: 'ovens_added__extra_sales' });
+      expect(p.items.find((i) => i.record_id === 'per_oven')?.shown_as).toEqual({ on_edge: 'ovens_added__sales' });
     }
     // Codex r4 #3709: a % rate's link figure is what the compiler uses, per ONE of the driver's unit (40 % → 0.4 loaf/week per
     // loaf/week), and it times the driver gives the compiled value; the card says it as the person gave it, 40 %.
@@ -3821,7 +3823,8 @@ describe('the model-program turn on the real core route', () => {
     // waiting for the answer; with the extra per oven asked as well nothing can be worked out yet, and still only what is
     // genuinely out (a note, an aim with no measure) is excluded.
     const waiting = nodeOf(project(bakery(), compile(bakery(), { sourceText: BRIEF })).graph);
-    expect(waiting('oven_price')).toMatchObject({ analysis_participation: 'included', display_value: 'Waiting for your answer',
+    // Q1 (28 Oct): its card reads "?"; that it waits for their answer, and the question, stay on it.
+    expect(waiting('oven_price')).toMatchObject({ analysis_participation: 'included', display_value: '?',
       value_basis: { kind: 'waiting_for_answer', words: 'Waiting for your answer', question: 'What would the second oven cost?' } });
     expect(waiting('spend').analysis_participation).toBe('included');
     const none = bakery();
@@ -3848,7 +3851,9 @@ describe('the model-program turn on the real core route', () => {
     expect(clubbed('promotion').interventions).toMatchObject({
       promo_on: { source: 'brief_extraction', source_words: 'Set by ‘Run a promotion’, from your brief' },
       spend: { source: 'brief_extraction', source_words: 'Set by ‘Run a promotion’, from your brief' } });
-    expect(clubbed('promo_on').value_basis).toEqual({ kind: 'structure', words: 'Fixed by how the model is built' });
+    // Q1 (Paul, 28 Oct): the promotion's on/off switch is no card of its own; the promotion's card says it, by its label.
+    expect(clubbed('promo_on')).toBeUndefined();
+    expect(clubbed('promotion').interventions.promo_on).toMatchObject({ label: 'promo on', value: 1 });
     expect(clubbed('members').value_basis).toMatchObject({ kind: 'worked_out', from: ['members_now', 'joins', 'leavers'] });
 
     // Codex r1 #3709 (1): a % range with no point is projected in the unit it is labelled with: 50–90 % sits at 70 %, never
