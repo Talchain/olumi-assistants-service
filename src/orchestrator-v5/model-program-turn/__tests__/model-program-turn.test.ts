@@ -3771,7 +3771,7 @@ describe('the model-program turn on the real core route', () => {
     const product = shown('product');
     // Q1 (Paul, 28 Oct: the situation, not the arithmetic): Olumi's "extra sales" total is said in the goal's workings, so the
     // rate's link runs from the ovens straight to the sales it adds to, with the same size.
-    const rateLinks = (p: ReturnType<typeof project>) => p.graph.edges.filter((e) => e.coefficient_id === 'per_oven');
+    const rateLinks = (p: ReturnType<typeof project>) => p.graph.edges.filter((e) => e.from === 'ovens_added' && (e.to === 'sales' || e.to === 'extra_sales'));
     // ONE link carries the rate in both forms: its id for the link editor, its size in natural units, its sign, whose it is.
     expect(rateLinks(product)).toEqual(rateLinks(effect));
     expect(rateLinks(product)).toEqual([expect.objectContaining({ id: 'ovens_added__sales', from: 'ovens_added', to: 'sales', coefficient_id: 'per_oven', effect_direction: 'positive', origin: 'model_program:calculation',

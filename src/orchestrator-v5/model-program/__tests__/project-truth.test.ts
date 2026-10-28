@@ -285,8 +285,20 @@ describe('C13 (27 Oct, the design session on Paul\'s board): the board draws wha
 });
 
 describe('Q1 (Paul, 28 Oct: "the canvas shows the situation, not the arithmetic")', () => {
-  // Each row is RED on 8a5f322e's projection (the switch, the total and its zero were their own cards) and GREEN with this change.
+  // The first three rows are RED on 76dd7532's projection (the switch, the total and its zero were their own cards; an asked
+  // figure read "Waiting for your answer") and GREEN with this change. The next two are guards that hold before and after
+  // (a person's total is never folded; every saved board stays whole). The last five are Codex r1's counterexamples on
+  // f9b20b71 (B1-B5), each RED there and GREEN with its fix.
   const ids = (xs: Rec[]) => new Set(xs.map((x) => x.id as string));
+  /** Every link joins two drawn cards, ids are once, and every record is a card or said on a drawn one. */
+  const lostIn = (p: ReturnType<typeof project>) => {
+    const nodes = ids(p.graph.nodes as Rec[]), edges = edgesOf(p), edgeIds = ids(edges);
+    return [...edges.filter((e) => !nodes.has(e.from) || !nodes.has(e.to)).map((e) => `link ${e.id}`),
+      ...(new Set(edges.map((e) => e.id)).size === edges.length ? [] : ['a repeated link id']),
+      ...p.items.filter((i) => (i.shown_as.node !== undefined && !nodes.has(i.shown_as.node)) || (i.shown_as.on_node !== undefined && !nodes.has(i.shown_as.on_node))
+        || ('on_edge' in i.shown_as && !edgeIds.has(i.shown_as.on_edge!)) || (i.shown_as.edge !== undefined && i.shown_as.edge.split(' ').some((x) => !edgeIds.has(x))))
+        .map((i) => `record ${i.record_id}`)];
+  };
   it('an on/off switch an option sets is said on that option\'s card, in words, and the option\'s own link carries the size', () => {
     const p = projected(club(), CLUB_BRIEF);
     expect(nodeOf(p, 'promo_on')).toBeUndefined();
@@ -329,15 +341,59 @@ describe('Q1 (Paul, 28 Oct: "the canvas shows the situation, not the arithmetic"
   });
 
   it('every saved board stays whole: each link joins two cards, each id is once, and every record is a card or said on one that is drawn', () => {
-    for (const file of ['capacity-s4.saved.json', 'hiring-alpha3.saved.json', 'hiring-paul-1027.saved.json']) {
-      const p = draft(file);
-      const nodes = ids(p.graph.nodes as Rec[]), edges = edgesOf(p);
-      expect(edges.filter((e) => !nodes.has(e.from) || !nodes.has(e.to)).map((e) => e.id), file).toEqual([]);
-      expect(new Set(edges.map((e) => e.id)).size, file).toBe(edges.length);
-      const edgeIds = ids(edges);
-      const lost = p.items.filter((i) => (i.shown_as.node !== undefined && !nodes.has(i.shown_as.node)) || (i.shown_as.on_node !== undefined && !nodes.has(i.shown_as.on_node))
-        || (i.shown_as.on_edge !== undefined && !edgeIds.has(i.shown_as.on_edge)) || (i.shown_as.edge !== undefined && i.shown_as.edge.split(' ').some((x) => !edgeIds.has(x))));
-      expect(lost.map((i) => [i.record_id, i.shown_as]), file).toEqual([]);
-    }
+    for (const file of ['capacity-s4.saved.json', 'hiring-alpha3.saved.json', 'hiring-paul-1027.saved.json']) expect(lostIn(draft(file)), file).toEqual([]);
+  });
+
+  it('B1: a constant\'s link that carries a size (a person\'s figure, or a question) is never dropped with the constant', () => {
+    const s = saved('capacity-s4.saved.json');
+    const m = structuredClone(s.model);
+    m.quantities.push(q('fixed_driver', 'specialist', { value: 1, author: 'structure' }),
+      q('person_rate', 'ticket/week/specialist', { kind: 'coefficient', value: 17, quote: 'a fixed specialist adds 17 tickets' }));
+    const r = m.relations.find((x) => x.defines === 'additional_capacity')!;
+    if (r.form !== 'effect') throw new Error('the fixture must be an effect');
+    r.terms.push({ driver: 'fixed_driver', coefficient: 'person_rate', author: 'person', quote: 'a fixed specialist adds 17 tickets', ...at });
+    const p = projected(m, s.brief);
+    expect(lostIn(p)).toEqual([]);
+    const host = p.items.find((i) => i.record_id === 'person_rate')!.shown_as.on_edge!;
+    expect(edgesOf(p).find((e) => e.id === host)).toMatchObject({ coefficient_id: 'person_rate' });
+  });
+
+  it('B2: a constant something else acts on (a risk) keeps its card; no link is left pointing at nothing', () => {
+    const s = saved('capacity-s4.saved.json');
+    const m = structuredClone(s.model);
+    m.quantities.push(q('shock_chance', '1', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.2, low: 0.1, high: 0.3, range_kind: 'plausible', basis: 'b' }),
+      q('shock_effect', '1', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.5, low: 0.4, high: 0.6, range_kind: 'plausible', basis: 'b' }));
+    m.risks.push({ id: 'shock', label: 'A shock', occurrence: 'shock_chance', severity: 'shock_effect', effect_on: 'zero_additional_capacity', mode: 'multiply', starts_after_periods: 0, author: 'olumi', quote: null, ...at });
+    const p = projected(m, s.brief);
+    expect(lostIn(p)).toEqual([]);
+    expect(nodeOf(p, 'zero_additional_capacity')).toMatchObject({ id: 'zero_additional_capacity' });
+  });
+
+  it('B3: a stock\'s inflow never passes a per-period size on as the stock\'s own: the promotion never claims its size on members', () => {
+    const m = club();
+    Object.assign(m.quantities.find((x) => x.id === 'base_joins')!, { author: 'structure', value: 0, low: null, high: null, range_kind: null, quote: null, status: 'known', kind: 'fact' });
+    const p = projected(m, CLUB_BRIEF);
+    expect(lostIn(p)).toEqual([]);
+    expect(edgesOf(p).filter((e) => e.to === 'members' && e.coefficient_id === 'promo_effect')).toEqual([]);
+  });
+
+  it('B4: a switch something other than its options acts on (a risk) keeps its card; the risk never borrows the option\'s size or sign', () => {
+    const m = club();
+    m.quantities.push(q('dip_chance', '1', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.2, low: 0.1, high: 0.3, range_kind: 'plausible', basis: 'b' }),
+      q('dip_effect', '1', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.5, low: 0.4, high: 0.6, range_kind: 'plausible', basis: 'b' }));
+    m.risks.push({ id: 'dip', label: 'The promotion half lapses', occurrence: 'dip_chance', severity: 'dip_effect', effect_on: 'promo_on', mode: 'multiply', starts_after_periods: 0, author: 'olumi', quote: null, ...at });
+    const p = projected(m, CLUB_BRIEF);
+    expect(lostIn(p)).toEqual([]);
+    expect(nodeOf(p, 'promo_on')).toMatchObject({ id: 'promo_on' });
+    expect(edgesOf(p).filter((e) => e.from === 'dip').map((e) => [e.to, e.effect_direction, e.effect_mode, e.coefficient_id ?? null])).toEqual([['promo_on', 'negative', 'multiply', null]]);
+  });
+
+  it('B5: an aim read per a worked-out figure says the totals folded off that figure too', () => {
+    const s = saved('capacity-s4.saved.json');
+    const m = structuredClone(s.model);
+    m.goals.push({ ...structuredClone(m.goals[0]!), id: 'share_goal', label: 'Existing share', measure: { ...structuredClone(m.goals[0]!.measure!), quantity: 'existing_capacity', per: 'weekly_support_capacity' } });
+    const p = projected(m, s.brief);
+    expect(nodeOf(p, 'share_goal').value_basis).toMatchObject({ kind: 'worked_out', from: expect.arrayContaining(['additional_capacity']),
+      words: 'Additional specialist capacity: worked out from Additional capacity with no additional specialists and Additional specialists' });
   });
 });

@@ -345,7 +345,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(p.graph.nodes).toHaveLength(14);
   });
 
-  it('W3 contrast (26 Oct), a saved draft with no notes projects exactly as before: the same cards, in order, no text card', () => {
+  it('W3 contrast (26 Oct), a saved draft with no notes has no text card; its cards in order (Q1, 28 Oct: its total and zero are said on the goal)', () => {
     const p = savedDraft('capacity-s4.saved.json');
     expect(p.items.filter((i) => NOTE_FAMILIES.has(i.family))).toEqual([]);
     // The cards staging drew for this draft before W3 (13e6bd5d), bound as literals: a note-less model is untouched.

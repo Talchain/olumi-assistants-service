@@ -575,7 +575,11 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     && !measured.has(q.id) && q.kind !== 'coefficient' && !isCoefficient(q.id);
   /** Every quantity an aim's measure is worked out from, nearest first. */
   const upstream = (id: string): string[] => { const seen: string[] = []; const walk = (x: string) => { for (const p of partsOf.get(x) ?? []) if (!seen.includes(p)) { seen.push(p); walk(p); } }; walk(id); return seen; };
-  const goalUpstream = new Map(model.goals.filter((g) => has(g.measure)).map((g) => [g.id, upstream(g.measure!.quantity)] as const));
+  /** What an aim's measure reads: its quantity, a per-unit denominator and a stated reference value (Codex r1 #3875 B5). */
+  const measureReads = (g: CanonicalModelT['goals'][number]) => (g.measure ? [g.measure.quantity, g.measure.per,
+    g.measure.reference?.kind === 'value' ? g.measure.reference.quantity : null].filter(has) : []);
+  const goalUpstream = new Map(model.goals.filter((g) => has(g.measure))
+    .map((g) => [g.id, [...new Set(measureReads(g).flatMap((m) => [m, ...upstream(m)]))]] as const));
   const optionsSetting = (id: string) => model.options.filter((o) => o.sets.some((s) => s.quantity === id)).map((o) => o.id).sort();
   const switches = new Map(model.quantities.filter((q) => q.author === 'structure' && q.status === 'known' && q.kind === 'fact' && controlled.has(q.id) && has(q.value)
     && !(has(q.low) && has(q.high) && q.low !== q.high) && foldable(q)).map((q) => [q.id, optionsSetting(q.id)[0]!] as const));
@@ -596,8 +600,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     .map((q) => [q.id, totals.get(model.relations.find((r) => partsOf.get(r.defines)?.includes(q.id))!.defines)!] as const));
   const reasoningOf = (e: Rec) => String((e.provenance as Rec | undefined)?.['reasoning'] ?? '');
   const definitionalLink = (e: Rec) => (e.provenance as Rec | undefined)?.['definitional'] === true;
-  /** A link that carries what feeds it one for one (a part added, a base, a starting level, an inflow). */
-  const oneForOne = (e: Rec) => definitionalLink(e) && e.effect_direction === 'positive' && /^(added|base level|starting level|inflow)/.test(reasoningOf(e));
+  /** A link that carries what feeds it one for one, in the same unit: a part added, or an effect's base level. A stock's
+   *  start and inflows accumulate over periods, so a size per period never becomes the stock's own (Codex r1 #3875 B3). */
+  const oneForOne = (e: Rec) => definitionalLink(e) && e.effect_direction === 'positive' && /^(added|base level)$/.test(reasoningOf(e));
   /** Two links make one only when at most one of them has a size, so the straight link never claims a size the model lacks. */
   const composable = (a: Rec, b: Rec) => oneForOne(a) || oneForOne(b) || (!has(a.coefficient_id) && !has(b.coefficient_id));
   const usedIds = new Set(edges.map((e) => e.id as string));
@@ -611,10 +616,16 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const offBoard = new Map<string, string>();
   for (const f of [...switches.keys(), ...totals.keys()].sort()) {
     const all = edges.filter((e) => e.to === f), outs = edges.filter((e) => e.from === f);
-    // A constant's link into a total carries nothing to what the total feeds: it is said in the workings, never drawn.
-    const ins = all.filter((a) => !constants.has(a.from as string));
+    // A constant's plain part into a total carries nothing to what the total feeds: it is said in the workings, never drawn.
+    // A link with a size of its own (a coefficient, and any question on it) is never dropped (Codex r1 #3875 B1).
+    const dropped = (a: Rec) => constants.has(a.from as string) && definitionalLink(a) && !has(a.coefficient_id);
+    const ins = all.filter((a) => !dropped(a));
+    // A switch is folded only when every link into it is an option setting it: anything else acting on it (a risk) keeps
+    // the switch its card, never copying the option's size onto it (Codex r1 #3875 B4).
+    const setters = new Set(optionsSetting(f));
+    if (switches.has(f) && !ins.every((a) => setters.has(a.from as string))) continue;
     if (ins.length === 0 || outs.length === 0 || (totals.has(f) && !ins.every((a) => outs.every((b) => composable(a, b))))) continue;
-    for (const a of all) if (constants.has(a.from as string)) replaced.set(a.id as string, []);
+    for (const a of all) if (dropped(a)) replaced.set(a.id as string, []);
     const label = Q.get(f)?.label ?? f;
     const made = ins.flatMap((a) => outs.map((b) => {
       const id = freshId(a.from as string, b.to as string, f);
@@ -639,7 +650,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     offBoard.set(f, switches.get(f) ?? totals.get(f)!);
   }
   // A constant leaves the board with the totals it fed, once none of its links is drawn.
-  for (const [c, aim] of constants) if (!edges.some((e) => e.from === c) && [...offBoard.keys()].some((t) => partsOf.get(t)?.includes(c))) offBoard.set(c, aim);
+  for (const [c, aim] of constants) if (!edges.some((e) => e.from === c || e.to === c) && [...offBoard.keys()].some((t) => partsOf.get(t)?.includes(c))) offBoard.set(c, aim);
   const resolve = (id: string): string[] => (replaced.has(id) ? replaced.get(id)!.flatMap(resolve) : [id]);
   if (offBoard.size > 0) {
     nodes.splice(0, nodes.length, ...nodes.filter((n) => !offBoard.has(n.id as string)));
@@ -658,8 +669,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       const m = g.measure?.quantity;
       if (inside.length === 0 || !has(m)) continue;
       const card = cardOf.get(g.id)!;
+      const own = partsOf.has(m) ? [workedOutWords(m)] : [];
       card.value_basis = { kind: 'worked_out', from: [...new Set([...(partsOf.get(m) ?? []), ...off])],
-        words: [workedOutWords(m), ...inside.map((t) => `${Q.get(t)?.label ?? t}: ${workedOutWords(t).replace(/^W/, 'w')}`)].join('; ') };
+        words: [...own, ...inside.map((t) => `${Q.get(t)?.label ?? t}: ${workedOutWords(t).replace(/^W/, 'w')}`)].join('; ') };
     }
   }
 
