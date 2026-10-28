@@ -126,7 +126,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // 28 Oct, Box 2 (Paul Q1/Q2, 28 Oct; DL contract 17:42, PL corrections 17:46): what a simplifying update keeps and may fold,
     // and Olumi's questions returned only when this change makes the saved ones out of date; each said once, in this order,
     // before the new-id sentence. Changed knowingly from 5cfd9f88… (the 28 Oct figures-kept sentence).
-    const BOX2 = ['When asked to simplify, keep every figure, limit, quote, link in words and risk they gave, each measure of an aim or limit of theirs, and every relation their figures size; fold only Olumi\'s own items that add nothing to understanding or challenge, and turn Olumi\'s unsized arithmetic scaffolding (switches, zeros or intermediate totals no real figure sizes) into links in words.',
+    const BOX2 = ['When asked to simplify, keep every figure, aim, limit, quote, link in words and risk they gave, each measure of an aim or limit of theirs, and every relation their figures size; fold only Olumi\'s own items that add nothing to understanding or challenge, and turn Olumi\'s unsized arithmetic scaffolding (switches, zeros or intermediate totals no real figure sizes) into links in words.',
       'Preserve supported numerical calculations and every consequential cause, condition, risk, uncertainty, disagreement and attribution, including Olumi\'s useful provisional reasoning; re-express rather than erase it.',
       // Box 3 rerun (28 Oct): Paul's "10 or fewer nodes" was met by cutting a figure-sized calculation and Olumi's pilot (simplify-noloss FAIL)
       'A size they ask for never outranks this: simplify as far as you can without losing any of it.',
@@ -134,7 +134,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     for (const line of BOX2) expect(count(UPDATE_PREFIX, line), line).toBe(1);
     expect(UPDATE_PREFIX).toContain(`without losing their meaning or history. ${BOX2.join(' ')} A new item gets a new id.`);
     expect(UPDATE_PREFIX).not.toContain('where no real figure sizes it');
-    expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('ec7f26c37168fef719c528c4a2beae8a8d382f758ffa01a3e79b2c0cc64b68e7'); // 28 Oct: Box 3 rerun, a size they ask for never outranks keeping what they gave; before it ef207a98…. 28 Oct: Box 3 european-simplify (PL 19:24): a simplify keeps each measure of theirs and every relation their figures size; before it 9dbe0cf0….
+    expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('f1230a2a2e72b40afc0516f24e0c23227d24e2c8a87bb6c90b16869d164ff0ef'); // 28 Oct: Box 3 rerun 2 (PL 20:52), a simplify keeps every aim they gave too; before it ec7f26c3…. 28 Oct: Box 3 rerun, a size they ask for never outranks keeping what they gave; before it ef207a98…. 28 Oct: Box 3 european-simplify (PL 19:24): a simplify keeps each measure of theirs and every relation their figures size; before it 9dbe0cf0….
     // Box 2: the update's strict output, as sent, carries Olumi's questions (null, or the whole new list); its identity, recorded.
     expect(createHash('sha256').update(JSON.stringify(UPDATE_JSON_SCHEMA), 'utf8').digest('hex')).toBe('4a39183bbb8b75a87904309fd44e2a73a184daae67143ee57c89455ac447c03e'); // before Box 2: f84a5631…
     expect(createHash('sha256').update(UPDATE_REPAIR_PREFIX, 'utf8').digest('hex')).toBe('1b52b62678cfab1b06670bc026504a9e63e186e458fec752c4b56ba9df918daf');
