@@ -17,6 +17,7 @@ import { readingOf, withApproved } from './postimage.js';
 import { holdProgramCard, isProgramProposal, SAVE_REFUSED_AFTER_APPROVAL } from './program-tools.js';
 import { programOperationId, savePostimage, withNewRun } from './program-save.js';
 import { programReadOf } from './program-store.js';
+import { foldedInto } from './reading-groups.js';
 
 type Ctx = { readonly scenario_id: string; readonly authenticated_user_id: string | null };
 
@@ -50,7 +51,12 @@ export async function approveReadingRows(deps: { readonly dispatch: InternalDisp
   const settled = args.ids.filter((id) => !proposed.has(id));
   if (settled.length > 0) return { outcome: refused('not_proposed', undefined, { ids: settled }) };
   const approver = ctx.authenticated_user_id;
-  const next = withNewRun({ ...program, canonical: withApproved(program.canonical, new Set(args.ids), approver) });
+  // W7 (assessor, 28 Oct 01:15Z): a row stands for every record the card presents on it. A worked-out figure is said on its
+  // relation's row and an option's own setting on the option's row (`foldedInto`, the map the card was built with, on this
+  // same model), so ticking that row approves them too, and an unticked row's records stay proposed.
+  const fold = foldedInto(program.canonical);
+  const presented = (ids: Iterable<string>) => { const on = new Set(ids); return new Set([...on, ...[...fold].filter(([child, row]) => on.has(row) && proposed.has(child)).map(([child]) => child)]); };
+  const next = withNewRun({ ...program, canonical: withApproved(program.canonical, presented(args.ids), approver) });
   const { write } = await savePostimage(deps.dispatch, { scenarioId: ctx.scenario_id, operationId, expectedIdentity: before.identity, ownVersion }, next.graph);
   if (write.status === 'unknown') return { outcome: write.outcome };
   if (write.status === 'stale') return { outcome: refused('superseded') };
@@ -64,7 +70,7 @@ export async function approveReadingRows(deps: { readonly dispatch: InternalDisp
   const card = reread === undefined || !reread.ok ? undefined : holdProgramCard(deps.proposals,
     { scenarioId: ctx.scenario_id, userId: p.user_id ?? null, graphHash: write.after.graphHash, identity: write.after.identity! },
     { label: p.public_label, basis: p.provenance.basis ?? '', reading: true, changes: reread.changes.filter((c) => open.has(c.id)),
-      program: withNewRun({ ...next.program, canonical: withApproved(next.program.canonical, open, approver) }).program });
+      program: withNewRun({ ...next.program, canonical: withApproved(next.program.canonical, presented(open), approver) }).program });
   return { outcome: ok({ saved: true, receipt: write.receipt, approved: args.ids.length, still_open: open.size,
     revision: { graph_hash: write.after.graphHash, graph_identity_hash: write.after.identity } }, { mutated: true, ran: true }), ...(card !== undefined ? { card } : {}) };
 }

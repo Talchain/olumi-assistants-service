@@ -27,6 +27,7 @@ import { applyCanvasFigure, applyProgramChange, holdProgramCard, ProgramChangePa
 import { log as staticLog } from '../../../utils/telemetry.js';
 import { asDrafted, GROUPS, readingOf, validatePostimage, withoutHost } from '../postimage.js';
 import { approveReadingRows } from '../approve-rows.js';
+import { foldedInto } from '../reading-groups.js';
 import { proposalPendingAction } from '../../agent-lane/durable-proposal.js';
 import { agentProposalOf, proposalFieldsWire, proposalRecord } from '../../agent-lane/proposal-object/record.js';
 import { ProposalChangeSchema, ProposalStore, type ProposalChange } from '../../agent-lane/proposal.js';
@@ -1564,6 +1565,17 @@ describe('the model-program turn on the real core route', () => {
     };
     const tick = (card: Json, ids: unknown, extra: Json = {}) => turn({ message: 'Confirm ticked.', chip: card.approve_action, approve_ids: ids, ...extra });
 
+    it('W7 (assessor 01:15Z): a ticked row approves every record the card says on it (a worked-out figure on its relation\'s row); an unticked row\'s stay proposed', async () => {
+      const card = await drafted();
+      const rowOf = foldedInto(persisted!.living_model.canonical as CanonicalModelT);
+      // The bakery's spend is worked out on the spend relation's row; it has no row of its own.
+      expect(rowOf.get('spend')).toBe('spend_rel');
+      expect(card.changes.some((c: Json) => c.id === 'spend')).toBe(false);
+      const res = await tick(card, ['spend_rel']);
+      expect(res.statusCode, res.body).toBe(200);
+      expect(approvals()).toMatchObject({ spend_rel: 'approved', spend: 'approved', sales_rel: 'proposed', sales: 'proposed' });
+    });
+
     it('a partial approval saves exactly the ticked ids (an Olumi estimate stays Olumi\'s), the rest stay proposed, with no AI call; the card is offered again for what is open; it survives a cold reopen and a resend', async () => {
       const card = await drafted();
       const before = persisted!.living_model.canonical as CanonicalModelT;
@@ -1579,7 +1591,10 @@ describe('the model-program turn on the real core route', () => {
       expect(body.receipts.map((x: Json) => x.authorised_by)).toEqual(['person']);
       // Exactly those two are approved; every other record is still Olumi's reading, proposed.
       const ids = card.changes.map((c: Json) => c.id) as string[];
-      expect(approvals()).toEqual(Object.fromEntries(ids.map((id) => [id, ['sell_through', 'more_loaves'].includes(id) ? 'approved' : 'proposed'])));
+      // Every record is a row or said on one (a worked-out figure on its relation's row); only the ticked rows' are approved.
+      const rowOf = foldedInto(before);
+      expect(Object.keys(approvals()).sort()).toEqual([...ids, ...rowOf.keys()].sort());
+      expect(approvals()).toEqual(Object.fromEntries(Object.keys(approvals()).map((id) => [id, ['sell_through', 'more_loaves'].includes(rowOf.get(id) ?? id) ? 'approved' : 'proposed'])));
       const saved = persisted!.living_model.canonical as CanonicalModelT;
       // Approval is not authorship: Olumi's estimate is still Olumi's, the person's goal still theirs, in their words.
       expect(saved.quantities.find((x) => x.id === 'sell_through')).toMatchObject({ author: 'olumi', quote: null, approval: 'approved', author_id: null });
@@ -1606,7 +1621,7 @@ describe('the model-program turn on the real core route', () => {
       // A Run press while the card waits answers in the conversation (one AI call on staging f49f50e1); the ticks around it call none.
       const callsAfterRun = sent.length;
       expect(later.cards.map((c: Json) => c.proposal_id)).toEqual([body.cards[0].proposal_id]);
-      expect(approvals()).toEqual(Object.fromEntries(ids.map((id) => [id, ['sell_through', 'more_loaves'].includes(id) ? 'approved' : 'proposed'])));
+      expect(approvals()).toEqual(Object.fromEntries(Object.keys(approvals()).map((id) => [id, ['sell_through', 'more_loaves'].includes(rowOf.get(id) ?? id) ? 'approved' : 'proposed'])));
       // The same press resent is that press: replayed, never a second write.
       const replay = await tick(card, ['sell_through', 'more_loaves'], { turn_id: turnId });
       expect([replay.statusCode, replay.json().durability, registered.length, sent.length]).toEqual([200, 'replayed', writes + 1, callsAfterRun]);
