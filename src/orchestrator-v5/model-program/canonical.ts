@@ -173,7 +173,7 @@ const StockRelation = z.object({
   inflows: ids.describe('Quantities added each period, in the stock\'s unit per period.'),
   outflows: ids.describe('Quantities removed each period, in the stock\'s unit per period (a stock × a rate per period is such a flow).'),
   ...attribution,
-}).strict().describe('A level that carries over: next period\'s level = this period\'s + inflows − outflows. In a first draft, use only when the person named a running total.');
+}).strict().describe('A level that carries over: next period\'s level = this period\'s + inflows − outflows.');
 
 export const CanonicalRelation = z.union([SumDefinition, ProductDefinition, EffectRelation, StockRelation]);
 export type CanonicalRelationT = z.infer<typeof CanonicalRelation>;
