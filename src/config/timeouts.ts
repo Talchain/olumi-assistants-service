@@ -1,7 +1,7 @@
 import { env } from "node:process";
 
 export const MIN_TIMEOUT_MS = 5_000; // 5s
-export const MAX_TIMEOUT_MS = 5 * 60_000; // 5m
+export const MAX_TIMEOUT_MS = 20 * 60_000; // MODEL-COMPARE long-turn (measurement only): 20m
 
 /** Default timeout for standard HTTP client operations (110s) */
 export const DEFAULT_HTTP_CLIENT_TIMEOUT_MS = 110_000;

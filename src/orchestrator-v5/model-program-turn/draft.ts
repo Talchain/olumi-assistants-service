@@ -13,6 +13,7 @@ import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
 import { todayInLondon } from '../goal-target/deadline-date.js';
 import { compile, compileJson, normalise, type CompileError, type CompileResult } from '../model-program/compile.js';
+import { anthropicResponsesCall, deepseekResponsesCall, mcDraftModel, mcOpenAiBody } from './mc-anthropic-call.js';
 import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, CanonicalUpdate, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, todayLine, UPDATE_JSON_SCHEMA, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX,
   type CanonicalUpdateT } from './prompt.js';
 
@@ -126,9 +127,10 @@ export function readUpdate(saved: CanonicalModelT, update: CanonicalUpdateT, rea
 
 /** The ledgered client's Responses call, streamed (two unstreamed phase-0 calls were cut at 180 s); one per turn. */
 export function ledgeredResponsesCall(): ResponsesCall {
+  const mc = mcDraftModel(); if (mc !== null) return process.env['MC_DRAFT_PROVIDER'] === 'deepseek' ? deepseekResponsesCall(mc) : anthropicResponsesCall(mc); // MEASUREMENT BRANCH ONLY
   return async (body) => {
     const final = await streamedLedgeredResponse({ site: 'model-program.draft',
-      detailOf: (b) => ({ model: String(b['model']), purpose: 'canonical_draft', ...agentRequestIdentity('agent.construct', b) }) }, body);
+      detailOf: (b) => ({ model: String(b['model']), purpose: 'canonical_draft', ...agentRequestIdentity('agent.construct', b) }) }, mcOpenAiBody(body));
     const text = (final?.output ?? []).flatMap((o) => (o.type === 'message' ? o.content : [])).flatMap((c) => (c.type === 'output_text' ? [c.text] : []))[0];
     return { text: text ?? null, status: final?.status ?? null, incomplete: final?.incomplete_details?.reason ?? null, usage: final?.usage ?? null };
   };
