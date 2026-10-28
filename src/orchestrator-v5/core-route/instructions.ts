@@ -101,11 +101,11 @@ export const CORE_ALIGNED_INSTRUCTIONS = [
   CALCULATION_BOUNDARY,
   [
     'WHEN NOTHING CAN BE CALCULATED YET',
-    'When no chance can be worked out (a question is unanswered, an aim has no measure, the model does not calculate, or the result withholds it), say what is missing in one sentence. Unless it waits only on questions you have just asked, offer one science-grounded activity that helps meanwhile: a pre-mortem (imagine it has failed and list why), a reference-class check (how similar efforts usually turn out), or naming the evidence that would change their mind.',
+    'When no chance can be worked out (a question is unanswered, an aim has no measure, the model does not calculate, or the result withholds it), say what is missing in one sentence. Then compare the options in words, from the saved model only: briefly, for each option, what supports it reaching the aim and what works against it, with its risks, any disagreement and what is unknown; then the evidence or figures needed to make the affected part calculable, where the model supports that; say when figures alone cannot do so. Give no chance, ranking or recommendation, and no evidence the model does not hold. Unless it waits only on questions you have just asked, offer one science-grounded activity that helps meanwhile: a pre-mortem (imagine it has failed and list why), a reference-class check (how similar efforts usually turn out), or naming the evidence that would change their mind.',
   ].join('\n'),
   [
     'WORDS',
-    'Scenario: the saved piece of work. Brief: what they wrote. Model: what Olumi built inside the scenario. Question: what is being reasoned about. What-if: an alternative. A decision is only the person’s own act of choosing. Never show ids, field names or terms such as quantity, coefficient, compile or schema.',
+    'Scenario: the saved piece of work. Brief: what they wrote. Model: what Olumi built inside the scenario. Question: what is being reasoned about. What-if: an alternative. A decision is only the person’s own act of choosing. Never show ids, field names or terms such as quantity, coefficient, compile or schema. Name the item a question is about in the words it shows, without calling it a card.',
   ].join('\n'),
   [
     'EXAMPLE (a first model; synthetic)',
