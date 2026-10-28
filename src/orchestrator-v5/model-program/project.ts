@@ -143,14 +143,15 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   /**
    * WHY A GOAL OR LIMIT IS NOT CALCULATED (Q1 reader r2, PL 16:33): the compiler's own reasons, which name every link in words
    * and unsized risk its closure reaches; an aim or guardrail with no measure has no closure, so the links in words and risks
-   * on it are named from the model, by the same labels. Said only where it is not calculated.
+   * on it are named from the model, by the same labels. Said only where it is not calculated. Every reason is kept, an error's
+   * too, each starting with a capital (DL, 28 Oct: correctness over shortening; shortening from the typed reasons is after the alpha).
    */
   const withheldReasonOf = (rec: { id: string; measure: unknown }, outcome: { status: string; reasons: readonly string[] } | undefined): Rec => {
     if (outcome === undefined || outcome.status === 'calculable') return {};
     const on = [...influences.filter((i) => i.to === rec.id).map((i) => `"${labelOf(i.from)} → ${labelOf(i.to)}"`),
       ...model.risks.filter((k) => k.effect_on === rec.id).map((k) => `the risk "${k.label}"`)];
     const linked = rec.measure === null && on.length > 0 ? [`It is linked in words from ${on.length === 1 ? on[0] : `${on.slice(0, -1).join(', ')} and ${on.at(-1)}`}.`] : [];
-    return { withheld_reason: [...outcome.reasons, ...linked].join(' ') };
+    return { withheld_reason: [...outcome.reasons.map((r) => r.charAt(0).toUpperCase() + r.slice(1)), ...linked].join(' ') };
   };
   // Every link is drawn (Paul: show, never hide; S1 strip): one whose size no one has given and whose direction is not stated
   // has no sign and no strength band (`rateLink`).

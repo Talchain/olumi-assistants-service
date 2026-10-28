@@ -207,10 +207,42 @@ describe('Box 1a: links in words, risks no one can size and unmeasured factors',
     m.risks.push({ ...m.risks[0]!, id: 'noise', label: 'Noise complaints', effect_on: 'members_happy' });
     const p = project(m, compile(m), { brief: STUDIO_BRIEF });
     const reason = (id: string) => (p.graph.nodes as Rec[]).find((n) => n.id === id)!.withheld_reason;
-    expect(reason('keep_members')).toBe([MOOD, EVENING_LINK, MOOD_LINK, RISK].join(' '));
+    // Every one of the compiler's reasons, each starting with a capital (DL, 28 Oct: correctness over shortening).
+    expect(reason('keep_members')).toBe('Rests on "How members feel", which is not measured: No one can measure how members feel yet; repeat bookings might show it. '
+      + 'Rests on the link "Evening classes → How members feel", which is in words, never calculated. Rests on the link "How members feel → members", which is in words, never calculated. '
+      + 'Rests on the risk "The instructor leaves", which the calculation cannot size.');
     expect(reason('members_happy')).toBe('"Members are happy" has no measure yet, so it is left out of the chance. It is linked in words from "Evening classes → Members are happy" and the risk "Noise complaints".');
     expect(reason('mp:limit:neighbours')).toBe('"Keep the neighbours on side" has no measure yet, so the result does not cover it. It is linked in words from "Evening classes → Keep the neighbours on side".');
     // Contrast: the calculable takings aim carries none.
     expect((p.graph.nodes as Rec[]).find((n) => n.id === 'takings_goal')).not.toHaveProperty('withheld_reason');
+  });
+
+  it('assessor (28 Oct): withheld_reason keeps every one of the compiler\'s reasons: a link in words and a missing deadline; a window figure\'s own reason and a link', () => {
+    const fee = (m: CanonicalModelT) => m.relations.push({ ...m.relations[3]!, id: 'fee_doubt', from: 'weekend_workshops', to: 'class_fee', direction: 'unknown', confidence: 'unknown', basis: null } as CanonicalModelT['relations'][number]);
+    const reason = (m: CanonicalModelT) => (project(m, compile(m)).graph.nodes as Rec[]).find((n) => n.id === 'takings_goal')!.withheld_reason;
+    // A link in words, and a setting that starts later on an aim with no deadline: both are said.
+    const later = studio();
+    fee(later);
+    later.options = later.options.map((o) => (o.id === 'weekend_workshops' ? { ...o, sets: o.sets.map((s) => ({ ...s, starts_after_periods: 2 })) } : o));
+    expect(reason(later)).toBe('Rests on the link "Weekend workshops → class fee", which is in words, never calculated. It changes over time, so it needs a deadline.');
+    // A link in words, and a window whose length is a range: both, each a sentence.
+    const ranged = studio();
+    fee(ranged);
+    ranged.quantities.push({ ...ranged.quantities.find((x) => x.id === 'members')!, id: 'duration', label: 'duration', unit: 'month', value: null, low: 2, high: 4, range_kind: 'bounds', quote: null });
+    ranged.goals = ranged.goals.map((g) => (g.id === 'takings_goal' ? { ...g, measure: { ...g.measure!, window: { origin_event: null, origin_offset: null, start: 0, periods: 'duration' } } } : g));
+    expect(reason(ranged)).toBe('The goal "Take £2,600 a month"\'s length "duration" is a range (2–4 month); the calculation needs one whole number of months. '
+      + 'Rests on the link "Weekend workshops → class fee", which is in words, never calculated.');
+  });
+
+  it('PL (28 Oct): a goal with no measure, in a model with an error, keeps "The model has errors to fix first." beside its own reason and what links to it', () => {
+    const m = studio();
+    m.goals.push({ ...m.goals[1]!, id: 'members_happy', label: 'Members are happy', measure: null, question: 'How would you tell the members are happy?', author: 'olumi', quote: null });
+    m.relations.push({ ...m.relations[2]!, id: 'evening_happy', to: 'members_happy', confidence: 'unsure', basis: null, author: 'olumi', quote: null } as CanonicalModelT['relations'][number]);
+    const reason = (x: CanonicalModelT) => (project(x, compile(x)).graph.nodes as Rec[]).find((n) => n.id === 'members_happy')!.withheld_reason;
+    const broken = structuredClone(m);
+    broken.quantities.push({ ...broken.quantities[0]! }); // the id "class_fee" twice
+    expect(reason(broken)).toBe('The model has errors to fix first. "Members are happy" has no measure yet, so it is left out of the chance. It is linked in words from "Evening classes → Members are happy".');
+    // Contrast: with no error, its own reason and the link alone.
+    expect(reason(m)).toBe('"Members are happy" has no measure yet, so it is left out of the chance. It is linked in words from "Evening classes → Members are happy".');
   });
 });
