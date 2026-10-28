@@ -137,3 +137,48 @@ describe('the program card\'s turn and reload rules are the legacy ones on a pro
     if (_name === 'its revision moved') expect(legacy).toEqual([]);
   });
 });
+
+describe('a reading card whose model the person changed by approving another card goes (Paul, 28 Oct)', () => {
+  // Paul's test: "The simpler model is now saved" came back with the FIRST draft's reading card as "Review this change" and
+  // "Not now", its only buttons. Reviewing it re-offers a reading of the model his approved change replaced.
+  const { graph, program } = first();
+  const reconcile = (held: PendingAction[], applied: Set<string>, g: Rec) => reconcileProgramCards({ atStart: held, latest: held,
+    isApplied: (id) => applied.has(id), declined: new Set(), graph: g, graphHash: hashOf(g), scenarioId: SCENARIO, nowMs: NOW });
+  const labels = (hs: readonly PendingAction[]) => hs.map((h) => agentProposalOf(h)!.public_label).sort();
+
+  it('the approved change saved: the reading card lapses, not kept for review', () => {
+    const store = new ProposalStore();
+    const reading = carrier(card(store, graph, { reading: true, label: 'Your situation as I understood it' }));
+    const change = carrier(card(store, graph, { label: 'A simpler model' }));
+    const out = reconcile([reading, change], new Set([agentProposalOf(change)!.proposal_id]), moved(program));
+    expect(out.carried).toEqual([]);
+    expect(labels(out.lapsed)).toEqual(['Your situation as I understood it']);
+  });
+
+  it('CONTRAST: the same reading card moved without an approval this turn is kept for review (PR-2)', () => {
+    const store = new ProposalStore();
+    const reading = carrier(card(store, graph, { reading: true, label: 'Your situation as I understood it' }));
+    const out = reconcile([reading], new Set(), moved(program));
+    expect(labels(out.carried)).toEqual(['Your situation as I understood it']);
+    expect(heldCardUnderReview(out.carried[0]!)).toBe(true);
+    expect(out.lapsed).toEqual([]);
+  });
+
+  it('CONTRAST: a change card beside the applied one is kept for review, never lapsed (PR-2)', () => {
+    const store = new ProposalStore();
+    const other = carrier(card(store, graph, { label: 'Estimate the oven price' }));
+    const change = carrier(card(store, graph, { label: 'A simpler model' }));
+    const out = reconcile([other, change], new Set([agentProposalOf(change)!.proposal_id]), moved(program));
+    expect(labels(out.carried)).toEqual(['Estimate the oven price']);
+    expect(heldCardUnderReview(out.carried[0]!)).toBe(true);
+    expect(out.lapsed).toEqual([]);
+  });
+
+  it('CONTRAST: on the same model the reading card holds, approvable', () => {
+    const store = new ProposalStore();
+    const reading = carrier(card(store, graph, { reading: true, label: 'Your situation as I understood it' }));
+    const out = reconcile([reading], new Set(), rerun(program));
+    expect(labels(out.carried)).toEqual(['Your situation as I understood it']);
+    expect(heldCardUnderReview(out.carried[0]!)).toBe(false);
+  });
+});

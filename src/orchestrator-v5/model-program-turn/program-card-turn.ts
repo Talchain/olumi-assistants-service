@@ -2,7 +2,8 @@
  * A model program's held cards across a turn and a reload (inventory F6 part b): the card's own rule (`program-card.ts`) in place
  * of the Living Model's lifecycle and field-scoped rules. A program card holds while its program revision does; one whose
  * revision moved is kept for review and said, never dropped; an applied or declined card goes; an expired one lapses. Same
- * results as the legacy reconcile and reload offer gave a program card (`__tests__/program-card-turn.test.ts`).
+ * results as the legacy reconcile and reload offer gave a program card (`__tests__/program-card-turn.test.ts`), save one: a
+ * reading card whose model the person changed by approving another card goes (Paul, 28 Oct: "Review this change" after "saved").
  */
 import { ProposalStore } from '../agent-lane/proposal.js';
 import { agentProposalOf, heldProposalId, offeredApproveChipOnRow, rehydrateProposals } from '../agent-lane/durable-proposal.js';
@@ -25,7 +26,9 @@ const holdsOn = (card: PendingAction, graph: unknown, graphHash: string): boolea
  * The program cards this answer row carries (the LATEST row's, the store's authority), refreshed and in emission order, and the
  * ones that went without the person (an expired card, or one this turn found that is no longer on the latest row). A card
  * applied or declined is gone, silently: the person did it. A card on an unknown model (`graphHash` undefined) is carried as it
- * stands. Only program cards are carried: a program has no other kind of held change.
+ * stands. Only program cards are carried: a program has no other kind of held change. A READING card whose revision moved
+ * because the person applied another card this turn lapses: their approved change replaced the model it read, and confirming
+ * it adds nothing (every row stays Olumi's provisional reading). A change card, or a reading moved any other way, is reviewed.
  */
 export function reconcileProgramCards(input: {
   readonly atStart: readonly PendingAction[];
@@ -42,10 +45,13 @@ export function reconcileProgramCards(input: {
   const lapsed: PendingAction[] = [];
   const live: PendingAction[] = [];
   const latest = cards(input.latest);
+  const appliedNow = cards(input.atStart).some((card) => input.isApplied(heldProposalId(card)));
   for (const card of latest) {
     if (gone(card)) continue;
     if (isPendingActionExpired(card, input.nowMs)) { lapsed.push(card); continue; }
-    live.push(input.graphHash !== undefined && !holdsOn(card, input.graph, input.graphHash) ? heldCardForReview(card, input.graphHash) : card);
+    const moved = input.graphHash !== undefined && !holdsOn(card, input.graph, input.graphHash);
+    if (moved && appliedNow && agentProposalOf(card)?.reading === true) { lapsed.push(card); continue; }
+    live.push(moved ? heldCardForReview(card, input.graphHash!) : card);
   }
   const onLatest = new Set(latest.map((h) => h.chip_id));
   for (const card of cards(input.atStart)) if (!onLatest.has(card.chip_id) && !gone(card)) lapsed.push(card);
