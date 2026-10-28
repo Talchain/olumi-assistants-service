@@ -329,7 +329,7 @@ export type CanonicalOptionSetT = z.infer<typeof CanonicalOptionSet>;
 export const CanonicalOption = z.object({
   id,
   label: z.string().describe('A short neutral name ("Second oven").'),
-  sets: z.array(CanonicalOptionSet).describe('[] means no numerical setting here; what the option changes in words is its influence links.'),
+  sets: z.array(CanonicalOptionSet).describe('The input quantities this option changes and what it sets each to. Where the brief states the option\'s effect as a figure (staff or capacity it adds, a price, a cost), that effect is a setting here on the input it changes. [] only when no figure sizes what it changes, which then stays an influence link.'),
   status: z.enum(OPTION_STATUSES).describe('live: compared. ruled_out: the person rules it out but keeps it in view. removed: taken out of the comparison.'),
   developed_from: id.nullable().describe('The id of the option this is a variant of. A record, not a cause. Null otherwise.'),
   carry_on: z.boolean().describe('true only for the option of carrying on as now; false for every other.'),
