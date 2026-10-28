@@ -11,6 +11,7 @@
  * The reply's counts and the card's groups are this ONE map, so tapping a count shows exactly that many rows.
  */
 import { type CanonicalModelT, type QuantityStatusT } from '../model-program/canonical.js';
+import { inlineQuantityId } from '../model-program/compile.js';
 
 export type ReadingGroup = 'used' | 'inferred' | 'left_out' | 'other';
 
@@ -18,6 +19,26 @@ type Attributed = { readonly author: string; readonly quote: string | null };
 const UNUSED: ReadonlySet<QuantityStatusT> = new Set(['not_applicable', 'unsupported']);
 /** Olumi's own figures: in hand (an estimate, or a reading of a stated date), or a size it cannot give yet. */
 const OLUMI_FIGURES: ReadonlySet<QuantityStatusT> = new Set(['known', 'estimated', 'unknown']);
+
+/**
+ * THE FIGURES SAID ON ANOTHER ITEM'S LINE (W8, c7.1 and c7.7), by id, with the id of that item: a worked-out figure with no
+ * words, question or party of its own is said on the line of the relation that works it out; an option's own setting with a
+ * figure in hand and no question (compile.ts `normalise`) is said on the option's line. A figure still to be given keeps its
+ * own line, where it is asked.
+ */
+export function foldedInto(model: CanonicalModelT): ReadonlyMap<string, string> {
+  const Q = new Map(model.quantities.map((q) => [q.id, q] as const));
+  const into = new Map<string, string>();
+  for (const r of model.relations) {
+    const q = Q.get(r.defines);
+    if (q !== undefined && !into.has(q.id) && q.status === 'derived' && q.quote === null && q.party === null && q.question === null) into.set(q.id, r.id);
+  }
+  for (const o of model.options) for (const s of o.sets) {
+    const q = s.to === null || s.to === undefined ? undefined : Q.get(s.to);
+    if (q !== undefined && q.id === inlineQuantityId(o.id, s.quantity) && q.status !== 'asked' && q.question === null) into.set(q.id, o.id);
+  }
+  return into;
+}
 
 /**
  * Every record's group, by its id (ids are unique across the model's families). `inTheirWords` is the validator's own check
@@ -41,6 +62,8 @@ export function readingGroups(model: CanonicalModelT, inTheirWords: (quote: stri
   for (const q of model.quantities) {
     groups.set(q.id, q.status === 'asked' || q.status === 'derived' ? 'other' : theirs(q) ? (UNUSED.has(q.status) ? 'left_out' : 'used') : q.author === 'olumi' && OLUMI_FIGURES.has(q.status) ? 'inferred' : 'other');
   }
+  // A figure said on another item's line is that item's, so it is counted once, as that line (W8).
+  for (const id of foldedInto(model).keys()) groups.delete(id);
   return groups;
 }
 

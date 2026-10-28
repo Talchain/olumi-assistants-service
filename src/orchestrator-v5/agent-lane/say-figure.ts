@@ -50,6 +50,8 @@ function place(n: string, rawUnit: string): string {
   if (c !== undefined) return n.startsWith('-') ? `-${c.symbol}${n.slice(1)}${c.rest}` : `${c.symbol}${n}${c.rest}`;
   return `${n} ${unit}`;
 }
+/** A formatted number placed beside its unit as {@link sayFigure} places it (a currency code says its symbol first). */
+export const placeFigure = (n: string, unit: string): string => place(n, unit);
 
 /**
  * {@link sayFigure} when it says the figure EXACTLY, else null. A consent label names the figure the approval writes,

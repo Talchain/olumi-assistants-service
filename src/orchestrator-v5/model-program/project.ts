@@ -100,9 +100,13 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
    * theirs as added (`user_set`), never "From your brief" (capacity, 27 Oct: "Staff absence", added in a later turn, was
    * marked "From your brief" beside its own "User edited" figure). Olumi's is Olumi's; a structural constant has none.
    */
-  const provenanceOf = (rec: { author: string; quote: string | null }) => {
+  // W8 (DL, served 1c16eb41): a figure still to be asked of the person ("person" there is who will answer it, canonical.ts
+  // `author`) with no words of theirs is Olumi's question, never "From your brief": it takes Olumi's provenance (`ai_inferred`,
+  // the existing value for Olumi's reading; the vocabulary has none for a question). A quoted record keeps the brief rule.
+  const askedByOlumi = (rec: { author: string; quote: string | null; status?: unknown }) => rec.author === 'person' && rec.status === 'asked' && !has(rec.quote);
+  const provenanceOf = (rec: { author: string; quote: string | null; status?: unknown }) => {
     const who = whoOf(rec, '');
-    return who === 'structure' ? {} : { provenance: who === 'olumi' ? 'ai_inferred' : has(rec.quote) && !fromBrief(rec.quote) ? 'user_set' : 'from_brief' };
+    return who === 'structure' ? {} : { provenance: who === 'olumi' || askedByOlumi(rec) ? 'ai_inferred' : has(rec.quote) && !fromBrief(rec.quote) ? 'user_set' : 'from_brief' };
   };
   /** Whose figure it is, in the canvas's value vocabulary: none claimed for a structural constant. */
   const figureSource = (q: CanonicalQuantityT): Rec => {

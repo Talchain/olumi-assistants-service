@@ -54,8 +54,8 @@ const CUST_WORDS = '‘Customers’ being at least 90 customers at 1 month from 
 const EXACT = 'Simulation precision: exact. Every simulated draw gives the same result for this option, so no sampling is involved.';
 // Lenses fit 2 (DL 23 Oct): an exact chance says the fixed value that makes it exact. Hold: £49 × 100 = £4,900 ≥ £4,800 and
 // 100 ≥ 90 (both met, both named); Raise: 100 − 1.8 × 10 = 82 < 90 (the missed one is named; £59 × 82 = £4,838 is met).
-const HOLD_WHY = 'in every simulated draw ‘Monthly recurring revenue’ is £4,900 at 1 month from the start of this model, at least £4,800 and ‘Customers’ is 100 customers at 1 month from the start of this model, at least 90 customers';
-const RAISE_WHY = 'in every simulated draw ‘Customers’ is 82 customers at 1 month from the start of this model, below 90 customers';
+const HOLD_WHY = 'Whatever the uncertain figures turn out to be, ‘Monthly recurring revenue’ is £4,900 at 1 month from the start of this model, at least £4,800 and ‘Customers’ is 100 customers at 1 month from the start of this model, at least 90 customers';
+const RAISE_WHY = 'Whatever the uncertain figures turn out to be, ‘Customers’ is 82 customers at 1 month from the start of this model, below 90 customers';
 const FORECAST_OR_VERDICT = /\b(will|win|wins|winner|best|recommend|recommended|should)\b|comes out on top/i;
 
 describe('present: the canonical analysis view from a simulated model', () => {
@@ -93,7 +93,7 @@ describe('present: the canonical analysis view from a simulated model', () => {
       const horizon = `${row[reading]} from the start of this model${row.aggregation === 'sum' && reading === 'state' ? ', taking its level at the start of each month' : ''}`;
       const words = `‘x’ being at least £4 ${horizon}`;
       expect(v.goal_chance.chance_words).toBe(`chance of ${words}`);
-      expect(cell(v, 'hold').face).toContain(`${words}, in this model, on your figures`);
+      expect(cell(v, 'hold').face).toContain(`${words}, in this model. It rests on your figures.`);
       expect(cell(v, 'hold').display).toBe(row.display);
       expect(JSON.stringify(v)).not.toContain('from now');
     }
@@ -115,9 +115,9 @@ describe('present: the canonical analysis view from a simulated model', () => {
         options: [{ option_id: 'hold', display: '100%' }, { option_id: 'raise', display: '0%' }] },
     ]);
     expect(cell(v, 'hold')).toEqual({ kind: 'figure', display: '100%',
-      face: `‘Hold’: 100% chance of ${joint}, in this model, on your figures: ${HOLD_WHY}.`,
+      face: `‘Hold’: 100% chance of ${joint}, in this model. It rests on your figures. ${HOLD_WHY}.`,
       detail: { precision_95: [1, 1], draws: 200, precision_words: EXACT } });
-    expect(cell(v, 'raise').face).toBe(`‘Raise to £59’: 0% chance of ${joint}, in this model, on your figures: ${RAISE_WHY}.`);
+    expect(cell(v, 'raise').face).toBe(`‘Raise to £59’: 0% chance of ${joint}, in this model. It rests on your figures. ${RAISE_WHY}.`);
   });
 
   it('(b) the basis: "on your figures" only when every input is the person’s; otherwise "if" with Olumi’s assumptions listed', () => {
@@ -125,22 +125,22 @@ describe('present: the canonical analysis view from a simulated model', () => {
     //     out of 10, a spread): conditional on Olumi's provisional reading of its own range, for every option and every target.
     const olumi = present(model(MRR_QUANTITIES(range('per_pound', -2.2, -1.4, -1.8, 'customers', 'olumi_estimate')), MRR_GOALS, MRR_OPTIONS),
       { ...MRR_LABELS, per_pound: { label: 'Customers lost per £1 of price rise', author: 'olumi' } });
-    const conversion = 'if ‘Customers lost per £1 of price rise’ follows Olumi’s provisional reading of Olumi’s own estimated range, '
-      + '-2.2 customers to -1.4 customers, as the range it falls in 8 times out of 10, with -1.8 customers as the middle value';
-    for (const id of ['hold', 'raise']) {
-      expect(cell(olumi, id).face).toContain(`, in this model, ${conversion}`);
-      expect(cell(olumi, id).face).not.toContain('on your figures');
-    }
-    expect(olumi.goal_chance.targets.per_target[1].words).toContain(`${CUST_WORDS}, in this model, ${conversion}`);
+    // W8 (c7.1): the reading is said in full once in the view (the first chance), and by its ends after.
+    const reading = '‘Customers lost per £1 of price rise’ follows Olumi’s provisional reading of Olumi’s own estimated range, -2.2 to -1.4 customers';
+    const conversion = `${reading}, as the range it falls in 8 times out of 10, with -1.8 customers as the middle value`;
+    expect(cell(olumi, 'hold').face).toContain(`, in this model. It assumes ${conversion}.`);
+    expect(cell(olumi, 'raise').face).toContain(`, in this model. It assumes ${reading}.`);
+    for (const id of ['hold', 'raise']) expect(cell(olumi, id).face).not.toContain('on your figures');
+    expect(olumi.goal_chance.targets.per_target[1].words).toContain(`${CUST_WORDS}, in this model, if ${reading}`);
     // (ii) The person's own range for the price: the ends are theirs, the reading is Olumi's provisional reading of them (W10).
     const theirs = present(model([...MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')).filter((x) => x.id !== 'price'),
       range('price', 39, 59, 49, '£', 'person_range')], MRR_GOALS, MRR_OPTIONS), MRR_LABELS);
-    expect(cell(theirs, 'hold').face).toContain(', in this model, if ‘Price’ follows Olumi’s provisional reading of your range, £39 to £59, as the range it falls in 8 times out of 10, with £49 as the middle value.');
+    expect(cell(theirs, 'hold').face).toContain(', in this model. It assumes ‘Price’ follows Olumi’s provisional reading of your range, £39 to £59, as the range it falls in 8 times out of 10, with £49 as the middle value.');
     // (iii) An option's own Olumi figure: only that option's chance is conditional on it; the target says which option.
     const own = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers'), fixed('price_59', 59, '£', 'state', 'olumi')), MRR_GOALS, MRR_OPTIONS),
       MRR_LABELS);
-    expect(cell(own, 'hold').face.endsWith(`, in this model, on your figures: ${HOLD_WHY}.`)).toBe(true);
-    expect(cell(own, 'raise').face.endsWith(`, in this model, if ‘New price’ is £59, Olumi’s figure: ${RAISE_WHY}.`)).toBe(true);
+    expect(cell(own, 'hold').face.endsWith(`, in this model. It rests on your figures. ${HOLD_WHY}.`)).toBe(true);
+    expect(cell(own, 'raise').face.endsWith(`, in this model. It assumes ‘New price’ is £59, Olumi’s figure. ${RAISE_WHY}.`)).toBe(true);
     // Codex #3769: no bare "on your figures" beside an option's own condition; the option named says what is conditional.
     expect(own.goal_chance.targets.per_target[0].words).toBe(`${MRR_WORDS}, in this model, with ‘Raise to £59’, if ‘New price’ is £59, Olumi’s figure`);
     for (const v of [olumi, theirs, own]) expect(JSON.stringify(v)).not.toMatch(FORECAST_OR_VERDICT);
@@ -196,7 +196,7 @@ describe('present: the canonical analysis view from a simulated model', () => {
     const pounds = JSON.stringify(present(build(1), labels, {}, 20000));
     const thousands = JSON.stringify(present(build(1000), labels, {}, 20000));
     // The main driver's record holds its ends in the quantity's own unit, so they are the unit's own difference too.
-    const swapped = [['£39', '0.039 £k'], ['£59', '0.059 £k'], ['£5,000', '5 £k'], ['£1,100', '1.1 £k'], ['"value":39,', '"value":0.039,'], ['"value":59,', '"value":0.059,'],
+    const swapped = [['£39 to £59', '0.039 to 0.059 £k'], ['£39', '0.039 £k'], ['£59', '0.059 £k'], ['£5,000', '5 £k'], ['£1,100', '1.1 £k'], ['"value":39,', '"value":0.039,'], ['"value":59,', '"value":0.059,'],
       ['(£49)', '(0.049 £k)'], ['"value":49,', '"value":0.049,'], ['£49 as the middle value', '0.049 £k as the middle value']]
       .reduce((s, [a, b]) => s.split(a!).join(b!), pounds);
     expect(swapped).not.toBe(pounds);
@@ -223,8 +223,8 @@ describe('present: the canonical analysis view from a simulated model', () => {
     // words say which is most likely to achieve every goal together, both chances, the basis and that no figure has a range.
     expect(v.leader_licence).toBe('permitted');
     expect(v.leader).toEqual({ licence: 'permitted', option_id: null, goal_chance_leader: 'hold', similar_option_ids: [],
-      words: `In this model, ‘Hold’ is the option most likely to achieve every goal together: 100% chance of ${MRR_WORDS} and ${CUST_WORDS}, `
-        + `against 0% for ‘Raise to £59’, the next most likely, on your figures. ${NO_RANGE_REASON}` });
+      words: 'In this model, ‘Hold’ is the option most likely to achieve every goal together: 100% chance, '
+        + `against 0% for ‘Raise to £59’, the next most likely. It rests on your figures. ${NO_RANGE_REASON}` });
     expect(v.run).toBeNull();
     expect(v.staleness).toEqual({ stale: null, revision: null, run_revision: null, basis: 'analysis_graph_hash_interim', reason: null,
       limitation: 'Currentness is unknown because an analysis hash is unavailable.' });
@@ -248,7 +248,7 @@ describe('present: the canonical analysis view from a simulated model', () => {
     expect(v.goal_chance.notes).toContain('Not yet checked: ‘Overdraft’ — Its figure is unknown.');
     const limitOnly = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')), MRR_GOALS, MRR_OPTIONS, [],
       [{ id: 'overdraft', kind: 'limit', label: 'Overdraft', reason: 'Its figure is unknown.' }]), MRR_LABELS);
-    expect(cell(limitOnly, 'hold').face).toBe(`‘Hold’: 100% chance of ${MRR_WORDS} and ${CUST_WORDS}, in this model, on your figures: ${HOLD_WHY}. Not yet checked: ‘Overdraft’ — Its figure is unknown.`);
+    expect(cell(limitOnly, 'hold').face).toBe(`‘Hold’: 100% chance of ${MRR_WORDS} and ${CUST_WORDS}, in this model. It rests on your figures. ${HOLD_WHY}. Not yet checked: ‘Overdraft’ — Its figure is unknown.`);
   });
 
   it('S3 fix 1: the basis lists only Olumi\u2019s quantities, coefficients and effect relations; identities never', () => {
@@ -263,7 +263,7 @@ describe('present: the canonical analysis view from a simulated model', () => {
     const plain = present(bakery(), confirmedFigures(bakery()));
     expect(cell(plain, 'hold').display).toBe('100%');
     // (£3.50 × 40 + 0) × 12 = £1,680 in every draw, at most £2,400.
-    expect(cell(plain, 'hold').face.endsWith(', in this model, on your figures: in every simulated draw ‘year_total’ is £1,680 at 1 month from the start of this model, at most £2,400.')).toBe(true);
+    expect(cell(plain, 'hold').face.endsWith(', in this model. It rests on your figures. Whatever the uncertain figures turn out to be, ‘year_total’ is £1,680 at 1 month from the start of this model, at most £2,400.')).toBe(true);
     // An effect whose size is Olumi's figure, and whose relation is Olumi's: both are listed, and nothing else.
     const withEffect = (relation_author?: 'person' | 'olumi') => {
       const m = bakery([fixed('base', 10, '£'), fixed('per_degree', -2, '£', 'state', 'olumi'),
@@ -271,12 +271,12 @@ describe('present: the canonical analysis view from a simulated model', () => {
       return present(m, { ...confirmedFigures(m), ...(relation_author === undefined ? {} : { weather: { label: 'weather', author: 'person', relation_author, confirmed: relation_author === 'person' } }) });
     };
     // Weather = 10 − 2 × 1 = £8, so (£140 + 0 + £8) × 12 = £1,776 in every draw: the basis, then why it is exact.
-    const WHY = ': in every simulated draw ‘year_total’ is £1,776 at 1 month from the start of this model, at most £2,400.';
-    const basis = (v: Rec): string => { const after = cell(v, 'hold').face.split(', in this model, ')[1] as string; expect(after.endsWith(WHY)).toBe(true); return after.slice(0, -WHY.length); };
-    expect(basis(withEffect('olumi'))).toBe('if ‘per_degree’ is -£2, Olumi’s figure and ‘weather’ follows Olumi’s assumed relationship');
-    expect(basis(withEffect('person'))).toBe('if ‘per_degree’ is -£2, Olumi’s figure');
+    const WHY = ' Whatever the uncertain figures turn out to be, ‘year_total’ is £1,776 at 1 month from the start of this model, at most £2,400.';
+    const basis = (v: Rec): string => { const after = cell(v, 'hold').face.split(', in this model. ')[1] as string; expect(after.endsWith(WHY)).toBe(true); return after.slice(0, -WHY.length); };
+    expect(basis(withEffect('olumi'))).toBe('It assumes ‘per_degree’ is -£2, Olumi’s figure. It also assumes ‘weather’ follows Olumi’s assumed relationship.');
+    expect(basis(withEffect('person'))).toBe('It assumes ‘per_degree’ is -£2, Olumi’s figure.');
     // DL ruling: a relation with NO recorded author is listed as an assumption, never read as the person's.
-    expect(basis(withEffect())).toBe('if ‘per_degree’ is -£2, Olumi’s figure and ‘weather’ follows a relationship (author not recorded)');
+    expect(basis(withEffect())).toBe('It assumes ‘per_degree’ is -£2, Olumi’s figure. It also assumes ‘weather’ follows a relationship (author not recorded).');
     // No identity, conversion or person's figure is ever named in the basis.
     for (const v of [withEffect('olumi')]) expect(basis(v)).not.toMatch(/‘(price|loaves|spend|x|zero|month_total|months|year_total|cap|base|temperature)’/);
   });
@@ -291,12 +291,12 @@ describe('present: the canonical analysis view from a simulated model', () => {
     [{ ...goal('g', 'weather', '>=', 'floor'), label: 'Weather takings' }], [option('hold', 'Hold')]);
     const v = present(m(unrecorded(fixed('per_degree', 2, '£'))), confirmedFigures(m(unrecorded(fixed('per_degree', 2, '£')))));
     expect(cell(v, 'hold').display).toBe('100%');
-    expect(cell(v, 'hold').face).toBe('‘Hold’: 100% chance of ‘weather’ being at least £5 at 1 month from the start of this model, in this model, '
-      + 'if ‘per_degree’ is £2 (author not recorded) and ‘weather’ follows a relationship (author not recorded): in every simulated draw ‘weather’ is £12 at 1 month from the start of this model, at least £5.');
+    expect(cell(v, 'hold').face).toBe('‘Hold’: 100% chance of ‘weather’ being at least £5 at 1 month from the start of this model, in this model. '
+      + 'It assumes ‘per_degree’ is £2 (author not recorded). It also assumes ‘weather’ follows a relationship (author not recorded). Whatever the uncertain figures turn out to be, ‘weather’ is £12 at 1 month from the start of this model, at least £5.');
     expect(JSON.stringify(v)).not.toContain('on your figures');
     // Contrast: the same model with both authors recorded as the person's reads "on your figures".
     const own = present(m(fixed('per_degree', 2, '£')), { ...confirmedFigures(m(fixed('per_degree', 2, '£'))), weather: { label: 'weather', author: 'person', relation_author: 'person', confirmed: true } });
-    expect(cell(own, 'hold').face.endsWith(', in this model, on your figures: in every simulated draw ‘weather’ is £12 at 1 month from the start of this model, at least £5.')).toBe(true);
+    expect(cell(own, 'hold').face.endsWith(', in this model. It rests on your figures. Whatever the uncertain figures turn out to be, ‘weather’ is £12 at 1 month from the start of this model, at least £5.')).toBe(true);
   });
 
   it('S3 fix 3: every limit\u2019s own outcome is in the words, and a limit waiting on an ask is named with what it waits on', () => {
@@ -318,7 +318,7 @@ describe('present: the canonical analysis view from a simulated model', () => {
     expect(cell(v, 'hold').face).toContain(` Each limit on its own: ${l50}: 100%; ${l30}: 100%. ${unchecked}`);
     expect(cell(v, 'add').face).toContain(` Each limit on its own: ${l50}: 100%; ${l30}: 0%. ${unchecked}`);
     // Add's 0% is exact, and the limit that fixes it is named with its value: 1 × £40,000 = £40,000 > £30,000.
-    expect(cell(v, 'add').face).toContain(': in every simulated draw ‘Specialist cost’ is £40,000 at 1 month from the start of this model, above £30,000. Each limit on its own:');
+    expect(cell(v, 'add').face).toContain('. Whatever the uncertain figures turn out to be, ‘Specialist cost’ is £40,000 at 1 month from the start of this model, above £30,000. Each limit on its own:');
     expect(v.goal_chance.limits).toEqual([
       { constraint_id: 'l50', words: l50, options: [{ option_id: 'hold', display: '100%' }, { option_id: 'add', display: '100%' }] },
       { constraint_id: 'l30', words: l30, options: [{ option_id: 'hold', display: '100%' }, { option_id: 'add', display: '0%' }] }]);
@@ -333,7 +333,7 @@ describe('present: the canonical analysis view from a simulated model', () => {
     [{ ...goal('g', 'weather', '>=', 'floor'), label: 'Weather takings' }], [option('hold', 'Hold')]);
     const relation = { ...confirmedFigures(m), weather: { label: 'weather', author: 'person' as const, relation_author: 'person' as const, confirmed: true } };
     const face = cell(present(m, { ...relation, per_degree: person('per_degree') }), 'hold').face;
-    expect(face).toContain(', in this model, on your figures:');
+    expect(face).toContain(', in this model. It rests on your figures. ');
     expect(face).not.toContain('not found in your words');
   });
 
@@ -352,13 +352,14 @@ describe('present: the canonical analysis view from a simulated model', () => {
     const v = present(capacity(100), labels);
     expect(cell(v, 'keep').display).toBe('0%');
     expect(cell(v, 'keep').detail.precision_words).toBe(EXACT);
-    expect(cell(v, 'keep').face.endsWith(': in every simulated draw ‘Weekly support capacity’ is 80 ticket / week at 1 month from the start of this model, below 100 ticket / week.')).toBe(true);
+    // W8 (c7.3): the unit as a person writes it, never "ticket / week".
+    expect(cell(v, 'keep').face.endsWith('. Whatever the uncertain figures turn out to be, ‘Weekly support capacity’ is 80 tickets per week at 1 month from the start of this model, below 100 tickets per week.')).toBe(true);
     const far = present(capacity(200), labels);
     expect(cell(far, 'add').display).toBe('less than 1%');
     expect(cell(far, 'add').detail.precision_95[0]).toBeCloseTo(0, 12);
     expect(cell(far, 'add').detail.precision_95[1]).toBeGreaterThan(0);
     expect(cell(far, 'add').detail.precision_words).toMatch(/^Simulation precision: 0% to [0-9.]+%, from 200 simulated draws\./);
-    expect(cell(far, 'add').face).not.toContain('in every simulated draw');
+    expect(cell(far, 'add').face).not.toContain('Whatever the uncertain figures turn out to be, ');
     expect(JSON.stringify(far)).not.toMatch(/"display":"0%"[^}]*"option_id":"add"|‘Add one specialist’: 0%/);
   });
 
@@ -390,8 +391,10 @@ const PAIR = (target: number) => model([range('c', 10, 30, undefined, 'tickets',
 const PAIR_LABELS: Record<string, PresentQuantity> = { c: { label: 'Capacity per specialist', author: 'olumi' }, e: { label: 'Extra capacity', author: 'olumi' },
   total: person('Total capacity', true), t: person('Capacity target') };
 const driver = (v: Rec, id: string): Rec => v.options.find((o: Rec) => o.option_id === id).main_driver;
-const SPEC_DETAIL = (whose: string) => `In this model, of the figures tested one at a time, the chance is most sensitive to ‘Capacity per specialist’ (${whose}): `
-  + 'at the low end (10 tickets) less than 1%, at the middle (20 tickets) more than 99%, at the high end (30 tickets) more than 99%.';
+// W8 (c7.6): the three settings, then why the overall chance can sit far from any one of them, said once.
+const SPEC_DETAIL = (whose: string) => `In this model, of the figures tested one at a time, the chance is most sensitive to ‘Capacity per specialist’ (${whose}). `
+  + 'With ‘Capacity per specialist’ held at its low end (10 tickets), the chance is less than 1%; at its middle (20 tickets), more than 99%; at its high end (30 tickets), more than 99%. '
+  + 'Each of these holds ‘Capacity per specialist’ at one value. The overall chance, about 70%, allows for every value it can take.';
 // A start that waits on a ranged delay: capacity is 80, or 110 once the hire starts; the goal is 100 at the end of month 6.
 const timed = (delayOn: 'set' | 'risk') => ({ periods: 6, period_unit: 'month', withheld: [],
   quantities: [delayOn === 'set' ? fixed('base', 80, 'tickets') : fixed('base', 110, 'tickets'), fixed('added', 0, 'tickets', 'state', 'structure'),
@@ -414,7 +417,7 @@ describe('present: what each computed chance rests on most (one figure at a time
     expect(d.driver.low).toEqual({ value: 0, display: '0%' });
     expect(d.driver.middle).toEqual({ value: 0.5, display: '0%' });
     expect(d.driver.high).toEqual({ value: 1, display: '100%' });
-    expect(d.detail).toContain('at the low end (0%) 0%, at the middle (50%) 0%, at the high end (100%) 100%');
+    expect(d.detail).toContain('held at its low end (0%), the chance is 0%; at its middle (50%), 0%; at its high end (100%), 100%');
     expect(x.dist).toMatchObject({ low: -0.2, high: 1.2, domain: { min: 0, max: 1 } });
   });
 
@@ -440,7 +443,7 @@ describe('present: what each computed chance rests on most (one figure at a time
     const v = present(m, { x: { label: 'Tickets sold', author: 'olumi' }, four: person('Four'), six: person('Six') });
     expect(driver(v, 'plan')).toEqual({ kind: 'available',
       driver: { quantity: 'x', author: 'olumi', low: { value: 0, display: '0%' }, middle: { value: 5, display: '100%' }, high: { value: 10, display: '0%' }, swing_points: 100, draws: 200, untested: [] },
-      detail: 'In this model, of the figures tested one at a time, the chance is most sensitive to ‘Tickets sold’ (Olumi’s estimate): at the low end (0 tickets) 0%, at the middle (5 tickets) 100%, at the high end (10 tickets) 0%.' });
+      detail: 'In this model, of the figures tested one at a time, the chance is most sensitive to ‘Tickets sold’ (Olumi’s estimate). With ‘Tickets sold’ held at its low end (0 tickets), the chance is 0%; at its middle (5 tickets), 100%; at its high end (10 tickets), 0%. Each of these holds ‘Tickets sold’ at one value. The overall chance, about 25%, allows for every value it can take.' });
   });
 
   it('buddy #3728: a ranged start delay is a driver (a set’s timing), and so is a ranged risk delay; both are in the basis too', () => {
@@ -451,10 +454,10 @@ describe('present: what each computed chance rests on most (one figure at a time
     const hire = present(timed('set'), labels);
     expect(driver(hire, 'hire')).toEqual({ kind: 'available',
       driver: { quantity: 'delay', author: 'olumi', low: { value: 2, display: '100%' }, middle: { value: 6, display: '100%' }, high: { value: 10, display: '0%' }, swing_points: 100, draws: 200, untested: [] },
-      detail: 'In this model, of the figures tested one at a time, the chance is most sensitive to ‘Start delay’ (Olumi’s estimate): at the low end (2 months) 100%, at the middle (6 months) 100%, at the high end (10 months) 0%.' });
+      detail: 'In this model, of the figures tested one at a time, the chance is most sensitive to ‘Start delay’ (Olumi’s estimate). With ‘Start delay’ held at its low end (2 months), the chance is 100%; at its middle (6 months), 100%; at its high end (10 months), 0%. Each of these holds ‘Start delay’ at one value. The overall chance, about 50%, allows for every value it can take.' });
     // Codex B1 on #3801: the floor of 0 cuts into the lower tail (σL = 4/1.2815516 = 3.12122, a = −6/3.12122 = −1.92232:
     // ½ × (0.1 − Φ(a))/(½ − Φ(a)) = 0.0769 below 2, not 1 in 10), so no frequency is said; the middle value stays the median.
-    expect(cell(hire, 'hire').face).toContain('‘Start delay’ follows Olumi’s provisional reading of Olumi’s own estimated range, 2 months to 10 months, '
+    expect(cell(hire, 'hire').face).toContain('‘Start delay’ follows Olumi’s provisional reading of Olumi’s own estimated range, 2 to 10 months, '
       + 'with 6 months as the middle value, kept to Olumi’s reading of what it can be (never below 0 months)');
     const outage = driver(present(timed('risk'), { ...labels, delay: { label: 'Outage delay', author: 'olumi' as const } }), 'carry_on');
     expect(outage.kind).toBe('available');
@@ -478,7 +481,7 @@ describe('present: what each computed chance rests on most (one figure at a time
     expect(fifteen.driver.middle).toEqual({ value: 5, display: 'more than 99%' });
     expect(fifteen.driver.high).toEqual({ value: 10, display: 'less than 1%' });
     expect(fifteen.driver.untested).toEqual([{ quantity: 'x', settings: ['low end'] }]);
-    expect(fifteen.detail).toBe('In this model, of the figures tested one at a time, the chance is most sensitive to ‘Batches’ (Olumi’s estimate): at the low end (0 tickets) could not be tested, at the middle (5 tickets) more than 99%, at the high end (10 tickets) less than 1%.');
+    expect(fifteen.detail).toBe('In this model, of the figures tested one at a time, the chance is most sensitive to ‘Batches’ (Olumi’s estimate). With ‘Batches’ held at its low end (0 tickets), the chance could not be worked out; at its middle (5 tickets), more than 99%; at its high end (10 tickets), less than 1%. Each of these holds ‘Batches’ at one value. The overall chance, about 55%, allows for every value it can take.');
     const five = driver(present(ratio(5), labels), 'plan');
     expect(five).toEqual({ kind: 'none_licensed', reason: '‘Batches’ could not be tested at its low end. Of the settings that could be tested, none moved this chance by more than 5 points.' });
     expect(five.reason).not.toContain(NO_DRIVER_REASON);
@@ -503,7 +506,7 @@ describe('present: what each computed chance rests on most (one figure at a time
     expect(d.kind).toBe('available');
     expect([d.driver.quantity, d.driver.low.value, d.driver.middle.value, d.driver.high.value]).toEqual(['p', 0.2, 0.4, 0.6]);
     expect(d.driver.untested).toEqual([]);
-    expect(d.detail).toContain('at the low end (0.2)');
+    expect(d.detail).toContain('held at its low end (0.2)');
     expect(d.detail).not.toContain('0.1');
   });
 
@@ -575,11 +578,11 @@ describe('present: which option is most likely to achieve the goal, in this mode
     return { ...m, quantities: m.quantities.map((x) => (x.id === 'target' ? fixed('target', target, 'tickets') : x)) };
   };
   /** The basis both chances rest on: the person's day-to-day range and Olumi's own range for the capacity per specialist. */
-  const HIRE_BASIS = 'if ‘Day-to-day variation’ follows Olumi’s provisional reading of your range, -0.1 tickets to 0.1 tickets, as the range it falls in 8 times '
-    + 'out of 10, with 0 tickets as the middle value and ‘Capacity per specialist’ follows Olumi’s provisional reading of Olumi’s own estimated range, '
-    + '10 tickets to 30 tickets, as the range it falls in 8 times out of 10, with 20 tickets as the middle value';
-  const DRIVER_C = (low: string, middle: string, high: string) =>
-    `Its chance is most sensitive to ‘Capacity per specialist’ (Olumi’s estimate): ${low} at its low end, ${middle} at its middle and ${high} at its high end.`;
+  /** W8 (c7.1): by the time the leader is said, each range's reading has been said in full with the first chance. */
+  const HIRE_BASIS = 'if ‘Day-to-day variation’ follows Olumi’s provisional reading of your range, -0.1 to 0.1 tickets '
+    + 'and ‘Capacity per specialist’ follows Olumi’s provisional reading of Olumi’s own estimated range, 10 to 30 tickets';
+  /** W8 (c7.1): the leader names what its chance is most sensitive to; the settings are said once, with the option's chance. */
+  const DRIVER_C = 'Its chance is most sensitive to ‘Capacity per specialist’ (Olumi’s estimate).';
 
   it('a clear leader: the highest chance, apart from the next by more than the simulation precision, is named with both chances, the basis and its driver', () => {
     // Target 95: Add meets it when c ≥ 15 − d; c is read as 10 to 30 eight times out of 10 (W10: median 20, sd 10/1.2815516 =
@@ -592,9 +595,10 @@ describe('present: which option is most likely to achieve the goal, in this mode
     expect(v.leader_licence).toBe('permitted');
     expect(v.leader).toEqual({ licence: 'permitted', option_id: null, goal_chance_leader: 'add', similar_option_ids: [], words: expect.any(String) });
     // At c = 10, 20, 30 the chance is P(d ≥ 5) = 0, P(d ≥ −5) = 1, 1: the driver's own three settings, as the cell's detail says them.
-    expect(v.leader.words).toBe(`In this model, ‘Add one specialist’ is the option most likely to achieve the goal: ${add.display} chance of `
-      + '‘Weekly capacity’ being at least 95 tickets at 1 month from the start of this model, against less than 1% for ‘Keep’, the next most likely, '
-      + `${HIRE_BASIS}. ${DRIVER_C('less than 1%', 'more than 99%', 'more than 99%')}`);
+    expect(v.leader.words).toBe(`In this model, ‘Add one specialist’ is the option most likely to achieve the goal: ${add.display} chance, `
+      + 'against less than 1% for ‘Keep’, the next most likely. Like each option’s chance, it rests on the assumptions listed with it. '
+      + DRIVER_C);
+    expect(driver(v, 'add').detail).toContain('the chance is less than 1%; at its middle (20 tickets), more than 99%; at its high end (30 tickets), more than 99%.');
     expect(v.leader.words).not.toContain('more likely to miss');
   });
 
@@ -604,7 +608,7 @@ describe('present: which option is most likely to achieve the goal, in this mode
     const v = present(HIRE(105), SPEC_LABELS, {}, 2000);
     expect(cell(v, 'add').display).toMatch(/^about (2[2-9]|30)%$/);
     expect(v.leader.goal_chance_leader).toBe('add');
-    expect(v.leader.words).toContain(`against less than 1% for ‘Keep’, the next most likely, `);
+    expect(v.leader.words).toContain('against less than 1% for ‘Keep’, the next most likely. ');
     expect(v.leader.words).toContain('. Even so, in this model it is more likely to miss the goal than to meet it. Its chance is most sensitive to');
   });
 
@@ -650,7 +654,7 @@ describe('present: which option is most likely to achieve the goal, in this mode
     expect(add.detail.precision_95[0]).toBeGreaterThan(keep.detail.precision_95[1]);
     expect(v.leader_licence).toBe('permitted');
     expect(v.leader.goal_chance_leader).toBe('add');
-    expect(v.leader.words.startsWith('In this model, ‘Add one specialist’ is the option most likely to achieve the goal: less than 1% chance of ‘Weekly capacity’ being at least 120 tickets')).toBe(true);
+    expect(v.leader.words.startsWith('In this model, ‘Add one specialist’ is the option most likely to achieve the goal: less than 1% chance, against less than 1% for ‘Keep’')).toBe(true);
     expect(v.leader.words).toContain('Even so, in this model it is more likely to miss the goal than to meet it.');
     expect(v.leader.words).not.toContain('no option is likely');
   });
@@ -665,13 +669,13 @@ describe('present: which option is most likely to achieve the goal, in this mode
     expect(pctOf(nudge.display) - pctOf(hold.display)).toBeLessThan(10);
     expect(v.leader_licence).toBe('permitted');
     expect(v.leader.goal_chance_leader).toBe('nudge');
-    expect(v.leader.words.startsWith(`In this model, ‘Nudge’ is the option most likely to achieve the goal: ${nudge.display} chance of `)).toBe(true);
+    expect(v.leader.words.startsWith(`In this model, ‘Nudge’ is the option most likely to achieve the goal: ${nudge.display} chance, against `)).toBe(true);
     expect(v.leader.words).not.toContain('points apart');
     // Contrast: Nudge adds 3, P(x ≥ 2) = Φ(3/3.9015) = Φ(0.7689) ≈ 78% against 50% (W10; before it, 85%): distinct, so it is named too.
     const apart = present(NUDGE(3), NUDGE_LABELS, {}, 10_000);
     expect(apart.leader_licence).toBe('permitted');
     expect(apart.leader.goal_chance_leader).toBe('nudge');
-    expect(apart.leader.words.startsWith(`In this model, ‘Nudge’ is the option most likely to achieve the goal: ${cell(apart, 'nudge').display} chance of `)).toBe(true);
+    expect(apart.leader.words.startsWith(`In this model, ‘Nudge’ is the option most likely to achieve the goal: ${cell(apart, 'nudge').display} chance, against `)).toBe(true);
   });
 
   it('B2: while a limit is not yet checked no option is named; the words say why, with each chance', () => {
