@@ -71,7 +71,7 @@ import {
 } from '../orchestrator-v5/core-route/contract.js';
 import { CONVERSATION_ROWS_READ } from './assist.v1.scenario-graph.js';
 import { runModelProgramTurn } from '../orchestrator-v5/model-program-turn/turn.js';
-import { approveReadingRows } from '../orchestrator-v5/model-program-turn/approve-rows.js';
+import { approveReadingRows, rowsOperationKey } from '../orchestrator-v5/model-program-turn/approve-rows.js';
 import type { ToolOutcome } from '../orchestrator-v5/path-b/tools/outcome.js';
 import { isProgramGraph, programReadOf, reopenProgram, savedProgramOf, sourceTextOf, unreadableWords } from '../orchestrator-v5/model-program-turn/program-store.js';
 import { compile } from '../orchestrator-v5/model-program/compile.js';
@@ -455,8 +455,10 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       // Its own save: a version, or (C8) the save the operation's own registration row carries when it minted none.
       const operationVersion = (operationId: string) => findOperationSave(dispatch, readTurn, scenarioId, operationId).catch(() => null);
       const ownVersion = (key: string) => operationVersion(programOperationId(scenarioId, key));
+      // A card press saves under its card (`proposal:`), or, with ticked rows, under those rows on it (`rowsOperationKey`).
       const [turnSave, cardSave, ...ranSaves] = await Promise.all([ownVersion(`turn:${turnId}`),
-        approvedProposal !== undefined ? ownVersion(`proposal:${approvedProposal}`) : null, ...recordedRunsOf(recorded).map(operationVersion)]);
+        approvedProposal === undefined ? null : ownVersion(rowIds !== undefined ? rowsOperationKey(approvedProposal, rowIds) : `proposal:${approvedProposal}`),
+        ...recordedRunsOf(recorded).map(operationVersion)]);
       // Who authorised the turn: save, from the recorded press, never this resend's envelope: a request matched exactly says it
       // (a Run press's re-save is the person's; a first draft, Olumi's); for the UI's chipless retry, the recorded hash does: a
       // Run press is tagged (RUN_PRESS_HASH_TAG), a typed turn that saved was its draft. Any other recorded chip press (one
@@ -733,7 +735,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         result = noCallAnswer();
       } else if (rowsPress !== undefined) {
         const t0 = Date.now();
-        const { outcome, card } = await approveReadingRows({ dispatch: countingDispatch, proposals }, { scenario_id: scenarioId, authenticated_user_id: userId },
+        const { outcome, card } = await approveReadingRows({ dispatch: countingDispatch, proposals, readTurn }, { scenario_id: scenarioId, authenticated_user_id: userId },
           { proposalId: rowsPress, ids: rowIds! });
         // Refused or unreadable before anything was written: said with its reason, and the same turn may be sent again.
         if (outcome.status !== 'ok' && writesDispatched === 0 && !(outcome.status === 'unavailable' && outcome.write === 'unknown')) {

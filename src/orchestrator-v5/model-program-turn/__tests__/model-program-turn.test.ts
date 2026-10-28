@@ -36,7 +36,7 @@ import { programRevisionOf } from '../program-card.js';
 import { projectCorePostimageForPersistence } from '../../persisted-graph-projection.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { ENGINE_VERSIONS, revisionDigest, RUN_AGAIN_AFTER_UPDATE, RUN_AGAIN_FOR_CHANCE } from '../run-receipt.js';
-import { registrationTurnId } from '../../graph-registration/registration-identity.js';
+import { registrationRequestHash, registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { PROGRAM_MODEL_STATE_PREFIX } from '../../agent-lane/turn-context.js';
 import { responsesSse } from '../../agent-lane/__tests__/stream-when-asked.js';
 import { AGENTS_CLIENT_MAX_RETRIES } from '../../../adapters/llm/openai-agents-client.js';
@@ -1625,12 +1625,46 @@ describe('the model-program turn on the real core route', () => {
       // The same press resent is that press: replayed, never a second write.
       const replay = await tick(card, ['sell_through', 'more_loaves'], { turn_id: turnId });
       expect([replay.statusCode, replay.json().durability, registered.length, sent.length]).toEqual([200, 'replayed', writes + 1, callsAfterRun]);
+      // C7 (PL 02:18Z): its receipt is the original's version, found by these rows' own operation on the card, never none (the
+      // history adds the registration turn id this harness's register reply does not carry).
+      const receiptOf = (r: Json) => ({ version_id: r.version_id, version: r.version, mutation_id: r.mutation_id, authorised_by: r.authorised_by });
+      expect(body.receipts).toHaveLength(1);
+      expect(replay.json().receipts.map(receiptOf)).toEqual(body.receipts.map(receiptOf));
       // The rest ticked on the card offered again: all approved, no card left, still no AI call.
       const rest = await tick(body.cards[0], ids.filter((id) => !['sell_through', 'more_loaves'].includes(id)));
       expect(rest.statusCode, rest.body).toBe(200);
       expect([rest.json().cards, rest.json().assistant_text, sent.length, registered.length]).toEqual([[], `Saved: ${ids.length - 2} items confirmed.`, callsAfterRun, writes + 2]);
       expect(new Set(Object.values(approvals()))).toEqual(new Set(['approved']));
       expect(withoutHostFields(persisted!.living_model.canonical)).toEqual(withoutHostFields(before));
+    });
+
+    it('C8 (PL 02:18Z): a guest\'s ticked rows that saved with no version, then lost the reply, are that save, found by its own registration row; never a second write (contrast: with no row read, unknown)', async () => {
+      const card = await drafted();
+      const held = agentProposalOf([...turnRows.values()].at(-1).pending_actions[0])!;
+      const proposals = new ProposalStore();
+      proposals.put(held);
+      const rows = new Map<string, Json>();
+      // The register lands and writes its own row, as a guest's save does (no version; the `#saved` carrier), then the reply is lost.
+      const guestLostAck: typeof dispatch = async (path, body) => {
+        if (path.endsWith('/graph/register')) {
+          await dispatch(path, body);
+          rows.set(registrationTurnId(SCENARIO, String((body as Json).operation_id)), { request_hash: registrationRequestHash(persisted, undefined), model_version_created: false });
+          throw new Error('socket hang up');
+        }
+        if (path.endsWith('/versions')) return { status: 200, json: { versions: [] } };
+        return dispatch(path, body);
+      };
+      const readTurn = async (_sid: string, id: string) => (rows.get(id) ?? null) as never;
+      const writes = registered.length;
+      const contrast = await approveReadingRows({ dispatch: guestLostAck, proposals }, { scenario_id: SCENARIO, authenticated_user_id: null }, { proposalId: held.proposal_id, ids: ['sell_through'] });
+      expect(contrast.outcome.status).toBe('unavailable');
+      expect(registered).toHaveLength(writes + 1);
+      // The same press, from the model before it, with the row read: that save, by its own row; still one write.
+      registered.pop(); persisted = JSON.parse(JSON.stringify(registered.at(-1)!.graph)); rows.clear();
+      const out = await approveReadingRows({ dispatch: guestLostAck, proposals, readTurn }, { scenario_id: SCENARIO, authenticated_user_id: null }, { proposalId: held.proposal_id, ids: ['sell_through'] });
+      expect(out.outcome).toMatchObject({ status: 'ok', data: { already_saved: true, receipt: { kind: 'unversioned', scenario_revision: computeGraphIdentityHash(persisted as never)!.value } } });
+      expect(registered).toHaveLength(writes + 1);
+      expect(approvals()).toMatchObject({ sell_through: 'approved', more_loaves: 'proposed' });
     });
 
     it('a record already approved is never approved again, so who approved it stays: refused by its id, nothing written', async () => {
