@@ -57,7 +57,8 @@ const count = (text: string, part: string) => text.split(part).length - 1;
 describe('W8 c7: the words a person reads, at their producers', () => {
   it('card, c7.7: an option says what it changes, once, never "compared, sets X 0 to Option: X 1"; its own setting is no second line', () => {
     expect(after('hire')).toBe('sets "extra mechanics" to 1 mechanic from the start, in your words "We could hire one mechanic"');
-    expect(after('keep')).toBe('carries on as now, in your words "keep the team as it is"');
+    // Paul 28 Oct (remove the false host phrases): an option with no settings is NOT said to carry on as now; its own words say it.
+    expect(after('keep')).toBe('in your words "keep the team as it is"');
     // The option's own setting (compile.ts `normalise`: "Hire one mechanic: extra mechanics") is said on the option's line.
     expect(card().filter((c) => c.label.includes(': '))).toEqual([]);
     expect(card().some((c) => c.id === 'hire__extra_mechanics')).toBe(false);

@@ -233,8 +233,7 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
       || (family === 'quantities' && (x.group === 'kind' || (x.group === 'status' && SAID_BY_FIGURE.has(r['status']))))
       || (family === 'options' && x.group === 'status' && r['status'] === 'live');
     const phrase = (fields: ReturnType<typeof said>, side: 'old' | 'now', r: Rec, whole: boolean) =>
-      [...new Set([...(family === 'options' && whole && Array.isArray(r['sets']) && r['sets'].length === 0 ? ['carries on as now'] : []),
-        ...fields.filter((x) => !(whole && onCard(x, r))).map((x) => x[side])].filter((x) => x !== ''))].join(', ');
+      [...new Set(fields.filter((x) => !(whole && onCard(x, r))).map((x) => x[side]).filter((x) => x !== ''))].join(', ');
     // W8 run 4 (c7.1, said once: "→ worded" the row's own heading; a risk named in their words, then "in your words" the same
     // words): the row's label is the item's name as it now stands, so the side that ends there does not say it again. A changed
     // name keeps its old words on the before side ("(was: named …)" when nothing else changed); words that are the label are
@@ -434,7 +433,7 @@ function wordsIn(m: CanonicalModelT) {
       });
       case 'when': return measured(r, (mm) => {
         const w = isRec(mm['window']) ? mm['window'] : null, agg = String(mm['aggregation']);
-        if (w === null) return `${agg === 'end' ? '' : `${of(AGG_ALONE, agg)}, `}no deadline set`;
+        if (w === null) return agg === 'end' ? '' : of(AGG_ALONE, agg);
         return `${of(AGG_WORDS, agg)} ${timed(String(w['periods']))}${typeof w['start'] === 'number' && w['start'] > 0 ? `, starting after ${w['start']} ${m.period}s` : ''}`
           + `${typeof w['origin_event'] === 'string' ? `, counted from "${w['origin_event']}"` : ''}${typeof w['origin_offset'] === 'string' ? `, which is ${timed(w['origin_offset'])} from the start of this model` : ''}`;
       });

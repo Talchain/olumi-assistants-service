@@ -1523,7 +1523,7 @@ describe('the model-program turn on the real core route', () => {
     // Contrast: a left-out item with only its why says only its why, as written.
     expect(card.changes[4]).toEqual({ id: 'staff_morale', kind: 'left_out', action: 'add', label: 'Staff morale while the second oven beds in', before: null,
       after: 'It has no measure in this model.', author: 'olumi', group: 'left_out', family: 'left_out' });
-    expect(card.changes[0]).toEqual({ id: 'more_loaves', kind: 'goal', action: 'add', label: 'Reach 380 loaves a week', before: null, after: '"sales" at least "sales target" 380 loaves per week, no deadline set, the measure you named, in your words "want to reach 380 loaves a week"', author: 'person' , group: 'used', family: 'goal' });
+    expect(card.changes[0]).toEqual({ id: 'more_loaves', kind: 'goal', action: 'add', label: 'Reach 380 loaves a week', before: null, after: '"sales" at least "sales target" 380 loaves per week, the measure you named, in your words "want to reach 380 loaves a week"', author: 'person' , group: 'used', family: 'goal' });
     // The held card's model: the saved draft accepted by its approver (a guest here), authorship and words untouched; a new Run.
     const held = agentProposalOf([...turnRows.values()].at(-1).pending_actions[0])!;
     expect(held.proposal_id).toBe(card.proposal_id);
@@ -1747,11 +1747,11 @@ describe('the model-program turn on the real core route', () => {
     const said = new Map((reading.ok ? reading.changes : []).map((c) => [c.id, c.after] as const));
     expect(Object.fromEntries(['more_loaves', 'within_budget', 'second_oven', 'keep_one', 'sold_rel', 'sales_rel', 'spend_rel', 'sell_through', 'oven_price', 'sales'].map((id) => [id, said.get(id)])))
       .toEqual({
-        more_loaves: '"sales" at least "sales target" 380 loaves per week, no deadline set, the measure you named, in your words "want to reach 380 loaves a week"',
-        within_budget: '"spend" at most "budget" £3,000, no deadline set, in your words "We have £3,000 to spend"',
+        more_loaves: '"sales" at least "sales target" 380 loaves per week, the measure you named, in your words "want to reach 380 loaves a week"',
+        within_budget: '"spend" at most "budget" £3,000, in your words "We have £3,000 to spend"',
         // W8 run 4 (c7.1): its words are its label, "A second oven", so they are theirs without being quoted twice.
         second_oven: 'sets "ovens added" to "one oven" 1 oven from the start, in your words',
-        keep_one: 'carries on as now, in your words "keep our one oven"',
+        keep_one: 'in your words "keep our one oven"',
         sold_rel: 'worked out as "extra per oven" multiplied by "sell through", in loaves per oven per week',
         sales_rel: 'starts from "base sales" and changes by "sold per oven" for each "ovens added", link 1 is yours, in your words "A second oven adds about 100 loaves a week", in loaves per week',
         spend_rel: 'worked out as "oven price" multiplied by "ovens added", in £',
@@ -2263,7 +2263,7 @@ describe('the model-program turn on the real core route', () => {
     const changes: ProposalChange[] = [
       { id: 'oven_price', kind: 'quantity', action: 'change', label: 'oven price', before: 'no figure yet (in £ per oven), still to be given, Olumi asks "What would the second oven cost?", not in your words',
         after: '£2,000 per oven, known, no question, in your words "the oven is £2,000"', author: 'person', family: 'quantity' },
-      { id: 'keep_one', kind: 'option', action: 'remove', label: 'Keep our one oven', before: 'carries on as now, in your words "keep our one oven"', after: null, author: 'person', family: 'option' },
+      { id: 'keep_one', kind: 'option', action: 'remove', label: 'Keep our one oven', before: 'in your words "keep our one oven"', after: null, author: 'person', family: 'option' },
       { id: 'landlord_agrees', kind: 'record', action: 'add', label: 'Only once the landlord agrees.', before: null,
         after: 'a prerequisite, about "A second oven", in your words "our landlord must agree first"', author: 'person', family: 'conditions' },
     ];
@@ -2414,7 +2414,9 @@ describe('the model-program turn on the real core route', () => {
     // A deadline taken away, and a setting taken away, are each said (nothing is left to set back alone).
     const timed = check(bakery(), (m) => { m.goals[0]!.measure!.window = { origin_event: null, origin_offset: null, start: 0, periods: 'one_oven' }; }, [BRIEF]) as { ok: true; model: CanonicalModelT };
     const untimed = check(timed.model, (m) => { m.goals[0]!.measure!.window = null; }, [BRIEF]);
-    expect(untimed.ok ? untimed.changes.map((c) => [c.before, c.after]) : untimed).toEqual([['by the end of "one oven" 1 oven', 'no deadline set']]);
+    // Paul 28 Oct (remove the false host phrases): the removed deadline is shown as its old words with nothing after (the UI's
+    // "(was: …)"), never "no deadline set", which a goal whose window was never drafted would also have claimed.
+    expect(untimed.ok ? untimed.changes.map((c) => [c.before, c.after]) : untimed).toEqual([['by the end of "one oven" 1 oven', null]]);
     const fewer = check(club(), (m) => { m.options[0]!.sets.pop(); });
     expect(fewer.ok ? fewer.changes.map((c) => [c.before, c.after]) : fewer).toEqual([['sets "spend" to "promo cost" £500 from the start, in your words "The promotion costs £500"', 'without this setting']]);
     // A link whose size is a fall of 3 to 7 (compiler-valid) reads "changes by" its own signed figure, never "raised by".
