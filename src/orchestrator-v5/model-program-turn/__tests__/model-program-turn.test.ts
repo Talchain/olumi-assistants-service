@@ -1516,9 +1516,10 @@ describe('the model-program turn on the real core route', () => {
     expect(card.changes[5]).toEqual({ id: 'longer_shifts', kind: 'left_out', action: 'add', label: 'Longer shifts for the staff', before: null,
       after: 'It is not measured in this model. Olumi asks: “How will staff feel?”. It concerns Reach 380 loaves a week and A second oven. Your words: “Our staff may not like longer shifts”',
       author: 'person', group: 'left_out', family: 'left_out' });
-    // Words the person reports from someone else are that someone's, by name, never "Your words".
+    // Words the person reports from someone else name that someone first, and stay the person's own words (W8 faithful, dev H03:
+    // "in CFO’s words" over their own sentence about the CFO was false attribution).
     expect(card.changes[6]).toEqual({ id: 'delivery_days', kind: 'left_out', action: 'add', label: 'Which days flour is delivered', before: null,
-      after: 'Nobody has said how it changes sales. Our supplier’s words: “deliveries only on weekdays”', author: 'person', group: 'left_out', family: 'left_out' });
+      after: 'Nobody has said how it changes sales. From Our supplier, in your words: “deliveries only on weekdays”', author: 'person', group: 'left_out', family: 'left_out' });
     // Contrast: a left-out item with only its why says only its why, as written.
     expect(card.changes[4]).toEqual({ id: 'staff_morale', kind: 'left_out', action: 'add', label: 'Staff morale while the second oven beds in', before: null,
       after: 'It has no measure in this model.', author: 'olumi', group: 'left_out', family: 'left_out' });
@@ -1784,6 +1785,21 @@ describe('the model-program turn on the real core route', () => {
     const rate = JSON.parse(JSON.stringify(saved)) as CanonicalModelT;
     rate.quantities.push(q('repairs', '1/week', { status: 'asked', question: 'How often does the oven need repair?', author: 'olumi' }));
     expect((rows(rate) as string[][]).map((r) => r[2])).toEqual(['no figure yet (per week), Olumi asks "How often does the oven need repair?"']);
+  });
+
+  it('W8 faithful (dev H03): words the person reports from someone are said as from them, in the person\'s words, never as that someone\'s own words; a change of whom is still shown', () => {
+    const words = [BRIEF];
+    const reported = JSON.parse(JSON.stringify(bakery())) as CanonicalModelT;
+    reported.claims.push({ id: 'baker_view', text: 'The baker thinks a second oven adds about 100 loaves a week.', concerns: [], author: 'person', quote: 'A second oven adds about 100 loaves a week', party: 'our baker', approval: 'proposed', approved_by: null, author_id: null });
+    const v = validatePostimage(bakery(), reported, { removals: [], words, fresh: words });
+    const row = v.ok ? v.changes.find((c) => c.id === 'baker_view') : undefined;
+    expect([row?.after?.endsWith('from our baker, in your words "A second oven adds about 100 loaves a week"'), row?.after?.includes('baker’s words')]).toEqual([true, false]);
+    // Whom they report, changed alone, still changes the card's words (the validator's per-field check is untouched).
+    const base = (v as { model: CanonicalModelT }).model;
+    const other = JSON.parse(JSON.stringify(base)) as CanonicalModelT;
+    other.claims.find((c) => c.id === 'baker_view')!.party = 'our manager';
+    const w = validatePostimage(base, other, { removals: [], words, fresh: words });
+    expect(w.ok && w.changes.map((c) => [c.before, c.after])).toEqual([['from our baker, in your words "A second oven adds about 100 loaves a week"', 'from our manager, in your words "A second oven adds about 100 loaves a week"']]);
   });
 
   it('the card in plain words (DL 24 Oct): a change to any one field of any item is said, before and after, in words (every group covered); a field that cannot change the words is refused', () => {
@@ -2343,7 +2359,7 @@ describe('the model-program turn on the real core route', () => {
     expect(named.data.changes).toEqual([{ id: 'sales_rel', kind: 'relation', action: 'change', label: 'sales',
       before: 'starts from "base sales" and changes by "sold per oven" for each "ovens added", link 1 is yours, in your words "A second oven adds about 100 loaves a week"',
       after: 'starts from "base sales" and changes by "extra per oven" for each "ovens added", link 1 is yours, '
-        + 'in our baker’s words "A second oven adds about 100 loaves a week"', author: 'olumi', family: 'relation' }]);
+        + 'from our baker, in your words "A second oven adds about 100 loaves a week"', author: 'olumi', family: 'relation' }]);
   });
 
   it('simplify v1 (buddy 22:47Z): a list of another length is compared entry by entry: a link moved to another figure of the same name is said with both figures while a link is added in full; moved to one named and sized alike, refused', async () => {
