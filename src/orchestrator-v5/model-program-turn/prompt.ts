@@ -24,13 +24,13 @@ export const DRAFTING_INSTRUCTIONS = [
   'Example: "We sell 400 loaves a week from our one oven and have £5,000 to spend. Should we buy a second oven? It adds 150 loaves a week of capacity. We want to sell 500 loaves a week without going over budget, and to grow the bakery."',
   'Sketch (period week; author person with their quote unless marked):',
   '- base_sales 400 loaf/week fact known "sell 400 loaves a week"; extra_capacity 150 loaf/week fact known "adds 150 loaves a week of capacity"; budget 5000 GBP fact known "£5,000 to spend"; sales_target 500 loaf/week fact known "sell 500 loaves a week"',
-  '- sales loaf/week fact unknown, olumi, basis "weekly sales once the choice has played out"',
+  '- sales loaf/week fact unknown, olumi, basis "weekly sales once the choice has played out"; added_capacity loaf/week fact known 0, olumi, basis "capacity the choice adds; carrying on adds none"',
   '- extra_demand loaf/week fact asked, olumi, question "How many more loaves a week do customers ask for that you cannot bake now?"; staff_cover, unit null, unknown, olumi, basis "whether staff can cover longer hours"',
   '- oven_price GBP fact asked, olumi, question "What would the second oven cost?"',
   '- goal sales >= sales_target, frame level, aggregation end, window null, "We want to sell 500 loaves a week"; grow_target loaf/week fact asked, olumi, question "How many more loaves a week would count as growing?"; goal "to grow the bakery", measure_by olumi (a suggested measure): sales change_abs from base_sales >= grow_target, end, window null, exclusions: left_out "growth beyond loaf sales, such as new lines", why "not in this model", author olumi, quote null',
   '- limit "without going over budget", measure null, question "Is the £5,000 for the oven alone, or for everything this choice needs?"; budget 5000 GBP is its figure, theirs',
-  '- option "Second oven", quote "buy a second oven": sets []; option "Longer baking hours", olumi (lower-commitment): sets []; option "Carry on as now", olumi, carry_on true: sets []',
-  '- links, olumi: Second oven → "without going over budget" unknown, unsure, basis "whether it fits depends on oven_price, still asked"; Second oven → sales up, likely, basis "150 loaves a week more capacity, sold only as far as demand allows"; extra_demand → sales up, likely, basis "extra loaves sell only if customers want them"; Longer baking hours → sales up, unsure, basis "more bakes from one oven"; staff_cover → sales up, unsure, basis "longer hours need staff to cover them"',
+  '- option "Second oven", quote "buy a second oven": sets [added_capacity to extra_capacity]; option "Longer baking hours", olumi (lower-commitment): sets []; option "Carry on as now", olumi, carry_on true: sets []',
+  '- links, olumi: Second oven → "without going over budget" unknown, unsure, basis "whether it fits depends on oven_price, still asked"; added_capacity → sales up, likely, basis "the extra loaves sell only as far as demand allows"; extra_demand → sales up, likely, basis "extra loaves sell only if customers want them"; Longer baking hours → sales up, unsure, basis "more bakes from one oven"; staff_cover → sales up, unsure, basis "longer hours need staff to cover them"',
   '- risk "A supermarket bakery opens nearby", olumi: on extra_demand, direction down, chance null, size null',
 ].join('\n');
 
