@@ -40,6 +40,8 @@ import { seedOf } from '../../orchestrator-v5/model-program-turn/evaluate.js';
 import { withNewRun } from '../../orchestrator-v5/model-program-turn/program-save.js';
 import { MODEL_PROGRAM, reopenProgram } from '../../orchestrator-v5/model-program-turn/program-store.js';
 import { at, bakery, BRIEF, q } from '../../orchestrator-v5/model-program-turn/__tests__/bakery.fixture.js';
+import { studio, STUDIO_BRIEF } from '../../orchestrator-v5/model-program-turn/__tests__/class-studio.fixture.js';
+import { appliedGraphWire } from '../../orchestrator-v5/core-route/deps.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { CanonicalModelT } from '../../orchestrator-v5/model-program/canonical.js';
 import { compile } from '../../orchestrator-v5/model-program/compile.js';
@@ -136,6 +138,29 @@ describe('a model program\'s postimage through the real /graph/register', () => 
     expect(JSON.stringify({ ...body, graph: null, canonical_analysis_view: null })).not.toMatch(/FACTOR_LEVEL_SCALE_UNRESOLVED|MODEL_HAS_BLOCKERS|ORPHAN_NODE/);
   });
 
+  it('Q1 reader 4: a class-studio draft keeps link_words and withheld_reason through the real register, the real scenario read and the core turn\'s wire projection', async () => {
+    const program = { model_program: MODEL_PROGRAM, canonical: studio(), seed: seedOf(SCENARIO), person_words: [STUDIO_BRIEF], runs: [] };
+    const { graph } = withNewRun(program);
+    const fields = (g: Rec) => [(g.edges as Rec[]).find((e) => e.id === 'evening_classes__member_mood')?.link_words,
+      (g.edges as Rec[]).find((e) => e.id === 'instructor_leaves__keep_members')?.link_words, (g.nodes as Rec[]).find((n) => n.id === 'keep_members')?.withheld_reason];
+    const sent = fields(graph);
+    // Positive control: the projection wrote all three.
+    expect(sent.every((x) => x !== undefined)).toBe(true);
+    expect((await register({ graph, thin_core: true, brief_text: STUDIO_BRIEF }, true)).statusCode).toBe(200);
+    const written = (append.mock.calls[0]![0] as Rec).graph as Rec;
+    expect(fields(written)).toEqual(sent);
+    store.readExistingScenario.mockResolvedValue({ userId: null, graph: JSON.parse(JSON.stringify(written)), briefText: STUDIO_BRIEF, analysisInvalidatedAt: null, revision: 1 });
+    const app = Fastify();
+    await scenarioGraphRoute(app);
+    await app.ready();
+    const res = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
+    await app.close();
+    expect(res.statusCode, res.body).toBe(200);
+    expect(fields((res.json() as Rec).graph as Rec)).toEqual(sent);
+    // The core turn serves the saved graph through `appliedGraphWire` (its `model.graph` and GRAPH_READY): the same fields.
+    expect(fields(appliedGraphWire(JSON.parse(JSON.stringify(written))) as unknown as Rec)).toEqual(sent);
+  });
+
   it('DL 26 Oct (inventory F7, compatibility): a program saved BEFORE the switch, its Run stamped with the old analysis hash, still opens as current; the read serves its revision, the receipt\'s digest', async () => {
     const program = { model_program: MODEL_PROGRAM, canonical: bakery(), seed: seedOf(SCENARIO), person_words: [BRIEF], runs: [] };
     const { graph, run } = withNewRun(program);
@@ -175,8 +200,8 @@ describe('a model program\'s postimage through the real /graph/register', () => 
         measure_by: 'person', assumptions: [], exclusions: [] }, question: null, author: 'person', quote: 'at least 100 tickets a week', ...at }],
       limits: [], preferences: [],
       options: [{ id: 'add', label: 'Add one specialist', sets: [{ quantity: 'specialists', to: 'one', value: null, low: null, high: null, range_kind: null, question: null, starts_after_periods: 0, author: 'person', quote: 'Add one specialist' }],
-        status: 'live', developed_from: null, author: 'person', quote: 'Add one specialist', ...at },
-      { id: 'keep', label: 'Keep the team', sets: [], status: 'live', developed_from: null, author: 'person', quote: 'keep the team as it is', ...at }],
+        status: 'live', developed_from: null, carry_on: false, author: 'person', quote: 'Add one specialist', ...at },
+      { id: 'keep', label: 'Keep the team', sets: [], status: 'live', developed_from: null, carry_on: true, author: 'person', quote: 'keep the team as it is', ...at }],
       risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [], title: null, coaching_questions: [] };
     const { graph } = withNewRun({ model_program: MODEL_PROGRAM, canonical: capacity, seed: seedOf(SCENARIO), person_words: [brief], runs: [] });
     expect((await register({ graph, thin_core: true, brief_text: brief }, true)).statusCode).toBe(200);

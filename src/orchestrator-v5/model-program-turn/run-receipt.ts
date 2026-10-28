@@ -85,7 +85,11 @@ export function revisionDigest(canonical: CanonicalModelT, personWords: readonly
   // a question is part of the revision.
   const { title, coaching_questions: coaching, ...rest } = canonical;
   const named = { ...rest, ...(title === null || title === undefined ? {} : { title }), ...(coaching === undefined || coaching.length === 0 ? {} : { coaching_questions: coaching }) };
-  return createHash('sha256').update(stableStringify({ canonical: lean({ ...named, quantities }), person_words: personWords }), 'utf8').digest('hex');
+  // Box 1a: an option that declares no carry-on (false) and a risk of unknown direction are what a model saved before them
+  // reads as, so they leave the digest as it was; a declared carry-on or a direction is part of the revision.
+  const options = canonical.options.map(({ carry_on, ...o }) => (carry_on === true ? { ...o, carry_on } : o));
+  const risks = canonical.risks.map(({ direction, ...k }) => (direction === 'unknown' || direction === undefined ? k : { ...k, direction }));
+  return createHash('sha256').update(stableStringify({ canonical: lean({ ...named, quantities, options, risks }), person_words: personWords }), 'utf8').digest('hex');
 }
 
 export function newRun(args: { canonical: CanonicalModelT; personWords: readonly string[]; seed: number; draws: number | null; result: StoredRun['result'];

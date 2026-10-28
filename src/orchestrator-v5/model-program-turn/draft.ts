@@ -97,7 +97,8 @@ export function withHostFields(json: unknown, firstDraft: boolean): unknown {
 /**
  * AN UPDATE, MERGED BY ID onto the saved model (DL 24 Oct, DoD-G classes 12 and 4): in each family a returned id replaces
  * that record where it stands, a new id is added after the saved ones, and an id in remove is deleted; every record not
- * returned is the saved one, exactly. The question and the time step change only when returned. A returned id given twice,
+ * returned is the saved one, exactly. The question, the time step and Olumi's questions change only when returned (Box 2:
+ * null keeps the saved list, [] clears it). A returned id given twice,
  * or moved to another family, is kept as returned, so the validator refuses it by name (`validatePostimage`).
  */
 export function mergeUpdate(saved: CanonicalModelT, update: CanonicalUpdateT): CanonicalModelT {
@@ -108,7 +109,8 @@ export function mergeUpdate(saved: CanonicalModelT, update: CanonicalUpdateT): C
     return [f, [...was.filter((r) => !gone.has(r.id)).map((r) => back.find((x) => x.id === r.id) ?? r),
       ...back.filter((r, i) => !ids.has(r.id) || back.findIndex((x) => x.id === r.id) !== i)]];
   }));
-  return { ...saved, ...families, question: update.question ?? saved.question, period: update.period ?? saved.period } as CanonicalModelT;
+  return { ...saved, ...families, question: update.question ?? saved.question, period: update.period ?? saved.period,
+    coaching_questions: update.coaching_questions ?? saved.coaching_questions } as CanonicalModelT;
 }
 /**
  * An update read as a first draft is, only where it speaks (Codex BLOCK on #3740): `read` is the first draft's reading of

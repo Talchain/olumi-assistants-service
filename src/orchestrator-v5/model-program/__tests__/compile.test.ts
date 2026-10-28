@@ -42,7 +42,7 @@ type SetT = CanonicalModelT['options'][number]['sets'][number];
 const set = (quantity: string, to: string | null, quote: string, f: Partial<SetT> = {}): SetT =>
   ({ quantity, to, value: null, low: null, high: null, range_kind: null, question: null, starts_after_periods: 0, author: 'person', quote, ...f });
 const option = (id: string, label: string, sets: SetT[], quote: string): CanonicalModelT['options'][number] =>
-  ({ id, label, sets, status: 'live', developed_from: null, author: 'person', quote, ...base });
+  ({ id, label, sets, status: 'live', developed_from: null, carry_on: false, author: 'person', quote, ...base });
 const asked = (id: string, unit: string, question: string) => qty(id, unit, { status: 'asked', question });
 const derived = (id: string, unit: string) => qty(id, unit, { status: 'derived', kind: 'derived' });
 const who = (quote: string | null) => (quote === null ? { author: 'olumi' as const, quote: null } : { author: 'person' as const, quote });
@@ -257,7 +257,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
   it('integrated review 26 Oct: an applied assumption on a risk is a premise of the result the risk reaches, so the basis names it', () => {
     const m = bakery();
     m.quantities.push(olumi('breakdown_chance', '1', 0.05, 0.2), olumi('lost_loaves', 'loaf/week', -150, -50, -100));
-    m.risks.push({ id: 'breakdown', label: 'The oven breaks down', occurrence: 'breakdown_chance', severity: 'lost_loaves', effect_on: 'sales', mode: 'add', starts_after_periods: 4, author: 'olumi', quote: null, ...base });
+    m.risks.push({ id: 'breakdown', label: 'The oven breaks down', occurrence: 'breakdown_chance', severity: 'lost_loaves', effect_on: 'sales', direction: 'unknown', mode: 'add', starts_after_periods: 4, author: 'olumi', quote: null, ...base });
     m.assumptions.push({ id: 'repaired_in_a_week', text: 'A breakdown is repaired within a week.', applied: true, concerns: ['breakdown'], author: 'olumi', quote: null, ...base },
       // Contrast: a noted assumption on the same risk is never a premise.
       { id: 'parts_in_stock', text: 'Spare parts are usually in stock.', applied: false, concerns: ['breakdown'], author: 'olumi', quote: null, ...base });
@@ -699,7 +699,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     };
     const risk = (from: number) => (m: CanonicalModelT) => {
       m.quantities.push(olumi('breakdown_chance', '1', 0.05, 0.2), olumi('lost_loaves', 'loaf/week', -150, -50, -100));
-      m.risks.push({ id: 'breakdown', label: 'The oven breaks down', occurrence: 'breakdown_chance', severity: 'lost_loaves', effect_on: 'sales', mode: 'add', starts_after_periods: from, author: 'olumi', quote: null, ...base });
+      m.risks.push({ id: 'breakdown', label: 'The oven breaks down', occurrence: 'breakdown_chance', severity: 'lost_loaves', effect_on: 'sales', direction: 'unknown', mode: 'add', starts_after_periods: from, author: 'olumi', quote: null, ...base });
     };
     waits(timed(4), 'the oven arrives in week 5');
     waits(timed('delivery', (m) => m.quantities.push(qty('delivery', 'week', { low: 2, high: 6, range_kind: 'plausible', status: 'estimated', author: 'olumi', basis: 'Typical delivery time.' }))), 'its start is a quantity');
@@ -721,7 +721,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
         m.options.push(option('cut_hours', 'Cut my hours', [set('hours', 'fewer_hours', 'cut to 40 hours', { starts_after_periods: 4 })], 'Cut my hours')); })],
       ['a known 0-week start held in a figure', timed('lead_time', (m) => m.quantities.push(person('lead_time', 'week', 0, 'it arrives straight away')))],
       ['a later risk on what it does not rest on', timed(0, (m) => { m.quantities.push(person('hours', 'hour/week', 50, '50 hours a week'), olumi('strain_chance', '1', 0.05, 0.2), olumi('lost_hours', 'hour/week', -10, -2, -5));
-        m.risks.push({ id: 'strain', label: 'Burnout cuts my hours', occurrence: 'strain_chance', severity: 'lost_hours', effect_on: 'hours', mode: 'add', starts_after_periods: 4, author: 'olumi', quote: null, ...base }); })],
+        m.risks.push({ id: 'strain', label: 'Burnout cuts my hours', occurrence: 'strain_chance', severity: 'lost_hours', effect_on: 'hours', direction: 'unknown', mode: 'add', starts_after_periods: 4, author: 'olumi', quote: null, ...base }); })],
       ['a later start on a ruled-out option', timed(0, (m) => m.options.push({ ...option('second_hand', 'A second-hand oven', [set('ovens_added', 'one_oven', 'a used one', { starts_after_periods: 4 })], 'a used one'), status: 'ruled_out' }))]] as const) {
       expect(r.errors, what).toEqual([]);
       expect(r.blockers, what).toEqual([]);
@@ -978,7 +978,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     // A risk starting then: only the goal it reaches is withheld; the members goal still calculates.
     const k = opens(gymFilled());
     k.quantities.push(olumi('leave_chance', '1', 0.05, 0.2), olumi('class_loss', '1', 0.5, 0.9, 0.7));
-    k.risks.push({ id: 'instructor_leaves', label: 'The instructor leaves', occurrence: 'leave_chance', severity: 'class_loss', effect_on: 'class_revenue', mode: 'multiply', starts_after_periods: 'opens', author: 'olumi', quote: null, ...base });
+    k.risks.push({ id: 'instructor_leaves', label: 'The instructor leaves', occurrence: 'leave_chance', severity: 'class_loss', effect_on: 'class_revenue', direction: 'unknown', mode: 'multiply', starts_after_periods: 'opens', author: 'olumi', quote: null, ...base });
     const rk = compile(k);
     expect(rk.errors).toEqual([]);
     expect(rk.perGoal.map((p) => [p.goal_id, p.status])).toEqual([['reach_400', 'calculable'], ['class_income', 'withheld']]);
@@ -1048,7 +1048,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       g.quantities = g.quantities.map((q) => (q.id === 'joins' ? { ...q, value: null, low: 0, high: 30, range_kind: 'plausible' as const, quote: words, floor } : q));
       g.quantities.push(qty('rival_chance', '%', { kind: 'coefficient', status: 'estimated', author: 'olumi', low: 10, high: 30, range_kind: 'plausible', basis: 'A rival opens nearby in some summers.' }),
         olumi('rival_loss', 'member', -30, -10));
-      g.risks.push({ id: 'rival', label: 'A rival gym opens', occurrence: 'rival_chance', severity: 'rival_loss', effect_on: 'members', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...base });
+      g.risks.push({ id: 'rival', label: 'A rival gym opens', occurrence: 'rival_chance', severity: 'rival_loss', effect_on: 'members', direction: 'unknown', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...base });
       return g;
     };
     const nodes = (m: CanonicalModelT) => evaluateCanonical(m, { sourceText: `300 members today. ${words}.`, seed: 7, draws: 2000 }).projection.graph.nodes;
@@ -1129,7 +1129,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       const g = gymFilled();
       g.quantities.push(qty('rival_chance', '%', { kind: 'coefficient', status: 'estimated', author: 'olumi', low: 10, high: 30, range_kind: 'plausible', basis: 'A rival opens nearby in some summers.', ...f }),
         olumi('rival_loss', 'member', -30, -10));
-      g.risks.push({ id: 'rival', label: 'A rival gym opens', occurrence: 'rival_chance', severity: 'rival_loss', effect_on: 'members', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...base });
+      g.risks.push({ id: 'rival', label: 'A rival gym opens', occurrence: 'rival_chance', severity: 'rival_loss', effect_on: 'members', direction: 'unknown', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...base });
       return g;
     };
     const drawn = (m: CanonicalModelT) => {
@@ -1186,7 +1186,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const c = gymFilled();
     c.quantities.push(qty('rival_chance', '%', { kind: 'coefficient', status: 'estimated', author: 'olumi', low: 10, high: 30, range_kind: 'plausible', basis: 'A rival opens nearby in some summers.', floor: 120 }),
       olumi('rival_loss', 'member', -30, -10));
-    c.risks.push({ id: 'rival', label: 'A rival gym opens', occurrence: 'rival_chance', severity: 'rival_loss', effect_on: 'members', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...base });
+    c.risks.push({ id: 'rival', label: 'A rival gym opens', occurrence: 'rival_chance', severity: 'rival_loss', effect_on: 'members', direction: 'unknown', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...base });
     expect(why(compile(c)).reasons).toEqual(['rests on "rival chance": Olumi reads "rival chance" as never below 120 %, but a chance is never above 100 %.']);
     // Contrast: bounds with room calculate.
     const roomy = gymFilled();
@@ -1202,7 +1202,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       g.quantities.push(person('rival_a', '%', a, `${a} % from one rival`), person('rival_b', '%', b, `${b} % from another`),
         { ...derived('rival_chance', '%'), floor: 0 }, person('rival_loss', 'member', -10, 'we would lose 10 members'));
       g.relations.push(def('rival_rel', 'rival_chance', 'sum', ['rival_a', 'rival_b']));
-      g.risks.push({ id: 'rival', label: 'A rival gym opens', occurrence: 'rival_chance', severity: 'rival_loss', effect_on: 'members', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...base });
+      g.risks.push({ id: 'rival', label: 'A rival gym opens', occurrence: 'rival_chance', severity: 'rival_loss', effect_on: 'members', direction: 'unknown', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...base });
       return compile(g);
     };
     const over = rival(80, 80);
@@ -1225,7 +1225,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       const g = gymFilled();
       g.quantities = g.quantities.map((q) => (q.id === 'attendances' ? { ...q, floor: 0 } : q));
       g.quantities.push(person('closure_chance', '%', 100, 'the studio will certainly close for works'), person('closure_loss', 'attendance/month', -loss, `${loss} fewer class visits a month`));
-      g.risks.push({ id: 'closure', label: 'The studio closes for works', occurrence: 'closure_chance', severity: 'closure_loss', effect_on: 'attendances', mode: 'add', starts_after_periods: 0, author: 'person', quote: 'the studio will certainly close for works', ...base });
+      g.risks.push({ id: 'closure', label: 'The studio closes for works', occurrence: 'closure_chance', severity: 'closure_loss', effect_on: 'attendances', direction: 'unknown', mode: 'add', starts_after_periods: 0, author: 'person', quote: 'the studio will certainly close for works', ...base });
       return compile(g);
     };
     const deep = closing(500);
@@ -1455,7 +1455,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     // Domains: a chance lies in [0, 1]; a count is never negative; money carries no invented domain.
     const m = bakery();
     m.quantities.push(olumi('breakdown_chance', '1', 0.05, 0.2), olumi('lost_loaves', 'loaf/week', -150, -50, -100));
-    m.risks.push({ id: 'breakdown', label: 'The oven breaks down', occurrence: 'breakdown_chance', severity: 'lost_loaves', effect_on: 'sales', mode: 'add', starts_after_periods: 4, author: 'olumi', quote: null, ...base });
+    m.risks.push({ id: 'breakdown', label: 'The oven breaks down', occurrence: 'breakdown_chance', severity: 'lost_loaves', effect_on: 'sales', direction: 'unknown', mode: 'add', starts_after_periods: 4, author: 'olumi', quote: null, ...base });
     m.quantities = m.quantities.map((q) => (q.id === 'base_sales' ? { ...q, value: null, low: 350, high: 450, range_kind: 'plausible' as const } : q));
     const rd = compile(m);
     expect(rd.errors).toEqual([]);

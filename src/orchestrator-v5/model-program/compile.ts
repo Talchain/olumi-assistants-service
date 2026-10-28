@@ -30,9 +30,9 @@
  * (`conversions`), so the executable model has one number per unit and the person's bounds are never their law.
  */
 import {
-  APPROXIMATE_FIGURE, CanonicalModel, FIGURE_STATUSES, WITHHOLDING_STATUSES, QUALITATIVE_FAMILIES,
+  APPROXIMATE_FIGURE, CanonicalModel, FIGURE_STATUSES, WITHHOLDING_STATUSES, QUALITATIVE_FAMILIES, isInfluence,
   type CanonicalModelT, type CanonicalQuantityT, type CanonicalRelationT, type CanonicalWindowT, type CanonicalOptionSetT,
-  type CanonicalGoalT, type CanonicalLimitT,
+  type CanonicalGoalT, type CanonicalLimitT, type CanonicalRiskT, type NumericRelationT,
 } from './canonical.js';
 import type { ExecutableModel, Quantity as XQuantity, Goal as XGoal, Limit as XLimit, Option as XOption, Risk as XRisk, Dist, Domain, Withheld, FixedAuthor } from './executable.js';
 import { parseUnit, multiply, divide, sameDims, isDimensionless, showUnit, perPeriod, TIME_DIMS, type Unit } from './units.js';
@@ -83,7 +83,8 @@ export type OptionOutcome = { option_id: string; status: Outcome | 'not_compared
  * range, with no word on whether its ends are hard. recount: their figure, given wholly outside what Olumi reads it can be
  * (its floor or ceiling, or those of what it sets); its `reason` names that reading in their unit, so they can correct either.
  * measure: an aim or guardrail with no measure. deadline: an aim or guardrail that changes over time with no deadline.
- * no_goal: no aim at all. unknown: a figure it rests on that no one can give or responsibly estimate yet; never the person's
+ * no_goal: no aim at all. unknown: a figure it rests on that no one can give or responsibly estimate yet (an unmeasured
+ * factor's too), or a link in words or a risk the calculation cannot size, by that record's id (Box 1a); never the person's
  * to answer (its basis says why).
  */
 export type BlockerCode = 'asked' | 'range_kind' | 'recount' | 'measure' | 'deadline' | 'no_goal' | 'unknown';
@@ -190,7 +191,8 @@ export function normalise(model: CanonicalModelT): CanonicalModelT {
       const fig = has(s.value) || has(s.low) || has(s.high);
       const proposal = s.author === 'olumi' && o.author === 'olumi';
       extra.push({
-        id, label: `${o.label}: ${target?.label ?? s.quantity}`, unit: target?.unit ?? '1',
+        // A setting on an unmeasured factor stays unmeasured (Box 1a): never a unit read into it.
+        id, label: `${o.label}: ${target?.label ?? s.quantity}`, unit: target === undefined ? '1' : target.unit,
         kind: 'fact',
         value: s.value, low: s.low, high: s.high, range_kind: s.range_kind, status: fig ? 'known' : 'asked', question: s.question,
         basis: s.author === 'olumi' ? (proposal ? `Olumi's proposed setting for its option "${o.label}".` : `Olumi's estimate of what "${o.label}" sets this to.`) : s.author === 'structure' ? `"${o.label}" switched on.` : null,
@@ -246,6 +248,7 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
   // ── units ──────────────────────────────────────────────────────────────────────────────────────────────────────────
   const U = new Map<string, Unit>();
   for (const q of model.quantities) {
+    if (q.unit === null) continue; // an unmeasured factor has no scale to read (Box 1a): whatever reaches it is withheld
     const p = parseUnit(q.unit);
     if (p.ok) U.set(q.id, p.unit);
     else err('unit_unreadable', `The unit "${q.unit}" of ${name(q.id)} ${p.message}.`, [q.id]);
@@ -268,11 +271,18 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
   const timingQs = new Set(timings);
 
   // ── relations ──────────────────────────────────────────────────────────────────────────────────────────────────────
-  const R = new Map<string, CanonicalRelationT>();
+  const R = new Map<string, NumericRelationT>();
   for (const r of model.relations) {
+    if (isInfluence(r)) continue; // a link in words defines nothing and is never lowered
     if (!isQ(r.defines, `The relation "${r.id}"`, r.id)) continue;
     if (R.has(r.defines)) { err('two_relations', `${name(r.defines)} is worked out by two relations ("${R.get(r.defines)!.id}" and "${r.id}"); keep one.`, [r.defines, r.id]); continue; }
     R.set(r.defines, r);
+  }
+  // ── links in words (Box 1a, Q1 28 Oct): never calculated; each names records of the kinds it joins ────────────────────
+  const influences = model.relations.filter(isInfluence);
+  for (const i of influences) {
+    if (!['option', 'quantity', 'risk'].includes(allIds.get(i.from) ?? '')) err('undefined_ref', `The link "${i.id}" starts from "${i.from}", which is not an option, quantity or risk in the model.`, [i.id, i.from]);
+    if (!['quantity', 'goal', 'limit'].includes(allIds.get(i.to) ?? '')) err('undefined_ref', `The link "${i.id}" goes to "${i.to}", which is not a quantity, goal or limit in the model.`, [i.id, i.to]);
   }
 
   // ── quantities: status, author and kind ↔ figures ──────────────────────────────────────────────────────────────────
@@ -365,20 +375,35 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
 
   // ── upstream closures (for reach and for what withholds what) ──────────────────────────────────────────────────────
   const risksOn = new Map<string, string[]>();
-  for (const k of model.risks) if (Q.has(k.effect_on)) risksOn.set(k.effect_on, [...(risksOn.get(k.effect_on) ?? []), k.id]);
+  for (const k of model.risks) risksOn.set(k.effect_on, [...(risksOn.get(k.effect_on) ?? []), k.id]);
   const riskById = new Map(model.risks.map((k) => [k.id, k] as const));
-  const riskInputs = (k: CanonicalModelT['risks'][number]) => [k.occurrence, k.severity, ...(typeof k.starts_after_periods === 'string' ? [k.starts_after_periods] : [])].filter((x) => Q.has(x));
+  const riskInputs = (k: CanonicalRiskT) => [k.occurrence, k.severity, ...(typeof k.starts_after_periods === 'string' ? [k.starts_after_periods] : [])].filter((x): x is string => has(x) && Q.has(x));
+  const influencesInto = new Map<string, typeof influences>();
+  for (const i of influences) influencesInto.set(i.to, [...(influencesInto.get(i.to) ?? []), i]);
+  /** The quantities `roots` rest on. A root may be a goal's or limit's own id, so the risks and links on it are followed too;
+   *  a link in words is followed from what it moves to what moves it (Box 1a), a risk that moves it bringing its own inputs. */
   const upstream = (roots: readonly string[]): Set<string> => {
     const seen = new Set<string>();
-    const stack = roots.filter((r) => Q.has(r));
+    const stack = [...roots];
     while (stack.length) {
       const q = stack.pop()!;
       if (seen.has(q)) continue;
       seen.add(q);
       stack.push(...(instant.get(q) ?? []), ...(lagged.get(q) ?? []));
       for (const rid of risksOn.get(q) ?? []) stack.push(...riskInputs(riskById.get(rid)!));
+      for (const i of influencesInto.get(q) ?? []) stack.push(...(Q.has(i.from) ? [i.from] : riskById.has(i.from) ? riskInputs(riskById.get(i.from)!) : []));
     }
-    return seen;
+    return new Set([...seen].filter((x) => Q.has(x)));
+  };
+  /** A risk the engine can draw: a chance, a severity and a mode, on a quantity. Any other is unsized and is never lowered. */
+  const sized = (k: CanonicalRiskT): k is CanonicalRiskT & { occurrence: string; severity: string; mode: 'add' | 'multiply' } =>
+    has(k.occurrence) && has(k.severity) && has(k.mode) && Q.has(k.effect_on);
+  /** The links in words and the unsized risks a closure reaches (`own`: the goal or limit it is read for), in the model's
+   *  order: any one withholds what rests on the closure, named (spec §3.0, the influence-reach admission rule). */
+  const inWords = (closure: ReadonlySet<string>, own?: string): string[] => {
+    const at = (x: string) => closure.has(x) || x === own;
+    const links = influences.filter((i) => at(i.to));
+    return [...links.map((i) => i.id), ...model.risks.filter((k) => !sized(k) && (at(k.effect_on) || links.some((i) => i.from === k.id))).map((k) => k.id)];
   };
 
   // ── timing: a whole period, or a quantity holding one ──────────────────────────────────────────────────────────────
@@ -397,7 +422,7 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
     if (!live && (q.status === 'derived' || q.status === 'not_applicable')) return null;
     if (q.status === 'derived') { derivedTimings.add(t); return null; }
     if (q.status === 'not_applicable') { err('timing', `${at}'s timing ${name(t)} is marked as not applying; a timing is a figure of ${model.period}s from now, given or estimated.`, [item, t]); return null; }
-    if (!FIGURE_STATUSES.has(q.status)) return null; // asked, unknown or unsupported: an ask or a withholding, through its closure
+    if (!FIGURE_STATUSES.has(q.status) || q.unit === null) return null; // asked, unknown, unsupported or unmeasured: an ask or a withholding, through its closure
     if (has(q.low) && has(q.high) && q.low !== q.high) {
       if (q.low < 0) err('timing', `${at}'s timing ${name(t)} starts at ${q.low}; a timing counts ${model.period}s from now, 0 or more.`, [item, t]);
       return t; // uncertain: a range read through the shared law, like any other (an unclear kind is asked, a held one withholds)
@@ -420,6 +445,7 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
       if (U.has(ref) && !sameDims(U.get(ref)!, period)) { err('window', `${at}'s ${what} ${name(ref)} is ${showUnit(U.get(ref)!)}; it counts ${model.period}s.`, [item, ref]); return null; }
       if (q.status === 'derived') { err('window', `${at}'s ${what} ${name(ref)} is derived; a window needs a figure.`, [item, ref]); return null; }
       if (q.status === 'asked') { st.blockers.push(ref); return null; }
+      if (q.unit === null) { st.withheld.push(`${said}'s ${what} "${q.label}" is not measured.`); return null; }
       if (!FIGURE_STATUSES.has(q.status)) { st.withheld.push(`${said}'s ${what} "${q.label}" is ${q.status.replace('_', ' ')}${has(q.basis) ? `: ${q.basis}` : '.'}`); return null; }
       if (has(q.low) && has(q.high) && q.low !== q.high) { st.withheld.push(`${said}'s ${what} "${q.label}" is a range (${q.low}–${q.high} ${q.unit}); the calculation needs one whole number of ${model.period}s.`); return null; }
       const v = q.value ?? q.low!;
@@ -530,15 +556,20 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
     const at = `The risk "${k.label}" (${k.id})`;
     const from = timingOf(k.starts_after_periods, at, k.id);
     riskTiming.set(k.id, from);
-    if (!isQ(k.occurrence, at, k.id) || !isQ(k.severity, at, k.id) || !isQ(k.effect_on, at, k.id)) continue;
-    const ou = U.get(k.occurrence);
-    if (ou && !isDimensionless(ou)) err('risk_shape', `${at}: its chance ${name(k.occurrence)} is ${showUnit(ou)}; a chance is a pure number ("1", or "%").`, [k.id, k.occurrence]);
-    const occ = Q.get(k.occurrence)!;
-    if (ou && isDimensionless(ou)) for (const v of [occ.value, occ.low, occ.high]) if (has(v) && (v * ou.scale < 0 || v * ou.scale > 1)) {
-      err('risk_shape', `${at}: its chance ${name(k.occurrence)} has ${v}${ou.scale === 1 ? '' : ' %'}, outside 0 to ${ou.scale === 1 ? '1' : '100 %'}.`, [k.id, k.occurrence]);
+    // A chance or a severity no one can give yet is null (Box 1a): the risk is unsized, never lowered, and withholds what it reaches.
+    if (![k.occurrence, k.severity].every((x) => !has(x) || isQ(x, at, k.id))) continue;
+    if (!['quantity', 'goal', 'limit', 'option'].includes(allIds.get(k.effect_on) ?? '')) {
+      err('undefined_ref', `${at} acts on "${k.effect_on}", which is not a quantity, goal, limit or option in the model.`, [k.id, k.effect_on]);
+      continue;
+    }
+    const ou = has(k.occurrence) ? U.get(k.occurrence) : undefined;
+    if (has(k.occurrence) && ou && !isDimensionless(ou)) err('risk_shape', `${at}: its chance ${name(k.occurrence)} is ${showUnit(ou)}; a chance is a pure number ("1", or "%").`, [k.id, k.occurrence]);
+    const occ = has(k.occurrence) ? Q.get(k.occurrence)! : undefined;
+    if (occ && ou && isDimensionless(ou)) for (const v of [occ.value, occ.low, occ.high]) if (has(v) && (v * ou.scale < 0 || v * ou.scale > 1)) {
+      err('risk_shape', `${at}: its chance ${name(occ.id)} has ${v}${ou.scale === 1 ? '' : ' %'}, outside 0 to ${ou.scale === 1 ? '1' : '100 %'}.`, [k.id, occ.id]);
       break;
     }
-    if (unitsOk(k.severity, k.effect_on)) {
+    if (has(k.severity) && has(k.mode) && unitsOk(k.severity, k.effect_on)) {
       const want = k.mode === 'add' ? U.get(k.effect_on)! : { dims: {}, scale: 1 };
       if (!sameDims(U.get(k.severity)!, want)) err('unit_mismatch', `${at}: its severity ${name(k.severity)} is ${showUnit(U.get(k.severity)!)}; to ${k.mode === 'add' ? 'add to' : 'multiply'} ${name(k.effect_on)} it must be ${showUnit(want)}.`, [k.id, k.severity, k.effect_on]);
     }
@@ -557,7 +588,7 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
   for (const l of measuredLimits) for (const x of limitRoots(l)) used.set(x, l.id);
   for (const { id, w } of windowed) for (const x of [w.periods, w.origin_offset]) if (has(x)) used.set(x, id);
   for (const o of model.options) for (const s of o.sets) { used.set(s.quantity, o.id); if (has(s.to)) used.set(s.to, o.id); }
-  for (const k of model.risks) for (const x of [k.occurrence, k.severity, k.effect_on]) used.set(x, k.id);
+  for (const k of model.risks) for (const x of [k.occurrence, k.severity, k.effect_on]) if (has(x)) used.set(x, k.id);
   for (const q of model.quantities) if (q.status === 'not_applicable' && used.has(q.id)) {
     err('not_applicable_used', `${name(q.id)} is marked not applicable but "${used.get(q.id)}" uses it; remove it from there, or give it a status that has a figure.`, [q.id, used.get(q.id)!]);
   }
@@ -569,7 +600,7 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
     && !model.risks.some((k) => [k.occurrence, k.severity, k.effect_on].includes(id))));
 
   // ── the ruled range law, for every range (a held range withholds what rests on it) ─────────────────────────────────
-  const chances = new Set(model.risks.map((k) => k.occurrence));
+  const chances = new Set(model.risks.map((k) => k.occurrence).filter(has));
   /**
    * WHAT A FIGURE CAN BE (alpha G2, spec §3.7): within the floor and ceiling the model declares, Olumi's reading, never
    * inferred from its unit's name; a chance also lies in [0, 1] and an elapsed time (a set's or risk's timing) is 0 or more
@@ -644,15 +675,23 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
 
   // ── typed outcomes: what each goal, limit and option rests on ──────────────────────────────────────────────────────
   const unverifiedIds = new Set(unverified.map((u) => u.id));
-  const withholds = (q: CanonicalQuantityT) => WITHHOLDING_STATUSES.has(q.status) || held.has(q.id);
+  // An unmeasured factor (unit null) is never executed, whatever its status says (Box 1a).
+  const withholds = (q: CanonicalQuantityT) => WITHHOLDING_STATUSES.has(q.status) || held.has(q.id) || q.unit === null;
   const isAsk = (q: CanonicalQuantityT) => q.status === 'asked' || unresolved.has(q.id) || recheck.has(q.id);
   const blockersOf = (closure: Iterable<string>) => [...closure].map((x) => Q.get(x)).filter((q): q is CanonicalQuantityT => !!q && (isAsk(q) || withholds(q)));
-  const describe = (q: CanonicalQuantityT) => (q.status === 'asked' ? `needs "${q.label}".` : held.has(q.id) ? `rests on "${q.label}": ${held.get(q.id)}${nothing.has(q.id) ? '.' : '; give a most likely figure, or ask'}`
-    : unresolved.has(q.id) ? `needs how to read "${q.label}" (firm ends, or a rough estimate).` : recheck.has(q.id) ? `needs "${q.label}" again: ${recheck.get(q.id)}.`
-      : `rests on "${q.label}", which is ${q.status.replace('_', ' ')}${has(q.basis) ? `: ${q.basis}` : '.'}`);
-  const outcomeOf = (closure: Set<string>, win?: WinState): { status: Outcome; reasons: string[]; asks: string[] } => {
+  const describe = (q: CanonicalQuantityT) => (q.unit === null ? `rests on "${q.label}", which is not measured${has(q.basis) ? `: ${q.basis}` : '.'}`
+    : q.status === 'asked' ? `needs "${q.label}".` : held.has(q.id) ? `rests on "${q.label}": ${held.get(q.id)}${nothing.has(q.id) ? '.' : '; give a most likely figure, or ask'}`
+      : unresolved.has(q.id) ? `needs how to read "${q.label}" (firm ends, or a rough estimate).` : recheck.has(q.id) ? `needs "${q.label}" again: ${recheck.get(q.id)}.`
+        : `rests on "${q.label}", which is ${q.status.replace('_', ' ')}${has(q.basis) ? `: ${q.basis}` : '.'}`);
+  const labelOf = (id: string) => Q.get(id)?.label ?? [...model.options, ...model.risks, ...model.goals, ...model.limits].find((r) => r.id === id)?.label ?? id;
+  /** A link in words, or a risk the calculation cannot size, said by what it joins or its own name. */
+  const sayInWords = (id: string) => {
+    const i = influences.find((x) => x.id === id);
+    return i !== undefined ? `rests on the link "${labelOf(i.from)} → ${labelOf(i.to)}", which is in words, never calculated.` : `rests on the risk "${labelOf(id)}", which the calculation cannot size.`;
+  };
+  const outcomeOf = (closure: Set<string>, win?: WinState, words: readonly string[] = []): { status: Outcome; reasons: string[]; asks: string[] } => {
     const blockers = blockersOf([...closure, ...(win?.blockers ?? [])]);
-    const withheld = [...(win?.withheld ?? []), ...blockers.filter(withholds).map(describe)];
+    const withheld = [...(win?.withheld ?? []), ...blockers.filter(withholds).map(describe), ...words.map(sayInWords)];
     const asked = [...new Map(blockers.filter((q) => isAsk(q) && !withholds(q)).map((q) => [q.id, q] as const)).values()];
     const reasons = [...withheld, ...asked.map(describe), ...(win?.deadline ? ['It changes over time, so it needs a deadline.'] : [])];
     return { status: withheld.length ? 'withheld' : asked.length || win?.deadline ? 'asks' : 'calculable', reasons, asks: asked.map((q) => q.id) };
@@ -682,32 +721,42 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
   /** A window's own figures that break what Olumi reads them as (a bound, or bounds leaving nothing): the window is read from
    *  them, so the goal or limit rests on them, asked or held, never run on that window (spec §3.7). */
   const outsideWindowRefs = (w: CanonicalWindowT | null | undefined) => [w?.periods, w?.origin_offset].filter((x): x is string => has(x) && (contradictory.has(x) || nothing.has(x)));
+  /** A goal's or limit's own window figures (its length and origin timing, every one the closures above gather): a link in
+   *  words or a risk on one reaches what is read over that window (Box 1a). */
+  const windowRefs = (w: CanonicalWindowT | null | undefined) => [w?.periods, w?.origin_offset].filter((x): x is string => has(x) && Q.has(x));
   const goalClosure = new Map<string, Set<string>>();
+  /** By goal, limit and live option: the links in words and unsized risks its closure reaches (Box 1a). */
+  const wordsOf = new Map<string, string[]>();
   const perGoal: GoalOutcome[] = model.goals.map((g) => {
     if (!has(g.measure)) {
       return { goal_id: g.id, status: 'asks', reasons: [`"${g.label}" has no measure yet, so it is left out of the chance.`], asks: [], cancelled: [], needs_measure: true, needs_deadline: false, olumi_inputs: [], unverified_inputs: unverifiedIds.has(g.id) ? [g.id] : [], rests_on: restsOn(new Set([g.id])), excludes: [] };
     }
-    const closure = upstream(goalRoots(g));
+    const closure = upstream([...goalRoots(g), g.id]);
     const w = goalWin.get(g.id), outsideWin = outsideWindowRefs(g.measure.window);
     goalClosure.set(g.id, new Set([...closure, ...(w?.blockers ?? []), ...unknownWindowRefs(g.measure.window), ...outsideWin]));
+    wordsOf.set(g.id, inWords(new Set([...closure, ...windowRefs(g.measure.window)]), g.id));
     const touched = touchedBy(closure, g.id);
     for (const x of [g.measure.window?.periods, g.measure.window?.origin_offset]) if (has(x)) touched.add(x);
-    return { goal_id: g.id, ...outcomeOf(new Set([...closure, ...outsideWin]), w), cancelled: [], needs_measure: false, needs_deadline: w?.deadline === true, olumi_inputs: olumiInputs(closure), unverified_inputs: [...touched].filter((x) => unverifiedIds.has(x)), rests_on: restsOn(touched, g.measure.assumptions), excludes: [...g.measure.exclusions] };
+    return { goal_id: g.id, ...outcomeOf(new Set([...closure, ...outsideWin]), w, wordsOf.get(g.id)), cancelled: [], needs_measure: false, needs_deadline: w?.deadline === true, olumi_inputs: olumiInputs(closure), unverified_inputs: [...touched].filter((x) => unverifiedIds.has(x)), rests_on: restsOn(touched, g.measure.assumptions), excludes: [...g.measure.exclusions] };
   });
   const limitClosure = new Map<string, Set<string>>();
   const perLimit: LimitOutcome[] = model.limits.map((l) => {
     if (!has(l.measure)) return { limit_id: l.id, status: 'asks', reasons: [`"${l.label}" has no measure yet, so the result does not cover it.`], asks: [], cancelled: [], needs_measure: true, rests_on: restsOn(new Set([l.id])) };
-    const closure = upstream(limitRoots(l));
+    const closure = upstream([...limitRoots(l), l.id]);
     const w = limitWin.get(l.id), outsideWin = outsideWindowRefs(l.measure.window);
     limitClosure.set(l.id, new Set([...closure, ...(w?.blockers ?? []), ...unknownWindowRefs(l.measure.window), ...outsideWin]));
+    wordsOf.set(l.id, inWords(new Set([...closure, ...windowRefs(l.measure.window)]), l.id));
     const touched = touchedBy(closure, l.id);
     for (const x of [l.measure.window?.periods, l.measure.window?.origin_offset]) if (has(x)) touched.add(x);
-    return { limit_id: l.id, ...outcomeOf(new Set([...closure, ...outsideWin]), w), cancelled: [], needs_measure: false, rests_on: restsOn(touched) };
+    return { limit_id: l.id, ...outcomeOf(new Set([...closure, ...outsideWin]), w, wordsOf.get(l.id)), cancelled: [], needs_measure: false, rests_on: restsOn(touched) };
   });
   const optionClosure = new Map(model.options.map((o) => [o.id, upstream([...o.sets.map((s) => s.to).filter(has), ...o.sets.map((s) => s.starts_after_periods).filter((t): t is string => typeof t === 'string')])] as const));
   const perOption: OptionOutcome[] = model.options.map((o) => {
     if (o.status !== 'live') return { option_id: o.id, status: 'not_compared', reasons: [o.status === 'ruled_out' ? `"${o.label}" is ruled out, kept in view.` : `"${o.label}" is removed from the comparison.`], asks: [], rests_on: [] };
-    return { option_id: o.id, ...outcomeOf(optionClosure.get(o.id)!), rests_on: restsOn(touchedBy(optionClosure.get(o.id)!, o.id)) };
+    // Its own links in words and the unsized risks on it too: an option whose effect is said only in words is never compared
+    // as if it changed nothing.
+    wordsOf.set(o.id, [...influences.filter((i) => i.from === o.id).map((i) => i.id), ...inWords(optionClosure.get(o.id)!, o.id)].filter((id, n, all) => all.indexOf(id) === n));
+    return { option_id: o.id, ...outcomeOf(optionClosure.get(o.id)!, undefined, wordsOf.get(o.id)), rests_on: restsOn(touchedBy(optionClosure.get(o.id)!, o.id)) };
   });
 
   const result: CompileResult = {
@@ -740,7 +789,7 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
         const when = setTiming.get(o.id)?.[i];
         for (const x of upstream([s.to ?? '', ...(typeof when === 'string' ? [when] : [])])) included.add(x);
       });
-      for (const k of model.risks) if (!xRisks.has(k.id) && included.has(k.effect_on)) {
+      for (const k of model.risks) if (!xRisks.has(k.id) && sized(k) && included.has(k.effect_on)) {
         xRisks.add(k.id); changed = true;
         const when = riskTiming.get(k.id);
         for (const x of upstream([k.occurrence, k.severity, ...(typeof when === 'string' ? [when] : [])])) included.add(x);
@@ -748,6 +797,7 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
     }
     const quantities: XQuantity[] = [];
     for (const q of model.quantities.filter((x) => included.has(x.id) && !consumedOnly.has(x.id))) {
+      if (q.unit === null) continue; // never lowered (Box 1a): whatever reaches an unmeasured factor is withheld
       const u = U.get(q.id)!;
       const unit = u.scale === 1 ? q.unit : showUnit({ dims: u.dims, scale: 1 });
       const r = R.get(q.id);
@@ -778,7 +828,8 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
       cmp: l.measure!.cmp, bound: l.measure!.bound, aggregation: l.measure!.aggregation, window: limitWin.get(l.id)!.win!,
       ...(l.measure!.window === null ? { no_deadline: true as const } : {}),
     }));
-    const xRiskList: XRisk[] = model.risks.filter((k) => xRisks.has(k.id)).map((k) => ({ id: k.id, occurrence: k.occurrence, severity: k.severity, effect_on: k.effect_on, mode: k.mode, from_period: riskTiming.get(k.id) ?? 0 }));
+    // Only a sized risk is lowered: a null id never reaches the executable model (Box 1a).
+    const xRiskList: XRisk[] = model.risks.filter(sized).filter((k) => xRisks.has(k.id)).map((k) => ({ id: k.id, occurrence: k.occurrence, severity: k.severity, effect_on: k.effect_on, mode: k.mode, from_period: riskTiming.get(k.id) ?? 0 }));
     setReadings(quantities);
     return { periods: horizon, period_unit: model.period, quantities, goals: xGoals, limits: xLimits, options: xOptions, risks: xRiskList, withheld: [] };
   };
@@ -822,10 +873,15 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
     ...model.quantities.flatMap((q) => [
       // Every figure the result rests on with none in hand waits (served funding dead end: two unknowns, nothing listed):
       // asked, theirs to give; unknown, where a goal, limit or option rests on it, no one's to give yet.
-      ...(q.status === 'asked' ? [blocker(q.id, 'asked', feedsOf(q.id))] : q.status === 'unknown' && feedsOf(q.id).length > 0 ? [blocker(q.id, 'unknown', feedsOf(q.id))] : []),
+      ...(q.status === 'asked' ? [blocker(q.id, 'asked', feedsOf(q.id))] : (q.status === 'unknown' || q.unit === null) && feedsOf(q.id).length > 0 ? [blocker(q.id, 'unknown', feedsOf(q.id))] : []),
       ...(unresolved.has(q.id) ? [blocker(q.id, 'range_kind', feedsOf(q.id))] : []),
       ...(recheck.has(q.id) ? [blocker(q.id, 'recount', feedsOf(q.id), recheck.get(q.id))] : []),
     ]),
+    // A link in words, or a risk the calculation cannot size, that a goal, limit or live option rests on (Box 1a), by its id.
+    ...[...influences.map((i) => i.id), ...model.risks.filter((k) => !sized(k)).map((k) => k.id)].flatMap((id) => {
+      const scope = [...wordsOf].filter(([, ids]) => ids.includes(id)).map(([owner]) => owner);
+      return scope.length > 0 ? [blocker(id, 'unknown', scope)] : [];
+    }),
   ];
   const withheldList: Withheld[] = [
     ...perGoal.filter((p) => p.status !== 'calculable').map((p) => ({ id: p.goal_id, kind: 'goal' as const, label: label(p.goal_id), reason: p.reasons.join(' ') })),
@@ -857,7 +913,7 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
   const inRun = new Set(x.risks.map((k) => k.id));
   x.withheld = [
     ...withheldList,
-    ...model.risks.filter((k) => !inRun.has(k.id)).map((k) => ({ id: k.id, kind: 'risk' as const, label: k.label, reason: 'It affects nothing this run works out.' })),
+    ...model.risks.filter((k) => !inRun.has(k.id)).map((k) => ({ id: k.id, kind: 'risk' as const, label: k.label, reason: sized(k) ? 'It affects nothing this run works out.' : 'The calculation cannot size it.' })),
   ];
   result.executable = x;
   result.conversions = conversions;

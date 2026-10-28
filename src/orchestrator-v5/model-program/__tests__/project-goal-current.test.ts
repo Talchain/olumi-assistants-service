@@ -35,7 +35,7 @@ function scenario(): CanonicalModelT {
     goals: [{ id: 'goal', label: 'Reach 150 orders a week', question: null, ...record, author: 'person', quote: 'Reach 150 orders a week in 3 months.',
       measure: { quantity: 'orders', per: null, cmp: '>=', target: 'target', frame: 'level', reference: null, aggregation: 'end',
         window: { origin_event: null, origin_offset: null, start: 0, periods: 'window' }, measure_by: 'person', assumptions: [], exclusions: [] } }],
-    options: [{ id: 'increase', label: 'Make the change', status: 'live', developed_from: null, ...record, author: 'person', quote: 'Make the change.',
+    options: [{ id: 'increase', label: 'Make the change', status: 'live', developed_from: null, carry_on: false, ...record, author: 'person', quote: 'Make the change.',
       sets: [{ quantity: 'switch', to: 'one', value: null, low: null, high: null, range_kind: null, question: null,
         starts_after_periods: 0, author: 'person', quote: 'Make the change.' }] }],
     limits: [], preferences: [], risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [], title: null, coaching_questions: [],
@@ -189,7 +189,7 @@ describe('integrated review 26 Oct: “today” only beside a goal measured from
     const model = scenario();
     Object.assign(model.quantities.find((q) => q.id === 'target')!, { unit: '%', value: 20, quote: 'target: 20 %' });
     model.quantities.push(quantity('last_year', 'order/week', 120));
-    model.options.push({ id: 'carry_on', label: 'Carry on as now', status: 'live', developed_from: null, ...record, author: 'person', quote: 'Carry on as now.', sets: [] });
+    model.options.push({ id: 'carry_on', label: 'Carry on as now', status: 'live', developed_from: null, carry_on: true, ...record, author: 'person', quote: 'Carry on as now.', sets: [] });
     Object.assign(model.goals[0]!.measure!, { frame: 'change_rel', reference });
     return node(projected(model).graph, 'goal');
   };

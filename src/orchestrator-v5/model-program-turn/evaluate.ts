@@ -77,7 +77,7 @@ function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: Execut
   const m = normalise(model);
   // Whose it is: the AI's own author, as written (A25 off the path, S1 strip, Paul 26 Oct).
   const who = (author: 'person' | 'olumi' | 'structure', _id: string): PresentQuantity['author'] => author;
-  const rel = new Map(m.relations.map((r) => [r.defines, r] as const));
+  const rel = new Map(m.relations.flatMap((r) => (r.form === 'influence' ? [] : [[r.defines, r] as const])));
   const own = new Map(m.quantities.map((q) => {
     const r = rel.get(q.id);
     const behind = r === undefined ? [q.id] : [r.id, ...(r.form === 'effect' ? r.terms.map((t) => `${r.id}:${t.driver}`) : [])];
@@ -122,8 +122,8 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
     .map((p) => ({ goal_id: p.goal_id, label: labelOf.get(p.goal_id) ?? p.goal_id, status: p.status, reasons: p.reasons, asks: p.asks,
       rests_on: premisesFor(p.rests_on) }));
   const blockers = blockersOf(model, compiled.blockers);
-  const asks: PresentAsk[] = normalise(model).quantities.filter((q) => blockers.some((b) => b.answer?.quantity_id === q.id))
-    .map((q) => ({ quantity_id: q.id, label: q.label, unit: q.unit }));
+  const asks: PresentAsk[] = normalise(model).quantities.flatMap((q) => (q.unit !== null && blockers.some((b) => b.answer?.quantity_id === q.id)
+    ? [{ quantity_id: q.id, label: q.label, unit: q.unit }] : []));
   const leaves_out = compiled.joint.leaves_out.map((id) => labelOf.get(id) ?? id);
 
   const x = compiled.executable;
@@ -148,13 +148,16 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
 
 /**
  * The compiler's blockers with their labels, in its order: a quantity's answer box fills that quantity; a measure, a deadline or
- * an aim is answered in the chat (null). Labels only: what to ask, and how, is the AI's.
+ * an aim is answered in the chat (null). Labels only: what to ask, and how, is the AI's. A link in words is named by what it
+ * joins ("from → to") and a risk by its own name (Box 1a); an unmeasured factor has no figure to type in, so no answer box.
  */
 function blockersOf(model: CanonicalModelT, list: readonly Blocker[]): PresentBlocker[] {
   const m = normalise(model);
-  const labelOf = new Map<string, string>([...m.quantities, ...m.goals, ...m.limits].map((r) => [r.id, r.label] as const));
-  const isQuantity = new Set(m.quantities.map((q) => q.id));
-  const basisOf = new Map(m.quantities.map((q) => [q.id, q.basis] as const));
+  const named = new Map<string, string>([...m.quantities, ...m.goals, ...m.limits, ...m.options, ...m.risks].map((r) => [r.id, r.label] as const));
+  const links = m.relations.flatMap((r) => (r.form === 'influence' ? [r] : []));
+  const labelOf = new Map<string, string>([...named, ...links.map((i) => [i.id, `${named.get(i.from) ?? i.from} → ${named.get(i.to) ?? i.to}`] as const)]);
+  const isQuantity = new Set(m.quantities.filter((q) => q.unit !== null).map((q) => q.id));
+  const basisOf = new Map([...m.quantities, ...links].map((r) => [r.id, r.basis] as const));
   // An `unknown` is no one's to answer yet: no answer box (so no ask), and its own basis says why.
   return list.map((b) => ({ id: b.id, code: b.code, label: b.code === 'no_goal' ? 'The result you want' : labelOf.get(b.id) ?? b.id, scope: b.scope,
     answer: isQuantity.has(b.id) && b.code !== 'unknown' ? { quantity_id: b.id } : null,

@@ -37,8 +37,8 @@ function shop(): CanonicalModelT {
     limits: [], preferences: [],
     options: [
       { id: 'hire', label: 'Hire one mechanic', sets: [{ quantity: 'extra_mechanics', to: null, value: 1, low: null, high: null, range_kind: null, question: null, starts_after_periods: 0,
-        author: 'person', quote: 'We could hire one mechanic' }], status: 'live', developed_from: null, author: 'person', quote: 'We could hire one mechanic', ...at },
-      { id: 'keep', label: 'Keep the team', sets: [], status: 'live', developed_from: null, author: 'person', quote: 'keep the team as it is', ...at },
+        author: 'person', quote: 'We could hire one mechanic' }], status: 'live', developed_from: null, carry_on: false, author: 'person', quote: 'We could hire one mechanic', ...at },
+      { id: 'keep', label: 'Keep the team', sets: [], status: 'live', developed_from: null, carry_on: true, author: 'person', quote: 'keep the team as it is', ...at },
     ],
     risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [],
     title: null, coaching_questions: [],
@@ -58,7 +58,7 @@ describe('W8 c7: the words a person reads, at their producers', () => {
   it('card, c7.7: an option says what it changes, once, never "compared, sets X 0 to Option: X 1"; its own setting is no second line', () => {
     expect(after('hire')).toBe('sets "extra mechanics" to 1 mechanic from the start, in your words "We could hire one mechanic"');
     // Paul 28 Oct (remove the false host phrases): an option with no settings is NOT said to carry on as now; its own words say it.
-    expect(after('keep')).toBe('in your words "keep the team as it is"');
+    expect(after('keep')).toBe('carries on as now, in your words "keep the team as it is"');
     // The option's own setting (compile.ts `normalise`: "Hire one mechanic: extra mechanics") is said on the option's line.
     expect(card().filter((c) => c.label.includes(': '))).toEqual([]);
     expect(card().some((c) => c.id === 'hire__extra_mechanics')).toBe(false);

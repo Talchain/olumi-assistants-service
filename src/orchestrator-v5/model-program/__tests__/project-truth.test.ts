@@ -39,7 +39,7 @@ function rival(severity: Partial<Parameters<typeof q>[2]> = {}, mode: 'add' | 'm
     q('rival_chance', '1', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.3, low: 0.2, high: 0.4, range_kind: 'plausible', basis: 'Rival clubs open in towns this size now and then.' }),
     q('rival_effect', mode === 'multiply' ? '1' : 'member/month', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.5, low: 0.4, high: 0.6, range_kind: 'plausible', basis: 'A rival takes some of the new joins.', ...severity }),
   );
-  m.risks.push({ id: 'rival_opens', label: 'A rival club opens nearby', occurrence: 'rival_chance', severity: 'rival_effect', effect_on: 'joins', mode, starts_after_periods: 0, author: 'olumi', quote: null, ...at });
+  m.risks.push({ id: 'rival_opens', label: 'A rival club opens nearby', occurrence: 'rival_chance', severity: 'rival_effect', effect_on: 'joins', direction: 'unknown', mode, starts_after_periods: 0, author: 'olumi', quote: null, ...at });
   return m;
 }
 const riskLink = (m: CanonicalModelT) => edgesOf(projected(m, CLUB_BRIEF)).find((e) => e.id === 'rival_opens__joins')!;
@@ -355,7 +355,7 @@ describe('Q1 (Paul, 28 Oct: "the canvas shows the situation, not the arithmetic"
     const m = structuredClone(s.model);
     m.quantities.push(q('fixed_driver', 'specialist', { value: 1, author: 'structure' }),
       q('person_rate', 'ticket/week/specialist', { kind: 'coefficient', value: 17, quote: 'a fixed specialist adds 17 tickets' }));
-    const r = m.relations.find((x) => x.defines === 'additional_capacity')!;
+    const r = m.relations.find((x) => x.form !== 'influence' && x.defines === 'additional_capacity')!;
     if (r.form !== 'effect') throw new Error('the fixture must be an effect');
     r.terms.push({ driver: 'fixed_driver', coefficient: 'person_rate', author: 'person', quote: 'a fixed specialist adds 17 tickets', ...at });
     const p = projected(m, s.brief);
@@ -369,7 +369,7 @@ describe('Q1 (Paul, 28 Oct: "the canvas shows the situation, not the arithmetic"
     const m = structuredClone(s.model);
     m.quantities.push(q('shock_chance', '1', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.2, low: 0.1, high: 0.3, range_kind: 'plausible', basis: 'b' }),
       q('shock_effect', '1', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.5, low: 0.4, high: 0.6, range_kind: 'plausible', basis: 'b' }));
-    m.risks.push({ id: 'shock', label: 'A shock', occurrence: 'shock_chance', severity: 'shock_effect', effect_on: 'zero_additional_capacity', mode: 'multiply', starts_after_periods: 0, author: 'olumi', quote: null, ...at });
+    m.risks.push({ id: 'shock', label: 'A shock', occurrence: 'shock_chance', severity: 'shock_effect', effect_on: 'zero_additional_capacity', direction: 'unknown', mode: 'multiply', starts_after_periods: 0, author: 'olumi', quote: null, ...at });
     const p = projected(m, s.brief);
     expect(lostIn(p)).toEqual([]);
     expect(nodeOf(p, 'zero_additional_capacity')).toMatchObject({ id: 'zero_additional_capacity' });
@@ -387,7 +387,7 @@ describe('Q1 (Paul, 28 Oct: "the canvas shows the situation, not the arithmetic"
     const m = club();
     m.quantities.push(q('dip_chance', '1', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.2, low: 0.1, high: 0.3, range_kind: 'plausible', basis: 'b' }),
       q('dip_effect', '1', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.5, low: 0.4, high: 0.6, range_kind: 'plausible', basis: 'b' }));
-    m.risks.push({ id: 'dip', label: 'The promotion half lapses', occurrence: 'dip_chance', severity: 'dip_effect', effect_on: 'promo_on', mode: 'multiply', starts_after_periods: 0, author: 'olumi', quote: null, ...at });
+    m.risks.push({ id: 'dip', label: 'The promotion half lapses', occurrence: 'dip_chance', severity: 'dip_effect', effect_on: 'promo_on', direction: 'unknown', mode: 'multiply', starts_after_periods: 0, author: 'olumi', quote: null, ...at });
     const p = projected(m, CLUB_BRIEF);
     expect(lostIn(p)).toEqual([]);
     expect(nodeOf(p, 'promo_on')).toMatchObject({ id: 'promo_on' });
@@ -411,7 +411,7 @@ describe('Q1 (Paul, 28 Oct: "the canvas shows the situation, not the arithmetic"
     const s = saved('capacity-s4.saved.json');
     const m = structuredClone(s.model);
     m.quantities.push(q('dent_chance', '1', { kind: 'coefficient', value: 1 }), q('dent', 'ticket/week', { kind: 'coefficient', value: -10 }));
-    m.risks.push({ id: 'dent_risk', label: 'A dent', occurrence: 'dent_chance', severity: 'dent', effect_on: 'zero_additional_capacity', mode: 'add', starts_after_periods: 0, author: 'person', quote: 'a dent of 10', ...at });
+    m.risks.push({ id: 'dent_risk', label: 'A dent', occurrence: 'dent_chance', severity: 'dent', effect_on: 'zero_additional_capacity', direction: 'unknown', mode: 'add', starts_after_periods: 0, author: 'person', quote: 'a dent of 10', ...at });
     const p = projected(m, s.brief);
     expect(lostIn(p)).toEqual([]);
     expect(nodeOf(p, 'zero_additional_capacity')).toMatchObject({ id: 'zero_additional_capacity' });
@@ -460,7 +460,7 @@ describe('Q1 (Paul, 28 Oct: "the canvas shows the situation, not the arithmetic"
     const s = saved('capacity-s4.saved.json');
     const m = structuredClone(s.model);
     m.quantities.push(q('halve_chance', '1', { kind: 'coefficient', value: 1 }), q('halve', '1', { kind: 'coefficient', value: 0.5 }));
-    m.risks.push({ id: 'halve_risk', label: 'Halved', occurrence: 'halve_chance', severity: 'halve', effect_on: 'additional_capacity', mode: 'multiply', starts_after_periods: 0, author: 'person', quote: 'halved', ...at });
+    m.risks.push({ id: 'halve_risk', label: 'Halved', occurrence: 'halve_chance', severity: 'halve', effect_on: 'additional_capacity', direction: 'unknown', mode: 'multiply', starts_after_periods: 0, author: 'person', quote: 'halved', ...at });
     const p = projected(m, s.brief);
     expect(lostIn(p)).toEqual([]);
     expect(nodeOf(p, 'additional_capacity')).toMatchObject({ id: 'additional_capacity' });

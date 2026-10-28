@@ -9,7 +9,8 @@
  * draws it (`project.ts`). The display shows every record; the calculation is the compiled subset.
  *
  * Rules the schema states and `compile.ts` enforces:
- *  · every number is a NAMED quantity with a unit, an author and a status; no bare literals;
+ *  · every number is a NAMED quantity with a unit, an author and a status; no bare literals. A factor no one can measure yet
+ *    has unit null (Box 1a, Q1 28 Oct): no scale, never executed, unknown or asked;
  *  · a quantity's author is the person (their words, quoted), Olumi (an estimate: always low AND high) or STRUCTURE (an exact
  *    constant that defines the model: a unit conversion, a 0/1 switch, a count; never shown as an Olumi estimate);
  *  · a quantity is a FACT (the person's own situation: asked when missing, never estimated) or a COEFFICIENT (a mechanism's
@@ -18,7 +19,8 @@
  *    it withholds only what that figure feeds, and the compiler never removes it or gives it a value;
  *  · relations are canonical forms only: a definition (a signed SUM, or a PRODUCT of powers ±1: difference, ratio and mixed
  *    signs in one op), an effect (base + Σ coefficient × driver, each coefficient an uncertain mechanism size in natural units)
- *    or a stock (start, inflows, outflows per period). An exact identity is a definition, never an effect;
+ *    or a stock (start, inflows, outflows per period). An exact identity is a definition, never an effect. A causal claim no
+ *    figure sizes is an INFLUENCE, a link in words (Box 1a): drawn, never calculated, and what it reaches is withheld;
  *  · a goal is what the person is trying to achieve; a limit is a condition the plan must not break; a preference ("we'd like
  *    fewer late deliveries") is neither. An aim or guardrail with no measure yet is valid: measure null plus a coaching question;
  *  · the QUESTION binds the calculation: each goal states its frame (a level, or a change from a reference), aggregation
@@ -101,7 +103,7 @@ const RANGE_KIND = z.enum(RANGE_KINDS).nullable().describe(
 export const CanonicalQuantity = z.object({
   id,
   label: z.string().describe('A short plain name the person would recognise ("Loaves sold per week").'),
-  unit: z.string().describe(UNIT_RULES),
+  unit: z.string().nullable().describe(`${UNIT_RULES} Null for a factor no one can measure yet: status unknown or asked, its meaning in its label and basis; never an invented unit or scale.`),
   value: z.number().nullable().describe('One figure, in the unit; for an Olumi estimate, its most likely figure strictly inside its range (or null). Null when there is no figure.'),
   low: z.number().nullable().describe('The low end of a stated or estimated range, in the unit. Null when not a range.'),
   high: z.number().nullable().describe('The high end of a stated or estimated range, in the unit. Null when not a range.'),
@@ -175,12 +177,30 @@ const StockRelation = z.object({
   ...attribution,
 }).strict().describe('A level that carries over: next period\'s level = this period\'s + inflows − outflows.');
 
-export const CanonicalRelation = z.union([SumDefinition, ProductDefinition, EffectRelation, StockRelation]);
+/** Box 1a (Q1, 28 Oct): which way a link in words moves what it points at, and how sure it is (never who said it). */
+export const INFLUENCE_DIRECTIONS = ['up', 'down', 'unknown', 'conditional', 'disputed'] as const;
+export const CONFIDENCES = ['likely', 'unsure', 'unknown'] as const;
+const InfluenceRelation = z.object({
+  form: z.enum(['influence']),
+  id,
+  from: id.describe('The option, quantity or risk that moves it.'),
+  to: id.describe('The quantity, goal or limit it moves.'),
+  direction: z.enum(INFLUENCE_DIRECTIONS).describe('up: more of from (or choosing it) means more of to; down: less. unknown: no one can say which way. conditional: it depends; disputed: people disagree (the basis, conditions or dissent say how).'),
+  confidence: z.enum(CONFIDENCES).describe('How sure the link is: likely, unsure or unknown.'),
+  basis: z.string().nullable().describe('What supports the link, in plain words. Null when nothing is stated.'),
+  ...attribution,
+}).strict().describe('A causal claim in words that no figure sizes ("evening classes lift how members feel"). Never calculated; what it reaches is withheld.');
+
+export const CanonicalRelation = z.union([SumDefinition, ProductDefinition, EffectRelation, StockRelation, InfluenceRelation]);
 export type CanonicalRelationT = z.infer<typeof CanonicalRelation>;
 export type SumDefinitionT = z.infer<typeof SumDefinition>;
 export type ProductDefinitionT = z.infer<typeof ProductDefinition>;
 export type EffectRelationT = z.infer<typeof EffectRelation>;
 export type StockRelationT = z.infer<typeof StockRelation>;
+export type InfluenceRelationT = z.infer<typeof InfluenceRelation>;
+/** The relations the engine calculates: every form but the link in words. */
+export type NumericRelationT = Exclude<CanonicalRelationT, InfluenceRelationT>;
+export const isInfluence = (r: CanonicalRelationT): r is InfluenceRelationT => r.form === 'influence';
 
 // ── Goals, limits and preferences ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -273,7 +293,9 @@ const timing = z.union([z.number().int(), id]).describe(`${STARTS_AFTER_PERIODS}
 /** The old fields, mapped ONCE, where a saved model is read (program-store): `from_period` k is `starts_after_periods` k, the
  *  same count under its old name. Missing quantity direction and physical bounds read as null, without inferring them, and
  *  so does a missing approved_by on a record, a link or a history entry (C6): an earlier approver stays where it was saved.
- *  A model saved before titles reads with no title (null) and no coaching questions ([]).
+ *  A model saved before titles reads with no title (null) and no coaching questions ([]). A model saved before Box 1a reads
+ *  with no carry-on declared on any option (false: no claim, never inferred from its settings or name) and each risk's
+ *  direction unknown.
  *  A model that has both timing names, or neither, is left for the schema to judge. */
 export function withDeclaredTiming(raw: unknown): unknown {
   const rec = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -284,7 +306,8 @@ export function withDeclaredTiming(raw: unknown): unknown {
     : Object.fromEntries([...Object.entries(x).map(([k, v]) => [k, approver(v)] as const), ...('approval' in x && !('approved_by' in x) ? [['approved_by', null] as const] : [])]));
   const read = { ...raw, ...('title' in raw ? {} : { title: null }), ...('coaching_questions' in raw ? {} : { coaching_questions: [] }),
     ...(Array.isArray(raw['quantities']) ? { quantities: raw['quantities'].map(declaredQuantity) } : {}),
-    options: raw['options'].map((o) => (rec(o) && Array.isArray(o['sets']) ? { ...o, sets: o['sets'].map(renamed) } : o)), risks: raw['risks'].map(renamed) };
+    options: raw['options'].map((o) => (rec(o) && Array.isArray(o['sets']) ? { carry_on: false, ...o, sets: o['sets'].map(renamed) } : o)),
+    risks: raw['risks'].map((k) => renamed(rec(k) ? { direction: 'unknown', ...k } : k)) };
   return Object.fromEntries(Object.entries(read).map(([k, v]) => [k, !Array.isArray(v) ? v : k === 'history'
     ? v.map((h) => (rec(h) && !('approved_by' in h) ? { ...h, approved_by: null } : h)) : approver(v)]));
 }
@@ -306,9 +329,10 @@ export type CanonicalOptionSetT = z.infer<typeof CanonicalOptionSet>;
 export const CanonicalOption = z.object({
   id,
   label: z.string().describe('A short neutral name ("Second oven").'),
-  sets: z.array(CanonicalOptionSet).describe('What the option changes. [] for "carry on as now".'),
+  sets: z.array(CanonicalOptionSet).describe('[] means no numerical setting here; what the option changes in words is its influence links.'),
   status: z.enum(OPTION_STATUSES).describe('live: compared. ruled_out: the person rules it out but keeps it in view. removed: taken out of the comparison.'),
   developed_from: id.nullable().describe('The id of the option this is a variant of. A record, not a cause. Null otherwise.'),
+  carry_on: z.boolean().describe('true only for the option of carrying on as now; false for every other.'),
   ...attribution,
 }).strict();
 export type CanonicalOptionT = z.infer<typeof CanonicalOption>;
@@ -316,10 +340,11 @@ export type CanonicalOptionT = z.infer<typeof CanonicalOption>;
 export const CanonicalRisk = z.object({
   id,
   label: z.string().describe('A short title of a few words for an event that may or may not happen, for its card ("Oven breaks down"). Never something already true.'),
-  occurrence: id.describe('A coefficient quantity in unit "1" or "%": the chance the event happens at least once over the whole model horizon.'),
-  severity: id.describe('A quantity: what it does IF it happens, drawn only when it does. In the affected quantity\'s unit for add; unit "1" for multiply.'),
-  effect_on: id.describe('The quantity it changes.'),
-  mode: z.enum(['add', 'multiply']).describe('add: severity is added to the quantity. multiply: the quantity is multiplied by severity.'),
+  occurrence: id.nullable().describe('A coefficient quantity in unit "1" or "%": the chance the event happens at least once over the whole model horizon. Null when no one can say yet.'),
+  severity: id.nullable().describe('A quantity: what it does IF it happens, drawn only when it does. In the affected quantity\'s unit for add; unit "1" for multiply. Null when no one can size it yet.'),
+  effect_on: id.describe('The quantity it changes; or, when it cannot be sized, the goal, limit or option it bears on.'),
+  direction: z.enum(['up', 'down', 'unknown']).describe('Which way it moves effect_on if it happens: up, down or unknown.'),
+  mode: z.enum(['add', 'multiply']).nullable().describe('add: severity is added to the quantity. multiply: the quantity is multiplied by severity. Null unless it is sized: a chance and a severity on a quantity.'),
   starts_after_periods: timing,
   ...attribution,
 }).strict();
