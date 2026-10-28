@@ -100,7 +100,7 @@ const RANGE_KIND = z.enum(RANGE_KINDS).nullable().describe(
 
 export const CanonicalQuantity = z.object({
   id,
-  label: z.string().describe('A short plain name the person would recognise ("Loaves sold per week").'),
+  label: z.string().describe('A short plain name the person would recognise ("Loaves sold per week"). In a first draft, aim for about 8 quantities the person would recognise; never add arithmetic scaffolding.'),
   unit: z.string().describe(UNIT_RULES),
   value: z.number().nullable().describe('One figure, in the unit; for an Olumi estimate, its most likely figure strictly inside its range (or null). Null when there is no figure.'),
   low: z.number().nullable().describe('The low end of a stated or estimated range, in the unit. Null when not a range.'),
@@ -173,7 +173,7 @@ const StockRelation = z.object({
   inflows: ids.describe('Quantities added each period, in the stock\'s unit per period.'),
   outflows: ids.describe('Quantities removed each period, in the stock\'s unit per period (a stock × a rate per period is such a flow).'),
   ...attribution,
-}).strict().describe('A level that carries over: next period\'s level = this period\'s + inflows − outflows.');
+}).strict().describe('A level that carries over: next period\'s level = this period\'s + inflows − outflows. In a first draft, use only when the person named a running total.');
 
 export const CanonicalRelation = z.union([SumDefinition, ProductDefinition, EffectRelation, StockRelation]);
 export type CanonicalRelationT = z.infer<typeof CanonicalRelation>;
@@ -290,7 +290,7 @@ export function withDeclaredTiming(raw: unknown): unknown {
 }
 
 export const CanonicalOptionSet = z.object({
-  quantity: id.describe('An input quantity (one with a figure, not a derived one) the option changes.'),
+  quantity: id.describe('An input quantity (one with a figure, not a derived one) the option changes. Prefer a recognisable figure, never an off/on switch in a first draft.'),
   to: id.nullable().describe('A named quantity holding the setting\'s value; required for an approximate point, whose basis an inline setting cannot hold. Null for the option\'s own exact inline value, range or unanswered setting.'),
   value: z.number().nullable().describe('With to null: this option\'s own value for the quantity, in its unit ("raise the price to 3.50": 3.5; switched on: 1). Null otherwise.'),
   low: z.number().nullable().describe('With to null: the low end of this option\'s own value, when a range. Null otherwise.'),
@@ -305,7 +305,7 @@ export type CanonicalOptionSetT = z.infer<typeof CanonicalOptionSet>;
 
 export const CanonicalOption = z.object({
   id,
-  label: z.string().describe('A short neutral name ("Second oven").'),
+  label: z.string().describe('A short neutral name ("Second oven"). In a first draft, aim for about 3 options; every option they name is kept.'),
   sets: z.array(CanonicalOptionSet).describe('What the option changes. [] for "carry on as now".'),
   status: z.enum(OPTION_STATUSES).describe('live: compared. ruled_out: the person rules it out but keeps it in view. removed: taken out of the comparison.'),
   developed_from: id.nullable().describe('The id of the option this is a variant of. A record, not a cause. Null otherwise.'),
@@ -315,9 +315,9 @@ export type CanonicalOptionT = z.infer<typeof CanonicalOption>;
 
 export const CanonicalRisk = z.object({
   id,
-  label: z.string().describe('A short title of a few words for an event that may or may not happen, for its card ("Oven breaks down"). Never something already true.'),
-  occurrence: id.describe('A coefficient quantity in unit "1" or "%": the chance the event happens at least once over the whole model horizon.'),
-  severity: id.describe('A quantity: what it does IF it happens, drawn only when it does. In the affected quantity\'s unit for add; unit "1" for multiply.'),
+  label: z.string().describe('A short title for a possible future downside stated or clearly implied by the brief ("Oven breaks down"). One risk record per distinct downside, even when unsized; never a condition labelled risk or something already true.'),
+  occurrence: id.describe('A coefficient quantity in unit "1" or "%": the chance the event happens at least once over the whole model horizon. Unknown is valid: reference an unknown coefficient with null figures, never invent a probability.'),
+  severity: id.describe('A quantity: what it does IF it happens, drawn only when it does. In the affected quantity\'s unit for add; unit "1" for multiply. Unknown is valid: reference an unknown coefficient with null figures, never invent a loss.'),
   effect_on: id.describe('The quantity it changes.'),
   mode: z.enum(['add', 'multiply']).describe('add: severity is added to the quantity. multiply: the quantity is multiplied by severity.'),
   starts_after_periods: timing,
@@ -359,7 +359,7 @@ export const CanonicalCondition = z.object({
   id,
   text: z.string(),
   kind: z.enum(['prerequisite', 'challenge']).describe(
-    'prerequisite: a real-world requirement that must be met first ("only once the landlord agrees"), shown beside the result. challenge: a doubt worth raising, said beside the result. A missing figure is never a condition: it is an asked quantity.'),
+    'prerequisite: a real-world requirement that must be met first ("only once the landlord agrees"), shown beside the result. challenge: a doubt worth raising, said beside the result. A possible future downside belongs in risks, even when its chance or size is unknown. A missing figure is never a condition: it is an asked quantity.'),
   concerns, ...attribution,
 }).strict();
 
@@ -390,12 +390,12 @@ export const CanonicalModel = z.object({
   title: z.string().nullable().describe('A short title of a few words for the situation, the name on its board ("Second oven or wholesale?"). Never empty.'),
   period: z.enum(PERIOD_UNITS).describe('The model\'s time step, which windows and stocks count in. Period 0 is now.'),
   quantities: z.array(CanonicalQuantity),
-  relations: z.array(CanonicalRelation),
+  relations: z.array(CanonicalRelation).describe('First draft: each option reaches the goal through as few named links as faithfully express it, usually one or two. No dummy links; no derived totals beyond what one goal or limit needs.'),
   goals: z.array(CanonicalGoal),
   limits: z.array(CanonicalLimit),
   preferences: z.array(CanonicalPreference),
   options: z.array(CanonicalOption),
-  risks: z.array(CanonicalRisk),
+  risks: z.array(CanonicalRisk).describe('Every distinct stated or clearly implied future downside, with stated versus Olumi-inferred authorship kept separate. Preserve risks when simplifying; unsized never means absent.'),
   claims: z.array(CanonicalClaim),
   evidence: z.array(CanonicalEvidence),
   assumptions: z.array(CanonicalAssumption),

@@ -2,39 +2,29 @@
  * THE CANONICAL DRAFTER'S FIXED TEXT (alpha, 23 Oct 2026, MODEL-ARCH-PLAN r2/r3). The phase-0b drafting prompt, ported to the
  * canonical model's own vocabulary (`model-program/canonical.ts`, S1), and the canonical schema as the strict structured
  * output. Both are constants: the instructions and the schema are the cached prefix, the same bytes on every call; the brief
- * (and, on a repair, the draft and the compiler's sentences) follows as the call's input. Synthetic example only (a bakery).
+ * (and, on a repair, the draft and the compiler's sentences) follows as the call's input. Synthetic example only (a class studio).
  */
 import { createHash } from 'node:crypto';
 import { z } from 'zod-v4';
 import { CanonicalModel, HOST_OWNED_FIELDS } from '../model-program/canonical.js';
 
 export const DRAFTING_INSTRUCTIONS = [
-  'Draft ONE canonical model. The expansion steps below apply only to a first draft.',
+  'Draft ONE small model of the person\'s situation, not its arithmetic. The size budget and expansion steps below apply only to a first draft.',
   'Work silently in this order:',
-  '1. Extract the question, stated aims, options, present state, targets, limits, deadlines, concerns and figures, preserving qualifiers, conditions and references without strengthening their meaning. Label their options, goals and limits in their own words; a figure they attribute to someone else (a demand, offer or estimate) keeps that someone as its party and does not become part of their label unless they make it part of that option, goal or limit themselves.',
+  '1. Extract the question, stated aims, options, present state, targets, limits, deadlines, concerns and figures, preserving qualifiers, conditions and references without strengthening their meaning.',
   '2. Aim: retain every stated aim, including avoiding a stated loss. Suggest a measure only when it tracks that aim, with exclusions for what it misses. With no stated aim, offer ONE Olumi working aim supported by the brief for confirmation or change.',
-  '3. Alternatives: retain every named option and carry on as now; with none, one, only two opposites, or an open request, add one or two materially different routes, lower-commitment where useful; for allocations, offer feasible divisions. Consider staged, hybrid, learn-first, smaller-scope, partner or buy routes and changes to scope or resources within stated budgets, exclusions and scope; never assume a constraint can move.',
-  '4. Causal paths: for each consequential concern or plausible outside force, trace each affected option setting to a goal or limit, retaining separately changeable bottlenecks, delays, benefits and harms as distinct quantities and relations with missing facts asked and unsized coefficients unknown on the path; missing numbers alone never send a mechanism to prose or left_out; omit only an unrepresentable mechanism or measure, saying why and what would enable it.',
-  '5. Quantities: encode supplied relations and figures; never invent a unit, period or reference, turn a stated amount into an unsupported rate, or assume carry-on leaves a reference unchanged. If no unit is supported, retain the statement and ask what would give it one.',
-  'Count a one-off payment once, through a total or stock start; model lasting assets through their capacity and ongoing activity through spending over a bounded window. Track cumulative spending against its limit with a stock. Ask missing durations wherever representable; otherwise explain the limitation.',
-  '6. Unknowns and questions: confirm an ambiguous or suggested aim, measure or reference; then select observable unknowns most able to change route feasibility or comparison through causal evidence, rival explanations, capacity, timing, permissions or commitments; a needed figure is arithmetic-only only if it cannot change that comparison. Put each missing input\'s question on its item; order item arrays and select coaching_questions by this priority. Ask for evidence, not invented effects or probabilities; never re-ask supplied information. Ask for a range when a supplied approximate point feeds a goal or limit.',
+  '3. Size and alternatives: keep the model small enough for the person to explain and challenge: as a guide, about 3 options and 8 quantities, using figures they would recognise; this guides what Olumi adds and never limits what they supplied. Retain named options; include carry on as now where meaningful, and propose a materially different or lower-commitment route when useful within the budget and stated constraints. If their stated options or essential figures already exceed the budget, preserve them, disclose the excess and ask what to focus on; never silently discard their content or refuse to draft.',
+  '4. Structure: connect each option to the goal through as few named links as faithfully express it, usually one or two; keep a longer path when their stated mechanism has more steps. Use direct option settings where they express the situation faithfully; keep a named mechanism only when it changes what the person could question or do. Retain supplied causal meaning and uncertainty; do not add links merely to connect. No off/on switches, no derived totals beyond what one goal or limit needs, and no stocks unless the person named a running total. Preserve other stated mechanisms as attributed qualitative records rather than expand arithmetic scaffolding.',
+  '5. Figures: encode supplied figures and relations without inventing a unit, period or reference, turning an amount into an unsupported rate, or assuming carry-on leaves a reference unchanged. Use an option\'s own inline setting rather than a separate quantity for the same exact figure. Ask for a missing duration only when a stated goal, limit or mechanism needs that window; do not build spending plumbing to generate questions.',
+  '6. Risks: each distinct downside stated or clearly implied by the brief belongs in risks, not a condition labelled "risk". Keep a stated concern as the person\'s, and an inferred risk as Olumi\'s provisional addition. Unknown chance or size is legitimate: never invent numbers to make a risk calculable. In the current quantity-reference contract, use unknown coefficient records for unsized chance or harm, with null figures and a basis; do not hide the risk because it is unsized. A fact already true stays context; the possible future harm is the risk.',
+  '7. Questions: confirm an ambiguous or suggested aim, measure or reference; then ask about the unknown most likely to change the reasoning. Put a needed input\'s question on its item and select at most three coaching_questions. Ask for evidence, never invented effects or probabilities; never re-ask supplied information. Ask for a range when a supplied approximate point feeds a goal or limit.',
   '',
-  'Example: "We sell 400 loaves a week from our one oven, with no advertising, and have £5,000 to spend. Should we buy a second oven? It adds 150 loaves a week of capacity. We want to sell 500 loaves a week without going over budget, and to grow the bakery."',
-  'Sketch (period week; author person with their quote unless marked):',
-  '- base_sales 400 loaf/week fact known "sell 400 loaves a week"; budget 5000 GBP fact known "£5,000 to spend"; ad_spend 0 GBP/week fact known "no advertising"',
-  '- ovens_added 0 oven and one_oven 1 oven: fact known, author structure, basis "the second oven off / on"',
-  '- oven_capacity 150 loaf/week/oven coefficient known "adds 150 loaves a week"',
-  '- sell_through 0.6 (0.3 to 0.9, plausible) 1 coefficient estimated olumi, basis "new capacity sells only as far as demand grows"',
-  '- sales_per_ad_pound 0.05 (0.02 to 0.1, plausible) loaf/GBP coefficient estimated olumi, basis "each £100 a week of small local ads adds roughly 2 to 10 sales a week"',
-  '- oven_price GBP/oven fact asked, question "What would the second oven cost?"',
-  '- extra_per_oven loaf/week/oven, kind coefficient, status derived: product(oven_capacity 1, sell_through 1), olumi',
-  '- sales loaf/week, kind derived: effect base_sales + extra_per_oven × ovens_added + sales_per_ad_pound × ad_spend, olumi',
-  '- oven_spend GBP, kind derived: product(oven_price 1, ovens_added 1); spent GBP, kind derived: stock, start oven_spend (the oven is paid once), inflows ad_spend (each week\'s ads), olumi',
-  '- budget_weeks week fact asked, question "Over how many weeks does the £5,000 need to last?"',
-  '- sales_target 500 loaf/week fact known "sell 500 loaves a week"; goal sales >= sales_target, frame level, aggregation end, window null, "We want to sell 500 loaves a week"',
-  '- grow_target loaf/week fact asked, question "How many more loaves a week would count as growing?"; goal "to grow the bakery", measure_by olumi (a suggested measure): sales change_abs from now >= grow_target, end, window null, exclusions: left_out "growth beyond loaf sales, such as new lines", why "not in this model", author olumi, quote null',
-  '- limit spent <= budget, max, window from now for budget_weeks, "without going over budget"',
-  '- option "Second oven", quote "buy a second oven": sets ovens_added to one_oven, starts_after_periods 0; option "Weekly local ads", olumi (they named only one; reversible, lower-commitment): sets ad_spend to its own value 50, olumi; option "Carry on as now", olumi: sets []',
+  'Example: "We run 6 classes a week and can carry on at 6. We want at least 8. Either add our own Saturday session or use a partner; either route would bring us to 8. Illness might cancel classes."',
+  'Small sketch (period week; person with their quote unless marked):',
+  '- classes 6 class/week fact known "run 6 classes a week"; target 8 class/week fact known "at least 8"; goal classes >= target, level, end, window null.',
+  '- option "Own Saturday session" sets classes to inline 8; option "Partner" sets classes to inline 8, both supported by "either route would bring us to 8"; option "Carry on" sets [], supported by "can carry on at 6". Each setting reaches the measured goal directly; no switch or derived total.',
+  '- risk "Illness cancels classes", person "Illness might cancel classes", effect_on classes; chance and harm unknown, no numbers invented. Under the current contract only: two unknown coefficient quantities (chance in 1; harm in class/week, lowers), mode add; Olumi\'s harm reading has its own attribution. No condition claims to be this risk.',
+  '- Four quantities, three options, one risk. Keep the options-to-goal structure and the risk when asked to simplify.',
 ].join('\n');
 
 /** What the compiler's sentences are returned with, in the same conversation (phase 0b's repair turn, verbatim). */
