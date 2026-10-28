@@ -110,7 +110,7 @@ describe('W8 c7: the words a person reads, at their producers', () => {
     expect(v.leader.words).toContain('the next most likely. Like each option’s chance, it rests on Olumi’s reading of your figures (not yet confirmed) and the assumptions listed with it.');
   });
 
-  it('canvas provenance (DL, served 1c16eb41): a figure Olumi asks of the person, with no words of theirs, is not "From your brief"', () => {
+  it('canvas provenance (DL, served 1c16eb41): a figure Olumi asks of the person, with no words of theirs, claims no origin: not "From your brief", not Olumi\'s', () => {
     const m = shop();
     m.quantities.push(q('parts_delay', 'job/week', { status: 'asked', question: 'How many jobs a week wait on parts?' }),
       q('weekend_jobs', 'job/week', { value: 5, quote: 'about 5 at weekends' }));
@@ -118,7 +118,7 @@ describe('W8 c7: the words a person reads, at their producers', () => {
     if (total?.form === 'definition' && total.op === 'sum') total.parts.push({ id: 'parts_delay', sign: -1 }, { id: 'weekend_jobs', sign: 1 });
     const nodes = project(m, compile(m), { brief: BRIEF }).graph.nodes as Json[];
     const provenance = (id: string) => nodes.find((n) => n.id === id)!.provenance;
-    expect(provenance('parts_delay')).toBe('ai_inferred');
+    expect(provenance('parts_delay')).toBeUndefined();
     // Contrasts: their brief's figure stays from the brief; a figure they gave later stays theirs as added.
     expect(provenance('jobs_now')).toBe('from_brief');
     expect(provenance('weekend_jobs')).toBe('user_set');
