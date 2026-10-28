@@ -11,7 +11,7 @@
 import type { ProposalStore, StructuredProposal } from '../agent-lane/proposal.js';
 import type { InternalDispatch } from '../agent-lane/runtime/agent-capabilities.js';
 import { findOperationSave, type RegistrationRowRead } from '../path-b/tools/core-write.js';
-import { isSavedRead, readSaved } from '../path-b/tools/context-tool.js';
+import { isSavedRead, readSaved } from './saved-read.js';
 import { ok, refused, type ToolOutcome } from '../path-b/tools/outcome.js';
 import { readingOf, withApproved } from './postimage.js';
 import { holdProgramCard, isProgramProposal, SAVE_REFUSED_AFTER_APPROVAL } from './program-tools.js';
