@@ -98,7 +98,7 @@ describe('thin core dependency boundary', () => {
   it('F1b: the core route and its dependencies load none of the Living Model turn machinery; CONTRAST: the program tools they do load are seen', () => {
     const read = (rel: string) => readFileSync(join(SRC, rel), 'utf8');
     expect(CORE_ROUTE_FILES.flatMap((rel) => forbiddenImports(read(rel), CORE_ROUTE_FORBIDDEN).map((v) => `${rel} → ${v}`))).toEqual([]);
-    expect(forbiddenImports(read('routes/core-turn.ts'), ['program-tools']), 'the probe sees a module the route imports').toEqual(['program-tools: applyCanvasFigure, DRAFT_REPLY_GUIDANCE, HOST_REPLY_WITHHELD_TOOLS, PROGRAM_TURN_GUIDANCE, readProgramContext, RUN_REPLY_GUIDANCE']);
+    expect(forbiddenImports(read('routes/core-turn.ts'), ['program-tools']), 'the probe sees a module the route imports').toEqual(['program-tools: applyCanvasFigure, draftReplyGuidance, HOST_REPLY_WITHHELD_TOOLS, PROGRAM_TURN_GUIDANCE, readProgramContext, RUN_REPLY_GUIDANCE']);
   });
 
   it('POSITIVE CONTROL: the checker flags a runtime import and passes type-only and named protocol imports', () => {

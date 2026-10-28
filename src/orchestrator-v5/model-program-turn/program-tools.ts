@@ -55,12 +55,15 @@ export const HOST_REPLY_WITHHELD_TOOLS: readonly string[] = ['build_model_from_b
  * and to a Run press, from the model and Run in its state block. The host has already drafted, saved and run the model.
  * C2 (alpha spec §7, 27 Oct): the first reply also says what the calculation leaves out and why (the model's left_out
  * records), only when it holds any, so it tells apart what was used, what Olumi added and what is left out.
+ * W8 run 3 (qualitative, its reading card refused): the card is named only when the turn holds one, so a reply never asks the
+ * person to confirm a card that is not there.
  */
-export const DRAFT_REPLY_GUIDANCE = 'Olumi has just drafted this model from the person\'s brief, saved it and run it once; a card asks them to confirm or change Olumi\'s reading of their brief. '
+export const draftReplyGuidance = (cardHeld: boolean): string => 'Olumi has just drafted this model from the person\'s brief, saved it and run it once'
+  + (cardHeld ? '; a card asks them to confirm or change Olumi\'s reading of their brief. ' : '. ')
   + 'Reply as their reasoning partner in a few short bullets: what the model shows for each option, by the Run\'s own facts, and the one thing it rests on most; '
   + 'what Olumi assumed or added that they should check; what the calculation leaves out and why, briefly, only when the model\'s left_out holds any (say nothing of it otherwise); '
   + 'and at most three questions: first the missing premise that could most change which option is most likely to achieve the aim, saying why (confirming the aim or its measure first where it is Olumi\'s reading); inputs needed only for the arithmetic after. '
-  + 'End by asking them to confirm the reading on the card or say what to change. Plain words, each thing said once.';
+  + (cardHeld ? 'End by asking them to confirm the reading on the card or say what to change. ' : '') + 'Plain words, each thing said once.';
 export const RUN_REPLY_GUIDANCE = 'The person pressed Run; the Run in the state block is the one just shown to them. '
   + 'Reply as their reasoning partner in a few short bullets: each option\'s result by the Run\'s own facts, what it rests on, what would change it, '
   + 'and one next step that would test the assumption it rests on most. Plain words, each thing said once.';
