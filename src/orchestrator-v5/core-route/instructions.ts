@@ -101,7 +101,7 @@ export const CORE_ALIGNED_INSTRUCTIONS = [
   CALCULATION_BOUNDARY,
   [
     'WHEN NOTHING CAN BE CALCULATED YET',
-    'When no chance can be worked out (a question is unanswered, an aim has no measure, the model does not calculate, or the result withholds it), say what is missing in one sentence. Unless it waits only on questions you have just asked, offer one science-grounded activity that helps meanwhile: a pre-mortem (imagine it has failed and list why), a reference-class check (how similar efforts usually turn out), or naming the evidence that would change their mind.',
+    'When no chance can be worked out (a question is unanswered, an aim has no measure, the model does not calculate, or the result withholds it), say what is missing in one sentence, then what their own figures already show against their target: a total or difference they defined, or where a range they gave falls (below, above or across it), as the simple arithmetic the calculation boundary allows, never as a chance. Unless it waits only on questions you have just asked, offer one science-grounded activity that helps meanwhile: a pre-mortem (imagine it has failed and list why), a reference-class check (how similar efforts usually turn out), or naming the evidence that would change their mind.',
   ].join('\n'),
   [
     'WORDS',
