@@ -55,14 +55,15 @@ export const GROUPS: Readonly<Record<Family, Readonly<Record<string, string>>>> 
   quantities: { ...by('name', 'label'), ...by('figure', 'value', 'low', 'high', 'range_kind', 'unit', 'direction', 'floor', 'ceiling'), ...by('kind', 'kind'), ...by('status', 'status'),
     ...by('question', 'question'), ...by('basis', 'basis'), ...OWN },
   relations: { ...by('name', 'defines'), ...by('how', 'form', 'op', 'base', 'start', 'parts.*.id', 'parts.*.sign', 'parts.*.power', 'terms.*.driver', 'terms.*.coefficient', 'inflows.*', 'outflows.*'),
+    ...by('influence', 'from', 'to', 'direction'), ...by('confidence', 'confidence'), ...by('basis', 'basis'),
     ...by('link#', ...WORDS.map((k) => `terms.*.${k}`)), ...OWN },
   goals: { ...by('name', 'label'), ...by('measure', ...MEASURE, 'measure.target', 'measure.frame', 'measure.reference.kind', 'measure.reference.option', 'measure.reference.quantity'),
     ...by('when', ...WHEN), ...by('measure_by', 'measure.measure_by'), ...by('rests', 'measure.assumptions.*'), ...by('excludes', 'measure.exclusions.*'), ...by('question', 'question'), ...OWN },
   limits: { ...by('name', 'label'), ...by('measure', ...MEASURE, 'measure.bound'), ...by('when', ...WHEN), ...by('question', 'question'), ...OWN },
   preferences: { ...by('name', 'quantity'), ...by('direction', 'direction'), ...OWN },
-  options: { ...by('name', 'label'), ...by('status', 'status'), ...by('variant', 'developed_from'),
+  options: { ...by('name', 'label'), ...by('status', 'status'), ...by('carry_on', 'carry_on'), ...by('variant', 'developed_from'),
     ...by('setting#', ...['quantity', 'to', 'value', 'low', 'high', 'range_kind', 'question', 'starts_after_periods', 'author', 'quote'].map((k) => `sets.*.${k}`)), ...OWN },
-  risks: { ...by('name', 'label'), ...by('chance', 'occurrence'), ...by('effect', 'severity', 'effect_on', 'mode'), ...by('starts', 'starts_after_periods'), ...OWN },
+  risks: { ...by('name', 'label'), ...by('chance', 'occurrence'), ...by('effect', 'severity', 'effect_on', 'mode', 'direction'), ...by('starts', 'starts_after_periods'), ...OWN },
   claims: { ...by('name', 'text'), ...by('about', 'concerns.*'), ...OWN },
   evidence: { ...by('name', 'text'), ...by('source', 'source'), ...by('bears', 'bears'), ...by('about', 'concerns.*'), ...OWN },
   assumptions: { ...by('name', 'text'), ...by('applied', 'applied'), ...by('about', 'concerns.*'), ...OWN },
@@ -229,8 +230,9 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
     // not tagged with its kind, nor with a status its figure already says (a figure in hand, worked out, still to be given
     // or not known yet: "no figure yet"); a compared option is not called "compared". A CHANGE of kind or status is still said.
     const SAID_BY_FIGURE: ReadonlySet<unknown> = new Set(['known', 'derived', 'asked', 'unknown']);
+    // An unmeasured factor (unit null) has no figure to say its status, so its status is said (Box 1a).
     const onCard = (x: ReturnType<typeof said>[number], r: Rec) => x.group === 'name' || (x.group === 'author' && r['author'] !== 'structure')
-      || (family === 'quantities' && (x.group === 'kind' || (x.group === 'status' && SAID_BY_FIGURE.has(r['status']))))
+      || (family === 'quantities' && (x.group === 'kind' || (x.group === 'status' && SAID_BY_FIGURE.has(r['status']) && r['unit'] !== null)))
       || (family === 'options' && x.group === 'status' && r['status'] === 'live');
     const phrase = (fields: ReturnType<typeof said>, side: 'old' | 'now', r: Rec, whole: boolean) =>
       [...new Set(fields.filter((x) => !(whole && onCard(x, r))).map((x) => x[side]).filter((x) => x !== ''))].join(', ');
@@ -315,6 +317,12 @@ export function readingOf(model: CanonicalModelT, opts: { readonly words: readon
 const RANGE_WORDS: Record<string, string> = { bounds: 'firm ends', plausible: 'a plausible range' };
 /** A link's direction, before the name of what it moves (Paul 24 Oct, "Arrow + words": "↓ lowers Churn"). */
 const DIRECTION_WORDS: Record<string, string> = { raises: '↑ raises', lowers: '↓ lowers' };
+/** A link in words (Box 1a): its verb between what moves and what it moves, and what follows when no way is settled. */
+const INFLUENCE_WORDS: Record<string, readonly [string, string]> = { up: ['↑ raises', ''], down: ['↓ lowers', ''], unknown: ['affects', ', in a direction not known yet'],
+  conditional: ['affects', ', depending on conditions'], disputed: ['affects', ', in a disputed direction'] };
+const CONFIDENCE_WORDS: Record<string, string> = { likely: 'judged likely', unsure: 'judged unsure', unknown: 'how sure is not known' };
+/** A risk's direction on what it acts on, if it happens. */
+const RISK_WAY: Record<string, string> = { up: '↑ raising it', down: '↓ lowering it', unknown: 'in a direction not known yet' };
 const WHO_WORDS: Record<string, string> = { person: 'yours', olumi: 'Olumi’s', structure: 'part of how the model is set up' };
 const AGG_WORDS: Record<string, string> = { end: 'by the end of', sum: 'in total over', mean: 'on average over', every: 'in every period of', max: 'at its highest over', min: 'at its lowest over' };
 const AGG_ALONE: Record<string, string> = { end: '', sum: 'in total', mean: 'on average', every: 'in every period', max: 'at its highest', min: 'at its lowest' };
@@ -370,13 +378,15 @@ function wordsIn(m: CanonicalModelT) {
     // alpha G2: what it can be is Olumi's reading, said as such, so a change to it shows.
     const can = [...(at('floor') !== null ? [`never below ${bare('floor')}`] : []), ...(at('ceiling') !== null ? [`never above ${bare('ceiling')}`] : [])];
     const reading = (typeof r['range_kind'] === 'string' ? ` (${of(RANGE_WORDS, r['range_kind'])})` : '') + (can.length > 0 ? ` (${can.join(', ')}: Olumi’s reading)` : '');
-    if (at('low') !== null && at('high') !== null) return sign(`from ${between(r['low'] as number, r['high'] as number, r['unit'])}${at('value') !== null ? `, most likely ${bare('value')}` : ''}${reading}`);
+    // Box 1a: an unmeasured factor (unit null) is said as such, never as a figure of no unit.
+    const unmeasured = r['unit'] === null ? ', not measured' : '';
+    if (at('low') !== null && at('high') !== null) return sign(`from ${between(r['low'] as number, r['high'] as number, r['unit'])}${at('value') !== null ? `, most likely ${bare('value')}` : ''}${unmeasured}${reading}`);
     const ends = [...(at('low') !== null ? [`no lower than ${at('low')}`] : []), ...(at('high') !== null ? [`no higher than ${at('high')}`] : [])].join(', ');
     // A worked-out figure has no figure of its own to give: only its unit.
     // W8 run 4 (c7.3, "no figure yet (in per week)"): a unit that is itself a rate is said as one ("per week").
     const inU = u.startsWith('per ') ? u : `in ${u}`;
-    const none = r['status'] === 'derived' ? (u === '' ? '' : inU) : `no figure yet${u === '' ? '' : ` (${inU})`}`;
-    return sign(([at('value') ?? none, ...(ends === '' ? [] : [ends])].filter((x) => x !== '').join(', ') + reading).trim());
+    const none = unmeasured !== '' ? '' : r['status'] === 'derived' ? (u === '' ? '' : inU) : `no figure yet${u === '' ? '' : ` (${inU})`}`;
+    return sign(([at('value') ?? none, ...(ends === '' ? [] : [ends]), ...(unmeasured === '' ? [] : ['not measured'])].filter((x) => x !== '').join(', ') + reading).trim());
   };
   /** Whose words an item is in: the person's own, or someone they report, by name. */
   // W8 faithful (dev H03, R3/R5: "in CFO’s words" over the person's own sentence about the CFO): a quote is always the person's
@@ -397,7 +407,7 @@ function wordsIn(m: CanonicalModelT) {
       case 'kind': return family === 'conditions' ? of({ prerequisite: 'a prerequisite', challenge: 'a challenge' }, r['kind']) : of({ fact: 'a fact', coefficient: 'a rate', derived: 'a result' }, r['kind']);
       case 'status': return family === 'options' ? of({ live: 'in the comparison', ruled_out: 'ruled out, kept in view', removed: 'taken out of the comparison' }, r['status'])
         : of({ known: 'known', estimated: 'an estimate', asked: 'still to be given', derived: 'worked out from the model', unknown: 'not known yet', not_applicable: 'does not apply',
-          unsupported: 'outside what the model can use' }, r['status']);
+          unsupported: 'outside what the model can use' }, r['status']) + (family === 'quantities' && r['unit'] === null ? ', not measured' : '');
       case 'question': return typeof r['question'] === 'string' ? `Olumi asks "${r['question']}"` : 'no question';
       case 'basis': return typeof r['basis'] === 'string' ? `based on "${r['basis']}"` : 'no basis given';
       case 'author': return of(WHO_WORDS, r['author']);
@@ -408,6 +418,7 @@ function wordsIn(m: CanonicalModelT) {
         const parts = Array.isArray(r['parts']) ? (r['parts'] as Rec[]) : [];
         const terms = Array.isArray(r['terms']) ? (r['terms'] as Rec[]) : [];
         const ids = (v: unknown) => (Array.isArray(v) ? v.map(nm) : []);
+        if (r['form'] === 'influence') return ''; // a link in words is said by what it joins (`influence`), never worked out
         if (r['form'] === 'effect') return `starts from ${nm(r['base'])}${terms.map((t, i) => `${i === 0 ? ' and changes' : ', and'} by ${nm(t['coefficient'])} for each ${nm(t['driver'])}`).join('')}`;
         if (r['form'] === 'stock') {
           const moves = [...(ids(r['inflows']).length > 0 ? [`adds ${and(ids(r['inflows']))}`] : []), ...(ids(r['outflows']).length > 0 ? [`takes away ${and(ids(r['outflows']))}`] : [])];
@@ -466,8 +477,23 @@ function wordsIn(m: CanonicalModelT) {
           + `${x['author'] === 'structure' ? `, as ${WHO_WORDS['structure']}` : x['author'] !== r['author'] ? `, as ${of(WHO_WORDS, x['author'])}` : ''}`
           + `${x['quote'] === r['quote'] ? '' : typeof x['quote'] === 'string' ? `, in your words "${x['quote']}"` : x['author'] === 'structure' ? '' : ', not in your words'}`;
       }
-      case 'chance': return `with a chance of ${q('occurrence')}`;
-      case 'effect': return r['mode'] === 'multiply' ? `multiplying ${q('effect_on')} by ${q('severity')}` : `adding ${q('severity')} to ${q('effect_on')}`;
+      // Box 1a: a link in words, by what it joins, which way and how sure; and a risk no one can size, or one on an aim, a
+      // limit or an option, with what is not known yet and its own direction (a sized risk's sign is its severity's).
+      case 'influence': {
+        const [verb, tail] = INFLUENCE_WORDS[String(r['direction'])] ?? ['affects', ''];
+        return `${nm(r['from'])} ${verb} ${nm(r['to'])}${tail}`;
+      }
+      case 'confidence': return of(CONFIDENCE_WORDS, r['confidence']);
+      case 'carry_on': return r['carry_on'] === true ? 'carries on as now' : '';
+      case 'chance': return typeof r['occurrence'] === 'string' ? `with a chance of ${q('occurrence')}` : 'with a chance not known yet';
+      case 'effect': {
+        const on = Q.has(String(r['effect_on'])) ? q('effect_on') : nm(r['effect_on']);
+        const size = typeof r['severity'] === 'string' ? q('severity') : 'a size not known yet';
+        const how = r['mode'] === 'multiply' ? `multiplying ${on} by ${size}` : r['mode'] === 'add' ? `adding ${size} to ${on}` : `affecting ${on}, by ${size}`;
+        const sized = typeof r['occurrence'] === 'string' && typeof r['severity'] === 'string' && typeof r['mode'] === 'string' && Q.has(String(r['effect_on']));
+        const way = r['direction'] === 'unknown' && sized ? '' : RISK_WAY[String(r['direction'])] ?? '';
+        return [...(typeof r['occurrence'] === 'string' ? [] : ['with a chance not known yet']), how, way].filter((x) => x !== '').join(', ');
+      }
       case 'starts': return start(r['starts_after_periods'] as number | string);
       case 'about': return list(r['concerns']).length > 0 ? `about ${and(list(r['concerns']))}` : 'about nothing in particular';
       case 'source': return typeof r['source'] === 'string' ? `from "${r['source']}"` : 'no source given';
@@ -479,7 +505,7 @@ function wordsIn(m: CanonicalModelT) {
     }
   };
   /** An item's name on the card. */
-  const title = (family: Family, r: Rec): string => String(family === 'relations' ? label(String(r['defines'])) : family === 'preferences' ? label(String(r['quantity']))
-    : r['label'] ?? r['text'] ?? r['holder']);
+  const title = (family: Family, r: Rec): string => String(family === 'relations' ? (r['form'] === 'influence' ? `${named(String(r['from']))} → ${named(String(r['to']))}` : label(String(r['defines'])))
+    : family === 'preferences' ? label(String(r['quantity'])) : r['label'] ?? r['text'] ?? r['holder']);
   return { title, phrase, named };
 }

@@ -43,7 +43,8 @@ export function programReadinessOf(graph: unknown): AnalysisReadyPayload | undef
         return typeof v === 'number' ? [[s.quantity, v]] : [];
       }));
       return { option_id: o.id, label: o.label, status: outcome?.status === 'calculable' ? 'ready' : 'needs_user_input', interventions,
-        ...(o.sets.length === 0 ? { is_baseline: true } : {}), ...(outcome !== undefined && outcome.reasons.length > 0 ? { status_reason: outcome.reasons.join(' ') } : {}) };
+        // The declared carry-on only (Box 1a): never read from empty settings.
+        ...(o.carry_on === true ? { is_baseline: true } : {}), ...(outcome !== undefined && outcome.reasons.length > 0 ? { status_reason: outcome.reasons.join(' ') } : {}) };
     }),
     status,
     ...(status === 'blocked' ? { blocked_reason: tooLarge ? 'MODEL_PROGRAM_TOO_LARGE' : 'MODEL_PROGRAM_DOES_NOT_COMPILE' } : {}),

@@ -22,7 +22,7 @@ export function rateOf(r: CanonicalRelationT, Q: ReadonlyMap<string, Pick<Canoni
 /** What a link sized by `id` moves: what an effect term with this coefficient, or a per-unit rate with it, defines. */
 export function linkTargets(model: Pick<CanonicalModelT, 'quantities' | 'relations'>, id: string): string[] {
   const Q = new Map(model.quantities.map((q) => [q.id, q] as const));
-  return [...new Set(model.relations.flatMap((r) => ((r.form === 'effect' && r.terms.some((t) => t.coefficient === id)) || rateOf(r, Q)?.coefficient === id ? [r.defines] : [])))];
+  return [...new Set(model.relations.flatMap((r) => (r.form !== 'influence' && ((r.form === 'effect' && r.terms.some((t) => t.coefficient === id)) || rateOf(r, Q)?.coefficient === id) ? [r.defines] : [])))];
 }
 
 /** A link's stated direction is used only where its size has no figure: no value, and no range or one across zero (issue 39). */

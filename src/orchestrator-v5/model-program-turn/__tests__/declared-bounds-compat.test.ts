@@ -209,8 +209,10 @@ describe('titles and coaching questions (Paul, approved 27 Oct 2026): a model sa
     const s = stored();
     expect(['title' in s.canonical, 'coaching_questions' in s.canonical]).toEqual([false, false]);
     const said = [s.brief];
-    // The model as it read before this change: today's reading, less the two new fields.
-    const { title: _t, coaching_questions: _c, ...readBefore } = CanonicalModel.parse(withDeclaredTiming(s.canonical));
+    // The model as it read before this change: today's reading, less the two new fields,
+    // and less Box 1a's read-time defaults (carry_on, risk direction).
+    const { title: _t, coaching_questions: _c, ...readToday } = CanonicalModel.parse(withDeclaredTiming(s.canonical));
+    const readBefore = { ...readToday, options: readToday.options.map(({ carry_on: _carry, ...o }) => o), risks: readToday.risks.map(({ direction: _direction, ...k }) => k) };
     const digest = digestBefore(readBefore, said);
     const run: StoredRun = {
       run_id: 'mp_run_saved_before_titles', computed_at: '2026-10-27T10:00:00.000Z',

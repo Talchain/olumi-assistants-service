@@ -250,7 +250,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       // Round 3 (27 Oct): events or tasks are context (the goal's own description); one statement, one record (the model's own).
       'never simultaneously a limit or preference. Events or tasks alone are context.',
       'One statement, one record across all families; never paraphrase it into another. Evidence and assumptions get separate records only for distinct statements.',
-      'What the option changes. [] for \\"carry on as now\\".',
+      '[] means no numerical setting here; what the option changes in words is its influence links.',
       'What matters but is not in the calculation.',
       'The clarification or representable measure that would let this into the calculation, as one question; null when none would.',
       'A disagreement worth keeping visible. Never resolved by dropping it.',

@@ -1,0 +1,189 @@
+/**
+ * Box 1a on the turn path (Paul's Q1, 28 Oct): the card shows every field of a link in words, a risk no one can size, a
+ * declared carry-on and an unmeasured factor; the reading groups count them; an update adds, changes and removes a link by
+ * id; the store reads them back; the result names what it waits on by the records' own labels; and a model saved before
+ * them opens, compiles and draws as before, its bytes and its Run untouched. Synthetic studio and bakery only; every
+ * expectation is written by hand from the fixtures.
+ */
+import { createHash } from 'node:crypto';
+import { describe, expect, it } from 'vitest';
+import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
+import type { CanonicalModelT } from '../../model-program/canonical.js';
+import { compile } from '../../model-program/compile.js';
+import { project } from '../../model-program/project.js';
+import { mergeUpdate } from '../draft.js';
+import { evaluateCanonical } from '../evaluate.js';
+import { readingOf, validatePostimage, verbatimIn } from '../postimage.js';
+import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram } from '../program-store.js';
+import { readingGroups, readingLine } from '../reading-groups.js';
+import { ENGINE_VERSIONS, type StoredRun } from '../run-receipt.js';
+import { at, bakery, BRIEF, q } from './bakery.fixture.js';
+import { studio, STUDIO_BRIEF } from './class-studio.fixture.js';
+
+type Rec = Record<string, any>;
+const WORDS = [STUDIO_BRIEF];
+const MOOD_BASIS = 'No one can measure how members feel yet; repeat bookings might show it.';
+
+describe('Box 1a: the card, the counts, the update and the store', () => {
+  it('the reading card says every new field in the records\' own words, titles each link by what it joins, and refuses nothing', () => {
+    const r = readingOf(studio(), { words: WORDS, approver: null });
+    expect(r.ok).toBe(true);
+    const rows = new Map((r.ok ? r.changes : []).map((c) => [c.id, c] as const));
+    const row = (id: string) => { const c = rows.get(id)!; return [c.label, c.after]; };
+    expect(row('evening_mood')).toEqual(['Evening classes → How members feel',
+      '"Evening classes" ↑ raises "How members feel", judged likely, based on "Members have asked for evening slots.", in your words "Members have asked for evening slots"']);
+    expect(row('mood_members')).toEqual(['How members feel → members',
+      '"How members feel" affects "members", depending on conditions, judged unsure, based on "Happier members stay only if the classes suit them."']);
+    expect(row('instructor_leaves')).toEqual(['The instructor leaves', 'with a chance not known yet, affecting "Keep at least 140 members", by a size not known yet, ↓ lowering it, from the start']);
+    expect(row('carry_on')).toEqual(['Carry on as now', 'carries on as now, in your words "carry on as now"']);
+    expect(row('member_mood')).toEqual(['How members feel', `not known yet, not measured, based on "${MOOD_BASIS}"`]);
+    // An option that declares no carry-on says nothing of one (false is no claim).
+    expect(rows.get('evening_classes')!.after).not.toMatch(/carries on/);
+    expect(JSON.stringify(r)).not.toMatch(/undefined/);
+  });
+
+  it('every new field, changed alone, is said before and after (no unshown change)', () => {
+    const one = (mutate: (m: CanonicalModelT) => void) => { const m = studio(); mutate(m); return m; };
+    const link = (m: CanonicalModelT, id: string) => m.relations.find((x) => x.id === id) as Rec;
+    const cases: [string, string, (m: CanonicalModelT) => void][] = [
+      ['link from', 'evening_mood', (m) => { link(m, 'evening_mood').from = 'weekend_workshops'; }],
+      ['link to', 'evening_mood', (m) => { link(m, 'evening_mood').to = 'members'; }],
+      ['link direction', 'evening_mood', (m) => { link(m, 'evening_mood').direction = 'disputed'; }],
+      ['link confidence', 'evening_mood', (m) => { link(m, 'evening_mood').confidence = 'unknown'; }],
+      ['link basis', 'evening_mood', (m) => { link(m, 'evening_mood').basis = null; }],
+      ['risk chance', 'instructor_leaves', (m) => { m.risks[0]!.occurrence = 'members'; }],
+      ['risk size', 'instructor_leaves', (m) => { m.risks[0]!.severity = 'members'; }],
+      ['risk on', 'instructor_leaves', (m) => { m.risks[0]!.effect_on = 'members'; }],
+      ['risk direction', 'instructor_leaves', (m) => { m.risks[0]!.direction = 'up'; }],
+      ['risk mode', 'instructor_leaves', (m) => { m.risks[0]!.mode = 'add'; }],
+      ['carry-on withdrawn', 'carry_on', (m) => { m.options[2]!.carry_on = false; }],
+      ['carry-on declared', 'evening_classes', (m) => { m.options[0]!.carry_on = true; }],
+      ['unit null', 'members', (m) => { m.quantities.find((x) => x.id === 'members')!.unit = null; }],
+    ];
+    const said = cases.map(([name, id, mutate]) => {
+      const v = validatePostimage(studio(), one(mutate), { removals: [], words: WORDS, fresh: [] });
+      const c = v.ok ? v.changes.find((x) => x.id === id) : undefined;
+      return [name, v.ok ? 'ok' : v.code, c !== undefined && c.before !== c.after && !`${c.before} ${c.after}`.includes('undefined')];
+    });
+    expect(said).toEqual(cases.map(([name]) => [name, 'ok', true]));
+    const change = (id: string, mutate: (m: CanonicalModelT) => void) => { const v = validatePostimage(studio(), one(mutate), { removals: [], words: WORDS, fresh: [] }); const c = v.ok ? v.changes.find((x) => x.id === id)! : undefined; return [c?.before, c?.after]; };
+    expect(change('evening_mood', cases[2]![2])).toEqual(['"Evening classes" ↑ raises "How members feel"', '"Evening classes" affects "How members feel", in a disputed direction']);
+    expect(change('carry_on', cases[10]![2])).toEqual(['carries on as now', null]);
+    expect(change('members', cases[12]![2])).toEqual(['150 members', '150, not measured']);
+    expect(change('instructor_leaves', cases[9]![2])).toEqual(['with a chance not known yet, affecting "Keep at least 140 members", by a size not known yet, ↓ lowering it',
+      'with a chance not known yet, adding a size not known yet to "Keep at least 140 members", ↓ lowering it']);
+  });
+
+  it('reading groups: a link of theirs in their words is used, Olumi\'s link and risk are inferred, and no link is said on another line', () => {
+    const groups = readingGroups(studio(), (quote) => verbatimIn(quote, WORDS));
+    expect(Object.fromEntries(groups)).toEqual({
+      takings_goal: 'used', keep_members: 'used', evening_classes: 'used', weekend_workshops: 'inferred', carry_on: 'used', instructor_leaves: 'inferred',
+      classes_rel: 'other', takings_rel: 'other', evening_mood: 'used', mood_members: 'inferred',
+      class_fee: 'used', classes_now: 'used', extra_classes: 'other', evening_extra: 'used', workshop_extra: 'inferred', takings_target: 'used', members: 'used',
+      members_target: 'used', member_mood: 'inferred',
+    });
+    expect(readingLine(groups)).toBe('I used 11 things from your brief and added 5 of my own for you to check.');
+  });
+
+  it('an update adds, changes and removes a link by id; the card says each and history keeps what it replaced', () => {
+    const saved = studio();
+    const changed = { ...saved.relations[2]!, confidence: 'unsure' } as CanonicalModelT['relations'][number];
+    const added = { ...saved.relations[3]!, id: 'workshop_mood', from: 'weekend_workshops', to: 'member_mood', direction: 'up', basis: null } as CanonicalModelT['relations'][number];
+    const update = { version: 'canonical.v1' as const, question: null, period: null, quantities: [], relations: [changed, added], goals: [], limits: [], preferences: [], options: [], risks: [],
+      claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: ['mood_members'] };
+    const merged = mergeUpdate(saved, update);
+    expect(merged.relations.map((r) => r.id)).toEqual(['classes_rel', 'takings_rel', 'evening_mood', 'workshop_mood']);
+    expect(merged.quantities).toEqual(saved.quantities); // every record not returned is the saved one, exactly
+    const v = validatePostimage(saved, merged, { removals: ['mood_members'], words: WORDS, fresh: [] });
+    expect(v.ok).toBe(true);
+    expect((v.ok ? v.changes : []).map((c) => [c.id, c.action, c.label, c.before, c.after])).toEqual([
+      ['evening_mood', 'change', 'Evening classes → How members feel', 'judged likely', 'judged unsure'],
+      ['workshop_mood', 'add', 'Weekend workshops → How members feel', null, '"Weekend workshops" ↑ raises "How members feel", judged unsure'],
+      ['mood_members', 'remove', 'How members feel → members', '"How members feel" affects "members", depending on conditions, judged unsure, based on "Happier members stay only if the classes suit them."', null],
+    ]);
+    expect((v.ok ? v.model.history : []).map((h) => [h.id, h.change])).toEqual([['evening_mood', 'superseded'], ['mood_members', 'withdrawn']]);
+  });
+
+  it('the store saves and reads back the links, the unsized risk, the carry-on and the unmeasured factor exactly', () => {
+    const program = { model_program: MODEL_PROGRAM, canonical: studio(), seed: 7, person_words: WORDS, runs: [] };
+    const read = programReadOf({ living_model: JSON.parse(JSON.stringify(livingModelOf(program))) });
+    expect(read.kind).toBe('program');
+    expect(read.kind === 'program' ? read.program.canonical : null).toEqual(studio());
+  });
+
+  it('the result names what the members aim waits on by the records\' own labels, the link as from → to, and never as a figure to type in', () => {
+    const e = evaluateCanonical(studio(), { sourceText: STUDIO_BRIEF, seed: 7, draws: 200 });
+    const view = e.view as Rec;
+    expect(view.goal_chance.waits_on).toEqual([
+      { id: 'member_mood', code: 'unknown', label: 'How members feel', scope: ['keep_members'], answer: null, basis: MOOD_BASIS },
+      { id: 'evening_mood', code: 'unknown', label: 'Evening classes → How members feel', scope: ['keep_members', 'evening_classes'], answer: null, basis: 'Members have asked for evening slots.' },
+      { id: 'mood_members', code: 'unknown', label: 'How members feel → members', scope: ['keep_members'], answer: null, basis: 'Happier members stay only if the classes suit them.' },
+      { id: 'instructor_leaves', code: 'unknown', label: 'The instructor leaves', scope: ['keep_members'], answer: null },
+    ]);
+    expect(view.goal_chance.notes).toEqual(expect.arrayContaining([
+      '‘Keep at least 140 members’ waits on ‘How members feel’, which no one can size yet (No one can measure how members feel yet; repeat bookings might show it), '
+        + '‘Evening classes → How members feel’, which no one can size yet (Members have asked for evening slots), '
+        + '‘How members feel → members’, which no one can size yet (Happier members stay only if the classes suit them) and ‘The instructor leaves’, which no one can size yet.',
+      'The risk ‘The instructor leaves’ is not in this run: The calculation cannot size it.',
+      // An option whose own effect is a link in words is not compared as if it changed nothing.
+      'The option ‘Evening classes’ is not in this run: rests on the link "Evening classes → How members feel", which is in words, never calculated.',
+    ]));
+    expect(JSON.stringify(view)).not.toMatch(/undefined|needs your answer/);
+    // No partial chance is shown as the whole: each compared option's cell waits, not on an answer; the takings aim is shown on its own.
+    expect(view.options.map((o: Rec) => [o.option_id, o.cell.kind, o.cell.face])).toEqual([['weekend_workshops', 'withheld', 'Chance not shown yet'], ['carry_on', 'withheld', 'Chance not shown yet']]);
+    expect(view.goal_chance.targets.per_target.map((t: Rec) => [t.constraint_id, t.options.map((o: Rec) => o.display)])).toEqual([['takings_goal', ['100%', '0%']]]);
+  });
+});
+
+describe('Box 1a: a model saved before links, carry-on and risk direction', () => {
+  const priorVersions = { ...ENGINE_VERSIONS, engine: 'mp-synthetic-before-box1a' };
+  /** The bakery as saved before Box 1a: no carry_on on its options, a sized risk with no direction, a history entry. */
+  const stored = (): Rec => {
+    const m = JSON.parse(JSON.stringify(bakery())) as Rec;
+    m.options = m.options.map(({ carry_on: _carry, ...o }: Rec) => o);
+    m.quantities.push(q('breakdown_chance', '1', { kind: 'coefficient', status: 'estimated', author: 'olumi', low: 0.05, high: 0.2, range_kind: 'plausible', basis: 'Ovens this age break down now and then.' }),
+      q('lost_loaves', 'loaf/week', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: -100, low: -150, high: -50, range_kind: 'plausible', basis: 'A week without an oven.' }));
+    m.risks = [{ id: 'breakdown', label: 'The oven breaks down', occurrence: 'breakdown_chance', severity: 'lost_loaves', effect_on: 'sales', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...at }];
+    m.history = [{ id: 'budget', change: 'superseded', old: '{"id":"budget","unit":"GBP","value":2500}', quote: null, author_id: null, approved_by: null }];
+    return m;
+  };
+  /** The revision digest as computed before Box 1a, written out independently of run-receipt.ts. */
+  const digestBefore = (canonical: Rec, words: readonly string[]): string => {
+    const quantities = (canonical.quantities as Rec[]).map(({ direction, floor, ceiling, ...x }) => ({ ...x,
+      ...(direction == null ? {} : { direction }), ...(floor == null ? {} : { floor }), ...(ceiling == null ? {} : { ceiling }) }));
+    const lean = (v: unknown): unknown => (Array.isArray(v) ? v.map(lean) : v !== null && typeof v === 'object'
+      ? Object.fromEntries(Object.entries(v).filter(([k, x]) => !(k === 'approved_by' && x == null)).map(([k, x]) => [k, lean(x)])) : v);
+    const { title, coaching_questions: coaching, ...rest } = canonical;
+    const named = { ...rest, ...(title == null ? {} : { title }), ...(coaching === undefined || coaching.length === 0 ? {} : { coaching_questions: coaching }) };
+    return createHash('sha256').update(stableStringify({ canonical: lean({ ...named, quantities }), person_words: words }), 'utf8').digest('hex');
+  };
+
+  it('opens with no carry-on declared and its risk\'s direction unknown, its bytes and its Run untouched, then compiles and draws as before with no baseline claimed', () => {
+    const canonical = stored();
+    expect([canonical.options.some((o: Rec) => 'carry_on' in o), 'direction' in canonical.risks[0]]).toEqual([false, false]);
+    const run: StoredRun = {
+      run_id: 'mp_run_saved_before_box1a', computed_at: '2026-10-27T10:00:00.000Z',
+      receipt: { revision_digest: digestBefore(canonical, [BRIEF]), versions: priorVersions, seed: 7, draws: 200 },
+      result: { canonical_analysis_view: { marker: 'stored result, never recomputed',
+        run: { run_id: 'mp_run_saved_before_box1a', graph_hash_at_run: 'old-graph', computed_at: '2026-10-27T10:00:00.000Z' }, staleness: { stale: false, reason: 'graph_hash_match' } },
+        chances: null, compile: null },
+    };
+    const before = JSON.stringify({ living_model: { model_program: MODEL_PROGRAM, canonical, person_words: [BRIEF], seed: 7, runs: [run] } });
+    const cold = JSON.parse(before);
+    const opened = reopenProgram(cold, priorVersions)!;
+    const m = opened.program.canonical;
+    expect([m.options.map((o) => o.carry_on), m.risks.map((k) => k.direction)]).toEqual([[false, false], ['unknown']]);
+    expect([opened.current, opened.engine_current, opened.run]).toEqual([true, true, run]);
+    expect(m.history[0]!.old).toBe('{"id":"budget","unit":"GBP","value":2500}');
+    expect(JSON.stringify(cold)).toBe(before);
+    // Compiles as before: the sized risk lowered exactly as it was, the same goal and the same ask.
+    const c = compile(m);
+    expect([c.errors, c.perGoal.map((g) => [g.goal_id, g.status]), c.blockers]).toEqual([[], [['more_loaves', 'calculable']], [{ id: 'oven_price', code: 'asked', scope: ['within_budget'] }]]);
+    expect(c.executable!.risks).toEqual([{ id: 'breakdown', occurrence: 'breakdown_chance', severity: 'lost_loaves', effect_on: 'sales', mode: 'add', from_period: 0 }]);
+    // Draws as before, but claims no baseline: the flag was never declared, and none is read from its empty settings or name.
+    const p = project(m, c, { brief: BRIEF });
+    expect((p.graph.nodes as Rec[]).filter((n) => n.kind === 'option').map((n) => [n.id, 'is_baseline' in n])).toEqual([['second_oven', false], ['keep_one', false]]);
+    expect((p.graph.edges as Rec[]).find((e) => e.id === 'breakdown__sales')).toMatchObject({ from: 'breakdown', to: 'sales', effect_direction: 'negative', effect_mode: 'add' });
+    expect((p.graph.edges as Rec[]).find((e) => e.id === 'breakdown__sales')).not.toHaveProperty('direction_settled');
+  });
+});

@@ -3,7 +3,7 @@ import type { CanonicalModelT, CanonicalQuantityT } from '../../model-program/ca
 
 export const BRIEF = 'We bake 300 loaves a week with our one oven and want to reach 380 loaves a week. A second oven adds about 100 loaves a week, or we could keep our one oven. We have £3,000 to spend and don\'t know the oven price yet.';
 export const at = { party: null, approval: 'proposed' as const, approved_by: null, author_id: null };
-export const q = (id: string, unit: string, f: Partial<CanonicalQuantityT>): CanonicalQuantityT => ({ id, label: id.replace(/_/g, ' '), unit, kind: 'fact', value: null, low: null, high: null,
+export const q = (id: string, unit: string | null, f: Partial<CanonicalQuantityT>): CanonicalQuantityT => ({ id, label: id.replace(/_/g, ' '), unit, kind: 'fact', value: null, low: null, high: null,
   range_kind: null, status: 'known', question: null, basis: null, direction: null, floor: null, ceiling: null, author: 'person', quote: null, ...at, ...f });
 export function bakery(): CanonicalModelT {
   return {
@@ -33,8 +33,8 @@ export function bakery(): CanonicalModelT {
     preferences: [],
     options: [
       { id: 'second_oven', label: 'A second oven', sets: [{ quantity: 'ovens_added', to: 'one_oven', value: null, low: null, high: null, range_kind: null, question: null, starts_after_periods: 0, author: 'person', quote: 'A second oven' }],
-        status: 'live', developed_from: null, author: 'person', quote: 'A second oven', ...at },
-      { id: 'keep_one', label: 'Keep our one oven', sets: [], status: 'live', developed_from: null, author: 'person', quote: 'keep our one oven', ...at },
+        status: 'live', developed_from: null, carry_on: false, author: 'person', quote: 'A second oven', ...at },
+      { id: 'keep_one', label: 'Keep our one oven', sets: [], status: 'live', developed_from: null, carry_on: true, author: 'person', quote: 'keep our one oven', ...at },
     ],
     risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [],
     title: null, coaching_questions: [],
@@ -90,8 +90,8 @@ export function club(): CanonicalModelT {
       { id: 'promotion', label: 'Run a promotion', sets: [
         { quantity: 'promo_on', to: 'one_promo', value: null, low: null, high: null, range_kind: null, question: null, starts_after_periods: 0, author: 'person', quote: 'Run a promotion' },
         { quantity: 'spend', to: 'promo_cost', value: null, low: null, high: null, range_kind: null, question: null, starts_after_periods: 0, author: 'person', quote: 'The promotion costs £500' }],
-        status: 'live', developed_from: null, author: 'person', quote: 'Run a promotion', ...at },
-      { id: 'carry_on', label: 'Carry on as now', sets: [], status: 'live', developed_from: null, author: 'person', quote: 'carry on as now', ...at },
+        status: 'live', developed_from: null, carry_on: false, author: 'person', quote: 'Run a promotion', ...at },
+      { id: 'carry_on', label: 'Carry on as now', sets: [], status: 'live', developed_from: null, carry_on: true, author: 'person', quote: 'carry on as now', ...at },
     ],
     risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [],
     title: null, coaching_questions: [],

@@ -1089,17 +1089,17 @@ describe('the model-program turn on the real core route', () => {
     };
 
     it('(a) neither schema the drafter is sent (first draft, update) holds approval or author_id anywhere, and each stays valid strict output', () => {
-      // Positive control: the walker reaches every attributed object (each record family, the four relation forms, a link, an
+      // Positive control: the walker reaches every attributed object (each record family, the five relation forms, a link, an
       // option's setting); neither holds a history entry (W2: the host's).
-      for (const [name, schema, quoted] of [['draft', CANONICAL_JSON_SCHEMA, 18], ['update', UPDATE_JSON_SCHEMA, 18]] as const) {
+      for (const [name, schema, quoted] of [['draft', CANONICAL_JSON_SCHEMA, 19], ['update', UPDATE_JSON_SCHEMA, 19]] as const) {
         const a = audit(schema);
         expect([a.host, a.loose, a.quoted], name).toEqual([[], [], quoted]);
         expect(JSON.stringify(schema), name).not.toMatch(/approval|author_id/);
       }
-      // Contrast: the same walker on the STORED format finds every one: approval on 17 objects, author_id on those and the
+      // Contrast: the same walker on the STORED format finds every one: approval on 18 objects, author_id on those and the
       // history entry, each as a property and a required key.
       const stored = audit(z.toJSONSchema(CanonicalModel));
-      expect([stored.host.length, stored.quoted]).toEqual([70, 19]);
+      expect([stored.host.length, stored.quoted]).toEqual([74, 20]);
       expect(stored.host).toEqual(expect.arrayContaining(['$.properties.history.items.properties.author_id', '$.properties.goals.items.properties.approval', '$.properties.goals.items.required.approval']));
     });
 
@@ -1751,7 +1751,7 @@ describe('the model-program turn on the real core route', () => {
         within_budget: '"spend" at most "budget" £3,000, in your words "We have £3,000 to spend"',
         // W8 run 4 (c7.1): its words are its label, "A second oven", so they are theirs without being quoted twice.
         second_oven: 'sets "ovens added" to "one oven" 1 oven from the start, in your words',
-        keep_one: 'in your words "keep our one oven"',
+        keep_one: 'carries on as now, in your words "keep our one oven"',
         sold_rel: 'worked out as "extra per oven" multiplied by "sell through", in loaves per oven per week',
         sales_rel: 'starts from "base sales" and changes by "sold per oven" for each "ovens added", link 1 is yours, in your words "A second oven adds about 100 loaves a week", in loaves per week',
         spend_rel: 'worked out as "oven price" multiplied by "ovens added", in £',
@@ -1778,7 +1778,7 @@ describe('the model-program turn on the real core route', () => {
     expect(rows(reworded)).toEqual([['The oven lasts eight years.', 'worded "The oven lasts five years.", not applied in the model', 'applied in the model']]);
     // A risk named in their own words (QUA-1.3): theirs, not quoted a second time.
     const risky = JSON.parse(JSON.stringify(saved)) as CanonicalModelT;
-    risky.risks.push({ id: 'lose_oven', label: 'keep our one oven', occurrence: 'sell_through', severity: 'extra_per_oven', effect_on: 'sales', mode: 'add', starts_after_periods: 0, author: 'person', quote: 'keep our one oven', ...at });
+    risky.risks.push({ id: 'lose_oven', label: 'keep our one oven', occurrence: 'sell_through', severity: 'extra_per_oven', effect_on: 'sales', direction: 'unknown', mode: 'add', starts_after_periods: 0, author: 'person', quote: 'keep our one oven', ...at });
     const [risk] = rows(risky) as string[][];
     expect([risk![0], risk![2]!.endsWith(', in your words'), risk![2]!.includes('keep our one oven')]).toEqual(['keep our one oven', true, false]);
     // A figure still to be given whose unit is a rate (QUA-3.9 "(in per week)").
@@ -1805,7 +1805,7 @@ describe('the model-program turn on the real core route', () => {
   it('the card in plain words (DL 24 Oct): a change to any one field of any item is said, before and after, in words (every group covered); a field that cannot change the words is refused', () => {
     const base = bakery();
     base.preferences.push({ id: 'fewer_hours', quantity: 'spend', direction: 'lower', author: 'olumi', quote: null, ...at });
-    base.risks.push({ id: 'breakdown', label: 'The oven breaks down', occurrence: 'sell_through', severity: 'extra_per_oven', effect_on: 'sales', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...at });
+    base.risks.push({ id: 'breakdown', label: 'The oven breaks down', occurrence: 'sell_through', severity: 'extra_per_oven', effect_on: 'sales', direction: 'unknown', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...at });
     base.claims.push({ id: 'demand_grows', text: 'Demand grows in spring.', concerns: ['more_loaves'], author: 'olumi', quote: null, ...at });
     base.evidence.push({ id: 'last_spring', text: 'Sales rose last spring.', source: null, bears: 'supports', concerns: ['more_loaves'], author: 'olumi', quote: null, ...at });
     base.assumptions.push({ id: 'oven_lasts', text: 'The oven lasts five years.', applied: false, concerns: [], author: 'olumi', quote: null, ...at });
@@ -2263,7 +2263,7 @@ describe('the model-program turn on the real core route', () => {
     const changes: ProposalChange[] = [
       { id: 'oven_price', kind: 'quantity', action: 'change', label: 'oven price', before: 'no figure yet (in £ per oven), still to be given, Olumi asks "What would the second oven cost?", not in your words',
         after: '£2,000 per oven, known, no question, in your words "the oven is £2,000"', author: 'person', family: 'quantity' },
-      { id: 'keep_one', kind: 'option', action: 'remove', label: 'Keep our one oven', before: 'in your words "keep our one oven"', after: null, author: 'person', family: 'option' },
+      { id: 'keep_one', kind: 'option', action: 'remove', label: 'Keep our one oven', before: 'carries on as now, in your words "keep our one oven"', after: null, author: 'person', family: 'option' },
       { id: 'landlord_agrees', kind: 'record', action: 'add', label: 'Only once the landlord agrees.', before: null,
         after: 'a prerequisite, about "A second oven", in your words "our landlord must agree first"', author: 'person', family: 'conditions' },
     ];
@@ -2435,7 +2435,7 @@ describe('the model-program turn on the real core route', () => {
     const estimate = (id: string, unit: string, low: number, high: number, value: number | null) => q(id, unit, { kind: 'coefficient', status: 'estimated', author: 'olumi', value, low, high, range_kind: 'plausible', basis: 'Synthetic.' });
     const risky = (label: string, as = savedWith) => as((d) => {
       d.quantities.push(estimate('breakdown_chance', '1', 0.05, 0.2, null), estimate('lost_loaves', 'loaf/week', -150, -50, -100));
-      d.risks.push({ id: 'breakdown', label, occurrence: 'breakdown_chance', severity: 'lost_loaves', effect_on: 'sales', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...at });
+      d.risks.push({ id: 'breakdown', label, occurrence: 'breakdown_chance', severity: 'lost_loaves', effect_on: 'sales', direction: 'unknown', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...at });
     });
     const propose = async (body: string) => {
       replies = [body];
@@ -2990,7 +2990,7 @@ describe('the model-program turn on the real core route', () => {
       const RISK = `${OWN} There is a one in five chance of a quiet month when five more leave.`;
       const m = allTheirs();
       m.quantities.push(q('quiet_chance', '1', { value: 0.2, quote: 'a one in five chance' }), q('quiet_extra', 'member/month', { value: 5, quote: 'five more leave' }));
-      m.risks.push({ id: 'quiet_month', label: 'A quiet month', occurrence: 'quiet_chance', severity: 'quiet_extra', effect_on: 'leavers', mode: 'add', starts_after_periods: 0,
+      m.risks.push({ id: 'quiet_month', label: 'A quiet month', occurrence: 'quiet_chance', severity: 'quiet_extra', effect_on: 'leavers', direction: 'unknown', mode: 'add', starts_after_periods: 0,
         author: 'person', quote: 'a one in five chance of a quiet month', ...at });
       // Contrast first: the risk is theirs too, so with no premise the result is still on their figures.
       expect(faceOf(approved(m), RISK)).toContain(', in this model. It rests on your figures.');

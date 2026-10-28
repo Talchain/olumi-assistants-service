@@ -30,6 +30,7 @@ export function foldedInto(model: CanonicalModelT): ReadonlyMap<string, string> 
   const Q = new Map(model.quantities.map((q) => [q.id, q] as const));
   const into = new Map<string, string>();
   for (const r of model.relations) {
+    if (r.form === 'influence') continue; // a link in words works nothing out: it keeps its own line (Box 1a)
     const q = Q.get(r.defines);
     if (q !== undefined && !into.has(q.id) && q.status === 'derived' && q.quote === null && q.party === null && q.question === null) into.set(q.id, r.id);
   }
@@ -53,9 +54,9 @@ export function readingGroups(model: CanonicalModelT, inTheirWords: (quote: stri
   for (const x of [...model.limits, ...model.preferences, ...model.options, ...model.risks, ...model.claims, ...model.evidence,
     ...model.assumptions, ...model.dissent, ...model.conditions]) groups.set(x.id, own(x));
   // An effect's links each have an author: one of Olumi's makes the row Olumi's to check. A definition or a running total is
-  // theirs when they stated it, and otherwise Olumi's working.
+  // theirs when they stated it, and otherwise Olumi's working. A link in words is a claim, read as any record is (Box 1a).
   for (const r of model.relations) {
-    groups.set(r.id, r.form === 'effect' && r.terms.some((t) => t.author === 'olumi') ? 'inferred'
+    groups.set(r.id, r.form === 'influence' ? own(r) : r.form === 'effect' && r.terms.some((t) => t.author === 'olumi') ? 'inferred'
       : (r.form === 'effect' && r.terms.some(theirs)) || theirs(r) ? 'used' : 'other');
   }
   // A figure still to be given or worked out by a relation is in no count, whoever wrote its words (Codex r1).

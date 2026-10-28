@@ -29,10 +29,10 @@
  */
 import { EventRiskV1 } from '../../schemas/event-risk.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../utils/goal-threshold-cap.js';
-import type { CanonicalModelT, CanonicalQuantityT, QualitativeFamilyT } from './canonical.js';
-import { CMP_WORDS, QUALITATIVE_FAMILIES } from './canonical.js';
+import type { CanonicalLimitT, CanonicalModelT, CanonicalQuantityT, NumericRelationT, QualitativeFamilyT } from './canonical.js';
+import { CMP_WORDS, QUALITATIVE_FAMILIES, isInfluence } from './canonical.js';
 import { compile, isApproximate, normalise, rangeDistOf, readRange, type CompileResult, type LawReading } from './compile.js';
-import { parseUnit, sameDims } from './units.js';
+import { parseUnit as parseUnitText, sameDims, type UnitParse } from './units.js';
 import { directionUsed, rateOf as rateOfLink } from './links.js';
 import { exactInitialValues } from './simulate/simulate.js';
 
@@ -64,6 +64,8 @@ const STRUCTURE_WORDS = 'Fixed by how the model is built';
 /** A figure no one can give yet: it is left out of the analysis, never waiting for an answer. */
 const OUT_OF_ANALYSIS = new Set(['unknown', 'unsupported', 'not_applicable']);
 const has = <T>(x: T | null | undefined): x is T => x !== null && x !== undefined;
+/** A unit as the engine reads it; an unmeasured factor (unit null, Box 1a) has none, so no scale is read into it. */
+const parseUnit = (unit: string | null): UnitParse => (unit === null ? { ok: false, message: 'is not measured' } : parseUnitText(unit));
 const fmt = (n: number) => (Number.isInteger(n) ? n.toLocaleString('en-GB') : String(Number(n.toPrecision(4))));
 
 /** Olumi's figure in the canvas's value vocabulary (the canvas reads it as Olumi's estimate). */
@@ -125,6 +127,17 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   };
   /** Each relation's links, in drawing order, with their ids: computed once, so a coefficient's host is its own link. */
   const relationEdgeIds = new Map<string, string[]>();
+  /** The relations the engine calculates; a link in words (Box 1a) is drawn on its own, from → to, never through them. */
+  const numeric: NumericRelationT[] = model.relations.filter((r): r is NumericRelationT => !isInfluence(r));
+  const influences = model.relations.filter(isInfluence);
+  /** A limit with one figure on a whole quantity is drawn as that quantity's goal constraint; every other limit is its own card. */
+  const asConstraint = (l: CanonicalLimitT) => {
+    const bound = l.measure ? Q.get(l.measure.bound) : undefined;
+    return l.measure !== null && bound !== undefined && has(bound.value) && !(has(bound.low) && bound.low !== bound.high) && !has(l.measure.per);
+  };
+  /** The card a record is drawn on, as the projection draws it: a limit's by its form, every other record's its own id. */
+  const cardOfRecord = (id: string) => { const l = model.limits.find((x) => x.id === id); return l === undefined ? id : asConstraint(l) ? l.measure!.quantity : `mp:limit:${l.id}`; };
+  const influenceEnds = new Set(influences.flatMap((i) => [i.from, i.to]));
   // Every link is drawn (Paul: show, never hide; S1 strip): one whose size no one has given and whose direction is not stated
   // has no sign and no strength band (`rateLink`).
 
@@ -145,7 +158,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const ownWindow = (t: string, owner: string) => windowOwners.set(t, [...(windowOwners.get(t) ?? []), owner]);
   /** A per-unit rate is drawn ONE way, on its driver's link (`links.ts`). */
   const rateOf = (r: CanonicalModelT['relations'][number]) => rateOfLink(r, Q);
-  for (const r of model.relations) {
+  for (const r of numeric) {
     const rate = rateOf(r);
     const froms = rate ? [rate.driver] : r.form === 'definition' ? r.parts.map((p) => p.id) : r.form === 'effect' ? [r.base, ...r.terms.map((t) => t.driver)] : [r.start, ...r.inflows, ...r.outflows];
     const ids = froms.map((f) => edgeId(f, r.defines));
@@ -155,6 +168,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     if (rate) { use(rate.coefficient, 'coefficient'); hostOf.set(rate.coefficient, { edge: ids[0]! }); }
     use(r.defines, 'node');
   }
+  // A link in words joins two cards: a quantity at either end keeps its own card (Box 1a).
+  for (const i of influences) { use(i.from, 'node'); use(i.to, 'node'); relationEdgeIds.set(i.id, [edgeId(cardOfRecord(i.from), cardOfRecord(i.to))]); }
   for (const g of model.goals) if (g.measure) {
     use(g.measure.quantity, 'node');
     if (has(g.measure.per)) use(g.measure.per, 'node');
@@ -172,7 +187,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   // card (C13, 27 Oct). Keyed per card, so one timing shared by two cards stays its own card.
   const ownTiming = (t: number | string, card: string) => { if (typeof t === 'string') { use(t, `starts:${card}`); hostOf.set(t, { node: card }); } };
   for (const o of model.options) for (const s of o.sets) { use(s.quantity, 'node'); if (has(s.to)) { use(s.to, 'on_option'); hostOf.set(s.to, { node: o.id }); } ownTiming(s.starts_after_periods, o.id); }
-  for (const k of model.risks) { use(k.effect_on, 'node'); for (const t of [k.occurrence, k.severity]) { use(t, 'on_risk'); hostOf.set(t, { node: k.id }); } ownTiming(k.starts_after_periods, k.id); }
+  for (const k of model.risks) { use(k.effect_on, 'node'); for (const t of [k.occurrence, k.severity]) if (has(t)) { use(t, 'on_risk'); hostOf.set(t, { node: k.id }); } ownTiming(k.starts_after_periods, k.id); }
   const folded = (id: string) => { const u = uses.get(id); return u !== undefined && u.size === 1 && !u.has('node') && hostOf.has(id); };
   /** A coefficient sizes a mechanism: drawn as one wherever it has a card, given or worked out, never as an outcome. */
   const isCoefficient = (id: string) => uses.get(id)?.has('coefficient') === true;
@@ -197,6 +212,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const lawOf = (q: CanonicalQuantityT) => (has(q.low) && has(q.high) && q.low < q.high && (q.status === 'known' || q.status === 'estimated')
     ? { law: { author: 'olumi' as const, provisional: true as const, range_kind: q.range_kind, reading: lawFor(q) } } : {});
   const display = (q: CanonicalQuantityT): string => {
+    if (q.unit === null) return 'not measured'; // an unmeasured factor has no scale to say a figure on (Box 1a)
     const unit = q.unit === '1' ? '' : ` ${q.unit}`;
     const owner = q.author === 'olumi' ? (q.status === 'estimated' ? ', Olumi\'s estimate' : ', Olumi\'s reading') : isApproximate(q) ? `, for now — you said “${q.quote}”` : '';
     if (q.status === 'asked') return WAITING_WORDS;
@@ -225,7 +241,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const unit = parseUnit(target.unit);
     const relative = frame === 'change_rel';
     const raw = relative && unit.ok ? stated * unit.unit.scale : stated;
-    const cap = relative ? null : resolveGoalThresholdCapWithProvenance(undefined, raw, target.unit, undefined);
+    const cap = relative ? null : resolveGoalThresholdCapWithProvenance(undefined, raw, target.unit ?? undefined, undefined);
     const src = figureSource(target)['source'];
     return { goal_threshold_raw: raw,
       ...(cap !== null ? { goal_threshold: raw / cap.cap, goal_threshold_cap: cap.cap, goal_threshold_cap_provenance: cap.provenance } : {}),
@@ -235,7 +251,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
 
   /** What a derived figure is worked out from, by name: its relation's parts, base and drivers, or a stock's start and flows,
    *  each once (a driver with two terms is still one input: the goal said "Tech leads hired, Tech leads hired", 27 Oct). */
-  const partsOf = new Map(model.relations.map((r) => [r.defines, [...new Set(r.form === 'definition' ? r.parts.map((p) => p.id) : r.form === 'effect' ? [r.base, ...r.terms.map((t) => t.driver)] : [r.start, ...r.inflows, ...r.outflows])]] as const));
+  const partsOf = new Map(numeric.map((r) => [r.defines, [...new Set(r.form === 'definition' ? r.parts.map((p) => p.id) : r.form === 'effect' ? [r.base, ...r.terms.map((t) => t.driver)] : [r.start, ...r.inflows, ...r.outflows])]] as const));
   const workedOutWords = (id: string) => {
     const names = (partsOf.get(id) ?? []).map((p) => Q.get(p)?.label ?? p);
     return names.length === 0 ? 'Worked out from its inputs' : `Worked out from ${names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`}`;
@@ -362,7 +378,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     }
     nodes.push({
       id: o.id, kind: 'option', label: o.label, ...provenanceOf(o), ...quoteOf(o, o.id), ...participation(inCalc || (o.status === 'live' && kept(per))),
-      ...(o.sets.length === 0 ? { is_baseline: true } : {}), ...(Object.keys(interventions).length ? { interventions } : {}),
+      // The baseline is the option the model declares carries on as now (Box 1a), never read from empty settings or a name.
+      ...(o.carry_on === true ? { is_baseline: true } : {}), ...(Object.keys(interventions).length ? { interventions } : {}),
       ...(o.author === 'olumi' ? { proposed_by: 'olumi' } : {}),
     });
     items.push({ record_id: o.id, family: 'option', shown_as: { node: o.id }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: o.approval });
@@ -379,6 +396,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const observedOf = (q: CanonicalQuantityT): Rec => {
     // Every card's figure is in its quantity's own unit (DL 23 Oct: the in-card editor reads it here, never the 0–1 model
     // scale), a question's or an unknown's too. A derived figure keeps its worked-out basis, never anyone's source stamp.
+    // An unmeasured factor has no unit and no figure to observe (Box 1a).
+    if (q.unit === null) return {};
     if (q.status !== 'known' && q.status !== 'estimated') return q.status === 'derived' ? derivedObservation(q) : { observed_state: { unit: q.unit } };
     const ranged = has(q.low) && has(q.high) && q.low !== q.high;
     const r = ranged ? lawFor(q) : undefined;
@@ -405,7 +424,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     }
     nodes.push({
       id: q.id, kind: q.status === 'derived' && !isCoefficient(q.id) ? 'outcome' : 'factor', label: q.label, ...provenanceOf(q), ...quoteOf(q, q.id),
-      ...participation(inCalc || (!notCompiling && inModel.has(q.id) && !OUT_OF_ANALYSIS.has(q.status))),
+      ...participation(inCalc || (!notCompiling && inModel.has(q.id) && !OUT_OF_ANALYSIS.has(q.status) && q.unit !== null)),
       ...(q.status !== 'derived' ? { category: controlled.has(q.id) ? 'controllable' : 'observable' } : {}),
       ...observedOf(q),
       // A figure still to be given or not known yet reads "?" on its card; its question and reason stay beside it (Q1, 28 Oct).
@@ -432,7 +451,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const definedUnit = Q.get(defines)?.unit ?? '';
     // The link's figure is what the compiler uses, per ONE of the driver's unit, in the defined quantity's unit: the
     // coefficient's own unit scale applied (a 40 % rate moves 0.4 loaf/week per loaf/week; Codex r4 #3709), as lawFor does.
-    const scaleOf = (unit: string) => { const u = parseUnit(unit); return u.ok ? u.unit.scale : 1; };
+    const scaleOf = (unit: string | null) => { const u = parseUnit(unit); return u.ok ? u.unit.scale : 1; };
     const k = c ? scaleOf(c.unit) * scaleOf(driverUnit) / scaleOf(definedUnit) : 1;
     // Its real size, in natural units. No β is keyed to it: the model holds none, and the link carries no strength (W3b).
     const natural = c && has(c.value)
@@ -446,6 +465,14 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
 
   // ── relations and effect terms: links ──────────────────────────────────────────────────────────────────────────────
   for (const r of model.relations) {
+    if (isInfluence(r)) {
+      // A link in words (Box 1a): from → to, its sign only where it states up or down, its basis as its reasoning; no size.
+      const id = relationEdgeIds.get(r.id)![0]!;
+      const sign = r.direction === 'up' ? 1 : r.direction === 'down' ? -1 : null;
+      edges.push({ ...link(cardOfRecord(r.from), cardOfRecord(r.to), sign, whoOf(r, r.id), false, has(r.basis) ? { reasoning: r.basis } : {}), ...(sign === null ? { direction_settled: false } : {}), id });
+      items.push({ record_id: r.id, family: 'relation', shown_as: { edge: id }, in_calculation: false, why_out: why(false, 'A link in words: drawn, never calculated.'), author: whoOf(r, r.id), approval: r.approval });
+      continue;
+    }
     const inCalc = xq.has(r.defines);
     const who = whoOf(r, r.id);
     const reason = 'What it works out is not used by anything that can be worked out yet.';
@@ -483,8 +510,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const lm = l.measure;
     const bound = lm ? Q.get(lm.bound) : undefined;
     const per = compiled.perLimit.find((p) => p.limit_id === l.id);
-    const point = bound && has(bound.value) && !(has(bound.low) && bound.low !== bound.high) ? bound.value : null;
-    if (lm && bound && point !== null && !has(lm.per)) {
+    if (lm && bound && has(bound.value) && asConstraint(l)) {
+      const point = bound.value;
       // The canvas draws a goal constraint itself, as the goal card's limit: a card as well said it twice on reopen (27 Oct).
       goal_constraints.push({
         constraint_id: l.id, node_id: lm.quantity, operator: lm.cmp.startsWith('>') ? '>=' : '<=', ...(lm.cmp === '<' || lm.cmp === '>' ? { operator_as_stated: lm.cmp } : {}),
@@ -546,19 +573,28 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   };
   /** A risk's start given by a figure, with that figure: it is folded onto this card, so the card says it (PL #3859 AMEND). */
   const riskStartWords = (id: string): string => { const t = Q.get(id); return t ? `from "${t.label}" (${display(t)})` : `from "${id}"`; };
+  const onCard = new Set([...model.quantities, ...model.goals, ...model.limits, ...model.options].map((r) => r.id));
   for (const k of model.risks) {
     const inCalc = xr.has(k.id);
     const who = whoOf(k, k.id);
-    const occ = Q.get(k.occurrence);
-    const sev = Q.get(k.severity);
+    const occ = has(k.occurrence) ? Q.get(k.occurrence) : undefined;
+    const sev = has(k.severity) ? Q.get(k.severity) : undefined;
+    const effect = k.mode === 'add' ? 'adds' : k.mode === 'multiply' ? 'multiplies by' : 'its effect is';
     nodes.push({
       id: k.id, kind: 'risk', label: k.label, ...provenanceOf(k), ...quoteOf(k, k.id), ...participation(inCalc || (!notCompiling && inModel.has(k.effect_on))),
       ...eventRiskOf(occ),
-      description: `Chance: ${occ ? display(occ) : 'not given'}. If it happens: ${k.mode === 'add' ? 'adds' : 'multiplies by'} ${sev ? display(sev) : 'not given'}, ${typeof k.starts_after_periods === 'number' ? (k.starts_after_periods === 0 ? 'from the start' : `after ${k.starts_after_periods} ${model.period}s`) : riskStartWords(k.starts_after_periods)}.`,
+      description: `Chance: ${occ ? display(occ) : 'not given'}. If it happens: ${effect} ${sev ? display(sev) : 'not given'}, ${typeof k.starts_after_periods === 'number' ? (k.starts_after_periods === 0 ? 'from the start' : `after ${k.starts_after_periods} ${model.period}s`) : riskStartWords(k.starts_after_periods)}.`,
     });
     items.push({ record_id: k.id, family: 'risk', shown_as: { node: k.id }, in_calculation: inCalc, why_out: why(inCalc, 'What it affects is not used by anything that can be worked out yet.'), author: who, approval: k.approval });
     // How it acts if it happens (adds, or multiplies), so the link can say "−" or "×" (C13, 27 Oct).
-    if (Q.has(k.effect_on)) edges.push({ ...link(k.id, k.effect_on, riskSign(k, sev), who, inCalc, { reasoning: 'if it happens' }), effect_mode: k.mode, id: edgeId(k.id, k.effect_on) });
+    if (has(k.occurrence) && has(k.severity) && has(k.mode) && Q.has(k.effect_on)) {
+      edges.push({ ...link(k.id, k.effect_on, riskSign(k, sev), who, inCalc, { reasoning: 'if it happens' }), effect_mode: k.mode, id: edgeId(k.id, k.effect_on) });
+    } else if (onCard.has(k.effect_on)) {
+      // A risk no one can size, or one on an aim, a limit or an option (Box 1a): the same link to that card, signed by its own
+      // direction where it states one, else unsettled.
+      const sign = k.direction === 'up' ? 1 : k.direction === 'down' ? -1 : null, to = cardOfRecord(k.effect_on);
+      edges.push({ ...link(k.id, to, sign, who, inCalc, { reasoning: 'if it happens' }), ...(has(k.mode) ? { effect_mode: k.mode } : {}), ...(sign === null ? { direction_settled: false } : {}), id: edgeId(k.id, to) });
+    }
   }
 
   // ── qualitative records: not cards; the canvas draws them by id from the model ────────────────────────────────────────
@@ -574,10 +610,11 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const measured = new Set([...model.goals, ...model.limits].flatMap((g) => (g.measure ? [g.measure.quantity, g.measure.per] : [])).filter(has));
   for (const g of model.goals) if (g.measure?.reference?.kind === 'value' && has(g.measure.reference.quantity)) measured.add(g.measure.reference.quantity);
   const cardOf = new Map(nodes.map((n) => [n.id as string, n] as const));
+  // A link in words is drawn from → to as the model states it, so neither end is ever folded into another link (Box 1a).
   const foldable = (q: CanonicalQuantityT) => cardOf.has(q.id) && q.author !== 'person' && !has(q.quote) && !has(q.party) && !has(q.question)
-    && !measured.has(q.id) && q.kind !== 'coefficient' && !isCoefficient(q.id);
+    && !measured.has(q.id) && q.kind !== 'coefficient' && !isCoefficient(q.id) && !influenceEnds.has(q.id);
   /** Everything a quantity's relation reads, its link sizes included (a total shared through a worked-out size, Codex r2 #3875 9). */
-  const readsOf = new Map(model.relations.map((r) => [r.defines, r.form === 'definition' ? r.parts.map((p) => p.id) : r.form === 'effect'
+  const readsOf = new Map(numeric.map((r) => [r.defines, r.form === 'definition' ? r.parts.map((p) => p.id) : r.form === 'effect'
     ? [r.base, ...r.terms.flatMap((t) => [t.driver, t.coefficient])] : [r.start, ...r.inflows, ...r.outflows]] as const));
   /** Every quantity an aim's measure is worked out from, nearest first. */
   const upstream = (id: string): string[] => { const seen: string[] = []; const walk = (x: string) => { for (const p of readsOf.get(x) ?? []) if (!seen.includes(p)) { seen.push(p); walk(p); } }; walk(id); return seen; };
@@ -602,7 +639,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const isConstant = (q: CanonicalQuantityT | undefined) => q !== undefined && q.author === 'structure' && q.status === 'known' && q.kind === 'fact' && !controlled.has(q.id) && foldable(q)
     // a constant a risk acts on is part of that risk's path to the aim: it stays drawn (Codex r2 #3875 7)
     && !model.risks.some((k) => k.effect_on === q.id);
-  const definedBy = new Map(model.relations.map((r) => [r.defines, r] as const));
+  const definedBy = new Map(numeric.map((r) => [r.defines, r] as const));
   /** A total: a sum or product, or an amount added on a structural zero; a mechanism with a real base level stays its card. */
   const isTotal = (q: CanonicalQuantityT) => {
     const r = definedBy.get(q.id);
@@ -613,9 +650,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const totals = new Map(model.quantities.filter((q) => isTotal(q) && !model.risks.some((k) => k.effect_on === q.id))
     .flatMap((q) => { const aim = [...goalUpstream].filter(([, up]) => up.includes(q.id)).map(([g]) => g).sort()[0]; return aim === undefined ? [] : [[q.id, aim] as const]; }));
   /** A constant used only inside totals goes with them: said in the aim's workings, with no link of its own. */
-  const constants = new Map(model.quantities.filter((q) => isConstant(q) && model.relations.some((r) => partsOf.get(r.defines)?.includes(q.id))
-    && model.relations.every((r) => !partsOf.get(r.defines)?.includes(q.id) || totals.has(r.defines)))
-    .map((q) => [q.id, totals.get(model.relations.find((r) => partsOf.get(r.defines)?.includes(q.id))!.defines)!] as const));
+  const constants = new Map(model.quantities.filter((q) => isConstant(q) && numeric.some((r) => partsOf.get(r.defines)?.includes(q.id))
+    && numeric.every((r) => !partsOf.get(r.defines)?.includes(q.id) || totals.has(r.defines)))
+    .map((q) => [q.id, totals.get(numeric.find((r) => partsOf.get(r.defines)?.includes(q.id))!.defines)!] as const));
   const reasoningOf = (e: Rec) => String((e.provenance as Rec | undefined)?.['reasoning'] ?? '');
   const definitionalLink = (e: Rec) => (e.provenance as Rec | undefined)?.['definitional'] === true;
   /** A link that carries what feeds it one for one, in the same unit: a part added, or an effect's base level. A stock's
@@ -675,7 +712,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     for (const it of items) {
       if (it.shown_as.edge !== undefined) it.shown_as = { ...it.shown_as, edge: it.shown_as.edge.split(' ').flatMap(resolve).join(' ') };
       // A link drawn only from a constant now drawn nowhere: the record is said where its total is.
-      const host = it.shown_as.edge === '' ? offBoard.get(model.relations.find((r) => r.id === it.record_id || it.record_id.startsWith(`${r.id}:`))?.defines ?? '') : undefined;
+      const host = it.shown_as.edge === '' ? offBoard.get(numeric.find((r) => r.id === it.record_id || it.record_id.startsWith(`${r.id}:`))?.defines ?? '') : undefined;
       if (host !== undefined) it.shown_as = { on_node: host };
       if (it.shown_as.on_edge !== undefined) it.shown_as = { ...it.shown_as, on_edge: resolve(it.shown_as.on_edge)[0]! };
       if (it.family === 'quantity' && offBoard.has(it.record_id) && it.shown_as.node === it.record_id) it.shown_as = { on_node: offBoard.get(it.record_id)! };
