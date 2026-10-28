@@ -2032,6 +2032,25 @@ describe('the model-program turn on the real core route', () => {
     expect(programReadOf({ ...persisted!, living_model: { ...lm, canonical: both } }).kind).toBe('unreadable');
   });
 
+  it('Paul 28 Oct (a "streamline" card removed his own figures): a change never removes a figure the person gave in their words; Olumi\'s own figure can go', async () => {
+    const first = bakery();
+    first.quantities.push(q('unsold_loaves', 'loaf/week', { status: 'estimated', author: 'olumi', value: 10, low: 5, high: 15, range_kind: 'plausible', basis: 'Some loaves go unsold each week.' }));
+    replies = [JSON.stringify(first)];
+    await turn({ message: BRIEF });
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const words = 'Make the model much simpler, with fewer items.';
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words });
+    const args = (remove: string[]) => ({ public_label: 'A simpler model', basis: 'they asked for a simpler model', request: 'Simplify the model.', remove });
+    // Their budget (in their words "We have £3,000 to spend") and the limit on it, listed for removal: refused, nothing proposed.
+    replies = [savedWith((d) => { d.quantities = d.quantities.filter((x) => x.id !== 'budget'); d.limits = []; })];
+    expect(await proposeProgramChange(deps, ctx(), args(['budget', 'within_budget']))).toMatchObject({ status: 'refused', reason: 'person_figure_removal', data: { ids: ['budget'] } });
+    expect(registered).toHaveLength(1);
+    // Contrast: Olumi's own estimate, listed for removal, goes on the card as a removal.
+    replies = [savedWith((d) => { d.quantities = d.quantities.filter((x) => x.id !== 'unsold_loaves'); })];
+    const p = await proposeProgramChange(deps, ctx(), args(['unsold_loaves'])) as Json;
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+  });
+
   it('simplify v1 (A1, A2): the ONE validator: an omitted record is refused; a removal only when listed, on the card and in history, its id never used again; every add, change and remove on the card and its wire', async () => {
     replies = [JSON.stringify(bakery())];
     await turn({ message: BRIEF });
