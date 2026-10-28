@@ -100,7 +100,7 @@ const RANGE_KIND = z.enum(RANGE_KINDS).nullable().describe(
 
 export const CanonicalQuantity = z.object({
   id,
-  label: z.string().describe('A short plain name the person would recognise ("Loaves sold per week"). In a first draft, aim for about 8 quantities the person would recognise; never add arithmetic scaffolding.'),
+  label: z.string().describe('A short plain name the person would recognise ("Loaves sold per week"). In a first draft, aim for about 8 quantities the person would recognise; never add arithmetic scaffolding the stated meaning does not need.'),
   unit: z.string().describe(UNIT_RULES),
   value: z.number().nullable().describe('One figure, in the unit; for an Olumi estimate, its most likely figure strictly inside its range (or null). Null when there is no figure.'),
   low: z.number().nullable().describe('The low end of a stated or estimated range, in the unit. Null when not a range.'),
@@ -290,7 +290,7 @@ export function withDeclaredTiming(raw: unknown): unknown {
 }
 
 export const CanonicalOptionSet = z.object({
-  quantity: id.describe('An input quantity (one with a figure, not a derived one) the option changes. Prefer a recognisable figure, never an off/on switch in a first draft.'),
+  quantity: id.describe('An input quantity (one with a figure, not a derived one) the option changes. Prefer a recognisable figure; an off/on switch only when the stated meaning needs one.'),
   to: id.nullable().describe('A named quantity holding the setting\'s value; required for an approximate point, whose basis an inline setting cannot hold. Null for the option\'s own exact inline value, range or unanswered setting.'),
   value: z.number().nullable().describe('With to null: this option\'s own value for the quantity, in its unit ("raise the price to 3.50": 3.5; switched on: 1). Null otherwise.'),
   low: z.number().nullable().describe('With to null: the low end of this option\'s own value, when a range. Null otherwise.'),
@@ -395,7 +395,7 @@ export const CanonicalModel = z.object({
   limits: z.array(CanonicalLimit),
   preferences: z.array(CanonicalPreference),
   options: z.array(CanonicalOption),
-  risks: z.array(CanonicalRisk).describe('Every distinct stated or clearly implied future downside, with stated versus Olumi-inferred authorship kept separate. Preserve risks when simplifying; unsized never means absent.'),
+  risks: z.array(CanonicalRisk).describe('Every distinct stated or clearly implied future downside, with stated versus Olumi-inferred authorship kept separate. When simplifying, keep supported risks, re-expressed more simply; follow an explicit correction or retraction, with its history. Unsized never means absent.'),
   claims: z.array(CanonicalClaim),
   evidence: z.array(CanonicalEvidence),
   assumptions: z.array(CanonicalAssumption),
