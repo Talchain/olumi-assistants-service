@@ -101,12 +101,14 @@ export function club(): CanonicalModelT {
 /**
  * What a faithful update returns (DL 24 Oct: only what it changes) for a model a row wrote whole: by id, the records that
  * differ from the saved one or are new (an id given twice, each time), the ids it no longer has in remove, and the question
- * and time step only when they change.
+ * and time step only when they change. Olumi's questions (Box 2, 28 Oct): null when the list is the saved one, else the whole
+ * new list ([] clears it).
  */
 export function updateOf(saved: CanonicalModelT, whole: CanonicalModelT): Record<string, unknown> {
-  const { version, question, period, history: _history, title: _title, coaching_questions: _coaching, ...families } = whole;
+  const { version, question, period, history: _history, title: _title, coaching_questions: coaching, ...families } = whole;
   const remove: string[] = [];
-  const out: Record<string, unknown> = { version, question: question === saved.question ? null : question, period: period === saved.period ? null : period };
+  const out: Record<string, unknown> = { version, question: question === saved.question ? null : question, period: period === saved.period ? null : period,
+    coaching_questions: JSON.stringify(coaching) === JSON.stringify(saved.coaching_questions) ? null : coaching };
   for (const [f, rs] of Object.entries(families) as [keyof typeof families, { id: string }[]][]) {
     const was = new Map((saved[f] as { id: string }[]).map((r) => [r.id, JSON.stringify(r)] as const));
     out[f] = rs.filter((r) => was.get(r.id) !== JSON.stringify(r) || rs.filter((x) => x.id === r.id).length > 1);

@@ -6,17 +6,19 @@
  * expectation is written by hand from the fixtures.
  */
 import { createHash } from 'node:crypto';
+import { Ajv } from 'ajv';
 import { describe, expect, it } from 'vitest';
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
 import type { CanonicalModelT } from '../../model-program/canonical.js';
 import { compile } from '../../model-program/compile.js';
 import { project } from '../../model-program/project.js';
 import { mergeUpdate } from '../draft.js';
+import { CanonicalUpdate, UPDATE_JSON_SCHEMA } from '../prompt.js';
 import { evaluateCanonical } from '../evaluate.js';
 import { readingOf, validatePostimage, verbatimIn } from '../postimage.js';
 import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram } from '../program-store.js';
 import { readingGroups, readingLine } from '../reading-groups.js';
-import { ENGINE_VERSIONS, type StoredRun } from '../run-receipt.js';
+import { ENGINE_VERSIONS, revisionDigest, type StoredRun } from '../run-receipt.js';
 import { at, bakery, BRIEF, q } from './bakery.fixture.js';
 import { studio, STUDIO_BRIEF } from './class-studio.fixture.js';
 
@@ -89,7 +91,7 @@ describe('Box 1a: the card, the counts, the update and the store', () => {
     const saved = studio();
     const changed = { ...saved.relations[2]!, confidence: 'unsure' } as CanonicalModelT['relations'][number];
     const added = { ...saved.relations[3]!, id: 'workshop_mood', from: 'weekend_workshops', to: 'member_mood', direction: 'up', basis: null } as CanonicalModelT['relations'][number];
-    const update = { version: 'canonical.v1' as const, question: null, period: null, quantities: [], relations: [changed, added], goals: [], limits: [], preferences: [], options: [], risks: [],
+    const update = { version: 'canonical.v1' as const, question: null, period: null, coaching_questions: null, quantities: [], relations: [changed, added], goals: [], limits: [], preferences: [], options: [], risks: [],
       claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: ['mood_members'] };
     const merged = mergeUpdate(saved, update);
     expect(merged.relations.map((r) => r.id)).toEqual(['classes_rel', 'takings_rel', 'evening_mood', 'workshop_mood']);
@@ -185,5 +187,78 @@ describe('Box 1a: a model saved before links, carry-on and risk direction', () =
     expect((p.graph.nodes as Rec[]).filter((n) => n.kind === 'option').map((n) => [n.id, 'is_baseline' in n])).toEqual([['second_oven', false], ['keep_one', false]]);
     expect((p.graph.edges as Rec[]).find((e) => e.id === 'breakdown__sales')).toMatchObject({ from: 'breakdown', to: 'sales', effect_direction: 'negative', effect_mode: 'add' });
     expect((p.graph.edges as Rec[]).find((e) => e.id === 'breakdown__sales')).not.toHaveProperty('direction_settled');
+  });
+});
+
+describe('Box 2 (Paul Q1/Q2, 28 Oct): an update returns Olumi\'s questions only when it makes the saved ones out of date', () => {
+  const SAVED_QS = ['What would make the second oven worth its cost?', 'Who else would need to agree before you buy it?'];
+  const NEW_QS = ['How sure are you that customers want more loaves?'];
+  const coached = (): CanonicalModelT => ({ ...bakery(), coaching_questions: [...SAVED_QS] });
+  /** An update that returns nothing: every family [], the question and time step null, Olumi's questions as given. */
+  const none = (m: CanonicalModelT, coaching_questions: string[] | null) => ({ version: m.version, question: null, period: null, coaching_questions, quantities: [], relations: [],
+    goals: [], limits: [], preferences: [], options: [], risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: [] as string[] });
+  const opts = { removals: [], words: [BRIEF], fresh: [] };
+
+  it('the update\'s schema, parsed and as the drafter is sent it (strict output), accepts null and a list; the key is required and holds only words', () => {
+    const ajv = new Ajv({ strict: false });
+    for (const list of [null, NEW_QS, []]) {
+      const update = none(bakery(), list);
+      expect(CanonicalUpdate.safeParse(update).success, JSON.stringify(list)).toBe(true);
+      expect([ajv.validate(UPDATE_JSON_SCHEMA, update), ajv.errors ?? []], JSON.stringify(list)).toEqual([true, []]);
+    }
+    const schema = UPDATE_JSON_SCHEMA as Rec;
+    expect(schema.required).toContain('coaching_questions');
+    expect(schema.properties.coaching_questions.description).toBe('Null unless this change makes the saved questions out of date (one is answered, settled or no longer applies, or the model now raises a more important one): then the whole new list, by the first draft\'s rules (up to three).');
+    expect(schema.properties.coaching_questions.anyOf.map((x: Rec) => x.type)).toEqual(['array', 'null']);
+    // Contrast: an update that leaves the key out, or puts a figure in the list, is refused by both.
+    const { coaching_questions: _left, ...without } = none(bakery(), null);
+    expect([CanonicalUpdate.safeParse(without).success, ajv.validate(UPDATE_JSON_SCHEMA, without)]).toEqual([false, false]);
+    expect([CanonicalUpdate.safeParse({ ...without, coaching_questions: [3] }).success, ajv.validate(UPDATE_JSON_SCHEMA, { ...without, coaching_questions: [3] })]).toEqual([false, false]);
+  });
+
+  it('mergeUpdate: null keeps the saved questions, [] clears them, a list replaces them; nothing else moves', () => {
+    const saved = coached();
+    const merged = (list: string[] | null) => mergeUpdate(saved, none(saved, list));
+    expect([merged(null).coaching_questions, merged([]).coaching_questions, merged(NEW_QS).coaching_questions]).toEqual([SAVED_QS, [], NEW_QS]);
+    for (const list of [null, [], NEW_QS]) expect({ ...merged(list), coaching_questions: [] }, JSON.stringify(list)).toEqual({ ...saved, coaching_questions: [] });
+  });
+
+  it('the card says a changed list as ONE entry, "Olumi’s questions for you", both lists in full ("No questions" for none, never null); the approved model holds the new list', () => {
+    const saved = coached();
+    const card = (list: string[], from: CanonicalModelT = saved) => validatePostimage(from, { ...from, coaching_questions: list }, opts);
+    const replaced = card(NEW_QS);
+    expect(replaced.ok ? replaced.changes : replaced.code).toEqual([{ id: 'coaching_questions', kind: 'record', action: 'change', label: 'Olumi’s questions for you',
+      before: `1. ${SAVED_QS[0]}\n2. ${SAVED_QS[1]}`, after: `1. ${NEW_QS[0]}`, author: 'olumi' }]);
+    expect(replaced.ok ? replaced.model.coaching_questions : null).toEqual(NEW_QS);
+    // [] clears them: the saved list before, "No questions" after; and from none, "No questions" before.
+    const cleared = card([]);
+    expect(cleared.ok ? cleared.changes.map((c) => [c.id, c.action, c.before, c.after]) : cleared.code).toEqual([['coaching_questions', 'change', `1. ${SAVED_QS[0]}\n2. ${SAVED_QS[1]}`, 'No questions']]);
+    expect(cleared.ok ? cleared.model.coaching_questions : null).toEqual([]);
+    const fromNone = card(NEW_QS, bakery());
+    expect(fromNone.ok ? fromNone.changes.map((c) => [c.id, c.action, c.before, c.after]) : fromNone.code).toEqual([['coaching_questions', 'change', 'No questions', `1. ${NEW_QS[0]}`]]);
+    // Beside a change to a figure: both are said, so the list never rides unseen (no unshown change).
+    const base = saved.quantities.find((x) => x.id === 'base_sales')!;
+    const both = validatePostimage(saved, { ...saved, coaching_questions: NEW_QS, quantities: saved.quantities.map((x) => (x.id === 'base_sales' ? { ...base, value: 320 } : x)) }, opts);
+    expect(both.ok ? both.changes.map((c) => c.id) : both.code).toEqual(['base_sales', 'coaching_questions']);
+    // The order is the first screen's, so a reordered list is a change; the same list is none.
+    expect((card([SAVED_QS[1]!, SAVED_QS[0]!]) as Rec).changes?.map((c: Rec) => c.after)).toEqual([`1. ${SAVED_QS[1]}\n2. ${SAVED_QS[0]}`]);
+    expect(card([...SAVED_QS])).toMatchObject({ ok: false, code: 'no_change' });
+  });
+
+  it('a model saved before coaching questions reads as none; an update that returns null keeps none, says nothing of them, and the digest counts no list', () => {
+    const { coaching_questions: _c, title: _t, ...old } = JSON.parse(JSON.stringify(bakery())) as Rec;
+    const read = programReadOf({ living_model: { model_program: MODEL_PROGRAM, canonical: old, seed: 7, person_words: [BRIEF], runs: [] } });
+    expect(read.kind).toBe('program');
+    const saved = (read.kind === 'program' ? read.program.canonical : null)!;
+    expect(saved.coaching_questions).toEqual([]);
+    const base = saved.quantities.find((x) => x.id === 'base_sales')!;
+    // The update as the drafter now returns it (the key present, null), parsed by its own schema.
+    const update = CanonicalUpdate.parse({ ...none(saved, null), quantities: [{ ...base, value: 320 }] });
+    const merged = mergeUpdate(saved, update);
+    expect(merged.coaching_questions).toEqual([]);
+    const v = validatePostimage(saved, merged, opts);
+    expect(v.ok ? v.changes.map((c) => c.id) : v.code).toEqual(['base_sales']);
+    const { coaching_questions: _none, ...unlisted } = merged;
+    expect(revisionDigest(merged, [BRIEF])).toBe(revisionDigest(unlisted as CanonicalModelT, [BRIEF]));
   });
 });

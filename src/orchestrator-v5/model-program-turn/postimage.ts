@@ -274,6 +274,13 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
   for (const [key, label] of [['question', 'The question'], ['period', 'The time step']] as const) {
     if (base[key] !== post[key]) changes.push({ id: key, kind: 'record', action: 'change', label, before: base[key], after: post[key], author: 'olumi' });
   }
+  // Box 2 (Paul Q1/Q2, 28 Oct): Olumi's questions, refreshed or cleared by an update, are ONE entry with both lists in full, in
+  // their order; none reads "No questions", never null (null reads as an add or a removal).
+  const asked = (qs: readonly string[]) => (qs.length === 0 ? 'No questions' : qs.map((x, i) => `${i + 1}. ${x}`).join('\n'));
+  if (JSON.stringify(base.coaching_questions) !== JSON.stringify(post.coaching_questions)) {
+    changes.push({ id: 'coaching_questions', kind: 'record', action: 'change', label: 'Olumi’s questions for you',
+      before: asked(base.coaching_questions), after: asked(post.coaching_questions), author: 'olumi' });
+  }
   if (changes.length === 0) return refuse('no_change', [], 'The proposed model is the saved one: nothing changes.');
   // W8 (c7.1, c7.7: "Total weekly support capacity" on two lines; "Add one specialist: Additional specialists" under "Add one
   // specialist"): a figure added with the row that says it is ONE line. A worked-out figure's unit and reading join its

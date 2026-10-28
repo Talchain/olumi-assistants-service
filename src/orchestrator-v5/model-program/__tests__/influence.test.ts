@@ -30,7 +30,7 @@ describe('Box 1a: links in words, risks no one can size and unmeasured factors',
     expect([ajv.validate(CANONICAL_JSON_SCHEMA, draft), ajv.errors ?? []]).toEqual([true, []]);
     // An update returning only the records it adds: the influences, the risk, the carry-on and the unmeasured factor.
     const m = studio();
-    const update = unhosted({ version: m.version, question: null, period: null, quantities: m.quantities.filter((x) => x.id === 'member_mood'),
+    const update = unhosted({ version: m.version, question: null, period: null, coaching_questions: null, quantities: m.quantities.filter((x) => x.id === 'member_mood'),
       relations: m.relations.filter((r) => r.form === 'influence'), goals: [], limits: [], preferences: [], options: m.options.filter((o) => o.id === 'carry_on'),
       risks: m.risks, claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: [] });
     expect([ajv.validate(UPDATE_JSON_SCHEMA, update), ajv.errors ?? []]).toEqual([true, []]);

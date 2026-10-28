@@ -514,7 +514,7 @@ describe('the model-program turn on the real core route', () => {
       expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
       const read = programReadOf(persisted!);
       const saved = (read.kind === 'program' ? read.program.canonical : null)!;
-      const none = { version: saved.version, question: null, period: null, quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [], claims: [],
+      const none = { version: saved.version, question: null, period: null, coaching_questions: null, quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [], claims: [],
         evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: [] };
       const broken = { ...none, claims: [{ id: 'nowhere', text: 'Bread sells.', concerns: ['no_such_record'], author: 'olumi', quote: null, party: null, approval: 'proposed', approved_by: null, author_id: null }] };
       const landlord = { id: 'landlord_agrees', text: 'Only once the landlord agrees.', kind: 'prerequisite', concerns: ['second_oven'], author: 'person', party: null,
@@ -1121,7 +1121,7 @@ describe('the model-program turn on the real core route', () => {
 
     it('(b) an update WITHOUT the host fields is merged and read as before: the record it returns takes the host\'s values, every other record is the saved one', async () => {
       const saved = approvedBakery();
-      const none = { version: saved.version, question: null, period: null, quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [], claims: [],
+      const none = { version: saved.version, question: null, period: null, coaching_questions: null, quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [], claims: [],
         evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: [] };
       const link = saved.relations.find((x) => x.form === 'effect')!;
       const update = unhosted({ ...none, relations: [link] });
@@ -1443,10 +1443,12 @@ describe('the model-program turn on the real core route', () => {
     };
     const shape = CanonicalModel.shape as Record<string, z.ZodType>;
     const ROOT_EXEMPT: Record<string, string> = { version: 'one fixed value: the format allows no other', history: 'host-owned: appended by the host, never compared',
-      // Titles and coaching questions (Paul, approved 27 Oct): the first draft's framing; an update never returns them.
-      title: 'the first draft\'s: an update never returns it (CanonicalUpdate omits it), so no change carries it',
-      coaching_questions: 'the first draft\'s: an update never returns them (CanonicalUpdate omits them), so no change carries them' };
-    const families = Object.keys(shape).filter((k) => defOf(shape[k]!).type === 'array' && ROOT_EXEMPT[k] === undefined);
+      // Titles (Paul, approved 27 Oct): the first draft's framing; an update never returns it.
+      title: 'the first draft\'s: an update never returns it (CanonicalUpdate omits it), so no change carries it' };
+    // The model's own fields the card says as their own entry (Codex #3742). Box 2 (Paul Q1/Q2, 28 Oct): Olumi's coaching
+    // questions moved here from the exemptions: an update now returns the whole new list when it makes them out of date.
+    const ROOT_SAID = ['question', 'period', 'coaching_questions'];
+    const families = Object.keys(shape).filter((k) => defOf(shape[k]!).type === 'array' && ROOT_EXEMPT[k] === undefined && !ROOT_SAID.includes(k));
     expect(families.sort()).toEqual(Object.keys(GROUPS).sort());
     const unsaid = (family: string, schema: z.ZodType) => fields(schema).filter((p) => GROUPS[family as keyof typeof GROUPS][p] === undefined && exemptAs(p) === undefined);
     const element = (family: string): z.ZodType => defOf(shape[family]!).element;
@@ -1459,7 +1461,6 @@ describe('the model-program turn on the real core route', () => {
     // Contrast: a field the card has no words for is caught.
     expect(unsaid('quantities', (element('quantities') as z.ZodObject).extend({ new_field: z.string() }))).toEqual(['new_field']);
     // The model's own fields (Codex #3742): each is a record family above, one the card says as its own entry, or exempt.
-    const ROOT_SAID = ['question', 'period'];
     const unsaidRoot = (keys: readonly string[]) => keys.filter((k) => !families.includes(k) && !ROOT_SAID.includes(k) && ROOT_EXEMPT[k] === undefined);
     expect(unsaidRoot(Object.keys(shape))).toEqual([]);
     expect(Object.keys(ROOT_EXEMPT).filter((k) => !(k in shape))).toEqual([]);
@@ -1468,6 +1469,8 @@ describe('the model-program turn on the real core route', () => {
       const r = validatePostimage(bakery(), { ...bakery(), [k]: v }, { removals: [], words: [BRIEF], fresh: [] });
       expect(r.ok ? r.changes.map((c) => [c.id, c.after]) : r.code).toEqual([[k, v]]);
     }
+    const coached = validatePostimage(bakery(), { ...bakery(), coaching_questions: ['Who else must agree?'] }, { removals: [], words: [BRIEF], fresh: [] });
+    expect(coached.ok ? coached.changes.map((c) => [c.id, c.after]) : coached.code).toEqual([['coaching_questions', '1. Who else must agree?']]);
     // Contrast: a field of the model's own with neither is caught.
     expect(unsaidRoot(Object.keys(CanonicalModel.extend({ new_unlisted_field: z.string() }).shape))).toEqual(['new_unlisted_field']);
   });
@@ -1933,6 +1936,66 @@ describe('the model-program turn on the real core route', () => {
     expect(registered.length).toBe(saves);
   });
 
+  it('Box 2 (Paul Q1/Q2, 28 Oct): an update that makes Olumi\'s questions out of date returns the whole new list; the card says both lists in full; approval saves it exactly, the revision and cold reads return it, and it is part of the revision; null keeps it and [] clears it', async () => {
+    const SAVED_QS = ['What would make the second oven worth its cost?', 'Who else would need to agree before you buy it?'];
+    const NEW_QS = ['What would the landlord need to see before agreeing?', SAVED_QS[0]!];
+    replies = [JSON.stringify({ ...bakery(), coaching_questions: SAVED_QS })];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const before = JSON.parse(JSON.stringify(persisted!.living_model.canonical)) as CanonicalModelT;
+    expect(before.coaching_questions).toEqual(SAVED_QS);
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const words: string[] = [BRIEF];
+    /** One update proposed and approved through the agent's own tools: the drafter's reply is the saved model with `edit`, as an update returns it. */
+    const changeAndApprove = async (said: string, edit: (m: CanonicalModelT) => void) => {
+      const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [said], user_turn_text: said };
+      const text = savedWith(edit);
+      replies = [text]; sent.length = 0;
+      const reply = JSON.parse(text) as Json;
+      const saves = registered.length;
+      const p = await proposeProgramChange(deps, ctx, ProgramChangeParams.parse({ public_label: 'Your change', basis: 'their words', request: said, remove: [] })) as Json;
+      expect(p.status, JSON.stringify(p)).toBe('ok');
+      expect(registered.length).toBe(saves); // proposing saves nothing
+      const held = savedProgramOf({ living_model: deps.proposals.get(p.data.proposal_id)!.living_model })!.canonical.coaching_questions;
+      expect(await applyProgramChange(deps, ctx, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+      words.push(said);
+      return { reply, changes: p.data.changes as Json[], held, ctx };
+    };
+    const coldList = () => reopenProgram(JSON.parse(JSON.stringify(persisted)))!.program.canonical.coaching_questions;
+
+    // (1) Refreshed: the drafter returns the whole new list; ONE entry, both lists in full, Olumi's.
+    const one = await changeAndApprove('The landlord has to agree first.', (m) => { m.coaching_questions = [...NEW_QS]; });
+    expect(one.reply.coaching_questions).toEqual(NEW_QS);
+    expect(one.changes).toEqual([{ id: 'coaching_questions', kind: 'record', action: 'change', label: 'Olumi’s questions for you',
+      before: `1. ${SAVED_QS[0]}\n2. ${SAVED_QS[1]}`, after: `1. ${NEW_QS[0]}\n2. ${NEW_QS[1]}`, author: 'olumi' }]);
+    expect(one.held).toEqual(NEW_QS); // the card's frozen program, which approval writes
+    const after = persisted!.living_model.canonical as CanonicalModelT;
+    expect(after.coaching_questions).toEqual(NEW_QS);
+    expect({ ...after, coaching_questions: [] }).toEqual({ ...before, coaching_questions: [] }); // nothing else moved
+    // The revision read and the cold read return the new list exactly; the new Run's digest binds it.
+    const context = await readProgramContext(deps, one.ctx) as Json;
+    expect(context.data.model.coaching_questions).toEqual(NEW_QS);
+    expect(coldList()).toEqual(NEW_QS);
+    const runs = persisted!.living_model.runs as Json[];
+    expect(runs).toHaveLength(2);
+    expect(runs[1]!.receipt.revision_digest).toBe(revisionDigest(after, words));
+    expect(runs[1]!.receipt.revision_digest).not.toBe(revisionDigest({ ...after, coaching_questions: SAVED_QS }, words));
+    expect(programRevisionOf(persisted)).toBe(runs[1]!.receipt.revision_digest);
+
+    // (2) Null keeps them: an update to a figure alone returns null for the questions; its card says nothing of them.
+    const two = await changeAndApprove('The oven would cost about £2,500.', (m) => setQ(m, 'oven_price', { status: 'known', value: 2500, question: null, quote: 'The oven would cost about £2,500.', basis: APPROXIMATE_FIGURE }));
+    expect(two.reply.coaching_questions).toBeNull();
+    expect(two.changes.map((c) => c.id)).toEqual(['oven_price']);
+    expect([two.held, coldList()]).toEqual([NEW_QS, NEW_QS]);
+
+    // (3) [] clears them: ONE entry, the saved list before and "No questions" after; saved and read back as none.
+    const three = await changeAndApprove('Those questions are settled now.', (m) => { m.coaching_questions = []; });
+    expect(three.reply.coaching_questions).toEqual([]);
+    expect(three.changes.map((c) => [c.id, c.action, c.before, c.after])).toEqual([['coaching_questions', 'change', `1. ${NEW_QS[0]}\n2. ${NEW_QS[1]}`, 'No questions']]);
+    expect([three.held, coldList()]).toEqual([[], []]);
+    const last = persisted!.living_model.runs as Json[];
+    expect(last.at(-1)!.receipt.revision_digest).toBe(revisionDigest(persisted!.living_model.canonical as CanonicalModelT, words));
+  });
+
   it('seam#3: a card held before an engine update saves its model exactly, with TODAY\'s Run of it in the card\'s Run\'s place, and apply_change reports that saved Run; a card held on today\'s engine saves byte for byte what it showed', async () => {
     replies = [JSON.stringify(bakery())];
     await turn({ message: BRIEF });
@@ -2006,7 +2069,7 @@ describe('the model-program turn on the real core route', () => {
     const words = 'We bake 320 loaves a week now. The oven would cost £2,500, and the landlord must agree first.';
     const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words });
     // What the drafter returns: nothing but what it lists (every family [] otherwise), never the history.
-    const none = { version: saved.version, question: null, period: null, quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [], claims: [],
+    const none = { version: saved.version, question: null, period: null, coaching_questions: null, quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [], claims: [],
       evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: [] };
     const propose = async (update: Json, more: Json = {}, n = 1) => {
       replies = Array.from({ length: n }, () => JSON.stringify({ ...none, ...update })); sent.length = 0;
@@ -2038,7 +2101,7 @@ describe('the model-program turn on the real core route', () => {
     expect(stableStringify(format.schema)).toBe(stableStringify(UPDATE_JSON_SCHEMA));
     const families = ['quantities', 'relations', 'goals', 'limits', 'preferences', 'options', 'risks', 'claims', 'evidence', 'assumptions', 'dissent', 'conditions', 'left_out'];
     for (const f of families) expect(stableStringify((UPDATE_JSON_SCHEMA as Json).properties[f].items), f).toBe(stableStringify((CANONICAL_JSON_SCHEMA as Json).properties[f].items));
-    expect(Object.keys((UPDATE_JSON_SCHEMA as Json).properties).sort()).toEqual([...families, 'period', 'question', 'remove', 'version'].sort());
+    expect(Object.keys((UPDATE_JSON_SCHEMA as Json).properties).sort()).toEqual([...families, 'coaching_questions', 'period', 'question', 'remove', 'version'].sort()); // Box 2 (Paul Q1/Q2, 28 Oct): + Olumi's questions
     expect((UPDATE_JSON_SCHEMA as Json).properties.remove.items).toEqual({ type: 'string' });
     expect((UPDATE_JSON_SCHEMA as Json).properties.question.anyOf.map((x: Json) => x.type)).toEqual(['string', 'null']);
     expect(sent[0]!.input.map((m: Json) => m.role)).toEqual(['user', 'assistant', 'user']);
@@ -2106,7 +2169,7 @@ describe('the model-program turn on the real core route', () => {
     // The update: a new switched-on figure, and the promotion's setting pointed at it; one_promo is not returned.
     const promotion = saved.options.find((o) => o.id === 'promotion')!;
     const twoPromos = q('two_promos', 'promotion', { value: 2, author: 'structure', basis: 'The promotion run twice.' });
-    replies = [JSON.stringify({ version: saved.version, question: null, period: null, quantities: [twoPromos], relations: [], goals: [], limits: [], preferences: [],
+    replies = [JSON.stringify({ version: saved.version, question: null, period: null, coaching_questions: null, quantities: [twoPromos], relations: [], goals: [], limits: [], preferences: [],
       options: [{ ...promotion, sets: promotion.sets.map((x) => (x.quantity === 'promo_on' ? { ...x, to: 'two_promos' } : x)) }],
       risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: [] })];
     const p = await proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words },

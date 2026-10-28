@@ -7,7 +7,7 @@ import { HOST_SCIENCE_AND_SOURCE_RULES, HOST_TOOL_CONTRACT } from '../coach-rout
 import { createHash } from 'node:crypto';
 import * as drafting from '../../path-b/drafting-guidance.js';
 import * as coreInstructions from '../../core-route/instructions.js';
-import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX } from '../../model-program-turn/prompt.js';
+import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, UPDATE_JSON_SCHEMA, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX } from '../../model-program-turn/prompt.js';
 import * as programDraft from '../../model-program-turn/draft.js';
 import { PROGRAM_TURN_GUIDANCE } from '../../model-program-turn/program-tools.js';
 import { APPROXIMATE_FIGURE } from '../../model-program/canonical.js';
@@ -123,7 +123,18 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // Round 2 (27 Oct): the quote sentence is gone; who asserted a record and its quote are the schema's (author, quote).
     // 28 Oct (Paul, blocking: "an update must never delete a figure you supplied"; the PL's sentence from db73db4f, alone):
     // a simplifying update keeps their figures, units, periods, quotes and origin; a deliberate retraction is still followed.
-    expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('5cfd9f88437d46eb56a73870bd062b10ab418867188657565f821f1ea6331676');
+    // 28 Oct, Box 2 (Paul Q1/Q2, 28 Oct; DL contract 17:42, PL corrections 17:46): what a simplifying update keeps and may fold,
+    // and Olumi's questions returned only when this change makes the saved ones out of date; each said once, in this order,
+    // before the new-id sentence. Changed knowingly from 5cfd9f88… (the 28 Oct figures-kept sentence).
+    const BOX2 = ['When asked to simplify, keep every figure, limit, quote, link in words and risk they gave; fold only Olumi\'s own items that add nothing to understanding or challenge, and turn Olumi\'s unsized arithmetic scaffolding (switches, zeros or intermediate totals no real figure sizes) into links in words.',
+      'Preserve supported numerical calculations and every consequential cause, condition, risk, uncertainty, disagreement and attribution, including Olumi\'s useful provisional reasoning; re-express rather than erase it.',
+      'Return coaching_questions only when this change makes the saved ones out of date.'];
+    for (const line of BOX2) expect(count(UPDATE_PREFIX, line), line).toBe(1);
+    expect(UPDATE_PREFIX).toContain(`without losing their meaning or history. ${BOX2.join(' ')} A new item gets a new id.`);
+    expect(UPDATE_PREFIX).not.toContain('where no real figure sizes it');
+    expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('9dbe0cf0dc47cde7cef7bf925601e421bea0b9965daec0b23e8f6d88b92a0fad');
+    // Box 2: the update's strict output, as sent, carries Olumi's questions (null, or the whole new list); its identity, recorded.
+    expect(createHash('sha256').update(JSON.stringify(UPDATE_JSON_SCHEMA), 'utf8').digest('hex')).toBe('4a39183bbb8b75a87904309fd44e2a73a184daae67143ee57c89455ac447c03e'); // before Box 2: f84a5631…
     expect(createHash('sha256').update(UPDATE_REPAIR_PREFIX, 'utf8').digest('hex')).toBe('1b52b62678cfab1b06670bc026504a9e63e186e458fec752c4b56ba9df918daf');
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
