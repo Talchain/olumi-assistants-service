@@ -59,11 +59,11 @@ export const HOST_OWNED_FIELDS = ['approval', 'approved_by', 'author_id'] as con
 /** Who asserted it, in whose words, and whether the person has accepted it. Separate facts, never one. */
 const attribution = {
   author: z.enum(AUTHORS).describe(
-    "Who asserted the entire record: person only when every assertion follows from their words; split any added interpretation, missing-information observation or stronger claim into an Olumi record. A reported speaker is named in party."),
+    "Who introduced this content: person for their quoted words, including uncertainty or a question; olumi for Olumi additions or readings. Keep added interpretation separate. Status alone never determines origin; party names a reported speaker."),
   party: z.string().nullable().describe(
     'When the person reports someone else\'s statement ("our accountant says"): that someone, as written. Null otherwise.'),
   quote: z.string().nullable().describe(
-    "One unbroken verbatim span supporting all supplied person-authored content in this record; null for Olumi items or an unanswered input."),
+    "One unbroken verbatim span supporting the person's content, including their stated uncertainty or question. Null for Olumi's content."),
   approval: z.enum(APPROVALS).describe('proposed: not yet accepted by the person (always, in a draft). approved: the person accepted it (set by Olumi\'s host, never by the draft).'),
   // C6 (27 Oct 2026): approving never makes the approver the author. A record approved before this held its approver in
   // author_id; it reads with approved_by null (`withDeclaredTiming`) and is never rewritten on read.
@@ -111,14 +111,14 @@ export const CanonicalQuantity = z.object({
   kind: z.enum(QUANTITY_KINDS).describe(
     'fact: a figure about their situation, including observed shares, mixes and allocations; missing facts are asked, never estimated. coefficient: a causal response per unit of driver, still a coefficient when derived; estimate only when a stated relation or established mechanism supports numerical scale, otherwise unknown even if direction is plausible. derived: a quantity worked out by its relation that is not a link\'s size. Structural constants are facts.'),
   status: z.enum(QUANTITY_STATUSES).describe(
-    'known: a figure in hand. estimated: an Olumi coefficient estimate with plausible low/high. asked: awaiting the person\'s input, every figure null and a question required. derived: computed by exactly one relation, every figure null. unknown: no defensible numerical range yet, every figure null. not_applicable: unused in this situation. unsupported: their statement cannot be expressed by these forms, every figure null.'),
+    'known: a figure in hand. estimated: an Olumi coefficient estimate with plausible low/high. asked: an answer is awaited, every figure null and a question required. derived: computed by exactly one relation, every figure null. unknown: no defensible numerical range yet, every figure null. not_applicable: unused in this situation. unsupported: their statement cannot be expressed by these forms, every figure null.'),
   question: z.string().nullable().describe('For asked: the one plain question to the person that would give this figure, in their words, never internal terms. Null otherwise.'),
   basis: z.string().nullable().describe(
     `For a person's approximate single figure, exactly: "${APPROXIMATE_FIGURE}". For estimated: what supports the numerical scale. For structure: what the constant is ("12 months in a year"). For unknown, not_applicable or unsupported: why and what would resolve it. Null otherwise.`),
   direction: z.enum(['raises', 'lowers']).nullable().describe(
     'For a link\'s size (a coefficient), used only when no figure is given (no most likely figure, and no range or one that spans zero): raises when more of the driver means more of what it moves, lowers when it means less; null when no one can say which. Null for every other quantity.'),
   author: z.enum(QUANTITY_AUTHORS).describe(
-    "Who gave the figure: person for their figure in its stated unit and period, or an asked fact, olumi for an estimate or reading, structure for exact mathematical constants and off/on switches, with one known figure and no range. Zero may encode no additional activity, never an unstated current level or share."),
+    `${attribution.author.description} structure only for necessary exact mathematical constants, with one known figure and no range. Zero may encode no additional activity, never an unstated current level or share.`),
   party: attribution.party,
   quote: attribution.quote,
   approval: attribution.approval,
@@ -252,7 +252,7 @@ export const CanonicalLimit = z.object({
   question: z.string().nullable().describe('When the measure is null: the one plain question that would give it a measure. Null otherwise.'),
   ...attribution,
 }).strict().describe(
-  'A condition the plan must not break, such as a budget or time cap.');
+  'A condition the plan must not break. A person-stated limit has author person and their quote on this record; an added reading of its measure or timing belongs in separately attributed supporting records, never changing who introduced the limit.');
 export type CanonicalLimitT = z.infer<typeof CanonicalLimit>;
 
 export const CanonicalPreference = z.object({

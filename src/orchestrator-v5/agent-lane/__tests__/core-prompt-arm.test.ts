@@ -286,8 +286,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // Round 2 (27 Oct, consolidation): the successor rules, where each now lives (the schema, as sent, or the shortened steps).
     for (const rule of [
       'Olumi\'s proposed option settings are olumi, even when to names the person\'s figure.',
-      // Round 3 (27 Oct): a figure is theirs in its stated unit and period.
-      'person for their figure in its stated unit and period, or an asked fact',
+      // E2 (28 Oct, dq-round4 dev gate PASS 136/169, 23/27, 9/9; Paul 01:07Z: authorship at the producer): a structural author
+      // only for a necessary exact constant; who introduced the content is said once, shared with every record.
+      'structure only for necessary exact mathematical constants, with one known figure and no range.',
+      'A condition the plan must not break. A person-stated limit has author person and their quote on this record; an added reading of its measure or timing belongs in separately attributed supporting records, never changing who introduced the limit.',
       'Zero may encode no additional activity, never an unstated current level or share.',
       'coefficient: a causal response per unit of driver, still a coefficient when derived;',
       `For a person's approximate single figure, exactly: \\"${APPROXIMATE_FIGURE}\\".`,
@@ -296,8 +298,8 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // Who asserted a record and its quote: one attribution, shared by every record schema (a goal's and a claim's, as sent).
     const attr = CANONICAL_JSON_SCHEMA as { properties: Record<string, { items: { properties: Record<string, { description?: string }> } }> };
     for (const family of ['goals', 'claims']) {
-      expect(attr.properties[family]!.items.properties['author']!.description, family).toBe('Who asserted the entire record: person only when every assertion follows from their words; split any added interpretation, missing-information observation or stronger claim into an Olumi record. A reported speaker is named in party.');
-      expect(attr.properties[family]!.items.properties['quote']!.description, family).toBe('One unbroken verbatim span supporting all supplied person-authored content in this record; null for Olumi items or an unanswered input.');
+      expect(attr.properties[family]!.items.properties['author']!.description, family).toBe('Who introduced this content: person for their quoted words, including uncertainty or a question; olumi for Olumi additions or readings. Keep added interpretation separate. Status alone never determines origin; party names a reported speaker.');
+      expect(attr.properties[family]!.items.properties['quote']!.description, family).toBe('One unbroken verbatim span supporting the person\'s content, including their stated uncertainty or question. Null for Olumi\'s content.');
     }
     expect(schemaText).toContain('An approximate single figure is known with its stated value, low/high/range_kind null and the approximate basis; never manufacture endpoints from about, roughly or ~.');
     for (const rule of [
