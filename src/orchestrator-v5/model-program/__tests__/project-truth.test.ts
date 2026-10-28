@@ -439,6 +439,13 @@ describe('Q1 (Paul, 28 Oct: "the canvas shows the situation, not the arithmetic"
     expect(lostIn(p)).toEqual([]);
     expect(nodeOf(p, 'promo_on')).toMatchObject({ id: 'promo_on' });
     expect(edgesOf(p).filter((e) => e.from === 'promotion' && e.to === 'joins')).toEqual([]);
+    // PL 04:07Z: a range wholly above where the switch stands, but only plausible, proves no bound either: still drawn.
+    const plausible = club();
+    const set3 = plausible.options.find((o) => o.id === 'promotion')!.sets.find((x) => x.quantity === 'promo_on')!;
+    Object.assign(plausible.quantities.find((x) => x.id === set3.to)!, { value: 1, low: 0.5, high: 1.5, range_kind: 'plausible' });
+    const pp = projected(plausible, CLUB_BRIEF);
+    expect(nodeOf(pp, 'promo_on')).toMatchObject({ id: 'promo_on' });
+    expect(edgesOf(pp).filter((e) => e.from === 'promotion' && e.to === 'joins')).toEqual([]);
     // PL 03:58Z: the same ranged setting on a unitless switch is said as its range, never "In use".
     const unitless = club();
     const set2 = unitless.options.find((o) => o.id === 'promotion')!.sets.find((x) => x.quantity === 'promo_on')!;

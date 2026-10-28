@@ -592,9 +592,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const turnsUp = (q: CanonicalQuantityT) => model.options.every((o) => o.sets.every((s) => {
     if (s.quantity !== q.id) return true;
     const to = has(s.to) ? Q.get(s.to) : undefined;
-    // Its whole setting above where the switch stands: a range reaching down to it or below could lower what it moves (Codex r3 6).
-    const lowest = to === undefined ? null : has(to.low) && has(to.high) ? Math.min(to.low, to.high, to.value ?? Infinity) : to.value;
-    return has(lowest) && lowest > q.value!;
+    // An exact setting above where the switch stands. Any range keeps the switch drawn: a plausible span gives no bound, and
+    // its ends are never read as one (Codex r3 6; PL 04:07Z).
+    return to !== undefined && has(to.value) && !(has(to.low) && has(to.high) && to.low !== to.high) && to.value > q.value!;
   }));
   const switches = new Map(model.quantities.filter((q) => q.author === 'structure' && q.status === 'known' && q.kind === 'fact' && controlled.has(q.id) && has(q.value)
     && !(has(q.low) && has(q.high) && q.low !== q.high) && foldable(q) && turnsUp(q)).map((q) => [q.id, optionsSetting(q.id)[0]!] as const));
