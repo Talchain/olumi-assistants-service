@@ -118,7 +118,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // (step 6), and the schema's description gives their form. The two bullets are gone.
     expect(count(DRAFTING_INSTRUCTIONS, 'Put each missing input\'s question on its item; order item arrays and select coaching_questions by this priority.')).toBe(1);
     for (const old of ['- Titles:', '- Coaching questions:']) expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('0caeb57fba9157373361ec96ef73cc4179f247fe9584a21ff149674aaf8fa7bc'); // 27 Oct: round 3 (Paul approved): a stated loss to avoid is an aim; missing numbers stay on the causal path; questions by what could change feasibility or the comparison; the one-statement line is the schema's; before it bac3de97…. 27 Oct: round 2, the consolidation (DL): ten entries (the workflow, enrichment, temporal choices and question selection); field definitions are the schema's; before it 209824f6…. 27 Oct: round 1, the PL's candidate wording (DL): step 5 removed, the approximate-figure mark for rough figures, missing periods asked, the deciding driver on the path, benefits and harms apart, a share a fact, questions by what could change the comparison. 27 Oct: titles and coaching questions (Paul approved). 27 Oct: W1 + PL AMEND (no quota on Olumi's options; a risk in the structure only with a defensible mechanism; an unsizable chance stays unknown), think before writing (extract, widen, select, frame; ported from the benchmarked v202 prompt), carry on as now always an option, a risk's chance an estimate unless only they can know it (prompt test 27 Oct: carry-on 2/9 -> 8/8, Olumi options 7 -> 15). 27 Oct: W2, no "history is []" (history is the host's, never in the first draft's schema). 27 Oct: T3, a relative change's floor is −100 % (science on Paul's hiring Run), an estimated range is two-sided where plausible, a one-off amount happens once (a stock's start, never a per-period driver), a measure tracks the aim, a record of theirs holds only their words; the example's ads are a weekly spend into a 'spent' stock. // 25 Oct: alpha G21, the reach rule is the compiler's (at least one goal or limit, only when every goal has a measure)
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('aa502237e8fbd5de84fc256cf1ef30f92f963a478c726394e449607fa56729e9'); // 28 Oct: Box 1b (Paul Q1: links in words by default, numbers only where real; PL 16:11/16:18 and Codex r3 corrections); before it 0caeb57f…. 27 Oct: round 3 (Paul approved): a stated loss to avoid is an aim; missing numbers stay on the causal path; questions by what could change feasibility or the comparison; the one-statement line is the schema's; before it bac3de97…. 27 Oct: round 2, the consolidation (DL): ten entries (the workflow, enrichment, temporal choices and question selection); field definitions are the schema's; before it 209824f6…. 27 Oct: round 1, the PL's candidate wording (DL): step 5 removed, the approximate-figure mark for rough figures, missing periods asked, the deciding driver on the path, benefits and harms apart, a share a fact, questions by what could change the comparison. 27 Oct: titles and coaching questions (Paul approved). 27 Oct: W1 + PL AMEND (no quota on Olumi's options; a risk in the structure only with a defensible mechanism; an unsizable chance stays unknown), think before writing (extract, widen, select, frame; ported from the benchmarked v202 prompt), carry on as now always an option, a risk's chance an estimate unless only they can know it (prompt test 27 Oct: carry-on 2/9 -> 8/8, Olumi options 7 -> 15). 27 Oct: W2, no "history is []" (history is the host's, never in the first draft's schema). 27 Oct: T3, a relative change's floor is −100 % (science on Paul's hiring Run), an estimated range is two-sided where plausible, a one-off amount happens once (a stock's start, never a per-period driver), a measure tracks the aim, a record of theirs holds only their words; the example's ads are a weekly spend into a 'spent' stock. // 25 Oct: alpha G21, the reach rule is the compiler's (at least one goal or limit, only when every goal has a measure)
     // 24 Oct (DL, DoD-G classes 12 and 4): an update returns only the records it changes or adds; the host merges them by id.
     // Round 2 (27 Oct): the quote sentence is gone; who asserted a record and its quote are the schema's (author, quote).
     // 28 Oct (Paul, blocking: "an update must never delete a figure you supplied"; the PL's sentence from db73db4f, alone):
@@ -260,18 +260,22 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       // DL 24 Oct (blind score of 1510a008, mrr structure): an identity is a definition; a missing figure is asked on its item.
       // AIE 6386018855 §5 (DL 24 Oct): the capture-only clauses replaced, each permission once, attributed and grounded.
       // Candidate A: the update's own goal-or-limit rule is said once, in UPDATE_PREFIX (pinned below), which every update sends.
-      'Draft ONE canonical model. The expansion steps below apply only to a first draft.',
+      // Box 1b (Q1, Paul 28 Oct): the model is their situation as a small influence diagram; the first-draft-only scope stays.
+      'Draft ONE canonical model: their situation as a small influence diagram they could explain in a minute',
+      'The steps below apply only to a first draft.',
       // Paul 26 Oct (1): no aim stated -> one provisional working aim of Olumi's, its target asked, never invented.
       'With no stated aim, offer ONE Olumi working aim supported by the brief for confirmation or change.',
       '2. Aim: retain every stated aim, including avoiding a stated loss.',
       // Paul 26 Oct (2) and (3): short neutral names, their words the quote; Olumi's lower-commitment options where they name none, one or only opposites.
-      '3. Alternatives: retain every named option and carry on as now;',
-      'with none, one, only two opposites, or an open request, add one or two materially different routes, lower-commitment where useful; for allocations, offer feasible divisions.',
-      'option "Weekly local ads", olumi (they named only one; reversible, lower-commitment): sets ad_spend to its own value 50, olumi',
+      // Box 1b: carrying on as now is the declared carry_on option (Box 1a), never read from empty settings.
+      '3. Options: retain every named option, and carrying on as now (carry_on true; false on every other option).',
+      'With none, one, only two opposites, or an open request, add one or two materially different options, lower-commitment where useful; for allocations, offer feasible divisions.',
+      // Box 1b: the example's Olumi option changes what it changes in words, with no invented spend (PL 16:11/16:18).
+      'option "Longer baking hours", olumi (lower-commitment): sets []',
       // AMEND (DL 24 Oct, blind score of #3735): a lever only the options set, and a whole, are structure; a stated limit stays a limit.
       // Codex buddy AMEND (26 Oct): one statement, one record. Round 3 (27 Oct): said once, in the sent schema (pinned above).
       // DL 24 Oct: the one worked example shows the proposing half once (an aim with no measure, Olumi's suggested measure).
-      'goal "to grow the bakery", measure_by olumi (a suggested measure): sales change_abs from now >= grow_target, end, window null,',
+      'goal "to grow the bakery", measure_by olumi (a suggested measure): sales change_abs from base_sales >= grow_target, end, window null,',
       // Codex BLOCK on #3735: the exclusion is Olumi's reading, marked as canonical.ts attribution requires.
       'exclusions: left_out "growth beyond loaf sales, such as new lines", why "not in this model", author olumi, quote null',
       // DL 24 Oct (P7 hiring blind score, classes 2 and 4): a stated threshold is theirs; a goal against today is relative to today.
@@ -279,7 +283,8 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       // DL 24 Oct (milestone blind score, effects-not-estimated): a range is defensible when its order of magnitude is knowable.
       // Buddy 24 Oct 08:17Z (accepted): capacity is not output.
       // DL 24 Oct (with S3's issue 39): an unsized link's direction goes in direction; one with no direction anyone can give is a note.
-      'sets ovens_added to one_oven, starts_after_periods 0;',
+      // Box 1b: no switch in the example; the second oven's effect and its budget fit are links in words (PL 16:18, Codex r3).
+      'Second oven → "without going over budget" unknown, unsure, basis "whether it fits depends on oven_price, still asked"',
     ]) expect(count(DRAFTING_INSTRUCTIONS, rule), rule).toBe(1);
     // Round 1 (27 Oct, the PL's candidate wording, adopted by the DL): seven bullets replaced and step 5 removed. Each successor
     // rule is sent once, and every replaced sentence above is gone. Two earlier rulings are REVERSED by the candidate, not kept:
@@ -306,12 +311,13 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(schemaText).toContain('An approximate single figure is known with its stated value, low/high/range_kind null and the approximate basis; never manufacture endpoints from about, roughly or ~.');
     for (const rule of [
       'turn a stated amount into an unsupported rate',
-      '6. Unknowns and questions: confirm an ambiguous or suggested aim, measure or reference;',
+      // Box 1b (Q1, Paul 28 Oct): questions are step 7; the causal-path step is now links in words from cause to effect.
+      '7. Unknowns and questions: confirm an ambiguous or suggested aim, measure or reference;',
       'Ask for evidence, not invented effects or probabilities; never re-ask supplied information.',
       'Ask for a range when a supplied approximate point feeds a goal or limit.',
-      '4. Causal paths: for each consequential concern or plausible outside force, trace each affected option setting to a goal or limit,',
-      'retaining separately changeable bottlenecks, delays, benefits and harms as distinct quantities and relations with missing facts asked and unsized coefficients unknown on the path; missing numbers alone never send a mechanism to prose or left_out;',
-      'omit only an unrepresentable mechanism or measure, saying why and what would enable it.',
+      'as influence links from cause to effect, each with a direction, how sure it is and its basis in plain words.',
+      'Link each live option to the aims or limits it plausibly affects; never add a link merely to connect.',
+      'omit only what does not, or an unrepresentable mechanism or measure, saying why and what would enable it.',
       'Ask missing durations wherever representable; otherwise explain the limitation.',
       'then select observable unknowns most able to change route feasibility or comparison through causal evidence, rival explanations, capacity, timing, permissions or commitments; a needed figure is arithmetic-only only if it cannot change that comparison.',
       'or assume carry-on leaves a reference unchanged.',

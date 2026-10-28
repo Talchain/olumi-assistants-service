@@ -138,6 +138,20 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   /** The card a record is drawn on, as the projection draws it: a limit's by its form, every other record's its own id. */
   const cardOfRecord = (id: string) => { const l = model.limits.find((x) => x.id === id); return l === undefined ? id : asConstraint(l) ? l.measure!.quantity : `mp:limit:${l.id}`; };
   const influenceEnds = new Set(influences.flatMap((i) => [i.from, i.to]));
+  /** A record by its own name, as the compiler names it in its reasons. */
+  const labelOf = (id: string) => [...model.quantities, ...model.goals, ...model.limits, ...model.options, ...model.risks].find((r) => r.id === id)?.label ?? id;
+  /**
+   * WHY A GOAL OR LIMIT IS NOT CALCULATED (Q1 reader r2, PL 16:33): the compiler's own reasons, which name every link in words
+   * and unsized risk its closure reaches; an aim or guardrail with no measure has no closure, so the links in words and risks
+   * on it are named from the model, by the same labels. Said only where it is not calculated.
+   */
+  const withheldReasonOf = (rec: { id: string; measure: unknown }, outcome: { status: string; reasons: readonly string[] } | undefined): Rec => {
+    if (outcome === undefined || outcome.status === 'calculable') return {};
+    const on = [...influences.filter((i) => i.to === rec.id).map((i) => `"${labelOf(i.from)} → ${labelOf(i.to)}"`),
+      ...model.risks.filter((k) => k.effect_on === rec.id).map((k) => `the risk "${k.label}"`)];
+    const linked = rec.measure === null && on.length > 0 ? [`It is linked in words from ${on.length === 1 ? on[0] : `${on.slice(0, -1).join(', ')} and ${on.at(-1)}`}.`] : [];
+    return { withheld_reason: [...outcome.reasons, ...linked].join(' ') };
+  };
   // Every link is drawn (Paul: show, never hide; S1 strip): one whose size no one has given and whose direction is not stated
   // has no sign and no strength band (`rateLink`).
 
@@ -347,6 +361,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       ...(has(g.question) ? { user_questions: [g.question] } : {}),
       ...horizonOf(g),
       ...goalFactsOf(g),
+      ...withheldReasonOf(g, per),
       // A total over a window or a per-quantity ratio is not the measured quantity's level today, and a change from a stated
       // value or from an option is not a change from today (integrated review 26 Oct: "Today: X" beside "up N% from today").
       ...(metric?.status === 'derived' && g.measure?.per === null && g.measure.aggregation !== 'sum' && goalUnit
@@ -469,7 +484,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       // A link in words (Box 1a): from → to, its sign only where it states up or down, its basis as its reasoning; no size.
       const id = relationEdgeIds.get(r.id)![0]!;
       const sign = r.direction === 'up' ? 1 : r.direction === 'down' ? -1 : null;
-      edges.push({ ...link(cardOfRecord(r.from), cardOfRecord(r.to), sign, whoOf(r, r.id), false, has(r.basis) ? { reasoning: r.basis } : {}), ...(sign === null ? { direction_settled: false } : {}), id });
+      edges.push({ ...link(cardOfRecord(r.from), cardOfRecord(r.to), sign, whoOf(r, r.id), false, has(r.basis) ? { reasoning: r.basis } : {}), ...(sign === null ? { direction_settled: false } : {}),
+        // Q1 reader r2: the link's own words, copied for the canvas's hover and detail (never a probability read from them).
+        link_words: { direction: r.direction, confidence: r.confidence, basis: r.basis }, id });
       items.push({ record_id: r.id, family: 'relation', shown_as: { edge: id }, in_calculation: false, why_out: why(false, 'A link in words: drawn, never calculated.'), author: whoOf(r, r.id), approval: r.approval });
       continue;
     }
@@ -526,7 +543,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const figure = bound && (bound.status === 'known' || bound.status === 'estimated') && (has(bound.value) || (has(bound.low) && has(bound.high))) ? display(bound) : null;
     const description = !lm ? `${l.label} (no measure yet, so the result does not cover it).` : figure === null ? `${l.label} (its figure is not given yet).`
       : `${l.label}: ${Q.get(lm.quantity)?.label ?? lm.quantity}${has(lm.per) ? ` per ${Q.get(lm.per)?.label ?? lm.per}` : ''} ${CMP_WORDS[lm.cmp]} ${figure}.`;
-    nodes.push({ id, kind: 'action', label: `Limit: ${l.label}`, description, ...provenanceOf(l), ...quoteOf(l, l.id), ...participation(inCalc || (has(lm) && kept(per))) });
+    nodes.push({ id, kind: 'action', label: `Limit: ${l.label}`, description, ...provenanceOf(l), ...quoteOf(l, l.id), ...participation(inCalc || (has(lm) && kept(per))), ...withheldReasonOf(l, per) });
     // What the limit measures, as a goal's measure is drawn: no size and no sign.
     if (lm && Q.has(lm.quantity)) edges.push({ ...link(lm.quantity, id, null, who, inCalc, { definitional: true }), id: edgeId(lm.quantity, id) });
     items.push({ record_id: l.id, family: 'limit', shown_as: { node: id }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: l.approval });
@@ -593,7 +610,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       // A risk no one can size, or one on an aim, a limit or an option (Box 1a): the same link to that card, signed by its own
       // direction where it states one, else unsettled.
       const sign = k.direction === 'up' ? 1 : k.direction === 'down' ? -1 : null, to = cardOfRecord(k.effect_on);
-      edges.push({ ...link(k.id, to, sign, who, inCalc, { reasoning: 'if it happens' }), ...(has(k.mode) ? { effect_mode: k.mode } : {}), ...(sign === null ? { direction_settled: false } : {}), id: edgeId(k.id, to) });
+      edges.push({ ...link(k.id, to, sign, who, inCalc, { reasoning: 'if it happens' }), ...(has(k.mode) ? { effect_mode: k.mode } : {}), ...(sign === null ? { direction_settled: false } : {}),
+        link_words: { direction: k.direction, confidence: null, basis: null }, id: edgeId(k.id, to) }); // a risk records no confidence or basis of its own
     }
   }
 

@@ -157,12 +157,15 @@ describe('Box 1a: links in words, risks no one can size and unmeasured factors',
     const edge = (id: string) => (p.graph.edges as Rec[]).find((e) => e.id === id);
     const node = (id: string) => (p.graph.nodes as Rec[]).find((n) => n.id === id)!;
     expect(edge('evening_classes__member_mood')).toEqual({ id: 'evening_classes__member_mood', from: 'evening_classes', to: 'member_mood', exists_probability: 1, effect_direction: 'positive',
-      provenance: { source: 'brief_extraction', reasoning: 'Members have asked for evening slots.' }, origin: 'model_program:display' });
+      provenance: { source: 'brief_extraction', reasoning: 'Members have asked for evening slots.' }, origin: 'model_program:display',
+      link_words: { direction: 'up', confidence: 'likely', basis: 'Members have asked for evening slots.' } });
     expect(edge('member_mood__members')).toEqual({ id: 'member_mood__members', from: 'member_mood', to: 'members', exists_probability: 1, direction_settled: false,
-      provenance: { source: 'cee_hypothesis', reasoning: 'Happier members stay only if the classes suit them.' }, origin: 'model_program:display' });
+      provenance: { source: 'cee_hypothesis', reasoning: 'Happier members stay only if the classes suit them.' }, origin: 'model_program:display',
+      link_words: { direction: 'conditional', confidence: 'unsure', basis: 'Happier members stay only if the classes suit them.' } });
     // The risk on an aim: the risk → quantity edge's own form, to the aim's card, signed by its own direction (it has no size).
     expect(edge('instructor_leaves__keep_members')).toEqual({ id: 'instructor_leaves__keep_members', from: 'instructor_leaves', to: 'keep_members', exists_probability: 1, effect_direction: 'negative',
-      provenance: { source: 'cee_hypothesis', reasoning: 'if it happens' }, origin: 'model_program:display' });
+      provenance: { source: 'cee_hypothesis', reasoning: 'if it happens' }, origin: 'model_program:display',
+      link_words: { direction: 'down', confidence: null, basis: null } });
     expect(p.items.filter((i) => ['evening_mood', 'mood_members'].includes(i.record_id))).toEqual([
       { record_id: 'evening_mood', family: 'relation', shown_as: { edge: 'evening_classes__member_mood' }, in_calculation: false, why_out: 'A link in words: drawn, never calculated.', author: 'person', approval: 'proposed' },
       { record_id: 'mood_members', family: 'relation', shown_as: { edge: 'member_mood__members' }, in_calculation: false, why_out: 'A link in words: drawn, never calculated.', author: 'olumi', approval: 'proposed' },
@@ -180,5 +183,34 @@ describe('Box 1a: links in words, risks no one can size and unmeasured factors',
     expect(u.graph.nodes.filter((n) => n.kind === 'option').some((n) => 'is_baseline' in n)).toBe(false);
     expect((u.graph.edges as Rec[]).find((e) => e.id === 'instructor_leaves__keep_members')).toMatchObject({ direction_settled: false });
     expect((u.graph.edges as Rec[]).find((e) => e.id === 'instructor_leaves__keep_members')).not.toHaveProperty('effect_direction');
+  });
+
+  it('Q1 reader 1: every link in words and every unsized-risk edge carries its words as recorded, and no numerical link does', () => {
+    const m = studio();
+    const p = project(m, compile(m), { brief: STUDIO_BRIEF });
+    const words = (p.graph.edges as Rec[]).filter((e) => 'link_words' in e).map((e) => [e.id, e.link_words]);
+    expect(words).toEqual([
+      ['evening_classes__member_mood', { direction: 'up', confidence: 'likely', basis: 'Members have asked for evening slots.' }],
+      ['member_mood__members', { direction: 'conditional', confidence: 'unsure', basis: 'Happier members stay only if the classes suit them.' }],
+      ['instructor_leaves__keep_members', { direction: 'down', confidence: null, basis: null }],
+    ]);
+    // Every other link keeps its own fields and no words: a definition's part, a setting, an aim's measure.
+    expect((p.graph.edges as Rec[]).length).toBeGreaterThan(words.length);
+  });
+
+  it('Q1 reader 2: a goal or limit not calculated carries withheld_reason naming its links in words, its unsized risks and its other reason; one with no measure names what links to it', () => {
+    const m = studio();
+    m.goals.push({ ...m.goals[1]!, id: 'members_happy', label: 'Members are happy', measure: null, question: 'How would you tell the members are happy?', author: 'olumi', quote: null });
+    m.limits.push({ id: 'neighbours', label: 'Keep the neighbours on side', measure: null, question: 'What would upset the neighbours?', author: 'olumi', quote: null, party: null, approval: 'proposed', approved_by: null, author_id: null });
+    m.relations.push({ ...m.relations[2]!, id: 'evening_happy', to: 'members_happy', confidence: 'unsure', basis: null, author: 'olumi', quote: null } as CanonicalModelT['relations'][number],
+      { ...m.relations[2]!, id: 'evening_neighbours', to: 'neighbours', direction: 'down', basis: 'Late classes are noisy.', author: 'olumi', quote: null } as CanonicalModelT['relations'][number]);
+    m.risks.push({ ...m.risks[0]!, id: 'noise', label: 'Noise complaints', effect_on: 'members_happy' });
+    const p = project(m, compile(m), { brief: STUDIO_BRIEF });
+    const reason = (id: string) => (p.graph.nodes as Rec[]).find((n) => n.id === id)!.withheld_reason;
+    expect(reason('keep_members')).toBe([MOOD, EVENING_LINK, MOOD_LINK, RISK].join(' '));
+    expect(reason('members_happy')).toBe('"Members are happy" has no measure yet, so it is left out of the chance. It is linked in words from "Evening classes → Members are happy" and the risk "Noise complaints".');
+    expect(reason('mp:limit:neighbours')).toBe('"Keep the neighbours on side" has no measure yet, so the result does not cover it. It is linked in words from "Evening classes → Keep the neighbours on side".');
+    // Contrast: the calculable takings aim carries none.
+    expect((p.graph.nodes as Rec[]).find((n) => n.id === 'takings_goal')).not.toHaveProperty('withheld_reason');
   });
 });
