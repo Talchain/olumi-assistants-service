@@ -231,7 +231,7 @@ export const CanonicalGoal = z.object({
     assumptions: ids.describe('Ids of assumption records this reading of the goal rests on; [] for none.'),
     exclusions: ids.describe('Ids of left_out records for parts of the aim this measure does not cover ("the café\'s cosy feel is not in this chance"). [] when it covers the whole aim.'),
   }).strict().nullable().describe('Null when the aim has no measure yet. A proposed release bar or other standard is an assumption or condition, never a substitute measure.'),
-  question: z.string().nullable().describe('When the measure is null: the one plain question that would give it a measure ("How would you tell the regulars are happy: repeat visits a week?"). When the window is null but the level changes over time: "By when?". Null otherwise.'),
+  question: z.string().nullable().describe('One plain question to clarify or confirm the aim, a suggested measure or reference, or a missing measure or deadline. Null when none is needed.'),
   ...attribution,
 }).strict().describe(
   'An outcome sought, including wanting more or less of something without a threshold; never simultaneously a limit or preference. Events or tasks alone are context.');
@@ -405,7 +405,7 @@ export const CanonicalModel = z.object({
   coaching_questions: z.array(z.string()).describe(
     'Ordered first-screen questions, up to three, each plain, non-leading, open and asking one thing; a selected item question uses its exact wording. [] when none would help.'),
   history: z.array(CanonicalHistoryEntry).describe('Kept by Olumi\'s host: [] in a first draft.'),
-}).strict().describe('One statement, one record across all families; never paraphrase it into another. Evidence and assumptions get separate records only for distinct statements.');
+}).strict().describe('One statement, one record across all families; never paraphrase it into another. Record texts use brief plain words; explain each item\'s meaning rather than repeating generic caveats.');
 export type CanonicalModelT = z.infer<typeof CanonicalModel>;
 
 /** The record families a `concerns` list (or an error's `items`) can name, in display order. */
