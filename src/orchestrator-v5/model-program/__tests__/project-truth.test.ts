@@ -13,7 +13,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { CanonicalModel, withDeclaredTiming, type CanonicalModelT } from '../canonical.js';
+import { CanonicalModel, withDeclaredTiming, type CanonicalModelT, type CanonicalQuantityT } from '../canonical.js';
 import { compile } from '../compile.js';
 import { project } from '../project.js';
 import { readingOf } from '../../model-program-turn/postimage.js';
@@ -223,5 +223,59 @@ describe('graph = model (alpha, 27 Oct): a card says the record came from the br
       ['existing_capacity', 'from_brief'], ['additional_specialists', 'from_brief'], ['zero_additional_capacity', null],
       ['additional_capacity', 'ai_inferred'], ['weekly_support_capacity', 'from_brief'],
     ]);
+  });
+});
+
+describe('C13 (27 Oct, the design session on Paul\'s board): the board draws what the model holds', () => {
+  const promoLink = (m: CanonicalModelT) => edgesOf(projected(m, CLUB_BRIEF)).find((e) => e.id === 'promo_on__joins')!;
+  const withQ = (m: CanonicalModelT, id: string, f: Partial<CanonicalQuantityT>) => { Object.assign(m.quantities.find((x) => x.id === id)!, f); return m; };
+
+  it('1 · a range across zero says its direction is not settled, whatever sign it is drawn with', () => {
+    const across = (f: Partial<CanonicalQuantityT>) => promoLink(withQ(club(), 'promo_effect', f));
+    // Its centre (the model's median, issue 39's rule, unchanged) gives the sign drawn; the link says it is not settled.
+    const centre = across({ value: null, low: -2, high: 8 });
+    expect([centre.effect_direction, centre.direction_settled]).toEqual(['positive', false]);
+    // Its own most likely figure, or a stated direction, keeps its sign; the range still says it is not settled.
+    const likely = across({ value: 3, low: -2, high: 8 });
+    expect([likely.effect_direction, likely.direction_settled]).toEqual(['positive', false]);
+    expect(across({ value: null, low: -2, high: 8, direction: 'lowers' }).effect_direction).toBe('negative');
+    // Contrast (right before): a range on one side keeps its sign and says nothing more.
+    const one = across({ value: null, low: 3, high: 7 });
+    expect([one.effect_direction, 'direction_settled' in one]).toEqual(['positive', false]);
+  });
+
+  it('2 · a risk\'s link says how it acts if it happens: it adds, or it multiplies', () => {
+    expect([riskLink(rival()).effect_mode, riskLink(rival({ value: -3, low: -4, high: -2 }, 'add')).effect_mode]).toEqual(['multiply', 'add']);
+  });
+
+  it('3 · an option\'s start given by a figure is said on that option\'s card, never as a loose card', () => {
+    const m = club();
+    m.quantities.push(q('promo_delay', 'month', { value: 1 }));
+    m.options[0]!.sets[0]!.starts_after_periods = 'promo_delay';
+    const p = projected(m, CLUB_BRIEF);
+    expect((p.graph.nodes as Rec[]).some((n) => n.id === 'promo_delay')).toBe(false);
+    expect((p.items as Rec[]).find((i) => i.record_id === 'promo_delay')).toMatchObject({ shown_as: { on_node: 'promotion' } });
+    expect(nodeOf(p, 'promotion').interventions.promo_on).toMatchObject({ from_period: 'promo_delay', from_period_display: expect.any(String) });
+    // Asked, it asks on that card.
+    withQ(m, 'promo_delay', { value: null, status: 'asked', question: 'When could the promotion start?' });
+    expect(nodeOf(projected(m, CLUB_BRIEF), 'promotion').user_questions).toEqual(['When could the promotion start?']);
+    // A risk's start given by a figure is folded onto the risk card, and the card says the figure (PL #3859 AMEND).
+    const r = rival();
+    r.quantities.push(q('rival_delay', 'month', { value: 2 }));
+    r.risks[0]!.starts_after_periods = 'rival_delay';
+    const rp = projected(r, CLUB_BRIEF);
+    expect([(rp.graph.nodes as Rec[]).some((n) => n.id === 'rival_delay'), nodeOf(rp, 'rival_opens').description]).toEqual([false, expect.stringMatching(/from "rival delay" \(2\b[^)]*month/)]);
+    // Contrast (right before): a start given as a count is the option's own number, with nothing folded.
+    const own = nodeOf(projected(club(), CLUB_BRIEF), 'promotion').interventions.promo_on;
+    expect([own.from_period, 'from_period_display' in own]).toEqual([0, false]);
+  });
+
+  it('4 · an asked figure folded onto a card asks its question there: the goal\'s target on the goal, a risk\'s chance on the risk', () => {
+    const goal = withQ(club(), 'member_target', { value: null, status: 'asked', quote: null, question: 'How many members would count as success?' });
+    expect(nodeOf(projected(goal, CLUB_BRIEF), 'reach_340').user_questions).toEqual(['How many members would count as success?']);
+    const risk = withQ(rival(), 'rival_chance', { value: null, low: null, high: null, range_kind: null, status: 'asked', question: 'Is a rival likely to open?' });
+    expect(nodeOf(projected(risk, CLUB_BRIEF), 'rival_opens').user_questions).toEqual(['Is a rival likely to open?']);
+    // Contrast (right before): a given target asks nothing.
+    expect('user_questions' in nodeOf(projected(club(), CLUB_BRIEF), 'reach_340')).toBe(false);
   });
 });
