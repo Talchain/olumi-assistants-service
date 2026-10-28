@@ -288,7 +288,7 @@ describe('Q1 (Paul, 28 Oct: "the canvas shows the situation, not the arithmetic"
   // The first three rows are RED on 76dd7532's projection (the switch, the total and its zero were their own cards; an asked
   // figure read "Waiting for your answer") and GREEN with this change. The next two are guards that hold before and after
   // (a person's total is never folded; every saved board stays whole). The last five are Codex r1's counterexamples on
-  // f9b20b71 (B1-B5), each RED there and GREEN with its fix; then Codex r2's three on 4e0127ee (7-9), each RED there.
+  // f9b20b71 (B1-B5), each RED there and GREEN with its fix; then Codex r2's three on 4e0127ee (7-9) and r3's two on 8f56310a (r3 6, r3 7), each RED there.
   const ids = (xs: Rec[]) => new Set(xs.map((x) => x.id as string));
   /** Every link joins two drawn cards, ids are once, and every record is a card or said on a drawn one. */
   const lostIn = (p: ReturnType<typeof project>) => {
@@ -431,13 +431,42 @@ describe('Q1 (Paul, 28 Oct: "the canvas shows the situation, not the arithmetic"
     expect(edgesOf(p).filter((e) => e.from === 'promotion' && e.to === 'joins')).toEqual([]);
   });
 
+  it('r3 6: a switch whose setting is a range reaching down to where it stands keeps its card (it could lower what it moves)', () => {
+    const m = club();
+    const set = m.options.find((o) => o.id === 'promotion')!.sets.find((x) => x.quantity === 'promo_on')!;
+    Object.assign(m.quantities.find((x) => x.id === set.to)!, { value: 1, low: -1, high: 3, range_kind: 'bounds' });
+    const p = projected(m, CLUB_BRIEF);
+    expect(lostIn(p)).toEqual([]);
+    expect(nodeOf(p, 'promo_on')).toMatchObject({ id: 'promo_on' });
+    expect(edgesOf(p).filter((e) => e.from === 'promotion' && e.to === 'joins')).toEqual([]);
+    // PL 03:58Z: the same ranged setting on a unitless switch is said as its range, never "In use".
+    const unitless = club();
+    const set2 = unitless.options.find((o) => o.id === 'promotion')!.sets.find((x) => x.quantity === 'promo_on')!;
+    for (const x of unitless.quantities) if (x.id === 'promo_on' || x.id === set2.to) x.unit = '1';
+    Object.assign(unitless.quantities.find((x) => x.id === set2.to)!, { value: 1, low: -1, high: 3, range_kind: 'bounds' });
+    const ranged = nodeOf(projected(unitless, CLUB_BRIEF), 'promotion').interventions.promo_on;
+    expect(ranged.display_value).not.toMatch(/use/);
+    expect(ranged.display_value).toBe(ranged.display);
+  });
+
+  it('r3 7: a total a risk acts on keeps its card, so the risk\'s multiplying is said of the total, never as a sign on the aim', () => {
+    const s = saved('capacity-s4.saved.json');
+    const m = structuredClone(s.model);
+    m.quantities.push(q('halve_chance', '1', { kind: 'coefficient', value: 1 }), q('halve', '1', { kind: 'coefficient', value: 0.5 }));
+    m.risks.push({ id: 'halve_risk', label: 'Halved', occurrence: 'halve_chance', severity: 'halve', effect_on: 'additional_capacity', mode: 'multiply', starts_after_periods: 0, author: 'person', quote: 'halved', ...at });
+    const p = projected(m, s.brief);
+    expect(lostIn(p)).toEqual([]);
+    expect(nodeOf(p, 'additional_capacity')).toMatchObject({ id: 'additional_capacity' });
+    expect(edgesOf(p).filter((e) => e.from === 'halve_risk').map((e) => [e.to, e.effect_mode])).toEqual([['additional_capacity', 'multiply']]);
+  });
+
   it('r2 9: a total shared through a worked-out link size is said in every aim it reaches', () => {
     const s = saved('capacity-s4.saved.json');
     const m = structuredClone(s.model);
     m.quantities.push(q('shared_rate', 'ticket/week', { kind: 'coefficient', status: 'derived', author: 'olumi' }), q('zero_x', 'ticket/week', { value: 0, author: 'structure' }),
-      q('x_out', 'ticket/week', { kind: 'derived', status: 'derived', author: 'olumi' }), q('x_target', 'ticket/week', { value: 5 }));
+      q('x_out', 'ticket/week', { kind: 'derived', status: 'derived', author: 'olumi' }), q('x_target', 'ticket/week', { value: 5 }), q('x_share', '1', { value: 0.5 }));
     m.relations.push({ form: 'definition', id: 'shared_rel', defines: 'shared_rate', op: 'sum', parts: [{ id: 'additional_capacity', sign: 1 }, { id: 'existing_capacity', sign: 1 }], author: 'olumi', quote: null, ...at },
-      { form: 'effect', id: 'x_rel', defines: 'x_out', base: 'zero_x', terms: [{ driver: 'additional_specialists', coefficient: 'shared_rate', author: 'olumi', quote: null, ...at }], author: 'olumi', quote: null, ...at });
+      { form: 'effect', id: 'x_rel', defines: 'x_out', base: 'zero_x', terms: [{ driver: 'x_share', coefficient: 'shared_rate', author: 'olumi', quote: null, ...at }], author: 'olumi', quote: null, ...at });
     m.goals.push({ ...structuredClone(m.goals[0]!), id: 'x_goal', label: 'X', measure: { ...structuredClone(m.goals[0]!.measure!), quantity: 'x_out', target: 'x_target' } });
     const p = projected(m, s.brief);
     expect(lostIn(p)).toEqual([]);

@@ -354,7 +354,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       // Its own label and words, so the card says the setting whether or not the set quantity has a card of its own (Q1, 28 Oct).
       const set = Q.get(s.quantity);
       // Words only for an explicit switch (structure-authored, 0 or 1); never a person's or Olumi's share that happens to be 0 or 1 (PL 03:12Z).
-      const onOff = set !== undefined && set.author === 'structure' && (set.unit === '1' || set.unit === '') && (set.value === 0 || set.value === 1) && (to?.value === 0 || to?.value === 1);
+      // An exact setting only: a range around 0 or 1 is said as its range, never as "In use" (PL 03:58Z).
+      const onOff = set !== undefined && set.author === 'structure' && (set.unit === '1' || set.unit === '') && (set.value === 0 || set.value === 1) && (to?.value === 0 || to?.value === 1)
+        && !(has(to?.low) && has(to?.high) && to!.low !== to!.high);
       if (to) interventions[s.quantity] = { value: to.value, unit: to.unit, display: display(to), display_value: onOff ? (to.value === 1 ? 'In use' : 'Not in use') : display(to),
         label: set?.label ?? s.quantity, from_period: s.starts_after_periods, ...(starts ? { from_period_display: display(starts) } : {}), ...settingSource(to, o) };
     }
@@ -587,8 +589,13 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const optionsSetting = (id: string) => model.options.filter((o) => o.sets.some((s) => s.quantity === id)).map((o) => o.id).sort();
   /** Each option's setting of a switch turns it up from where it stands, so the option's link keeps the switch link's sign and
    *  size; one that turns it down (or holds it) keeps the switch its card (Codex r2 #3875 8). */
-  const turnsUp = (q: CanonicalQuantityT) => model.options.every((o) => o.sets.every((s) => s.quantity !== q.id
-    || (has(s.to) && has(Q.get(s.to)?.value) && Q.get(s.to)!.value! > q.value!)));
+  const turnsUp = (q: CanonicalQuantityT) => model.options.every((o) => o.sets.every((s) => {
+    if (s.quantity !== q.id) return true;
+    const to = has(s.to) ? Q.get(s.to) : undefined;
+    // Its whole setting above where the switch stands: a range reaching down to it or below could lower what it moves (Codex r3 6).
+    const lowest = to === undefined ? null : has(to.low) && has(to.high) ? Math.min(to.low, to.high, to.value ?? Infinity) : to.value;
+    return has(lowest) && lowest > q.value!;
+  }));
   const switches = new Map(model.quantities.filter((q) => q.author === 'structure' && q.status === 'known' && q.kind === 'fact' && controlled.has(q.id) && has(q.value)
     && !(has(q.low) && has(q.high) && q.low !== q.high) && foldable(q) && turnsUp(q)).map((q) => [q.id, optionsSetting(q.id)[0]!] as const));
   /** A structural constant (a zero base, a unit conversion): arithmetic the model's form needs, never a lever. */
@@ -602,7 +609,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     return q.author === 'olumi' && q.status === 'derived' && q.kind === 'derived' && !controlled.has(q.id) && foldable(q) && r !== undefined
       && (r.form === 'definition' || (r.form === 'effect' && isConstant(Q.get(r.base)) && Q.get(r.base)!.value === 0));
   };
-  const totals = new Map(model.quantities.filter(isTotal)
+  // A total a risk acts on keeps its card: how the risk moves the aim depends on the total's own sign (Codex r3 7).
+  const totals = new Map(model.quantities.filter((q) => isTotal(q) && !model.risks.some((k) => k.effect_on === q.id))
     .flatMap((q) => { const aim = [...goalUpstream].filter(([, up]) => up.includes(q.id)).map(([g]) => g).sort()[0]; return aim === undefined ? [] : [[q.id, aim] as const]; }));
   /** A constant used only inside totals goes with them: said in the aim's workings, with no link of its own. */
   const constants = new Map(model.quantities.filter((q) => isConstant(q) && model.relations.some((r) => partsOf.get(r.defines)?.includes(q.id))
