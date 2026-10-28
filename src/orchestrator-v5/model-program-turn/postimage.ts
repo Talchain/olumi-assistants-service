@@ -73,7 +73,7 @@ export const GROUPS: Readonly<Record<Family, Readonly<Record<string, string>>>> 
 
 export type PostimageResult =
   | { readonly ok: true; readonly model: CanonicalModelT; readonly changes: readonly ProposalChange[] }
-  | { readonly ok: false; readonly code: 'schema' | 'duplicate_id' | 'moved_record' | 'omitted_record' | 'removal_not_applied' | 'unknown_removal' | 'recycled_id'
+  | { readonly ok: false; readonly code: 'schema' | 'duplicate_id' | 'moved_record' | 'omitted_record' | 'removal_not_applied' | 'unknown_removal' | 'person_figure_removal' | 'recycled_id'
     | 'unverified_person_words' | 'unshown_change' | 'invalid_change_entry' | 'no_change'; readonly reason: string; readonly ids: readonly string[];
     /** Which words check refused it: their words anywhere, or this turn's (a figure of theirs that changes). */
     readonly check?: 'their_words' | 'this_turn' };
@@ -163,6 +163,12 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
   const removals = new Set(opts.removals);
   const unknown = [...removals].filter((id) => !FAMILIES.some(([f]) => baseIn.get(f)!.has(id)));
   if (unknown.length > 0) return refuse('unknown_removal', unknown, `Nothing in the model has the id ${unknown.join(', ')} to remove.`);
+  // Paul, 28 Oct (his "drastically streamline" card removed his 400 customers and 3% churn): a change never removes a figure
+  // the person gave, in their own words. It can be changed with a new figure of theirs; a simpler model keeps it.
+  const theirs = base.quantities.filter((q) => removals.has(q.id) && q.author === 'person' && typeof q.quote === 'string' && q.quote.trim() !== ''
+    && (q.value != null || q.low != null || q.high != null));
+  if (theirs.length > 0) return refuse('person_figure_removal', theirs.map((q) => q.id), `${theirs.map((q) => `"${q.label}" (in their words "${q.quote}")`).join(' and ')} `
+    + `${theirs.length > 1 ? 'are' : 'is'} the person's own; a change never removes their figure. Keep it in the model; only a new figure from them changes it.`);
   const omitted = FAMILIES.flatMap(([f]) => [...baseIn.get(f)!].filter((id) => !removals.has(id) && !idsOf(post, f).includes(id)));
   if (omitted.length > 0) return refuse('omitted_record', omitted, `The proposed model leaves out ${omitted.join(', ')} without a listed removal; nothing is removed unless the person asks.`);
   const kept = [...removals].filter((id) => FAMILIES.some(([f]) => baseIn.get(f)!.has(id) && idsOf(post, f).includes(id)));
