@@ -221,7 +221,7 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
     const leftOut = (r: Rec) => [String(r['why']),
       ...(typeof r['question'] === 'string' ? [`Olumi asks: “${r['question']}”`] : []),
       ...(Array.isArray(r['concerns']) && r['concerns'].length > 0 ? [`It concerns ${(r['concerns'] as string[]).map(now.named).join(' and ')}`] : []),
-      ...(typeof r['quote'] === 'string' ? [typeof r['party'] === 'string' ? `${r['party']}’s words: “${r['quote']}”` : `Your words: “${r['quote']}”`]
+      ...(typeof r['quote'] === 'string' ? [typeof r['party'] === 'string' ? `From ${r['party']}, in your words: “${r['quote']}”` : `Your words: “${r['quote']}”`]
         : typeof r['party'] === 'string' ? [`From ${r['party']}`] : [])]
       .reduce((said, part) => `${said}${/[.!?]$/.test(said) ? ' ' : '. '}${part}`);
     // A whole item added or removed: its name is the card's label and whose it is (theirs or Olumi's) the card's mark, so
@@ -380,7 +380,9 @@ function wordsIn(m: CanonicalModelT) {
     return sign(([at('value') ?? none, ...(ends === '' ? [] : [ends])].filter((x) => x !== '').join(', ') + reading).trim());
   };
   /** Whose words an item is in: the person's own, or someone they report, by name. */
-  const words = (r: Rec) => (typeof r['quote'] === 'string' ? `in ${typeof r['party'] === 'string' ? `${r['party']}’s` : 'your'} words "${r['quote']}"`
+  // W8 faithful (dev H03, R3/R5: "in CFO’s words" over the person's own sentence about the CFO): a quote is always the person's
+  // own words (C6 checks it against what they wrote); a party is whom they report, named first ("from our supplier").
+  const words = (r: Rec) => (typeof r['quote'] === 'string' ? `${typeof r['party'] === 'string' ? `from ${r['party']}, ` : ''}in your words "${r['quote']}"`
     : typeof r['party'] === 'string' ? `said by ${r['party']}` : 'not in your words');
   const measured = (r: Rec, say: (mm: Rec) => string) => (isRec(r['measure']) ? say(r['measure']) : 'no measure yet');
   const reference = (ref: unknown) => (!isRec(ref) || ref['kind'] === 'now' ? 'now' : ref['kind'] === 'option' ? `"${named(String(ref['option']))}"` : timed(String(ref['quantity'])));
