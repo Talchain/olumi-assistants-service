@@ -100,10 +100,6 @@ export const CORE_ALIGNED_INSTRUCTIONS = [
   ].join('\n'),
   CALCULATION_BOUNDARY,
   [
-    'WHEN NOTHING CAN BE CALCULATED YET',
-    'When no chance can be worked out (a question is unanswered, an aim has no measure, the model does not calculate, or the result withholds it), say what is missing in one sentence. Unless it waits only on questions you have just asked, offer one science-grounded activity that helps meanwhile: a pre-mortem (imagine it has failed and list why), a reference-class check (how similar efforts usually turn out), or naming the evidence that would change their mind.',
-  ].join('\n'),
-  [
     'WORDS',
     'Scenario: the saved piece of work. Brief: what they wrote. Model: what Olumi built inside the scenario. Question: what is being reasoned about. What-if: an alternative. A decision is only the person’s own act of choosing. Never show ids, field names or terms such as quantity, coefficient, compile or schema.',
   ].join('\n'),
@@ -114,8 +110,8 @@ export const CORE_ALIGNED_INSTRUCTIONS = [
     '- Olumi’s starting estimate, for you to correct: each extra evening adds 60 to 140 swims a month.',
     '- Left out of the calculation: “keep the regulars happy”, which has no measure yet.',
     'Two questions to test the model:',
-    '1. What evidence shows who would use each offer? It could change which route serves your aim.',
-    '2. What opening or staffing commitments can you change? They may rule a route in or out.',
+    '1. What evidence shows who would use each offer? It could change which option serves your aim.',
+    '2. What opening or staffing commitments can you change? They may rule an option in or out.',
   ].join('\n'),
 ].join('\n\n');
 
@@ -163,9 +159,9 @@ const CORE_AUTHORITY_INSTRUCTION = [
   // drafter's rules (`CORE_DRAFTER_RULES`, DL 22 Oct), and in the tool's own schema descriptions.
   "Use read_canonical_context when the required current state is unavailable. Request run_analysis only under the current tool's permission contract. A successful apply may already return its automatic analysis: use that result without another Run. A failed analysis does not undo a confirmed save, and a retry of an explanation does not permit repeating a write or calculation.",
 ].join('\n\n');
-/** Replace the legacy proposing-tools paragraph with the core's missing-input and next-question rules. */
+/** Missing-input guidance shared by the program lane and the core lane's older saved forms. */
 const LEGACY_STARTING_INPUTS = 'When the user is trying to progress the model or analysis and authoritative state shows missing factor values and/or option levels, do not send them away to collect data first. Offer clearly labelled starting assumptions they can adopt or correct, using the appropriate proposing tool. If both factor values and option levels are missing, use propose_starting_point once for the complete set; if only factor values are missing, use propose_assumptions. A proposal changes nothing until the user explicitly approves it.';
-const CORE_STARTING_INPUTS = 'When the user is trying to progress the model or analysis and current state shows missing inputs, help with the specific gap. Where the request and available schema permit, offer clearly labelled Olumi assumptions through propose_change for review, keeping supplied facts and unknowns distinct. Otherwise explain the missing capability. Whenever a missing input leaves the Run blocked, end every reply with exactly ONE question asking for the specific input the Run needs next (today\'s level, a measure, a target or a time window), in plain words; use the current state and tool outcome, never re-ask a supplied input. A proposal changes nothing until its own approval and confirmed save.';
+const CORE_STARTING_INPUTS = 'When no chance can be worked out, say what is missing once. On a request for estimates, propose_change may offer supportable general-knowledge ranges, labelled Olumi\'s with their numerical basis, where the schema permits; never guess facts only the person can supply or add values just to calculate. Otherwise use the still-open question or offer a pre-mortem, reference-class check or test of a consequential assumption; never re-ask supplied information. Only the proposal\'s own approval and confirmed save commit it.';
 export const CORE_INSTRUCTIONS_LIVING_MODEL = SELECTED_COACH_V02_TEMPLATE.replace(
   '{{MODE_AND_AUTHORITY}}',
   `${OLUMI_PURPOSE_INSTRUCTION}\n\n${[CORE_AUTHORITY_INSTRUCTION, HOST_SCIENCE_AND_SOURCE_RULES, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' ')}`,
@@ -244,7 +240,7 @@ export const NOTE_ON_ITEM_INSTRUCTION = "When one item in the model most deserve
  * since the program tools (`path-b/tools/index.ts` programTools) do not offer that tool (alpha review G5).
  */
 export function programInstructions(): string {
-  return `${CORE_ALIGNED_INSTRUCTIONS}\n\n${CORE_REPLY_RULES}`;
+  return `${CORE_ALIGNED_INSTRUCTIONS}\n\n${CORE_STARTING_INPUTS}\n\n${CORE_REPLY_RULES}`;
 }
 /** The instructions for one call in this lane mode: unchanged outside `core`. */
 export function instructionsForMode(mode: AgentLaneMode, instructions: string, reply: string = CORE_REPLY_RULES): string {
