@@ -436,7 +436,13 @@ function wordsIn(m: CanonicalModelT) {
         const point = given !== undefined && given['low'] == null && given['high'] == null && (given['value'] === 0 || given['value'] === 1) ? given['value'] : undefined;
         const onOff = point !== undefined && target !== undefined && unitWords(target.unit) === '' && (target.value === 0 || target.value === 1)
           && (target.ceiling === 1 || target.author === 'structure');
-        const to = onOff ? (point === 1 ? 'yes' : 'no') : given !== undefined ? figure(given) : timed(String(x['to']));
+        // W8 run 3 (qualitative, no reading card: unshown_change on `sets.0.to`): an own setting with no figure yet keeps its
+        // own row (it asks its question there, `foldedInto`), and this line says it is still to be given or not known yet.
+        // Said as "no figure yet", it read the same as a setting given on this line, so the card could not show `to`.
+        const open = own !== undefined && own['value'] == null && own['low'] == null && own['high'] == null
+          ? (own['status'] === 'asked' ? 'still to be given' : own['status'] === 'unknown' ? 'not known yet' : null) : null;
+        const to = onOff ? (point === 1 ? 'yes' : 'no') : open !== null ? figure(own!).replace(/^no figure yet/, `a figure ${open}`)
+          : given !== undefined ? figure(given) : timed(String(x['to']));
         return `sets ${nm(x['quantity'])} to ${to} ${start(x['starts_after_periods'] as number | string)}${typeof x['question'] === 'string' ? `, Olumi asks "${x['question']}"` : ''}`
           + `${x['author'] === 'structure' ? `, as ${WHO_WORDS['structure']}` : x['author'] !== r['author'] ? `, as ${of(WHO_WORDS, x['author'])}` : ''}`
           + `${x['quote'] === r['quote'] ? '' : typeof x['quote'] === 'string' ? `, in your words "${x['quote']}"` : x['author'] === 'structure' ? '' : ', not in your words'}`;

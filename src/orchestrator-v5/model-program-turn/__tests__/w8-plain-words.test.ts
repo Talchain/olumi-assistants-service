@@ -62,6 +62,21 @@ describe('W8 c7: the words a person reads, at their producers', () => {
     expect(card().some((c) => c.id === 'hire__extra_mechanics')).toBe(false);
   });
 
+  it('card, W8 run 3 (no reading card: unshown_change on sets.0.to): an option whose own setting is still asked shows on the card; its question is said once, on the setting\'s own row', () => {
+    // Olumi's option sets a figure to its OWN setting (`inlineQuantityId`), which has no figure yet and asks the person for it.
+    const m = shop();
+    const own = q('share__extra_mechanics', 'mechanic', { author: 'olumi', status: 'asked', question: 'How many mechanics could you share with the other branch?' });
+    const share = { ...m.options[0]!, id: 'share', label: 'Share a mechanic', author: 'olumi' as const, quote: null, developed_from: 'hire',
+      sets: [{ ...m.options[0]!.sets[0]!, to: 'share__extra_mechanics', value: null, author: 'olumi' as const, quote: null }] };
+    const v = readingOf({ ...m, quantities: [...m.quantities, own], options: [...m.options, share] } as CanonicalModelT, { words: [BRIEF], approver: null });
+    expect(v.ok ? 'ok' : `${v.code} ${JSON.stringify(v.ids)}`).toBe('ok');
+    if (!v.ok) return;
+    expect(v.changes.find((c) => c.id === 'share')?.after).toBe('a variant of "Hire one mechanic", sets "extra mechanics" to a figure still to be given (in mechanics) from the start');
+    // Asked, it keeps its own row (`foldedInto`), which asks the question; the option's line does not ask it again.
+    const asks = v.changes.filter((c) => (c.after ?? '').includes('How many mechanics could you share'));
+    expect(asks.map((c) => c.id)).toEqual(['share__extra_mechanics']);
+  });
+
   it('card, c7.1 and c7.7: a worked-out figure is one line with its relation, said as a short sentence by name, never "X is Y 0 multiplied by Z"', () => {
     const labels = card().map((c) => c.label);
     expect(labels.filter((l) => l === 'total jobs')).toHaveLength(1);
