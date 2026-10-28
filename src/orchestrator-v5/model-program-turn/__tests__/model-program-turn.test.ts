@@ -1639,7 +1639,7 @@ describe('the model-program turn on the real core route', () => {
     });
 
     it('C8 (PL 02:18Z): a guest\'s ticked rows that saved with no version, then lost the reply, are that save, found by its own registration row; never a second write (contrast: with no row read, unknown)', async () => {
-      const card = await drafted();
+      await drafted();
       const held = agentProposalOf([...turnRows.values()].at(-1).pending_actions[0])!;
       const proposals = new ProposalStore();
       proposals.put(held);
@@ -1748,7 +1748,8 @@ describe('the model-program turn on the real core route', () => {
       .toEqual({
         more_loaves: '"sales" at least "sales target" 380 loaves per week, no deadline set, the measure you named, in your words "want to reach 380 loaves a week"',
         within_budget: '"spend" at most "budget" £3,000, no deadline set, in your words "We have £3,000 to spend"',
-        second_oven: 'sets "ovens added" to "one oven" 1 oven from the start, in your words "A second oven"',
+        // W8 run 4 (c7.1): its words are its label, "A second oven", so they are theirs without being quoted twice.
+        second_oven: 'sets "ovens added" to "one oven" 1 oven from the start, in your words',
         keep_one: 'carries on as now, in your words "keep our one oven"',
         sold_rel: 'worked out as "extra per oven" multiplied by "sell through", in loaves per oven per week',
         sales_rel: 'starts from "base sales" and changes by "sold per oven" for each "ovens added", link 1 is yours, in your words "A second oven adds about 100 loaves a week", in loaves per week',
@@ -1757,6 +1758,32 @@ describe('the model-program turn on the real core route', () => {
         oven_price: 'no figure yet (in £ per oven), Olumi asks "What would the second oven cost?"',
         sales: undefined,
       });
+  });
+
+  it('W8 run 4 (c7.1 said once, c7.3): a changed name is not said again after the row\'s own label; words that are the label are not quoted twice; a rate unit reads "(per week)"; every change still shows', () => {
+    const words = [BRIEF];
+    const base = bakery();
+    base.assumptions.push({ id: 'oven_lasts', text: 'The oven lasts five years.', applied: false, concerns: [], author: 'olumi', quote: null, ...at });
+    const v0 = validatePostimage(bakery(), base, { removals: [], words, fresh: words });
+    expect(v0.ok, JSON.stringify(v0)).toBe(true);
+    const saved = (v0 as { model: CanonicalModelT }).model;
+    const rows = (m: CanonicalModelT) => { const v = validatePostimage(saved, m, { removals: [], words, fresh: words }); return v.ok ? v.changes.map((c) => [c.label, c.before, c.after]) : v; };
+    // Reworded alone (EUR-1.9 "→ worded" its own heading): the label is the new words, the before side the old.
+    const reworded = JSON.parse(JSON.stringify(saved)) as CanonicalModelT;
+    reworded.assumptions.find((a) => a.id === 'oven_lasts')!.text = 'The oven lasts eight years.';
+    expect(rows(reworded)).toEqual([['The oven lasts eight years.', 'worded "The oven lasts five years."', null]]);
+    // Reworded beside another change: the after side says only the other change.
+    reworded.assumptions.find((a) => a.id === 'oven_lasts')!.applied = true;
+    expect(rows(reworded)).toEqual([['The oven lasts eight years.', 'worded "The oven lasts five years.", not applied in the model', 'applied in the model']]);
+    // A risk named in their own words (QUA-1.3): theirs, not quoted a second time.
+    const risky = JSON.parse(JSON.stringify(saved)) as CanonicalModelT;
+    risky.risks.push({ id: 'lose_oven', label: 'keep our one oven', occurrence: 'sell_through', severity: 'extra_per_oven', effect_on: 'sales', mode: 'add', starts_after_periods: 0, author: 'person', quote: 'keep our one oven', ...at });
+    const [risk] = rows(risky) as string[][];
+    expect([risk![0], risk![2]!.endsWith(', in your words'), risk![2]!.includes('keep our one oven')]).toEqual(['keep our one oven', true, false]);
+    // A figure still to be given whose unit is a rate (QUA-3.9 "(in per week)").
+    const rate = JSON.parse(JSON.stringify(saved)) as CanonicalModelT;
+    rate.quantities.push(q('repairs', '1/week', { status: 'asked', question: 'How often does the oven need repair?', author: 'olumi' }));
+    expect((rows(rate) as string[][]).map((r) => r[2])).toEqual(['no figure yet (per week), Olumi asks "How often does the oven need repair?"']);
   });
 
   it('the card in plain words (DL 24 Oct): a change to any one field of any item is said, before and after, in words (every group covered); a field that cannot change the words is refused', () => {
