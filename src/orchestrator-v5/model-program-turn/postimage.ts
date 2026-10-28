@@ -235,12 +235,23 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
     const phrase = (fields: ReturnType<typeof said>, side: 'old' | 'now', r: Rec, whole: boolean) =>
       [...new Set([...(family === 'options' && whole && Array.isArray(r['sets']) && r['sets'].length === 0 ? ['carries on as now'] : []),
         ...fields.filter((x) => !(whole && onCard(x, r))).map((x) => x[side])].filter((x) => x !== ''))].join(', ');
+    // W8 run 4 (c7.1, said once: "→ worded" the row's own heading; a risk named in their words, then "in your words" the same
+    // words): the row's label is the item's name as it now stands, so the side that ends there does not say it again. A changed
+    // name keeps its old words on the before side ("(was: named …)" when nothing else changed); words that are the label are
+    // said as theirs without being quoted twice. Words only: the validator's per-group checks above are untouched.
+    const unrepeated = (fields: ReturnType<typeof said>, side: 'old' | 'now', r: Rec, label: string, renamed: boolean) => fields.map((x) =>
+      renamed && x.group === 'name' && (x[side] === `named "${label}"` || x[side] === `worded "${label}"`) ? { ...x, [side]: '' }
+        : x.group === 'words' && r['quote'] === label && x[side].endsWith(` "${label}"`) ? { ...x, [side]: x[side].slice(0, -(label.length + 3)) } : x);
     // W3b: each row says its family, a fixed part of the structure as such, and a figure still to be given as asked.
-    const entry = (id: string, action: ProposalChange['action'], fields: ReturnType<typeof said>, label: string, author: ProposalChange['author'], r: Rec): ProposalChange => ({ id, kind, action, label,
-      before: action === 'add' ? null : phrase(fields, 'old', r, action === 'remove'),
-      after: action === 'remove' ? null : action === 'add' && family === 'left_out' ? leftOut(r) : phrase(fields, 'now', r, action === 'add'), author,
-      family: ROW_FAMILY[family], ...(r['author'] === 'structure' ? { structure: true as const } : {}),
-      ...(family === 'quantities' && r['status'] === 'asked' ? { asked: true as const } : {}) });
+    const entry = (id: string, action: ProposalChange['action'], fields: ReturnType<typeof said>, label: string, author: ProposalChange['author'], r: Rec): ProposalChange => {
+      const after = action === 'change' ? phrase(unrepeated(fields, 'now', r, label, true), 'now', r, false) : null;
+      return { id, kind, action, label,
+        before: action === 'add' ? null : phrase(action === 'remove' ? unrepeated(fields, 'old', r, label, false) : fields, 'old', r, action === 'remove'),
+        after: action === 'remove' ? null : action === 'add' && family === 'left_out' ? leftOut(r) : action === 'add' ? phrase(unrepeated(fields, 'now', r, label, false), 'now', r, true)
+          : after === '' ? null : after, author,
+        family: ROW_FAMILY[family], ...(r['author'] === 'structure' ? { structure: true as const } : {}),
+        ...(family === 'quantities' && r['status'] === 'asked' ? { asked: true as const } : {}) };
+    };
     const records = (post[family] as readonly Rec[]).map((r) => {
       const old = before.get(String(r['id']));
       const fields = said(String(r['id']), old, r);
@@ -363,7 +374,9 @@ function wordsIn(m: CanonicalModelT) {
     if (at('low') !== null && at('high') !== null) return sign(`from ${between(r['low'] as number, r['high'] as number, r['unit'])}${at('value') !== null ? `, most likely ${bare('value')}` : ''}${reading}`);
     const ends = [...(at('low') !== null ? [`no lower than ${at('low')}`] : []), ...(at('high') !== null ? [`no higher than ${at('high')}`] : [])].join(', ');
     // A worked-out figure has no figure of its own to give: only its unit.
-    const none = r['status'] === 'derived' ? (u === '' ? '' : `in ${u}`) : `no figure yet${u === '' ? '' : ` (in ${u})`}`;
+    // W8 run 4 (c7.3, "no figure yet (in per week)"): a unit that is itself a rate is said as one ("per week").
+    const inU = u.startsWith('per ') ? u : `in ${u}`;
+    const none = r['status'] === 'derived' ? (u === '' ? '' : inU) : `no figure yet${u === '' ? '' : ` (${inU})`}`;
     return sign(([at('value') ?? none, ...(ends === '' ? [] : [ends])].filter((x) => x !== '').join(', ') + reading).trim());
   };
   /** Whose words an item is in: the person's own, or someone they report, by name. */
