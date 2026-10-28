@@ -34,7 +34,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   });
 
   it('ALPHA: the model-program prompt, each section once, the purpose once and the reply rules last; the coach template and the Living Model host rules are gone', () => {
-    for (const h of ['HOW THE MODEL WORKS', 'FIRST MODEL', 'ANSWERS AND CHANGES', 'RESULTS', 'CALCULATION BOUNDARY', 'WHEN NOTHING CAN BE CALCULATED YET', 'WORDS',
+    for (const h of ['HOW THE MODEL WORKS', 'FIRST MODEL', 'ANSWERS AND CHANGES', 'RESULTS', 'CALCULATION BOUNDARY', 'WHEN NOTHING CAN BE CALCULATED YET', 'COACHING', 'WORDS',
       'EXAMPLE (a first model; synthetic)']) expect(count(b, `\n\n${h}\n`), h).toBe(1);
     for (const part of [OLUMI_PURPOSE_INSTRUCTION, CORE_REPLY_RULES]) expect(count(b, part)).toBe(1);
     expect(b.endsWith(CORE_REPLY_RULES)).toBe(true);
@@ -56,7 +56,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(b).not.toContain(NOTE_ON_ITEM_INSTRUCTION);
     expect(b.endsWith(CORE_REPLY_RULES)).toBe(true);
     // 23 Oct (ALPHA): the model-program prompt replaces arm B's assembled reference (055841368f…, 29,512 characters sent).
-    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('c545b8a10e980348185bcf71110676e039f06828897c0a47370e9d0f09000327'); // 27 Oct: round 3 (Paul approved): first-model questions are coaching_questions in drafted order (the cap is the schema's); the approval/Run sentences are the tools' own; a non-current Run said in RESULTS; before it 1c0f7685…. 27 Oct: round 2, the consolidation (DL): RESULTS is the single Run-reporting owner, the first-model questions take coaching_questions then item questions in order, the reply rules shortened; before it e1e01c5e…. 27 Oct: round 1, the first-model questions lead with the premise that could change the comparison (DL). 27 Oct: T1, each caveat once per conversation and no "not a recommendation" disclaimer. 26 Oct: integrated review words#7, the "on Olumi’s reading of …" basis. 25 Oct: alpha G10, no threshold sentences. 25 Oct: alpha G5, no note_on_item sentence on the program path. 24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
+    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('044375354194eb0459355ac5b84dc7508fcd2dc53e5fe177c582d2c54b30d110'); // 28 Oct: Q2 COACHING (five moves, one question a reply, each naming its card, said once) and C1 (the comparison in words when nothing calculates), contract r2 with the PL's 16:20 C1 wording; before it c545b8a1…. 27 Oct: round 3 (Paul approved): first-model questions are coaching_questions in drafted order (the cap is the schema's); the approval/Run sentences are the tools' own; a non-current Run said in RESULTS; before it 1c0f7685…. 27 Oct: round 2, the consolidation (DL): RESULTS is the single Run-reporting owner, the first-model questions take coaching_questions then item questions in order, the reply rules shortened; before it e1e01c5e…. 27 Oct: round 1, the first-model questions lead with the premise that could change the comparison (DL). 27 Oct: T1, each caveat once per conversation and no "not a recommendation" disclaimer. 26 Oct: integrated review words#7, the "on Olumi’s reading of …" basis. 25 Oct: alpha G10, no threshold sentences. 25 Oct: alpha G5, no note_on_item sentence on the program path. 24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
     // Candidate-3 witness kept (21 Oct): WHEN to build. Text only, not behaviour.
     expect(b).toContain('draft the first model from their brief in that same turn, even when figures are missing');
   });
@@ -145,25 +145,43 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       "1. What Olumi understood, in two to four short lines: the question, goals, limits, options and main figures, plus what was left out of the calculation and why.",
       // Round 1 (DL 27 Oct): the first question is chosen by what could change the comparison, never by what unblocks the arithmetic.
       // Round 3 (27 Oct): the drafted coaching_questions, in order; the schema caps them at three and the drafter selects them.
-      '2. Present coaching_questions in their drafted order as one numbered list; briefly explain each question\'s purpose without claiming measured sensitivity. On later turns, use the still-open questions in that order.',
+      // Q2 (28 Oct, contract r2): each names the card it is about; later turns follow COACHING (the drafted order no longer binds them).
+      '2. Present coaching_questions in their drafted order as one numbered list, each naming the card it is about; briefly explain each question\'s purpose without claiming measured sensitivity. Later turns follow COACHING.',
       'Lead with the answer in one plain sentence, then at most three short bullets. Stay within about 130 words; a first model\'s summary and questions may take what they need.',
-      // 2. a chance as the Run records it, what it rests on, the limit lines, and ONE next step
+      // 2. a chance as the Run records it, what it rests on, the limit lines, and at most one next step (COACHING's, Q2 28 Oct)
       // Round 2 (27 Oct): RESULTS is the single Run-reporting owner (the tool descriptions no longer repeat it).
       'A non-current Run describes an earlier model: say so. Report only the current Run\'s recorded figures and words: each option\'s chance or reason none is shown, goal, target, horizon and basis; each goal\'s words and options[].display; the joint chance or reason it waits; notes, limits and unchecked limits. Preserve its \'if\', unconfirmed Olumi readings and exclusions without turning them into forecasts. Give run.options[].driver\'s measured sensitivity when present; precision_95 describes simulation precision, not uncertainty in the chance, and is shown only if asked. Name a leader only from run.leader.option_id, using its option label; otherwise give run.leader.words, or say the Run names none. Never round, combine or rank results yourself. On later turns report only what changed; add no extra disclaimer.',
-      'Then give ONE next step: replace an Olumi estimate the chance rests on with their own figure, or test the assumption the result rests on. Call an input the one that matters most only when the result measured that.',
+      'Then give at most one next step, as COACHING says.',
       // 3. edits in chat, only what they ask; a what-if is not an edit. Round 2 (27 Oct): a loose figure is the drafter's and the schema's
       // (an approximate point, never endpoints made from it; a range asked when it feeds a goal or limit), pinned in the drafter row.
       'The person may answer or request changes in chat; use the edit tools and change only what they ask. If an answer\'s destination is unclear, ask which item they mean.',
       'A what-if is not an edit: explain the current result and offer to calculate changed values. On a request for ideas, offer Olumi additions; add them only when asked.',
       // Round 3 (27 Oct): when to Run is run_analysis's own description (pinned below).
       'Use the result a saved change returns.',
-      // 4. nothing calculable: what is missing in one sentence, and a science-grounded activity
-      'say what is missing in one sentence. Unless it waits only on questions you have just asked, offer one science-grounded activity that helps meanwhile: a pre-mortem (imagine it has failed and list why), a reference-class check (how similar efforts usually turn out), or naming the evidence that would change their mind.',
+      // 4. nothing calculable: what is missing in one sentence, then (C1, Paul approved 28 Oct) the comparison in words from the saved
+      // model only, with no chance, ranking, recommendation or evidence it does not hold; a coaching move may still help.
+      'say what is missing in one sentence. Then compare the options in words, from the saved model only: briefly, for each option, what supports it reaching the aim and what works against it, with its risks, any disagreement and what is unknown; then the evidence or figures needed to make the affected part calculable, where the model supports that; say when figures alone cannot do so.',
+      'Give no chance, ranking or recommendation, and no evidence the model does not hold.',
+      'Unless it waits only on questions you have just asked, a coaching move may still help meanwhile.',
+      // 5. Q2 (Paul 28 Oct; contract r2): coaching is five named moves, each picked from what the model shows, one question a reply,
+      // naming its card, said once; a reply with no question is complete. Prompt only: no question-state store or filter.
+      'After the first model, ask at most one question a reply, last, and only when one of the reasons below applies. A reply with no question is complete; its answer, results and caveats stay.',
+      'Choose, from the current saved model, what could most change whether an option can reach the aim or how the options compare: a missing figure or fact that would change that, a still-open drafted question the model still shows a reason for, or one of these moves. A figure needed only for the arithmetic comes after them.',
+      '- Widen the options: only one or two options, or only opposites. Ask what other way could reach the aim.',
+      '- Outside view: the result rests on an estimate or link that looks optimistic or untested. Ask how similar efforts have turned out, or for their own figure.',
+      '- Pre-mortem: their own words or evidence in the model favour one option, or the model holds no risks. Ask them to imagine it has failed and say why. The Run\'s leading option is not their choice.',
+      '- What would change your mind: an unknown the comparison rests on. Ask what they would need to learn about it and why it could change the comparison; call it the one that matters most only when the Run measured that.',
+      '- Define success: an aim that is vague or has no measure. Ask what result would count as success, and by when.',
+      'Name the card the question is about, in the words it shows. In the question, never supply evidence, a base rate, an example or a figure of your own. Ask each question once: never one already asked or answered in this conversation; as the model changes, ask about what it now shows.',
       // the product rules: never a recommendation; the most likely option only where the result names one
       'Never recommend or choose an option for the user, and never call one "best", the "winner" or the one to "go with".',
     ]) expect(count(b, rule), rule.slice(0, 60)).toBe(1);
     // Round 1 (DL 27 Oct): the arithmetic-unblocking order is gone from the first-model questions.
     for (const old of ['the one that unblocks the most first', 'Only the questions that block a goal or a limit', 'the blocking ones first']) expect(b, old).not.toContain(old);
+    // Q2 (28 Oct, contract r2): the fixed later-turn order, the old next-step and activity sentences and the example's card-less
+    // questions are gone; COACHING says each once.
+    for (const old of ['On later turns, use the still-open questions in that order.', 'Then give ONE next step: replace an Olumi estimate',
+      'a reference-class check (how similar efforts usually turn out)', 'What evidence shows who would use each offer?']) expect(b, old).not.toContain(old);
     // Kept from the old reply rule, each once: what the reply must report of saves and approvals, and the AIE's scope rule (K3).
     // Round 2 (27 Oct, consolidation): the no-host-words and author sentences in their shortened words.
     for (const kept of ['The user reads exactly your words; the host adds or rewrites nothing.',
@@ -470,8 +488,9 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       "For a risk's chance and window, use supplied figures or, where reasonable, a labelled Olumi estimate under the estimate rule; if no reasonable estimate is possible, keep it unknown and say what is missing.",
       "An option acts through settings on factors or sized option-to-item links; retain either valid form without adding an artificial factor.",
     ];
-    // Round 2 (27 Oct, consolidation): the still-open questions are asked in the same order on later turns.
-    const question = 'On later turns, use the still-open questions in that order.';
+    // Round 2 (27 Oct, consolidation): the still-open questions survive on later turns. Q2 (28 Oct, contract r2): as one of
+    // COACHING's choices, while the current model still shows their reason, not in a fixed order.
+    const question = 'a still-open drafted question the model still shows a reason for';
     const firstTurn = `${b}\n\n${CORE_DRAFTER_RULES}`;
     for (const rule of [...draftRules, question]) expect(count(firstTurn, rule), rule).toBe(1);
     expect(count(b, question), 'the questions survive after the first model').toBe(1);
