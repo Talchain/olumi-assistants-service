@@ -288,7 +288,7 @@ describe('Q1 (Paul, 28 Oct: "the canvas shows the situation, not the arithmetic"
   // The first three rows are RED on 76dd7532's projection (the switch, the total and its zero were their own cards; an asked
   // figure read "Waiting for your answer") and GREEN with this change. The next two are guards that hold before and after
   // (a person's total is never folded; every saved board stays whole). The last five are Codex r1's counterexamples on
-  // f9b20b71 (B1-B5), each RED there and GREEN with its fix.
+  // f9b20b71 (B1-B5), each RED there and GREEN with its fix; then Codex r2's three on 4e0127ee (7-9), each RED there.
   const ids = (xs: Rec[]) => new Set(xs.map((x) => x.id as string));
   /** Every link joins two drawn cards, ids are once, and every record is a card or said on a drawn one. */
   const lostIn = (p: ReturnType<typeof project>) => {
@@ -309,6 +309,12 @@ describe('Q1 (Paul, 28 Oct: "the canvas shows the situation, not the arithmetic"
     const to = unitless.options.find((o) => o.id === 'promotion')!.sets[0]!.to!;
     for (const x of unitless.quantities) if (x.id === 'promo_on' || x.id === to) x.unit = '1';
     expect(nodeOf(projected(unitless, CLUB_BRIEF), 'promotion').interventions.promo_on).toMatchObject({ label: 'promo on', display_value: 'In use' });
+    // Contrast (PL 03:12Z): the same 0/1 setting on the person's own share is their figure, never "In use".
+    const share = club();
+    for (const x of share.quantities) if (x.id === 'promo_on' || x.id === to) Object.assign(x, { unit: '1', author: 'person', quote: 'we run it or we do not' });
+    const theirs = nodeOf(projected(share, CLUB_BRIEF), 'promotion').interventions.promo_on;
+    expect(theirs.display_value).not.toMatch(/use/);
+    expect(theirs.display_value).toBe(theirs.display);
     expect(edgesOf(p).filter((e) => e.from === 'promo_on' || e.to === 'promo_on')).toEqual([]);
     expect(edgesOf(p).find((e) => e.id === 'promotion__joins')).toMatchObject({ from: 'promotion', to: 'joins', coefficient_id: 'promo_effect' });
     // Contrast (right before, unchanged): a mechanism with a base level of its own ("joins") stays its card.
@@ -388,12 +394,55 @@ describe('Q1 (Paul, 28 Oct: "the canvas shows the situation, not the arithmetic"
     expect(edgesOf(p).filter((e) => e.from === 'dip').map((e) => [e.to, e.effect_direction, e.effect_mode, e.coefficient_id ?? null])).toEqual([['promo_on', 'negative', 'multiply', null]]);
   });
 
-  it('B5: an aim read per a worked-out figure says the totals folded off that figure too', () => {
+  it('B5: an aim read per a worked-out figure, or as a change from one, says the totals folded off that figure too', () => {
     const s = saved('capacity-s4.saved.json');
     const m = structuredClone(s.model);
-    m.goals.push({ ...structuredClone(m.goals[0]!), id: 'share_goal', label: 'Existing share', measure: { ...structuredClone(m.goals[0]!.measure!), quantity: 'existing_capacity', per: 'weekly_support_capacity' } });
+    const base = m.goals[0]!.measure!;
+    m.quantities.push(q('share_target', '1', { value: 0.5 }), q('gap_target', 'ticket/week', { value: 10 }));
+    m.goals.push({ ...structuredClone(m.goals[0]!), id: 'share_goal', label: 'Existing share', measure: { ...structuredClone(base), quantity: 'existing_capacity', per: 'weekly_support_capacity', target: 'share_target' } },
+      { ...structuredClone(m.goals[0]!), id: 'gap_goal', label: 'Above the whole', measure: { ...structuredClone(base), quantity: 'existing_capacity', frame: 'change_abs', target: 'gap_target',
+        reference: { kind: 'value', option: null, quantity: 'weekly_support_capacity' } } });
     const p = projected(m, s.brief);
-    expect(nodeOf(p, 'share_goal').value_basis).toMatchObject({ kind: 'worked_out', from: expect.arrayContaining(['additional_capacity']),
+    for (const g of ['share_goal', 'gap_goal']) expect(nodeOf(p, g).value_basis, g).toMatchObject({ kind: 'worked_out', from: expect.arrayContaining(['additional_capacity']),
       words: 'Additional specialist capacity: worked out from Additional capacity with no additional specialists and Additional specialists' });
+  });
+
+  it('r2 7: a constant a risk acts on keeps its card and its link on, so the risk still reaches the aim', () => {
+    const s = saved('capacity-s4.saved.json');
+    const m = structuredClone(s.model);
+    m.quantities.push(q('dent_chance', '1', { kind: 'coefficient', value: 1 }), q('dent', 'ticket/week', { kind: 'coefficient', value: -10 }));
+    m.risks.push({ id: 'dent_risk', label: 'A dent', occurrence: 'dent_chance', severity: 'dent', effect_on: 'zero_additional_capacity', mode: 'add', starts_after_periods: 0, author: 'person', quote: 'a dent of 10', ...at });
+    const p = projected(m, s.brief);
+    expect(lostIn(p)).toEqual([]);
+    expect(nodeOf(p, 'zero_additional_capacity')).toMatchObject({ id: 'zero_additional_capacity' });
+    // The zero is no longer a plain constant, so the total on it is no plain total either: the risk's whole path stays drawn.
+    expect(edgesOf(p).filter((e) => e.from === 'zero_additional_capacity').map((e) => e.to)).toEqual(['additional_capacity']);
+    expect(edgesOf(p).filter((e) => e.from === 'additional_capacity').map((e) => e.to)).toEqual(['weekly_support_capacity']);
+  });
+
+  it('r2 8: an option that turns a switch down keeps the switch its card; its link is never drawn as the switch\'s own positive size', () => {
+    const m = club();
+    const to = m.options.find((o) => o.id === 'promotion')!.sets.find((x) => x.quantity === 'promo_on')!.to!;
+    Object.assign(m.quantities.find((x) => x.id === 'promo_on')!, { value: 1 });
+    Object.assign(m.quantities.find((x) => x.id === to)!, { value: 0 });
+    const p = projected(m, CLUB_BRIEF);
+    expect(lostIn(p)).toEqual([]);
+    expect(nodeOf(p, 'promo_on')).toMatchObject({ id: 'promo_on' });
+    expect(edgesOf(p).filter((e) => e.from === 'promotion' && e.to === 'joins')).toEqual([]);
+  });
+
+  it('r2 9: a total shared through a worked-out link size is said in every aim it reaches', () => {
+    const s = saved('capacity-s4.saved.json');
+    const m = structuredClone(s.model);
+    m.quantities.push(q('shared_rate', 'ticket/week', { kind: 'coefficient', status: 'derived', author: 'olumi' }), q('zero_x', 'ticket/week', { value: 0, author: 'structure' }),
+      q('x_out', 'ticket/week', { kind: 'derived', status: 'derived', author: 'olumi' }), q('x_target', 'ticket/week', { value: 5 }));
+    m.relations.push({ form: 'definition', id: 'shared_rel', defines: 'shared_rate', op: 'sum', parts: [{ id: 'additional_capacity', sign: 1 }, { id: 'existing_capacity', sign: 1 }], author: 'olumi', quote: null, ...at },
+      { form: 'effect', id: 'x_rel', defines: 'x_out', base: 'zero_x', terms: [{ driver: 'additional_specialists', coefficient: 'shared_rate', author: 'olumi', quote: null, ...at }], author: 'olumi', quote: null, ...at });
+    m.goals.push({ ...structuredClone(m.goals[0]!), id: 'x_goal', label: 'X', measure: { ...structuredClone(m.goals[0]!.measure!), quantity: 'x_out', target: 'x_target' } });
+    const p = projected(m, s.brief);
+    expect(lostIn(p)).toEqual([]);
+    expect(nodeOf(p, 'additional_capacity')).toBeUndefined();
+    expect(nodeOf(p, 'x_goal').value_basis).toMatchObject({ kind: 'worked_out', from: expect.arrayContaining(['additional_capacity']),
+      words: expect.stringContaining('Additional specialist capacity: worked out from') });
   });
 });

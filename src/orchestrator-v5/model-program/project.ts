@@ -353,7 +353,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       const starts = typeof s.starts_after_periods === 'string' ? Q.get(s.starts_after_periods) : undefined;
       // Its own label and words, so the card says the setting whether or not the set quantity has a card of its own (Q1, 28 Oct).
       const set = Q.get(s.quantity);
-      const onOff = set !== undefined && (set.unit === '1' || set.unit === '') && (set.value === 0 || set.value === 1) && (to?.value === 0 || to?.value === 1);
+      // Words only for an explicit switch (structure-authored, 0 or 1); never a person's or Olumi's share that happens to be 0 or 1 (PL 03:12Z).
+      const onOff = set !== undefined && set.author === 'structure' && (set.unit === '1' || set.unit === '') && (set.value === 0 || set.value === 1) && (to?.value === 0 || to?.value === 1);
       if (to) interventions[s.quantity] = { value: to.value, unit: to.unit, display: display(to), display_value: onOff ? (to.value === 1 ? 'In use' : 'Not in use') : display(to),
         label: set?.label ?? s.quantity, from_period: s.starts_after_periods, ...(starts ? { from_period_display: display(starts) } : {}), ...settingSource(to, o) };
     }
@@ -573,18 +574,27 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const cardOf = new Map(nodes.map((n) => [n.id as string, n] as const));
   const foldable = (q: CanonicalQuantityT) => cardOf.has(q.id) && q.author !== 'person' && !has(q.quote) && !has(q.party) && !has(q.question)
     && !measured.has(q.id) && q.kind !== 'coefficient' && !isCoefficient(q.id);
+  /** Everything a quantity's relation reads, its link sizes included (a total shared through a worked-out size, Codex r2 #3875 9). */
+  const readsOf = new Map(model.relations.map((r) => [r.defines, r.form === 'definition' ? r.parts.map((p) => p.id) : r.form === 'effect'
+    ? [r.base, ...r.terms.flatMap((t) => [t.driver, t.coefficient])] : [r.start, ...r.inflows, ...r.outflows]] as const));
   /** Every quantity an aim's measure is worked out from, nearest first. */
-  const upstream = (id: string): string[] => { const seen: string[] = []; const walk = (x: string) => { for (const p of partsOf.get(x) ?? []) if (!seen.includes(p)) { seen.push(p); walk(p); } }; walk(id); return seen; };
+  const upstream = (id: string): string[] => { const seen: string[] = []; const walk = (x: string) => { for (const p of readsOf.get(x) ?? []) if (!seen.includes(p)) { seen.push(p); walk(p); } }; walk(id); return seen; };
   /** What an aim's measure reads: its quantity, a per-unit denominator and a stated reference value (Codex r1 #3875 B5). */
   const measureReads = (g: CanonicalModelT['goals'][number]) => (g.measure ? [g.measure.quantity, g.measure.per,
     g.measure.reference?.kind === 'value' ? g.measure.reference.quantity : null].filter(has) : []);
   const goalUpstream = new Map(model.goals.filter((g) => has(g.measure))
     .map((g) => [g.id, [...new Set(measureReads(g).flatMap((m) => [m, ...upstream(m)]))]] as const));
   const optionsSetting = (id: string) => model.options.filter((o) => o.sets.some((s) => s.quantity === id)).map((o) => o.id).sort();
+  /** Each option's setting of a switch turns it up from where it stands, so the option's link keeps the switch link's sign and
+   *  size; one that turns it down (or holds it) keeps the switch its card (Codex r2 #3875 8). */
+  const turnsUp = (q: CanonicalQuantityT) => model.options.every((o) => o.sets.every((s) => s.quantity !== q.id
+    || (has(s.to) && has(Q.get(s.to)?.value) && Q.get(s.to)!.value! > q.value!)));
   const switches = new Map(model.quantities.filter((q) => q.author === 'structure' && q.status === 'known' && q.kind === 'fact' && controlled.has(q.id) && has(q.value)
-    && !(has(q.low) && has(q.high) && q.low !== q.high) && foldable(q)).map((q) => [q.id, optionsSetting(q.id)[0]!] as const));
+    && !(has(q.low) && has(q.high) && q.low !== q.high) && foldable(q) && turnsUp(q)).map((q) => [q.id, optionsSetting(q.id)[0]!] as const));
   /** A structural constant (a zero base, a unit conversion): arithmetic the model's form needs, never a lever. */
-  const isConstant = (q: CanonicalQuantityT | undefined) => q !== undefined && q.author === 'structure' && q.status === 'known' && q.kind === 'fact' && !controlled.has(q.id) && foldable(q);
+  const isConstant = (q: CanonicalQuantityT | undefined) => q !== undefined && q.author === 'structure' && q.status === 'known' && q.kind === 'fact' && !controlled.has(q.id) && foldable(q)
+    // a constant a risk acts on is part of that risk's path to the aim: it stays drawn (Codex r2 #3875 7)
+    && !model.risks.some((k) => k.effect_on === q.id);
   const definedBy = new Map(model.relations.map((r) => [r.defines, r] as const));
   /** A total: a sum or product, or an amount added on a structural zero; a mechanism with a real base level stays its card. */
   const isTotal = (q: CanonicalQuantityT) => {
