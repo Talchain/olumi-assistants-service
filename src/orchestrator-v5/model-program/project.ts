@@ -362,7 +362,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     }
     nodes.push({
       id: o.id, kind: 'option', label: o.label, ...provenanceOf(o), ...quoteOf(o, o.id), ...participation(inCalc || (o.status === 'live' && kept(per))),
-      ...(o.sets.length === 0 ? { is_baseline: true } : {}), ...(Object.keys(interventions).length ? { interventions } : {}),
+      ...(Object.keys(interventions).length ? { interventions } : {}),
       ...(o.author === 'olumi' ? { proposed_by: 'olumi' } : {}),
     });
     items.push({ record_id: o.id, family: 'option', shown_as: { node: o.id }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: o.approval });
