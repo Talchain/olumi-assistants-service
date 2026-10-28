@@ -1961,6 +1961,25 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(((approved.json() as Json).canonical_analysis_view as Json).run.run_id).toBe(runs[1]!.run_id);
     });
 
+    it('Paul 28 Oct (stale card): after an approved change saves, the first draft\'s reading card is not offered again for review', async () => {
+      await savedProgram();
+      const updated = bakery();
+      updated.quantities = updated.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known' as const, value: 2500, question: null, quote: 'The oven would cost £2,500' } : x));
+      canonicalDraft = JSON.stringify(updateOf(bakery(), updated));
+      const set = { public_label: 'Oven price £2,500', basis: 'their answer', request: 'The oven price is £2,500.', remove: [] };
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'p1', args: set }], [{ type: 'message', text: 'I prepared the oven price; approve its card.' }]];
+      // CONTRAST: before the press, the reply carries the reading card beside the change card (`changeCards` asserts it).
+      const card = changeCards((await typed('The oven would cost £2,500.')).json() as Json)[0]!;
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved: the oven price is £2,500.' }]];
+      const approved = await post({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click', chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
+      expect(approved.statusCode, approved.body).toBe(200);
+      const j = approved.json() as Json;
+      expect((persisted!.living_model.runs as Json[]), 'the change saved').toHaveLength(2);
+      // Before: the reading card came back as "Review this change" / "Not now", the reply's only buttons, after "Saved".
+      expect(j.cards as Json[]).toEqual([]);
+      expect(JSON.stringify(j)).not.toContain('agent-review-proposal:');
+    });
+
     it('Codex B2 on #3801: a program Run stored by an earlier engine is named complete_stale in the reply\'s `run`, never current', async () => {
       await savedProgram();
       const { programRunOf } = await import('../core-turn.js');
