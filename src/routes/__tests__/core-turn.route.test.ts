@@ -1391,11 +1391,14 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(r.statusCode, r.body).toBe(200);
     expect(r.json()._agent.tool_calls).toEqual([{ name: 'draft_canonical_model', outcome: 'refused', refusal: 'save_refused', code: 'GRAPH_TOO_LARGE' }]);
     expect(r.json().assistant_text).toBe('The model could not be saved (refused). Nothing was changed.');
+    // Nothing was saved, so no analysis is served: the candidate this turn computed never reaches the wire (AR0900 10:41, PL 10:48).
+    expect(r.json().canonical_analysis_view).toBeNull();
     // Contrast: a refusal that gives no code names none.
     registerRefusal = { schema: 'error.v1', code: 'BAD_INPUT', message: 'Refused.', details: {} };
     const none = await draft();
     expect(none.statusCode, none.body).toBe(200);
     expect(none.json()._agent.tool_calls).toEqual([{ name: 'draft_canonical_model', outcome: 'refused', refusal: 'save_refused' }]);
+    expect(none.json().canonical_analysis_view).toBeNull();
     expect([registered.length, persisted]).toEqual([0, null]);
   });
 

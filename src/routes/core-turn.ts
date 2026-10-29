@@ -955,7 +955,9 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         receipts: turnReceipts(result),
         // A program scenario's analysis is its newest STORED Run as the scenario read serves it (never a recompute), on every turn.
         ...(programPayload !== undefined || isProgramGraph(after.graph) ? { modelProgram: {
-          canonical_analysis_view: reopenProgram(after.graph)?.view ?? programPayload?.canonical_analysis_view ?? null,
+          // Only the stored Run's view, or null: a candidate this turn computed is never served when its save was refused or
+          // unknown (assessor AR0900 10:41, PL 10:48: turn.ts payload → here → contract.ts).
+          canonical_analysis_view: reopenProgram(after.graph)?.view ?? null,
           model_program: programPayload?.model_program ?? { turn: 'agent' } } } : {}),
         paused: paused !== undefined ? { proposal_id: paused.proposal_id } : null,
         error: recordedNow !== undefined ? RECORDED[recordedNow].error : null,

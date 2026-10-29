@@ -49,18 +49,21 @@ describe('the Run admission limit (alpha G11)', () => {
     // 10 draws × [1 option × (2 times × 6 reads (a 1, b 1, s 1 + 2 parts, t 1) + window 2 × 2 + the goal's walk 8 × 2 values that
     // can leave (b's draw and s; the figures a and t have no end and no risk, so cannot)) + sorts ⌈log2 11⌉ = 4 × (1 ranged + 1
     // condition)] = 10 × 40. Bytes: 10 × (16 × 1 ranged + 1 option × (9 × 1 condition + 4: joint, within, both and the kept
-    // headline, SC2) + 8 quantile copy) + 8 × 2 times × 4 quantities + 72 × 2 values that can leave = 370 + 64 + 144.
-    expect(costOf(tiny(), 10)).toEqual({ operations: 400, bytes: 578 });
+    // headline, SC2) + 8 quantile copy) + 16 × 2 times × 4 quantities (two grids, the values and their rounding bounds: simulate.ts
+    // runOption `vals` and `errs`; AR0900 10:41 found 8, which counted one) + 72 × 2 values that can leave = 370 + 128 + 144.
+    expect(costOf(tiny(), 10)).toEqual({ operations: 400, bytes: 642 });
+    // Each further period holds both grids again: 16 bytes a quantity, never 8.
+    expect(costOf({ ...tiny(), periods: 2 }, 10).bytes - costOf(tiny(), 10).bytes).toBe(16 * 4);
     // A sum's parts are work, however few quantities hold them (Codex r1): 1,000 more parts, 2 times × 1,000 more reads a draw.
     expect(costOf(tiny(1000), 10).operations).toBe(400 + 10 * 2 * 1000);
     // A risk on s (Codex r2–r3): 8 at each of 2 times and 8 a draw, so 10 × 24 more operations, and its uniforms, 8 bytes a draw.
     // Its chance `a` can leave [0, 1] (C14, 27 Oct): the goal's walk over it, 8 a draw (10 × 8 more) and 72 bytes.
     const risky: ExecutableModel = { ...tiny(), risks: [{ id: 'k', occurrence: 'a', severity: 'a', effect_on: 's', mode: 'add', from_period: 0 }] };
-    expect(costOf(risky, 10)).toEqual({ operations: 400 + 240 + 80, bytes: 578 + 80 + 72 });
+    expect(costOf(risky, 10)).toEqual({ operations: 400 + 240 + 80, bytes: 642 + 80 + 72 });
     // CONTRAST, the same risk on the figure t: t can now leave too (a shock can take it past what a number holds), so the walk
     // covers two more values (a and t), 10 × 16 more and 144 bytes.
     const shocked: ExecutableModel = { ...tiny(), risks: [{ id: 'k', occurrence: 'a', severity: 'a', effect_on: 't', mode: 'add', from_period: 0 }] };
-    expect(costOf(shocked, 10)).toEqual({ operations: 400 + 240 + 160, bytes: 578 + 80 + 144 });
+    expect(costOf(shocked, 10)).toEqual({ operations: 400 + 240 + 160, bytes: 642 + 80 + 144 });
   });
 
   it('the limits by name: 450 ranged inputs pass MAX_BYTES while their work fits; 1,000,000 parts pass MAX_OPERATIONS', () => {
@@ -269,12 +272,12 @@ describe('C14: the walk over values that left their domain is counted (condition
     // By hand, RUN_DRAWS = 10,000 draws, 1 option, 2 times, ⌈log2 10,001⌉ = 14: reads 2L + 4 at each time (a, t and each x 1,
     // s 1 + L + 1 parts), each goal's window 4 and sorts 14, and 8 for each goal and each of the L + 1 values that can leave
     // (each x and s): 10,000 × (4L + 8 + 26C + 8CL). Without the walk, 400 × 900 was 10,000 × 10,808 = 108,080,000: admitted.
-    expect(costOf(leaving(400, 900), RUN_DRAWS)).toEqual({ operations: 10_000 * (3_608 + 10_400 + 2_880_000), bytes: 10_000 * (9 * 400 + 4 + 8) + 8 * 2 * 903 + 72 * 400 * 901 });
+    expect(costOf(leaving(400, 900), RUN_DRAWS)).toEqual({ operations: 10_000 * (3_608 + 10_400 + 2_880_000), bytes: 10_000 * (9 * 400 + 4 + 8) + 16 * 2 * 903 + 72 * 400 * 901 });
     expect(costOf(leaving(400, 900), RUN_DRAWS).operations).toBe(28_940_080_000);
     expect(admission(leaving(400, 900))).toEqual({ ok: false, over: 'operations' });
     // A ratio (a divisor of 0) is a calculation like any other: tiny's s as a ÷ b, the same two parts, costs what tiny does.
     const ratio: ExecutableModel = { ...tiny(), quantities: tiny().quantities.map((x) => (x.id === 's' ? { ...x, equation: { form: 'definition', op: 'ratio', parts: ['a', 'b'] } } : x)) };
-    expect(costOf(ratio, 10)).toEqual({ operations: 400, bytes: 578 });
+    expect(costOf(ratio, 10)).toEqual({ operations: 400, bytes: 642 });
     // The boundary at 40 conditions: 10,000 × (324L + 1,048), so 43 values is the most admitted (149,800,000 ≤ 150,000,000) and
     // 44 the first refused (153,040,000).
     expect(admission(leaving(40, 43))).toEqual({ ok: true, operations: 149_800_000 });
@@ -297,7 +300,7 @@ describe('C14: the walk over values that left their domain is counted (condition
     // figures with no end): 10,000 × (8n + 10 + 26C + 8Cn). Counting only declared ends, chances and ratios, the walk was
     // 0 and 400 × 900 was 10,000 × (7,210 + 7,200) = 144,100,000: admitted, with 400 goals walking 900 values in every draw.
     expect(costOf(overflowing(400, 900), RUN_DRAWS)).toEqual({ operations: 10_000 * (7_210 + 10_400 + 2_880_000),
-      bytes: 10_000 * (9 * 400 + 4 + 8) + 8 * 2 * 904 + 72 * 400 * 901 });
+      bytes: 10_000 * (9 * 400 + 4 + 8) + 16 * 2 * 904 + 72 * 400 * 901 });
     expect(costOf(overflowing(400, 900), RUN_DRAWS).operations).toBe(28_976_100_000);
     expect(admission(overflowing(400, 900))).toEqual({ ok: false, over: 'operations' });
     // A small one is admitted at its hand count, 10,000 × (40 + 10 + 780 + 1,200), and its Run shows the walk is real: no value
