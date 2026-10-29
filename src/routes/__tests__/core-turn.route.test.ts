@@ -1539,7 +1539,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('(6) ALPHA (23 Oct) + F1b (26 Oct): a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model is refused before any call', async () => {
       // Pinned from the request bodies the provider received on this route, not from the module that builds them.
-      const PROGRAM_SHA = 'ec2755cb5d0f1b9c60c7466e5f68b1a2f21a20351c86620ba7972b7a75af0176'; // 29 Oct 03:2xZ: assessor AR0300 boundaries; before it d29e9d87. · 29 Oct: J2, when asked Olumi proposes labelled ranged estimates; before it 36cfc7fd. · 28 Oct: names factors and waits too; before it 232ae815…. 28 Oct: Box 3 naming sentence; before it d2bc1608…. 28 Oct: C1 no-chance comparison in words (K1's sentence plus keep any consequence worked out); before it c545b8a1…. 27 Oct: round 3 (Paul approved: said once, decisive mechanism, first questions); before it 1c0f7685…. 27 Oct: round 2, the consolidation (RESULTS the single Run-reporting owner; first-model questions in drafted order; shortened reply rules); before it e1e01c5e…. 27 Oct: round 1, first-model questions lead with the premise that could change the comparison. 27 Oct: T1, each caveat once per conversation. // 26 Oct: integrated review words#7 (the "on Olumi’s reading of …" basis). // 25 Oct: alpha G10 (no threshold sentences). // 25 Oct: alpha G5 (no note_on_item sentence). // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
+      const PROGRAM_SHA = '95c5eb7c73b2c60da3111bc571da6b7298f52895b576012ba2956931a2d01675'; // 29 Oct 03:2xZ: assessor AR0300 boundaries; before it d29e9d87. · 29 Oct: J2, when asked Olumi proposes labelled ranged estimates; before it 36cfc7fd. · 28 Oct: names factors and waits too; before it 232ae815…. 28 Oct: Box 3 naming sentence; before it d2bc1608…. 28 Oct: C1 no-chance comparison in words (K1's sentence plus keep any consequence worked out); before it c545b8a1…. 27 Oct: round 3 (Paul approved: said once, decisive mechanism, first questions); before it 1c0f7685…. 27 Oct: round 2, the consolidation (RESULTS the single Run-reporting owner; first-model questions in drafted order; shortened reply rules); before it e1e01c5e…. 27 Oct: round 1, first-model questions lead with the premise that could change the comparison. 27 Oct: T1, each caveat once per conversation. // 26 Oct: integrated review words#7 (the "on Olumi’s reading of …" basis). // 25 Oct: alpha G10 (no threshold sentences). // 25 Oct: alpha G5 (no note_on_item sentence). // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
       const sha = (c: Json) => createHash('sha256').update(String(c.instructions), 'utf8').digest('hex');
       persisted = postimage(KNOWN_ANSWER);
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
@@ -1844,7 +1844,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(String(sentTools.propose_change)).toContain('An answer to a listed question (a blocker, or an asked item\'s question) that gives a figure, or says they do not know, goes in answers, on that existing figure\'s id from read_canonical_context, saying whose it is: author person, ');
       expect(String(sentTools.propose_change)).toContain('An answer in words with no figure (a measure, a deadline, a date, a definition) goes in request, in their exact words with the id it answers. ');
       expect(String(sentTools.propose_change)).toContain('Anything else (a new item or link, a rename, a removal) goes in request, in plain words with their exact words for every figure of theirs, '
-        + 'with remove the ids of anything they asked to remove ([] for none); Olumi’s drafter writes it. ');
+        + 'with remove the exact IDs Olumi proposes to remove for the person\'s review, under the tool\'s removal rules: a generic simplify request may propose redundant scaffolding removal and fewer non-protected records re-expressing the same consequential meaning, preserving protected person-authored figure IDs, supported calculations, useful options, causal routes, prerequisites, uncertainty and attribution; include every planned removal ID, because the drafter cannot remove an unlisted record ([] for none); Olumi’s drafter writes it. ');
       // 26 Oct (W9, european 13:44Z): a second proposal is refused only once a card is prepared, and after any refusal, while no
       // card is prepared, a corrected proposal may follow (program-tools.ts releases the turn's claim on every outcome that is not
       // ok). Before it 2bb9c6c0… (ONE correction, after does_not_compile only); the text before W9, "a second proposal in the same
@@ -1853,7 +1853,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // Strip (Paul 26 Oct, B5): a worded answer goes in request; before it 6c4611c7….
       // 26 Oct (T1, Paul): RUN_WORDS_RULE reports from the Run's own facts (chance, precision_95, driver, leader.option_id), each figure once; before it 9532ffa4….
       // 27 Oct (round 2, consolidation): RUN_WORDS_RULE is gone (RESULTS owns Run reporting), and so is the line repeating the attribution rule; before it 7996a9ef….
-      expect(sentSha('propose_change')).toBe('3817edd1d025a6aa653d2dcf5a791df9e0c40039b4fcaf2da5bf1d2f7d69f77b');
+      expect(sentSha('propose_change')).toBe('10bcbbebb03b61dca16f04f7dac84dd4a8be9e85bd5cf239bc7425070fe499f9');
       const sentParams = (calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.parameters as Json;
       expect(Object.keys(sentParams.properties)).toEqual(['public_label', 'basis', 'request', 'remove', 'answers']);
       expect(sentParams.required).toContain('answers');
@@ -1865,7 +1865,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // figure's id; a worded answer in request (strip, Paul 26 Oct, B5; before it 4ccd4a59…).
       const guidance = ((calls[0]!.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content)).filter((c) => c.startsWith('This scenario\'s model is a model program'));
       expect(guidance).toHaveLength(1);
-      expect(createHash('sha256').update(guidance[0]!, 'utf8').digest('hex')).toBe('38f262c5fc61aff38bb7454774eb4b8e28114f6bdf1a92720ed0e609e7787664');
+      expect(createHash('sha256').update(guidance[0]!, 'utf8').digest('hex')).toBe('0ae8bd0d8121d3df8d092029dfcf55b8212e1809797e671c7084cf24b921ab46');
       // The read the agent got back: the Run's goal_chance exactly as stored (each goal's own line, the joint, the notes).
       const output = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'read')!.output;
       const read = JSON.parse(typeof output === 'string' ? output : JSON.stringify(output)) as Json;
