@@ -49,21 +49,22 @@ describe('Box 1a: links in words, risks no one can size and unmeasured factors',
     expect([goalOf(c, 'keep_members').status, goalOf(c, 'keep_members').reasons]).toEqual(['withheld', [MOOD, EVENING_LINK, MOOD_LINK, RISK]]);
     // Typed, in the model's order (quantities, relations, risks), each by its own id: no one's to answer as a figure.
     expect(c.blockers).toEqual([
-      // Evening classes' own link in words holds that option up too (it is never compared as if it changed nothing).
-      { id: 'member_mood', code: 'unknown', scope: ['keep_members'] }, { id: 'evening_mood', code: 'unknown', scope: ['keep_members', 'evening_classes'] },
+      // Evening classes' own link in words reaches only the members aim: it never holds that option up on takings (spec §3.0).
+      { id: 'member_mood', code: 'unknown', scope: ['keep_members'] }, { id: 'evening_mood', code: 'unknown', scope: ['keep_members'] },
       { id: 'mood_members', code: 'unknown', scope: ['keep_members'] }, { id: 'instructor_leaves', code: 'unknown', scope: ['keep_members'] },
     ]);
     const x = c.executable!;
     expect(x.goals.map((g) => g.id)).toEqual(['takings_goal']);
-    expect(x.options.map((o) => o.id)).toEqual(['weekend_workshops', 'carry_on']);
+    expect(x.options.map((o) => o.id)).toEqual(['evening_classes', 'weekend_workshops', 'carry_on']);
     expect(x.risks).toEqual([]);
-    expect(x.quantities.map((q) => q.id).sort()).toEqual(['class_fee', 'classes', 'classes_now', 'extra_classes', 'takings', 'takings_target', 'workshop_extra']);
+    expect(x.quantities.map((q) => q.id).sort()).toEqual(['class_fee', 'classes', 'classes_now', 'evening_extra', 'extra_classes', 'takings', 'takings_target', 'workshop_extra']);
     expect(x.withheld.map((w) => [w.id, w.kind, w.reason])).toEqual([
-      ['keep_members', 'goal', [MOOD, EVENING_LINK, MOOD_LINK, RISK].join(' ')], ['evening_classes', 'option', EVENING_LINK], ['instructor_leaves', 'risk', 'The calculation cannot size it.'],
+      ['keep_members', 'goal', [MOOD, EVENING_LINK, MOOD_LINK, RISK].join(' ')], ['instructor_leaves', 'risk', 'The calculation cannot size it.'],
     ]);
-    // The sibling calculates: 200 classes at £12 is £2,400; weekend workshops make 220 (£2,640).
+    // The sibling calculates for every option, evening classes too: 200 classes at £12 is £2,400; evening classes make 240
+    // (£2,880), weekend workshops 220 (£2,640).
     const sim = simulate(x, { seed: 7, draws: 200 });
-    expect(sim.options.map((o) => [o.option_id, (o.per_goal[0] as { chance: number }).chance])).toEqual([['weekend_workshops', 1], ['carry_on', 0]]);
+    expect(sim.options.map((o) => [o.option_id, (o.per_goal[0] as { chance: number }).chance])).toEqual([['evening_classes', 1], ['weekend_workshops', 1], ['carry_on', 0]]);
     // Contrast: without its two links and its risk, the members aim calculates (150 is at least 140).
     const plain = studio();
     plain.relations = plain.relations.filter((r) => r.form !== 'influence');
@@ -99,18 +100,28 @@ describe('Box 1a: links in words, risks no one can size and unmeasured factors',
     // Its closure reaches the factor, so the link into the factor too.
     expect([o.status, o.reasons]).toEqual(['withheld', [MOOD, EVENING_LINK, 'rests on the link "How members feel → workshop extra", which is in words, never calculated.']]);
     expect(goalOf(c, 'takings_goal').status).toBe('calculable');
-    expect(c.executable!.options.map((x) => x.id)).toEqual(['carry_on']);
+    expect(c.executable!.options.map((x) => x.id)).toEqual(['evening_classes', 'carry_on']);
   });
 
-  it('an option whose only effect is a link in words is withheld, naming its link: never compared as if it changed nothing', () => {
-    const m = studio();
-    m.options = m.options.map((o) => (o.id === 'evening_classes' ? { ...o, sets: [] } : o));
-    const c = compile(m);
-    const o = c.perOption.find((p) => p.option_id === 'evening_classes')!;
-    expect([o.status, o.reasons]).toEqual(['withheld', [EVENING_LINK]]);
-    expect(c.executable!.options.map((x) => x.id)).toEqual(['weekend_workshops', 'carry_on']);
-    // Contrast: the option that declares it carries on as now, with no link of its own, is compared.
-    expect(c.perOption.find((p) => p.option_id === 'carry_on')!.status).toBe('calculable');
+  it('an option\'s own link in words withholds each aim it reaches, naming it, never the option\'s chance on an aim it does not reach (spec §3.0)', () => {
+    const c = compile(studio());
+    // Evening classes adds 40 classes and, in words, lifts how members feel: the members aim is withheld naming that link; the
+    // option itself is compared, on takings, by its 40 classes.
+    expect(goalOf(c, 'keep_members').reasons).toContain(EVENING_LINK);
+    expect(c.perOption.find((p) => p.option_id === 'evening_classes')).toMatchObject({ status: 'calculable', reasons: [] });
+    // With no setting at all, its link still reaches only the members aim: on takings the model says it changes nothing, so it
+    // draws what carrying on draws (£2,400, short of £2,600).
+    const words = studio();
+    words.options = words.options.map((o) => (o.id === 'evening_classes' ? { ...o, sets: [] } : o));
+    const w = compile(words);
+    expect(w.perOption.find((p) => p.option_id === 'evening_classes')!.status).toBe('calculable');
+    const sim = simulate(w.executable!, { seed: 7, draws: 200 });
+    expect(sim.options.map((o) => [o.option_id, (o.per_goal[0] as { chance: number }).chance])).toEqual([['evening_classes', 0], ['weekend_workshops', 1], ['carry_on', 0]]);
+    // Contrast: the same link aimed at takings withholds the takings aim, for every option, naming it.
+    const reach = studio();
+    reach.relations = reach.relations.map((r) => (r.id === 'evening_mood' ? { ...r, to: 'takings' } : r)) as CanonicalModelT['relations'];
+    const t = compile(reach);
+    expect([goalOf(t, 'takings_goal').status, goalOf(t, 'takings_goal').reasons]).toEqual(['withheld', ['rests on the link "Evening classes → takings", which is in words, never calculated.']]);
   });
 
   it('Codex review 1: a risk no one can size on an option itself withholds that option, naming the risk, with its blocker', () => {
@@ -119,8 +130,35 @@ describe('Box 1a: links in words, risks no one can size and unmeasured factors',
     const c = compile(m);
     const o = c.perOption.find((p) => p.option_id === 'weekend_workshops')!;
     expect([o.status, o.reasons]).toEqual(['withheld', ['rests on the risk "The weekend venue is lost", which the calculation cannot size.']]);
-    expect(c.executable!.options.map((x) => x.id)).toEqual(['carry_on']);
+    expect(c.executable!.options.map((x) => x.id)).toEqual(['evening_classes', 'carry_on']);
     expect(c.blockers.find((b) => b.id === 'venue_lost')).toEqual({ id: 'venue_lost', code: 'unknown', scope: ['weekend_workshops'] });
+  });
+
+  it('GAP 1 review (29 Oct): an option\'s link in words that reaches an aim\'s window figure through a risk\'s chance or a factor withholds that aim for every option, naming the option\'s link', () => {
+    const windowed = () => {
+      const m = studio();
+      m.quantities.push({ ...m.quantities.find((x) => x.id === 'members')!, id: 'duration', label: 'duration', unit: 'month', value: 3, quote: null });
+      m.goals = m.goals.map((g) => (g.id === 'takings_goal' ? { ...g, measure: { ...g.measure!, window: { origin_event: null, origin_offset: null, start: 0, periods: 'duration' } } } : g));
+      return m;
+    };
+    // Through a factor: evening classes → how members feel → duration. Both links are named, the option's too.
+    const viaFactor = windowed();
+    viaFactor.relations.push({ ...viaFactor.relations[3]!, id: 'term_mood', from: 'member_mood', to: 'duration', direction: 'unknown', confidence: 'unknown', basis: null } as CanonicalModelT['relations'][number]);
+    const f = compile(viaFactor);
+    expect(goalOf(f, 'takings_goal').status).toBe('withheld');
+    expect(goalOf(f, 'takings_goal').reasons).toEqual(expect.arrayContaining([EVENING_LINK, 'rests on the link "How members feel → duration", which is in words, never calculated.']));
+    expect(f.blockers.find((b) => b.id === 'evening_mood')!.scope).toContain('takings_goal');
+    // Through a risk's chance: evening classes → the chance the term is cut → (sized) risk on duration.
+    const viaRisk = windowed();
+    const base = viaRisk.quantities.find((x) => x.id === 'members')!;
+    viaRisk.quantities.push({ ...base, id: 'cut_chance', label: 'Chance the term is cut', unit: '1', value: 0.2, quote: null, floor: 0, ceiling: 1 },
+      { ...base, id: 'cut_months', label: 'Months lost', unit: 'month', value: -1, quote: null });
+    viaRisk.risks.push({ ...viaRisk.risks[0]!, id: 'term_cut', label: 'The term is cut short', effect_on: 'duration', direction: 'down', occurrence: 'cut_chance', severity: 'cut_months', mode: 'add' } as CanonicalModelT['risks'][number]);
+    viaRisk.relations.push({ ...viaRisk.relations[3]!, id: 'evening_cut', from: 'evening_classes', to: 'cut_chance', direction: 'up', confidence: 'unsure', basis: null } as CanonicalModelT['relations'][number]);
+    const r = compile(viaRisk);
+    expect([goalOf(r, 'takings_goal').status, goalOf(r, 'takings_goal').reasons]).toEqual(['withheld', ['rests on the link "Evening classes → Chance the term is cut", which is in words, never calculated.']]);
+    // Contrast: with neither link, over its three months the takings aim calculates.
+    expect(goalOf(compile(windowed()), 'takings_goal').status).toBe('calculable');
   });
 
   it('Codex review 2: a link in words or an unsized risk on an aim\'s window figure withholds the aim, naming it', () => {
@@ -135,7 +173,8 @@ describe('Box 1a: links in words, risks no one can size and unmeasured factors',
     const linked = windowed();
     linked.relations.push({ ...linked.relations[3]!, id: 'term_doubt', from: 'member_mood', to: 'duration', direction: 'unknown', confidence: 'unknown', basis: null } as CanonicalModelT['relations'][number]);
     const l = goalOf(compile(linked), 'takings_goal');
-    expect([l.status, l.reasons]).toEqual(['withheld', ['rests on the link "How members feel → duration", which is in words, never calculated.']]);
+    // The factor it comes from is itself moved by evening classes in words, so that link reaches the window too (GAP 1 review).
+    expect([l.status, l.reasons]).toEqual(['withheld', [EVENING_LINK, 'rests on the link "How members feel → duration", which is in words, never calculated.']]);
     const risked = windowed();
     risked.risks.push({ ...risked.risks[0]!, id: 'term_cut', label: 'The term is cut short', effect_on: 'duration', direction: 'down' });
     const r = goalOf(compile(risked), 'takings_goal');

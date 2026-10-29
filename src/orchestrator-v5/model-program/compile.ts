@@ -722,7 +722,8 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
    *  them, so the goal or limit rests on them, asked or held, never run on that window (spec §3.7). */
   const outsideWindowRefs = (w: CanonicalWindowT | null | undefined) => [w?.periods, w?.origin_offset].filter((x): x is string => has(x) && (contradictory.has(x) || nothing.has(x)));
   /** A goal's or limit's own window figures (its length and origin timing, every one the closures above gather): a link in
-   *  words or a risk on one reaches what is read over that window (Box 1a). */
+   *  words or a risk on one, or on anything one rests on, reaches what is read over that window (Box 1a; GAP 1 review: an
+   *  option's link into a risk's chance on the window's length withholds the aim, never only the option). */
   const windowRefs = (w: CanonicalWindowT | null | undefined) => [w?.periods, w?.origin_offset].filter((x): x is string => has(x) && Q.has(x));
   const goalClosure = new Map<string, Set<string>>();
   /** By goal, limit and live option: the links in words and unsized risks its closure reaches (Box 1a). */
@@ -734,7 +735,7 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
     const closure = upstream([...goalRoots(g), g.id]);
     const w = goalWin.get(g.id), outsideWin = outsideWindowRefs(g.measure.window);
     goalClosure.set(g.id, new Set([...closure, ...(w?.blockers ?? []), ...unknownWindowRefs(g.measure.window), ...outsideWin]));
-    wordsOf.set(g.id, inWords(new Set([...closure, ...windowRefs(g.measure.window)]), g.id));
+    wordsOf.set(g.id, inWords(new Set([...closure, ...upstream(windowRefs(g.measure.window))]), g.id));
     const touched = touchedBy(closure, g.id);
     for (const x of [g.measure.window?.periods, g.measure.window?.origin_offset]) if (has(x)) touched.add(x);
     return { goal_id: g.id, ...outcomeOf(new Set([...closure, ...outsideWin]), w, wordsOf.get(g.id)), cancelled: [], needs_measure: false, needs_deadline: w?.deadline === true, olumi_inputs: olumiInputs(closure), unverified_inputs: [...touched].filter((x) => unverifiedIds.has(x)), rests_on: restsOn(touched, g.measure.assumptions), excludes: [...g.measure.exclusions] };
@@ -745,7 +746,7 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
     const closure = upstream([...limitRoots(l), l.id]);
     const w = limitWin.get(l.id), outsideWin = outsideWindowRefs(l.measure.window);
     limitClosure.set(l.id, new Set([...closure, ...(w?.blockers ?? []), ...unknownWindowRefs(l.measure.window), ...outsideWin]));
-    wordsOf.set(l.id, inWords(new Set([...closure, ...windowRefs(l.measure.window)]), l.id));
+    wordsOf.set(l.id, inWords(new Set([...closure, ...upstream(windowRefs(l.measure.window))]), l.id));
     const touched = touchedBy(closure, l.id);
     for (const x of [l.measure.window?.periods, l.measure.window?.origin_offset]) if (has(x)) touched.add(x);
     return { limit_id: l.id, ...outcomeOf(new Set([...closure, ...outsideWin]), w, wordsOf.get(l.id)), cancelled: [], needs_measure: false, rests_on: restsOn(touched) };
@@ -753,9 +754,10 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
   const optionClosure = new Map(model.options.map((o) => [o.id, upstream([...o.sets.map((s) => s.to).filter(has), ...o.sets.map((s) => s.starts_after_periods).filter((t): t is string => typeof t === 'string')])] as const));
   const perOption: OptionOutcome[] = model.options.map((o) => {
     if (o.status !== 'live') return { option_id: o.id, status: 'not_compared', reasons: [o.status === 'ruled_out' ? `"${o.label}" is ruled out, kept in view.` : `"${o.label}" is removed from the comparison.`], asks: [], rests_on: [] };
-    // Its own links in words and the unsized risks on it too: an option whose effect is said only in words is never compared
-    // as if it changed nothing.
-    wordsOf.set(o.id, [...influences.filter((i) => i.from === o.id).map((i) => i.id), ...inWords(optionClosure.get(o.id)!, o.id)].filter((id, n, all) => all.indexOf(id) === n));
+    // An unsized risk on the option itself, or a link in words into what its settings rest on, withholds the option. Its own
+    // links in words withhold the goals and limits they reach (each aim's closure follows them, above), never the option's
+    // chance on an aim they do not reach (spec §3.0; BRIEF-BOX1A 28–29, 44: a fully numeric sibling still calculates).
+    wordsOf.set(o.id, inWords(optionClosure.get(o.id)!, o.id));
     return { option_id: o.id, ...outcomeOf(optionClosure.get(o.id)!, undefined, wordsOf.get(o.id)), rests_on: restsOn(touchedBy(optionClosure.get(o.id)!, o.id)) };
   });
 
