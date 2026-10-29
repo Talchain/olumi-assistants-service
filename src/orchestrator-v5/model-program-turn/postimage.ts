@@ -18,7 +18,7 @@
  */
 import { ProposalChangeSchema, type ProposalChange } from '../agent-lane/proposal.js';
 import { foldedInto, readingGroups } from './reading-groups.js';
-import { CanonicalModel, CMP_WORDS, HOST_OWNED_FIELDS, type CanonicalModelT } from '../model-program/canonical.js';
+import { CanonicalModel, CMP_WORDS, FIGURE_STATUSES, HOST_OWNED_FIELDS, type CanonicalModelT } from '../model-program/canonical.js';
 import { inlineQuantityId, norm } from '../model-program/compile.js';
 import { linkTargets } from '../model-program/links.js';
 import { unitWords } from '../model-program/present/display-words.js';
@@ -74,7 +74,7 @@ export const GROUPS: Readonly<Record<Family, Readonly<Record<string, string>>>> 
 
 export type PostimageResult =
   | { readonly ok: true; readonly model: CanonicalModelT; readonly changes: readonly ProposalChange[] }
-  | { readonly ok: false; readonly code: 'schema' | 'duplicate_id' | 'moved_record' | 'omitted_record' | 'removal_not_applied' | 'unknown_removal' | 'recycled_id'
+  | { readonly ok: false; readonly code: 'schema' | 'duplicate_id' | 'moved_record' | 'omitted_record' | 'removal_not_applied' | 'unknown_removal' | 'recycled_id' | 'figure_removed'
     | 'unverified_person_words' | 'unshown_change' | 'invalid_change_entry' | 'no_change'; readonly reason: string; readonly ids: readonly string[];
     /** Which words check refused it: their words anywhere, or this turn's (a figure of theirs that changes). */
     readonly check?: 'their_words' | 'this_turn' };
@@ -143,6 +143,22 @@ const bare = (r: Rec | undefined): unknown => (r === undefined ? undefined : wit
 const idsOf = (m: CanonicalModelT, f: Family): string[] => (m[f] as readonly { id: string }[]).map((r) => r.id);
 
 /**
+ * A FIGURE THEY GAVE IS NEVER REMOVED (Paul 28 Oct, blocking; ALPHA plan item 3, his added change). Box 3's European simplify:
+ * the agent listed his 400 customers, 8 % churn and £500k budget for removal as "a representation change", and a listed
+ * removal was trusted, so they became notes and left the calculation. Their quantity with a figure in hand changes, or is
+ * marked not applicable, on their word (its history keeps what it was); a removal listing it is refused, whoever lists it.
+ * The ids in `ids` that are such figures in `saved`.
+ */
+export function theirFiguresIn(saved: CanonicalModelT, ids: readonly string[]): string[] {
+  return ids.filter((id) => saved.quantities.some((q) => q.id === id && q.author === 'person' && FIGURE_STATUSES.has(q.status)));
+}
+/** The refusal's words, back to the agent, which proposes the change again keeping them. */
+export function keepTheirFigures(saved: CanonicalModelT, ids: readonly string[]): string {
+  const names = ids.map((id) => `‘${saved.quantities.find((q) => q.id === id)?.label ?? id}’`).join(', ');
+  return `${names} ${ids.length > 1 ? 'are figures' : 'is a figure'} they gave: an update keeps a figure of theirs, changing it or marking it not applicable only on their word, and never removes it. Propose the change again without removing ${ids.length > 1 ? 'them' : 'it'}.`;
+}
+
+/**
  * Check `raw`, a whole proposed model, against the saved one. `removals`: the ids the person asked to remove, listed
  * explicitly; `words`: every word of theirs this change may quote (their earlier words and `fresh`, this change's own);
  * `approver`: who approves the card (its items' approved_by), and the person whose words `fresh` are (in every caller the
@@ -168,6 +184,8 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
   const removals = new Set(opts.removals);
   const unknown = [...removals].filter((id) => !FAMILIES.some(([f]) => baseIn.get(f)!.has(id)));
   if (unknown.length > 0) return refuse('unknown_removal', unknown, `Nothing in the model has the id ${unknown.join(', ')} to remove.`);
+  const theirs = theirFiguresIn(base, [...removals]);
+  if (theirs.length > 0) return refuse('figure_removed', theirs, keepTheirFigures(base, theirs));
   const omitted = FAMILIES.flatMap(([f]) => [...baseIn.get(f)!].filter((id) => !removals.has(id) && !idsOf(post, f).includes(id)));
   if (omitted.length > 0) return refuse('omitted_record', omitted, `The proposed model leaves out ${omitted.join(', ')} without a listed removal; nothing is removed unless the person asks.`);
   const kept = [...removals].filter((id) => FAMILIES.some(([f]) => baseIn.get(f)!.has(id) && idsOf(post, f).includes(id)));
