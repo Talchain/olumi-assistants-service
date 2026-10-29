@@ -156,7 +156,9 @@ describe('Box 1a: links in words, risks no one can size and unmeasured factors',
     viaRisk.risks.push({ ...viaRisk.risks[0]!, id: 'term_cut', label: 'The term is cut short', effect_on: 'duration', direction: 'down', occurrence: 'cut_chance', severity: 'cut_months', mode: 'add' } as CanonicalModelT['risks'][number]);
     viaRisk.relations.push({ ...viaRisk.relations[3]!, id: 'evening_cut', from: 'evening_classes', to: 'cut_chance', direction: 'up', confidence: 'unsure', basis: null } as CanonicalModelT['relations'][number]);
     const r = compile(viaRisk);
-    expect([goalOf(r, 'takings_goal').status, goalOf(r, 'takings_goal').reasons]).toEqual(['withheld', ['rests on the link "Evening classes → Chance the term is cut", which is in words, never calculated.']]);
+    // GAP 2: the sized risk on the window length is named too; the length is read once and a draw cannot change it.
+    expect([goalOf(r, 'takings_goal').status, goalOf(r, 'takings_goal').reasons]).toEqual(['withheld', ['rests on the link "Evening classes → Chance the term is cut", which is in words, never calculated.',
+      'rests on the risk "The term is cut short" on "duration", which the calculation reads once as written and cannot change in a draw.']]);
     // Contrast: with neither link, over its three months the takings aim calculates.
     expect(goalOf(compile(windowed()), 'takings_goal').status).toBe('calculable');
   });
