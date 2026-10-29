@@ -234,13 +234,22 @@ const toolCallsOf = (result: Pick<AgentTurnResult, 'tool_calls'>) => result.tool
  * ⭐ ONE LOG LINE PER TURN (arch plan Step 0, DL 23 Oct): each provider call (model, ms, tokens) and each tool call (outcome,
  * refusal code, the self-check's verdict and `run_ready`, the authorship decisions), by id and code only, never content.
  */
+/** `output_tokens_details.reasoning_tokens` of a provider's raw usage, when it is a number. */
+export function reasoningTokensOf(raw: unknown): number | undefined {
+  const details = raw !== null && typeof raw === 'object' ? (raw as Record<string, unknown>)['output_tokens_details'] : undefined;
+  const n = details !== null && typeof details === 'object' ? (details as Record<string, unknown>)['reasoning_tokens'] : undefined;
+  return typeof n === 'number' && Number.isFinite(n) ? n : undefined;
+}
 function turnLog(result: AgentTurnResult | undefined, seen: Pick<AgentTurnResult, 'tool_calls' | 'tool_results'>): Record<string, unknown> {
   // A failed turn has no result: its calls are the ones the route saw recorded before it failed.
   const calls = result ?? seen;
   return {
     provider_calls: recordedProviderCalls().map((c) => ({ model: c.returned_model ?? c.model, purpose: c.purpose,
       outcome: c.attempt?.outcome ?? c.outcome, ms: c.duration_ms, input_tokens: c.usage?.input_tokens,
-      output_tokens: c.usage?.output_tokens, cached_input_tokens: c.usage?.cached_input_tokens })),
+      output_tokens: c.usage?.output_tokens, cached_input_tokens: c.usage?.cached_input_tokens,
+      // The Responses usage's own reasoning count (output_tokens_details.reasoning_tokens), read from its raw object: the lever on
+      // a draft's time (prompts v2 benchmark); undefined when the provider gave none.
+      reasoning_tokens: reasoningTokensOf(c.usage?.raw) })),
     ...(result === undefined ? {} : { stopped_reason: result.stopped_reason, timing: result.timing }),
     tool_calls: toolCallsOf(calls).map((c, i) => {
       const r = calls.tool_results[i] as { check?: TurnCheck; provider_error?: unknown } | undefined;

@@ -27,7 +27,7 @@ import { stableStringify } from '../../orchestrator/context/stable-stringify.js'
 import { ASK_CHALLENGE_CHIP_ID, OWN_SAVE_READ_MS, recordedRunsOf, typedRowProof } from '../../orchestrator-v5/core-route/turn-request.js';
 import { bakery, BRIEF as BAKERY_BRIEF, club, CLUB_BRIEF, q, updateOf } from '../../orchestrator-v5/model-program-turn/__tests__/bakery.fixture.js';
 import type { CanonicalQuantityT } from '../../orchestrator-v5/model-program/canonical.js';
-import { DRAFTING_INSTRUCTIONS } from '../../orchestrator-v5/model-program-turn/prompt.js';
+import { DRAFTING_INSTRUCTIONS, todayLine } from '../../orchestrator-v5/model-program-turn/prompt.js';
 import type { LivingModelT } from '../../schemas/living-model.js';
 import { seedOf } from '../../orchestrator-v5/model-program-turn/evaluate.js';
 import { programOperationId, withNewRun } from '../../orchestrator-v5/model-program-turn/program-save.js';
@@ -1536,8 +1536,10 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(drafted.statusCode).toBe(200);
       expect(calls[0]!.text?.format?.name).toBe('canonical_model');
       const london = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-      // 29 Oct: stated time and decide-by (TIME-AND-DECIDE-BY design); before it "… (Europe/London). A date they state counts in whole periods from today, which is period 0."
-      expect(calls[0]!.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is ${london} (Europe/London), period 0. Read the dates they state against it.`);
+      // 29 Oct: prompts v2 (INTEGRATION §1): the fixed instructions alone, the date context the first, developer message; before
+      // it the instructions ended "\n\nToday is … (Europe/London), period 0. Read the dates they state against it."
+      expect(calls[0]!.instructions).toBe(DRAFTING_INSTRUCTIONS);
+      expect((calls[0]!.input as Json[])[0]).toEqual({ role: 'developer', content: todayLine(london) });
       draftCalls = [...calls];
       calls.length = 0;
       return String((drafted.json() as Json).assistant_text);
@@ -1892,7 +1894,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       await savedProgram();
       const updated = bakery();
       updated.quantities = updated.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known' as const, value: 2500, question: null, quote: 'The oven would cost £2,500' } : x));
-      canonicalDraft = JSON.stringify(updated);
+      // 29 Oct: prompts v2: an update's output is the edit schema's, so the drafter returns only what it changes (a whole model
+      // is not schema-valid for it and has no base); before it the whole updated model was returned.
+      canonicalDraft = JSON.stringify(updateOf(bakery(), updated));
       outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'p1', args: { public_label: 'Oven price £2,500', basis: 'their answer', request: 'The oven price is £2,500.', remove: [] } }],
         [{ type: 'message', text: 'I prepared the oven price; approve its card.' }]];
       const card = changeCards((await typed('The oven would cost £2,500.')).json() as Json)[0]!;
@@ -1913,7 +1917,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('measure RL mrr-r4/r5 (25 Oct: 8 reads, then an empty reply): a press on a card the model has moved past tells the agent what it CAN do on a press (say it is out of date, ask again), and the reply comes well under the call limit', async () => {
       await savedProgram();
-      const said = (id: string, f: Partial<CanonicalQuantityT>) => { const m = bakery(); m.quantities = m.quantities.map((x) => (x.id === id ? { ...x, ...f } : x)); return JSON.stringify(m); };
+      // 29 Oct: prompts v2: the drafter's update returns only what it changes (the edit schema); before it the whole model.
+      const said = (id: string, f: Partial<CanonicalQuantityT>) => { const m = bakery(); m.quantities = m.quantities.map((x) => (x.id === id ? { ...x, ...f } : x)); return JSON.stringify(updateOf(bakery(), m)); };
       const cardFor = async (words: string, draft: string, public_label: string): Promise<Json> => {
         canonicalDraft = draft;
         outputs = [[{ type: 'function_call', name: 'propose_change', call_id: `p-${public_label}`, args: { public_label, basis: 'their answer', request: words, remove: [] } }],
@@ -2028,14 +2033,14 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('W9 (european, served 26 Oct 13:44Z): propose_change, as SENT, says what the code does: a second proposal is refused only once a card is prepared, and after a refusal (here does_not_compile) a corrected proposal makes the card in the same turn', async () => {
       await savedProgram();
-      // The first update does not calculate (a claim about no record: undefined_ref), on its call and both repairs; the
-      // corrected proposal's update does. Synthetic bakery words.
+      // The first update does not calculate (a claim about no record: undefined_ref), on its call and its ONE repair (prompts v2;
+      // before it both repairs, three drafter calls); the corrected proposal's update does. Synthetic bakery words.
       const broken = bakery();
       broken.claims.push({ id: 'nowhere', text: 'Bread sells.', concerns: ['no_such_record'], author: 'olumi', quote: null, party: null, approval: 'proposed', author_id: null } as never);
       const updated = bakery();
       updated.quantities = updated.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known' as const, value: 2500, question: null, quote: 'The oven would cost £2,500' } : x));
       const bad = JSON.stringify(updateOf(bakery(), broken));
-      canonicalDrafts = [bad, bad, bad, JSON.stringify(updateOf(bakery(), updated))];
+      canonicalDrafts = [bad, bad, JSON.stringify(updateOf(bakery(), updated))];
       const set = (request: string) => ({ public_label: 'Oven price £2,500', basis: 'their answer', request, remove: [] });
       outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'p1', args: set('The oven price is £2,500, and a note that bread sells.') }],
         [{ type: 'function_call', name: 'propose_change', call_id: 'p2', args: set('The oven price is £2,500.') }],
@@ -2046,9 +2051,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect((j._agent.tool_calls as Json[]).filter((c) => c.name === 'propose_change').map((c) => [c.outcome, c.refusal ?? null]))
         .toEqual([['refused', 'does_not_compile'], ['ok', null]]);
       expect(changeCards(j)).toHaveLength(1);
-      expect(calls.map((c) => (c.text?.format?.name === 'canonical_model' ? 'drafter' : 'agent'))).toEqual(['agent', 'drafter', 'drafter', 'drafter', 'agent', 'drafter', 'agent']);
+      expect(calls.map((c) => (c.text?.format?.name === 'canonical_model' ? 'drafter' : 'agent'))).toEqual(['agent', 'drafter', 'drafter', 'agent', 'drafter', 'agent']);
       // The refusal's own reasons went back to the agent as the tool's output, so the correction can use them.
-      const back = JSON.stringify((calls[4]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'p1')!.output);
+      const back = JSON.stringify((calls[3]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'p1')!.output);
       expect(back).toContain('does_not_compile');
       expect(back).toContain('no_such_record');
       expect(registered.length, 'proposing saves nothing').toBe(1);
@@ -2145,7 +2150,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // Round 2 (27 Oct, consolidation): the rule is the drafter's (step 6) and the schema's (an approximate point, never endpoints
       // made from it), no longer the agent instructions'.
       expect(sent).not.toContain('A loose figure ("about 35") goes in exactly as they said it');
-      expect(DRAFTING_INSTRUCTIONS.split('Ask for a range when a supplied approximate point feeds a goal or limit.')).toHaveLength(2);
+      // 29 Oct: prompts v2; before it "Ask for a range when a supplied approximate point feeds a goal or limit."
+      expect(DRAFTING_INSTRUCTIONS.split('Ask for a range when their approximate point feeds an aim or limit.')).toHaveLength(2);
       for (const gone of ['18 to 22', 'a range that reads their word', 'the range is Olumi\'s reading']) expect(sent, gone).not.toContain(gone);
     });
 

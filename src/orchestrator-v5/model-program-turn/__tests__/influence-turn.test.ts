@@ -225,7 +225,8 @@ describe('Box 2 (Paul Q1/Q2, 28 Oct): an update returns Olumi\'s questions only 
     }
     const schema = UPDATE_JSON_SCHEMA as Rec;
     expect(schema.required).toContain('coaching_questions');
-    expect(schema.properties.coaching_questions.description).toBe('Null unless this change makes the saved questions out of date (one is answered, settled or no longer applies, or the model now raises a more important one): then the whole new list, by the first draft\'s rules (up to three).');
+    // 29 Oct: prompts v2 (schema-descriptions.txt, CanonicalUpdate.coaching_questions); before it "Null unless this change makes the saved questions out of date (one is answered, …".
+    expect(schema.properties.coaching_questions.description).toBe('Null keeps the saved list; otherwise replace the whole list when this change answers, invalidates or changes the priority of questions. [] clears it. Apply the canonical question rules.');
     expect(schema.properties.coaching_questions.anyOf.map((x: Rec) => x.type)).toEqual(['array', 'null']);
     // Contrast: an update that leaves the key out, or puts a figure in the list, is refused by both.
     const { coaching_questions: _left, ...without } = none(bakery(), null);

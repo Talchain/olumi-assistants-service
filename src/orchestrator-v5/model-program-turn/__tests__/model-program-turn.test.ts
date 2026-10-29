@@ -18,11 +18,16 @@ import { compile, isApproximate, normalise } from '../../model-program/compile.j
 import { PROGRAM_TOOL_DESCRIPTIONS, programInstructions } from '../../core-route/instructions.js';
 import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
-import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_CHANGE_LABEL, UPDATE_JSON_SCHEMA, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX } from '../prompt.js';
+import { BASE_MODEL_LABEL, CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, FIRST_DRAFT_ONLY, MODELLING_RULES, REPAIR_ERRORS_LABEL, REPAIR_INSTRUCTIONS, SAVED_MODEL_LABEL, todayLine, UPDATE_CHANGE_LABEL,
+  UPDATE_INSTRUCTIONS, UPDATE_JSON_SCHEMA, UPDATE_REMOVALS_LABEL } from '../prompt.js';
+/** An update's developer task as sent (prompts v2, INTEGRATION §2): update.txt, then Olumi's change request and the permitted removal ids. */
+const updateTask = (request: string, removals = 'none') => `${UPDATE_INSTRUCTIONS}\n\n${UPDATE_CHANGE_LABEL} ${request}\n${UPDATE_REMOVALS_LABEL} ${removals}`;
+/** An update's conversation roles (prompts v2): the date context, the person's words, the saved model as data, Olumi's task. */
+const UPDATE_ROLES = ['developer', 'user', 'developer', 'developer'];
 import { runModelProgramTurn } from '../turn.js';
 import { evaluateCanonical, seedOf, RUN_DRAWS } from '../evaluate.js';
 import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, sourceTextOf } from '../program-store.js';
-import { draftCanonicalModel, proposePostimage, withHostFields } from '../draft.js';
+import { draftCanonicalModel, draftReasoningEffort, draftRequestBody, proposePostimage, withHostFields } from '../draft.js';
 import { applyCanvasFigure, applyProgramChange, holdProgramCard, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
 import { log as staticLog } from '../../../utils/telemetry.js';
 import { asDrafted, GROUPS, readingOf, validatePostimage, withoutHost } from '../postimage.js';
@@ -549,19 +554,40 @@ describe('the model-program turn on the real core route', () => {
     const body = sent[0]!;
     expect(body.model).toBe('gpt-6.1-sol');
     expect(body.reasoning).toEqual({ effort: 'medium' });
-    // Alpha G14: today's date (Europe/London) follows the fixed instructions, so a stated date counts from it.
+    // Alpha G14: today's date (Europe/London) goes with the call, so a stated date is read against it.
     const london = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-    // 29 Oct: stated time and decide-by (TIME-AND-DECIDE-BY design); before it "… (Europe/London). A date they state counts in whole periods from today, which is period 0."
-    expect(body.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is ${london} (Europe/London), period 0. Read the dates they state against it.`);
+    // 29 Oct: prompts v2 (INTEGRATION §1): the instructions are the fixed text alone (the cached prefix), and the date context is
+    // the conversation's first, developer message; before it the instructions ended "\n\nToday is … (Europe/London), period 0. Read the dates they state against it."
+    expect(body.instructions).toBe(DRAFTING_INSTRUCTIONS);
     // The date sent is recorded beside the fixed instructions' hash, so the record says exactly what was sent (Codex on #3760).
     expect(r.json().model_program.draft).toMatchObject({ prompt_sha256: createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex'), today: london });
     expect(body.text.format).toMatchObject({ type: 'json_schema', name: 'canonical_model', strict: true });
     expect(stableStringify(body.text.format.schema)).toBe(stableStringify(CANONICAL_JSON_SCHEMA));
-    expect(body.input).toEqual([{ role: 'user', content: BRIEF }]);
+    // 29 Oct: prompts v2; before it [{ role: 'user', content: BRIEF }] alone.
+    expect(body.input).toEqual([{ role: 'developer', content: todayLine(london) }, { role: 'user', content: BRIEF }]);
+    expect(todayLine(london)).toBe(`Today: ${london}. Time zone: Europe/London. Saved period-zero date: ${london}. These dates are context for interpreting stated time; the host counts model periods.`);
     expect(body.tools ?? []).toEqual([]);
     // The saved model is the AI's own draft, unedited.
     expect(persisted!.living_model.canonical).toEqual(bakery());
     expect(r.json().model_program.draft.attempts.map((a: Json) => a.errors.length)).toEqual([0]);
+  });
+
+  it('prompts v2 (mechanical): the benchmark arm alone may set the drafter\'s reasoning effort (CEE_DRAFT_REASONING_EFFORT: low, medium or high); anything else is medium', () => {
+    expect([draftReasoningEffort({}), draftReasoningEffort({ CEE_DRAFT_REASONING_EFFORT: 'high' }), draftReasoningEffort({ CEE_DRAFT_REASONING_EFFORT: 'low' }),
+      draftReasoningEffort({ CEE_DRAFT_REASONING_EFFORT: 'xhigh' }), draftReasoningEffort({ CEE_DRAFT_REASONING_EFFORT: 'HIGH' })]).toEqual(['medium', 'high', 'low', 'medium', 'medium']);
+    vi.stubEnv('CEE_DRAFT_REASONING_EFFORT', 'high');
+    try { expect([draftRequestBody([], false).reasoning, draftRequestBody([], true).reasoning]).toEqual([{ effort: 'high' }, { effort: 'high' }]); } finally { vi.unstubAllEnvs(); }
+    expect(draftRequestBody([], false).reasoning).toEqual({ effort: 'medium' });
+  });
+
+  it('prompts v2 (mechanical): each provider call in core_turn.summary carries its reasoning tokens (the Responses usage\'s output_tokens_details.reasoning_tokens)', async () => {
+    const info = vi.spyOn((await import('../../../utils/telemetry.js')).log, 'info');
+    replies = [JSON.stringify(bakery())];
+    expect((await turn({ message: BRIEF })).statusCode).toBe(200);
+    const line = info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : [])).at(-1)!;
+    info.mockRestore();
+    expect(line.provider_calls.length).toBeGreaterThan(0);
+    for (const c of line.provider_calls as Json[]) expect(c).toMatchObject({ output_tokens: 500, reasoning_tokens: 100 });
   });
 
   it('no header, no flag: a scenario with no saved model is drafted by the canonical drafter and nothing else', async () => {
@@ -571,27 +597,60 @@ describe('the model-program turn on the real core route', () => {
     expect(persisted!.living_model.model_program).toBe('v1');
   });
 
-  it('step 2, compile + repair: the compiler\'s own sentence goes back to the SAME conversation; at most 2 repairs', async () => {
+  // 29 Oct: prompts v2 (INTEGRATION §3, "Mechanical work"): ONE edit-only repair. Before it "step 2, compile + repair: the
+  // compiler's own sentence goes back to the SAME conversation; at most 2 repairs" (the draft as the assistant's turn, then
+  // REPAIR_PREFIX asking for the whole model again, in the user role, three calls at most).
+  it('step 2, ONE edit-only repair: the retained candidate and the compiler\'s sentences go back as Olumi\'s, with the MODELLING RULES only and the edit schema; the repair returns only its edits, merged onto the candidate', async () => {
     const bad = JSON.stringify(bakeryWithDefect());
-    replies = [bad, JSON.stringify(bakery())];
-    const r = await turn({ message: BRIEF });
-    expect(drafterCalls()).toHaveLength(2);
     const errors = compile(bakeryWithDefect(), { sourceText: BRIEF }).errors;
     expect(errors.map((e) => e.code)).toEqual(['range_order']);
-    expect(sent[1]!.input).toEqual([{ role: 'user', content: BRIEF }, { role: 'assistant', content: bad },
-      { role: 'user', content: `${REPAIR_PREFIX}\n- ${errors[0]!.message}` }]);
-    expect(sent[1]!.instructions).toBe(sent[0]!.instructions);
+    // The repair returns ONLY the record it fixes, in the edit schema; nothing else of the model.
+    const edits = { version: 'canonical.v1', question: null, period: null, coaching_questions: null, decide_by: null, quantities: [bakery().quantities.find((x) => x.id === 'sell_through')!],
+      relations: [], goals: [], limits: [], preferences: [], options: [], risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: [] };
+    replies = [bad, JSON.stringify(edits)];
+    const r = await turn({ message: BRIEF });
+    expect(drafterCalls()).toHaveLength(2);
+    const repair = sent[1]!;
+    // MODELLING RULES only (never FIRST DRAFT ONLY), and the edit schema.
+    expect([repair.instructions, String(repair.instructions).includes(FIRST_DRAFT_ONLY)]).toEqual([MODELLING_RULES, false]);
+    expect(stableStringify(repair.text.format.schema)).toBe(stableStringify(UPDATE_JSON_SCHEMA));
+    // The person's brief stays the one user-role message; the retained candidate (labelled data) and the errors are Olumi's.
+    expect(repair.input.map((m: Json) => m.role)).toEqual(['developer', 'user', 'developer', 'developer']);
+    expect(repair.input[0]).toEqual(sent[0]!.input[0]);
+    expect(repair.input[1]).toEqual({ role: 'user', content: BRIEF });
+    expect(String(repair.input[2].content).startsWith(`${BASE_MODEL_LABEL}\n`)).toBe(true);
+    expect(JSON.parse(String(repair.input[2].content).slice(BASE_MODEL_LABEL.length + 1))).toEqual(bakeryWithDefect());
+    expect(repair.input[3]).toEqual({ role: 'developer', content: `${REPAIR_INSTRUCTIONS}\n\n${REPAIR_ERRORS_LABEL}\n- ${errors[0]!.message}` });
+    // No whole-model ask anywhere in the repair request.
+    expect(JSON.stringify(repair.input)).not.toMatch(/Return the whole model again|whole model again/);
+    expect(REPAIR_INSTRUCTIONS).toContain('Never return the whole model.');
+    // Its one edit merged onto the candidate: the saved model is the fixed bakery, every other record as drafted.
     expect(r.json().model_program.draft.attempts.map((a: Json) => a.errors.length)).toEqual([1, 0]);
     expect(persisted!.living_model.canonical).toEqual(bakery());
+  });
 
-    // Three defective drafts: three calls (two repairs), and nothing is saved.
-    beforeEachReset();
-    replies = [bad, bad, bad];
-    const r3 = await turn({ message: BRIEF });
-    expect(sent).toHaveLength(3);
+  it('step 2b, at most ONE repair: a repair that still does not compile stops honestly, with no third call and nothing saved; a draft with no schema-valid base is never repaired', async () => {
+    const bad = JSON.stringify(bakeryWithDefect());
+    const still = { version: 'canonical.v1', question: null, period: null, coaching_questions: null, decide_by: null, quantities: [bakeryWithDefect().quantities.find((x) => x.id === 'sell_through')!],
+      relations: [], goals: [], limits: [], preferences: [], options: [], risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: [] };
+    replies = [bad, JSON.stringify(still), 'never sent'];
+    const r = await turn({ message: BRIEF });
+    expect(drafterCalls()).toHaveLength(2);
+    expect(replies).toEqual(['never sent']);
     expect(persisted).toBeNull();
-    expect(r3.json().model_program.saved).toBe(false);
-    expect(r3.json()._agent.tool_calls).toEqual([{ name: 'draft_canonical_model', outcome: 'refused', refusal: 'does_not_compile' }]);
+    expect(r.json().model_program.saved).toBe(false);
+    expect(r.json().model_program.draft.attempts.map((a: Json) => a.errors.length)).toEqual([1, 1]);
+    expect(r.json()._agent.tool_calls).toEqual([{ name: 'draft_canonical_model', outcome: 'refused', refusal: 'does_not_compile' }]);
+
+    // No schema-valid draft: no base to repair onto, so no repair call, never a request for the whole model.
+    beforeEachReset();
+    replies = [JSON.stringify({ version: 'canonical.v1' }), 'never sent'];
+    const none = await turn({ message: BRIEF });
+    expect(drafterCalls()).toHaveLength(1);
+    expect(replies).toEqual(['never sent']);
+    expect(persisted).toBeNull();
+    expect(none.json()._agent.tool_calls).toEqual([{ name: 'draft_canonical_model', outcome: 'refused', refusal: 'no_draft' }]);
+    expect(none.json().model_program.draft.attempts).toMatchObject([{ attempt: 0, failed: 'output is not in the model schema' }]);
   });
 
   it('25 Oct 03:55Z (every first draft "call failed: Error"; the cause, 429 insufficient_quota, recorded nowhere): a provider call that throws keeps its typed fields on the attempt and the summary log line, never its message or key; the same no_draft words', async () => {
@@ -752,10 +811,11 @@ describe('the model-program turn on the real core route', () => {
       const draft = rows[0]!;
       expect(draft).toMatchObject({ model: 'gpt-6.1-sol', returned_model: 'gpt-6.1-sol', reasoning_effort: 'medium', max_output_tokens: 32_000, tool_names: [],
         schema_sha256: sha(JSON.stringify(sent[0]!.text.format.schema)) });
-      // The draft record's schema hash is the one the ledger saw sent; its prompt hash is the FIXED instructions' (step 1),
-      // the ledger's the composed instructions with today's line.
+      // The draft record's schema hash is the one the ledger saw sent; its prompt hash is the FIXED instructions' (step 1).
+      // 29 Oct: prompts v2: the date context is an input message, so what was sent as instructions IS the fixed text and the two
+      // hashes are one; before it they differed (the ledger's held the composed instructions with today's line).
       expect(draft.schema_sha256).toBe(j.model_program.draft.schema_sha256);
-      expect(draft.prompt_sha256).not.toBe(j.model_program.draft.prompt_sha256);
+      expect(draft.prompt_sha256).toBe(j.model_program.draft.prompt_sha256);
       expect(rows[1]!.schema_sha256, 'the reply sends no schema').toBeUndefined();
     }, 30_000);
   });
@@ -1913,9 +1973,12 @@ describe('the model-program turn on the real core route', () => {
     expect(sent).toHaveLength(2);
     // C6 (29 Oct): the update's own text and the agent's change are Olumi's (developer role, the change labelled as Olumi's
     // instruction), never the person's: re-pinned knowingly from ['user', 'assistant', 'user'] and "The change:".
-    expect(sent[1]!.input.map((m: Json) => m.role)).toEqual(['user', 'assistant', 'developer']);
+    // 29 Oct: prompts v2 (INTEGRATION §2): the date context first and the saved model as labelled data, both Olumi's; before it ['user', 'assistant', 'developer'].
+    expect(sent[1]!.input.map((m: Json) => m.role)).toEqual(UPDATE_ROLES);
+    expect(sent[1]!.instructions).toBe(MODELLING_RULES);
     // The update's request is prompt.ts's text, then the change (DL 24 Oct: the update text is prompt code).
-    expect(sent[1]!.input[2].content).toBe(`${UPDATE_PREFIX}\n${UPDATE_CHANGE_LABEL} The oven price is their answer: about £2,500.\nRemove: nothing`);
+    // 29 Oct: prompts v2; before it `${UPDATE_PREFIX}\n${UPDATE_CHANGE_LABEL} …\nRemove: nothing` at input[2].
+    expect(sent[1]!.input[3].content).toBe(updateTask('The oven price is their answer: about £2,500.'));
     // The card shows the change's substance, before and after, and whose it is.
     expect(proposed.data.changes).toEqual([{ id: 'oven_price', kind: 'quantity', action: 'change', label: 'oven price', before: 'no figure yet (in £ per oven), still to be given, Olumi asks "What would the second oven cost?", no basis given, not in your words',
       after: `£2,500 per oven, known, no question, based on "${APPROXIMATE_FIGURE}", in your words "The oven would cost about £2,500."`, author: 'person', family: 'quantity' }]);
@@ -2116,8 +2179,11 @@ describe('the model-program turn on the real core route', () => {
     expect((UPDATE_JSON_SCHEMA as Json).properties.remove.items).toEqual({ type: 'string' });
     expect((UPDATE_JSON_SCHEMA as Json).properties.question.anyOf.map((x: Json) => x.type)).toEqual(['string', 'null']);
     // C6 (29 Oct): the change is Olumi's instruction, in the developer role; re-pinned knowingly from ['user', 'assistant', 'user'] and "The change:".
-    expect(sent[0]!.input.map((m: Json) => m.role)).toEqual(['user', 'assistant', 'developer']);
-    expect(sent[0]!.input[2].content).toBe(`${UPDATE_PREFIX}\n${UPDATE_CHANGE_LABEL} Base sales are 320 a week; the landlord must agree first.\nRemove: nothing`);
+    // 29 Oct: prompts v2; before it ['user', 'assistant', 'developer'] and UPDATE_PREFIX at input[2]. An update is sent the
+    // MODELLING RULES only, never the FIRST DRAFT ONLY section.
+    expect(sent[0]!.input.map((m: Json) => m.role)).toEqual(UPDATE_ROLES);
+    expect([sent[0]!.instructions, String(sent[0]!.instructions).includes(FIRST_DRAFT_ONLY)]).toEqual([MODELLING_RULES, false]);
+    expect(sent[0]!.input[3].content).toBe(updateTask('Base sales are 320 a week; the landlord must agree first.'));
 
     // (2) + (3) A new id is added after the saved ones; an id in remove (listed by the person) is deleted, on the card and in
     // history; everything else is the saved one, byte for byte.
@@ -2154,22 +2220,27 @@ describe('the model-program turn on the real core route', () => {
       expect(p.data.changes.find((c: Json) => c.id === 'base_sales')).toMatchObject({ action: 'change', author: 'person', after });
     }
 
-    // (6) A merged model that does not compile is refused as today, after the drafter's two repairs; each repair asks for
-    // the changes again (never the whole model), after the changes it returned.
+    // (6) A merged model that does not compile is refused as today, after the drafter's ONE edit-only repair (prompts v2; before
+    // it two, each asking for every change again): the repair is given the candidate (the saved model with the update merged) as
+    // labelled data and the compiler's sentences, Olumi's both, and its edits are merged onto that candidate.
     const broken = { claims: [{ id: 'nowhere', text: 'Bread sells.', concerns: ['no_such_record'], author: 'olumi', quote: null, party: null, approval: 'proposed', approved_by: null, author_id: null }] };
     const info = vi.spyOn(staticLog, 'info'); // the instance the statically imported tools hold (the routes are re-imported after resetModules)
-    expect(await propose(broken, {}, 3)).toMatchObject({ status: 'refused', reason: 'does_not_compile' });
+    expect(await propose(broken, {}, 2)).toMatchObject({ status: 'refused', reason: 'does_not_compile' });
     // Why it took three calls is logged: each attempt's compiler codes, never words (T record 26 Oct: a 124 s edit's second draft had no recorded cause).
     const drafted = info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'model_program.update_draft' ? [o as Json] : []));
     info.mockRestore();
-    expect(drafted.map((d) => d.attempts.map((a: Json) => a.codes))).toEqual([[['undefined_ref'], ['undefined_ref'], ['undefined_ref']]]);
+    expect(drafted.map((d) => d.attempts.map((a: Json) => a.codes))).toEqual([[['undefined_ref'], ['undefined_ref']]]);
     expect(JSON.stringify(drafted)).not.toContain('Bread sells');
-    expect(sent).toHaveLength(3);
-    expect(sent[1]!.input.at(-2)).toEqual({ role: 'assistant', content: JSON.stringify({ ...none, ...broken }) });
-    expect(String(sent[1]!.input.at(-1).content).startsWith(`${UPDATE_REPAIR_PREFIX}\n- `)).toBe(true);
+    expect(sent).toHaveLength(2); // ONE repair, never a third call
+    const base = String(sent[1]!.input.at(-2).content);
+    expect(base.startsWith(`${BASE_MODEL_LABEL}\n`)).toBe(true);
+    const candidate = JSON.parse(base.slice(BASE_MODEL_LABEL.length + 1)) as CanonicalModelT;
+    expect([candidate.claims.map((c) => c.id), candidate.quantities.length]).toEqual([['nowhere'], saved.quantities.length]); // the delta materialised onto the saved model
+    expect(String(sent[1]!.input.at(-1).content).startsWith(`${REPAIR_INSTRUCTIONS}\n\n${REPAIR_ERRORS_LABEL}\n- `)).toBe(true);
     // C6 (29 Oct): the update's repair feedback is the host's, in the developer role, never the person's (content unchanged).
-    expect(sent[1]!.input.map((m: Json) => m.role)).toEqual(['user', 'assistant', 'developer', 'assistant', 'developer']);
-    expect(stableStringify(sent[2]!.text.format.schema)).toBe(stableStringify(UPDATE_JSON_SCHEMA));
+    expect(sent[1]!.input.map((m: Json) => m.role)).toEqual(['developer', 'user', 'developer', 'developer']);
+    expect(sent[1]!.instructions).toBe(MODELLING_RULES);
+    expect(stableStringify(sent[1]!.text.format.schema)).toBe(stableStringify(UPDATE_JSON_SCHEMA));
     expect(registered).toHaveLength(1); // proposing saves nothing
   });
 
@@ -2660,12 +2731,16 @@ describe('the model-program turn on the real core route', () => {
     expect(p.status, JSON.stringify(p)).toBe('ok');
     expect(sent).toHaveLength(1);
     const input = sent[0]!.input as Json[];
-    expect(input.map((x) => x.role)).toEqual(['user', 'assistant', 'developer']);
+    // 29 Oct: prompts v2 (INTEGRATION §2); before it ['user', 'assistant', 'developer'], the saved model as the assistant's turn.
+    expect(input.map((x) => x.role)).toEqual(UPDATE_ROLES);
     // The person's verified words, where they always were: the brief and what they typed this turn, and nothing of the agent's.
-    expect(input[0]).toEqual({ role: 'user', content: `${BRIEF}\n\n${typed}` });
+    expect(input[1]).toEqual({ role: 'user', content: `${BRIEF}\n\n${typed}` });
+    expect(String(input[2]!.content).startsWith(`${SAVED_MODEL_LABEL}\n`)).toBe(true);
     // The agent's instruction, said as Olumi's, in the developer role with the update's own text.
-    expect(input[2]).toEqual({ role: 'developer', content: `${UPDATE_PREFIX}\n${UPDATE_CHANGE_LABEL} ${request}\nRemove: nothing` });
-    expect(UPDATE_CHANGE_LABEL).toMatch(/^Olumi's instruction for this change \(written by Olumi, never their words/);
+    expect(input[3]).toEqual({ role: 'developer', content: updateTask(request) });
+    // 29 Oct: prompts v2; before it the label /^Olumi's instruction for this change \(written by Olumi, never their words/ (update.txt now says it).
+    expect(UPDATE_CHANGE_LABEL).toBe('Olumi\'s change request:');
+    expect(UPDATE_INSTRUCTIONS).toContain('The change request below is Olumi\'s instruction, not the person\'s words.');
     // No user-role message carries any of the agent's words.
     expect(input.filter((x) => x.role === 'user').some((x) => String(x.content).includes('Amend the existing'))).toBe(false);
     // The card shows the person's own words as theirs.
@@ -2894,8 +2969,9 @@ describe('the model-program turn on the real core route', () => {
     // drafter's (its step 6), no longer the program instructions'.
     expect(r.blockers.some((b) => b.id === 'oven_price')).toBe(false);
     expect(JSON.stringify(r)).not.toContain('What range would you put on it');
-    expect(DRAFTING_INSTRUCTIONS.split('Ask for a range when a supplied approximate point feeds a goal or limit.')).toHaveLength(2);
-    expect(programInstructions()).not.toContain('If that figure feeds a goal or a limit, ask what range they would put on it.');
+    // 29 Oct: prompts v2; before it "Ask for a range when a supplied approximate point feeds a goal or limit."
+    expect(DRAFTING_INSTRUCTIONS.split('Ask for a range when their approximate point feeds an aim or limit.')).toHaveLength(2);
+    expect(CORE_ALIGNED_INSTRUCTIONS).not.toContain('If that figure feeds a goal or a limit, ask what range they would put on it.');
     expect(r.within_limits.status).toBe('calculable'); // the range asked for holds nothing back
     expect(r.conversions.some((c) => c.quantity === 'oven_price')).toBe(false);
     const view = evaluateCanonical(approx, { sourceText: `${BRIEF}\n${words}`, seed: 7 }).view as Json;
@@ -3477,7 +3553,8 @@ describe('the model-program turn on the real core route', () => {
     expect(p.status, JSON.stringify(p)).toBe('ok');
     expect(sent).toHaveLength(1);
     // C6 (29 Oct): Olumi's instruction, in the developer role; re-pinned knowingly from the user role and "The change:".
-    expect((sent[0]!.input as Json[])[2]).toEqual({ role: 'developer', content: `${UPDATE_PREFIX}\n${UPDATE_CHANGE_LABEL} ${request}\nRemove: nothing` });
+    // 29 Oct: prompts v2; before it UPDATE_PREFIX at input[2].
+    expect((sent[0]!.input as Json[])[3]).toEqual({ role: 'developer', content: updateTask(request) });
     expect(p.data.changes.map((x: Json) => [x.id, x.kind, x.action, x.before, x.after, x.author])).toEqual([
       ['more_loaves_target', 'quantity', 'add', null, `380 loaves per week, in your words "${words}"`, 'person'],
       ['more_loaves_window', 'quantity', 'add', null, `4 weeks, in your words "${words}"`, 'person'],
@@ -3523,7 +3600,8 @@ describe('the model-program turn on the real core route', () => {
     expect(p.status, JSON.stringify(p)).toBe('ok');
     expect(sent).toHaveLength(1);
     // C6 (29 Oct): Olumi's instruction, in the developer role; re-pinned knowingly from the user role and "The change:".
-    expect((sent[0]!.input as Json[])[2]).toEqual({ role: 'developer', content: `${UPDATE_PREFIX}\n${UPDATE_CHANGE_LABEL} ${request}\nRemove: nothing` });
+    // 29 Oct: prompts v2; before it UPDATE_PREFIX at input[2].
+    expect((sent[0]!.input as Json[])[3]).toEqual({ role: 'developer', content: updateTask(request) });
     expect(p.data.changes.map((x: Json) => [x.id, x.kind, x.action, x.author])).toEqual([['oven_weeks', 'quantity', 'change', 'olumi']]);
     // B20 removed: a drafter update that leaves the item as saved is no "read no figure" refusal of the host's.
     replies = [savedWith((d) => setQ(d, 'oven_weeks', { basis: 'No date given.' }))];
@@ -3677,8 +3755,9 @@ describe('the model-program turn on the real core route', () => {
       m.options = m.options.map((o) => (o.id === 'second_oven' ? { ...o, sets: o.sets.map((x) => ({ ...x, starts_after_periods: 'oven_weeks' })) } : o));
       replies = [JSON.stringify(m)];
       expect((await turn({ message: `${BRIEF} We count eight weeks.` })).json().model_program.saved).toBe(true);
-      // 29 Oct: stated time and decide-by (TIME-AND-DECIDE-BY design); before it "… (Europe/London). A date they state counts in whole periods from today, which is period 0."
-      expect(sent[0]!.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is 2026-10-26 (Europe/London), period 0. Read the dates they state against it.`);
+      // 29 Oct: prompts v2 (INTEGRATION §1): the fixed instructions, and the date context as the first, developer message; before
+      // it the instructions ended "\n\nToday is 2026-10-26 (Europe/London), period 0. Read the dates they state against it."
+      expect([sent[0]!.instructions, sent[0]!.input[0]]).toEqual([DRAFTING_INSTRUCTIONS, { role: 'developer', content: todayLine('2026-10-26') }]);
       expect(persisted!.living_model.drafted_on).toBe('2026-10-26');
       const drafted = JSON.parse(JSON.stringify(persisted)) as Json;
       // A program saved before the day was kept: the same stored JSON without it.
@@ -3695,7 +3774,8 @@ describe('the model-program turn on the real core route', () => {
         request: `The answer to oven_weeks, in their words: "${words}"`, remove: [], answers: [] })) as Promise<Json>; };
 
       // Contrast first, the program saved before: it reopens exactly as stored (the same newest Run, current, its view byte for
-      // byte), is rewritten with no new key, and its update is told today, for reading their words, and that period 0 is not recorded.
+      // byte), is rewritten with no new key. Its update has no saved period 0, so the date context says none was recorded and the
+      // host counts nothing from today (PL HOLD a, 29 Oct; before it the update counted from the day it ran).
       persisted = JSON.parse(JSON.stringify(old)) as Json;
       const reopened = reopenProgram(JSON.parse(JSON.stringify(old)))!;
       expect([reopened.run!.run_id, reopened.current, reopened.engine_current]).toEqual([oldLiving.runs.at(-1).run_id, true, true]);
@@ -3705,10 +3785,10 @@ describe('the model-program turn on the real core route', () => {
       replies = [savedWith((d) => setQ(d, 'oven_weeks', { status: 'known', question: null, value: 2, author: 'olumi', quote: null, basis: 'Two whole weeks from today, 9 November 2026.' }))];
       expect((await ask(ctx())).status).toBe('ok');
       expect(sent).toHaveLength(1);
-      // 29 Oct (independent read): no start date recorded is said so, never "period 0" for today; before it "Today is
-      // 2026-11-09 (Europe/London), period 0. Read the dates they state against it."
-      expect(sent[0]!.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is 2026-11-09 (Europe/London). This model's period 0, the day it was first drafted, is not recorded: `
-        + 'read the dates they state against today.');
+      // 29 Oct: prompts v2; before it the instructions ended "\n\nToday is 2026-11-09 (Europe/London), period 0. Read the dates they state against it."
+      expect([sent[0]!.instructions, sent[0]!.input[0]]).toEqual([MODELLING_RULES, { role: 'developer', content: todayLine('2026-11-09', null) }]);
+      // 29 Oct (independent read): no start date recorded is said so, never that today is period 0; today is still given.
+      expect(todayLine('2026-11-09', null)).toBe('Today: 2026-11-09. Time zone: Europe/London. Saved period-zero date: not recorded. These dates are context for interpreting stated time; the host counts model periods.');
 
       // The program with its day: the drafter is told both days, and counts their date from 26 October, the model's period 0.
       persisted = JSON.parse(JSON.stringify(drafted)) as Json;
@@ -3717,9 +3797,8 @@ describe('the model-program turn on the real core route', () => {
       const p = await ask(c);
       expect(p.status, JSON.stringify(p)).toBe('ok');
       expect(sent).toHaveLength(1);
-      // 29 Oct: stated time and decide-by (TIME-AND-DECIDE-BY design); before it "… the day it was first drafted: a date they state, and anything they time from today, counts in whole periods from 2026-10-26."
-      expect(sent[0]!.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is 2026-11-09 (Europe/London). This model's period 0 is 2026-10-26, the day it was first drafted: `
-        + 'read the dates they state against today; Olumi counts them from 2026-10-26.');
+      // 29 Oct: prompts v2; before it the instructions ended "…This model's period 0 is 2026-10-26, the day it was first drafted: read the dates they state against today; Olumi counts them from 2026-10-26."
+      expect([sent[0]!.instructions, sent[0]!.input[0]]).toEqual([MODELLING_RULES, { role: 'developer', content: todayLine('2026-11-09', '2026-10-26') }]);
       // Approved, the update is saved with the SAME period 0, and the drafter's four weeks exactly as it wrote them (B4 removed:
       // never re-stamped as theirs).
       expect(await applyProgramChange(deps, c as never, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
@@ -3895,7 +3974,8 @@ describe('the model-program turn on the real core route', () => {
     expect(p.status, JSON.stringify(p)).toBe('ok');
     // ONE drafter call, given the model WITH the answer set exactly: nothing they said is lost to the redraft.
     expect(sent).toHaveLength(1);
-    const given = JSON.parse(String((sent[0]!.input as Json[])[1]!.content)) as CanonicalModelT;
+    // 29 Oct: prompts v2: the saved model is labelled data at input[2]; before it the assistant's turn at input[1].
+    const given = JSON.parse(String((sent[0]!.input as Json[])[2]!.content).slice(SAVED_MODEL_LABEL.length + 1)) as CanonicalModelT;
     expect(given.quantities.find((x) => x.id === 'oven_price')).toMatchObject(price);
     // ONE card with every change: their figure, the new target and the new goal.
     expect(p.data.changes.map((c: Json) => [c.id, c.action, c.author]).sort()).toEqual([['oven_price', 'change', 'person'], ['stretch', 'add', 'person'], ['stretch_target', 'add', 'person']]);
@@ -4121,11 +4201,12 @@ describe('the model-program turn on the real core route', () => {
       (d.relations.find((r) => r.id === 'features_rel') as { base: string }).base = 'current_features'; };
     expect(read(onBase('We ship 4 features a month', 4)).quantities.find((x) => x.id === 'current_features')).toMatchObject({ author: 'structure', status: 'known', value: 4, quote: 'We ship 4 features a month' });
 
-    // Refused: a note naming a record that is not there, after the drafter's two repairs (its sentence goes back each time).
+    // Refused: a note naming a record that is not there, after the drafter's ONE repair (prompts v2; before it two).
     replies = Array.from({ length: 3 }, () => completed((d) => { d.assumptions[d.assumptions.length - 1]!.concerns.push('no_such_record'); }));
     sent.length = 0;
     expect(await propose()).toMatchObject({ status: 'refused', reason: 'does_not_compile' });
-    expect(sent).toHaveLength(3);
+    expect(sent).toHaveLength(2);
+    expect(replies).toHaveLength(1); // the third is never asked for
     // S1 strip (A2, A2b off; each in its own store): a figure only they know given as theirs in words they never wrote, and one
     // of their figures rewritten under their EARLIER words, are proposed as the AI wrote them, shown on the card for their press.
     replies = [completed((d) => setQ(d, 'features_now', { status: 'known', value: 12, question: null, quote: 'about 12 a month' }))];
@@ -5050,12 +5131,15 @@ describe('display words stay on one line: the compiler\'s reasons quote labels a
 function beforeEachReset() { SCENARIO = randomUUID(); persisted = null; registered.length = 0; turnRows.clear(); conversationIds.clear(); pausedRun = null; sent.length = 0; replies = []; creates.length = 0; createAnswers = []; }
 
 describe('the update schema carries the one-statement rule (PL AMEND on R3, 27 Oct)', () => {
-  it('UPDATE_JSON_SCHEMA states it once, and the first-draft schema still states it once', async () => {
-    const { UPDATE_JSON_SCHEMA, CANONICAL_JSON_SCHEMA } = await import('../prompt.js');
-    const rule = 'One statement, one record across all families; never paraphrase it into another.';
-    const count = (s: unknown) => JSON.stringify(s).split(rule).length - 1;
-    expect(count(UPDATE_JSON_SCHEMA)).toBe(1);
-    expect(count(CANONICAL_JSON_SCHEMA)).toBe(1);
-    expect(JSON.stringify(UPDATE_JSON_SCHEMA)).toContain('Only the records this update changes or adds, each in full with its id, in its own family; [] for a family with none.');
+  // 29 Oct: prompts v2 (INTEGRATION "Descriptions": a delta-specific root for edits, never the full-model root concatenated). The
+  // rule now rides the MODELLING RULES every update and repair is sent, and the first-draft schema's root; before it the update
+  // schema's root carried "One statement, one record across all families; never paraphrase it into another." once.
+  it('every update is sent the one-statement rule once (its MODELLING RULES), and the first-draft schema states it once', async () => {
+    const { UPDATE_JSON_SCHEMA, CANONICAL_JSON_SCHEMA, MODELLING_RULES } = await import('../prompt.js');
+    const count = (s: string, rule: string) => s.split(rule).length - 1;
+    expect(count(MODELLING_RULES, 'Represent each distinct assertion once; reuse references rather than paraphrase it across families.')).toBe(1);
+    expect(count(JSON.stringify(CANONICAL_JSON_SCHEMA), 'Represent each distinct assertion once; a source span may support distinct records')).toBe(1);
+    expect(JSON.stringify(UPDATE_JSON_SCHEMA)).toContain('Only added or changed records, each complete in its existing family with its stable id; [] for unchanged families. Unchanged nullable top-level fields are null. Do not return the whole model or duplicate unaffected records.');
+    expect(JSON.stringify(UPDATE_JSON_SCHEMA)).not.toContain('One provisional Living Model');
   });
 });

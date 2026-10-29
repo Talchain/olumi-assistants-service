@@ -3,9 +3,12 @@
  *
  * One strict structured call returns a CanonicalModel (S1's schema, `prompt.ts`), on the client CEE's core lane uses
  * (`ledgeredAgentsClient`: every attempt is a `_provider_calls` row), at the core budget's model with reasoning effort
- * MEDIUM. The draft is compiled; while it has errors, the compiler's own sentences go back to the SAME conversation (the
- * draft as the assistant's turn, the errors as the next user turn: phase 0b's repair shape), at most twice. Nothing here
- * edits the model but the host's own fields (`withHostFields`): what compiles is the AI's own draft.
+ * MEDIUM (the benchmark arm alone may set CEE_DRAFT_REASONING_EFFORT). The draft is compiled; when it has errors, ONE
+ * edit-only repair (prompts v2, INTEGRATION §3): the retained schema-valid candidate as labelled base data and the
+ * compiler's sentences, both Olumi's (developer role), with the edit schema; its edits are merged onto that candidate and
+ * compiled once more, and an output still invalid stops honestly. A draft that is not schema-valid, or none at all, has no
+ * base, so it stops: the whole model is never asked for again. Nothing here edits the model but the host's own fields
+ * (`withHostFields`) and the host's count of stated time: what compiles is the AI's own draft.
  */
 import { streamedLedgeredResponse, type StreamedResponsesBody } from '../../adapters/llm/openai-agents-client.js';
 import { coreBudget } from '../agent-lane/model-budgets.js';
@@ -14,11 +17,20 @@ import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical
 import { todayInLondon } from '../goal-target/deadline-date.js';
 import { countStatedTime } from './stated-time.js';
 import { compile, compileJson, normalise, type CompileError, type CompileResult } from '../model-program/compile.js';
-import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, CanonicalUpdate, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, todayLine, UPDATE_CHANGE_LABEL, UPDATE_JSON_SCHEMA, UPDATE_PREFIX,
-  UPDATE_REPAIR_PREFIX, type CanonicalUpdateT } from './prompt.js';
+import { BASE_MODEL_LABEL, CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, CanonicalUpdate, DRAFTING_INSTRUCTIONS, MODELLING_RULES, REPAIR_ERRORS_LABEL, REPAIR_INSTRUCTIONS,
+  SAVED_MODEL_LABEL, todayLine, UPDATE_CHANGE_LABEL, UPDATE_INSTRUCTIONS, UPDATE_JSON_SCHEMA, UPDATE_REMOVALS_LABEL, type CanonicalUpdateT } from './prompt.js';
 
-export const MAX_REPAIRS = 2;
+/** ONE edit-only repair (prompts v2): a second compile failure stops, with no third call. */
+export const MAX_REPAIRS = 1;
+/** The drafter's default reasoning effort. */
 export const DRAFT_REASONING_EFFORT = 'medium' as const;
+const EFFORTS = ['low', 'medium', 'high'] as const;
+/** The effort a drafting call is sent: medium, unless the benchmark arm sets CEE_DRAFT_REASONING_EFFORT to low, medium or high. */
+// eslint-disable-next-line no-restricted-syntax -- call-time read by design: the benchmark arm alone sets it, per run (prompts v2)
+export function draftReasoningEffort(env: Readonly<Record<string, string | undefined>> = process.env): (typeof EFFORTS)[number] {
+  const v = env['CEE_DRAFT_REASONING_EFFORT'];
+  return EFFORTS.find((e) => e === v) ?? DRAFT_REASONING_EFFORT;
+}
 /** Room for a whole canonical model plus its reasoning (phase 0b's largest draft used 11.7k of 16k on a smaller format). */
 export const DRAFT_MAX_OUTPUT_TOKENS = 32_000;
 
@@ -61,23 +73,29 @@ export type DraftOutcome = {
 };
 
 /**
- * The request body: fixed instructions and schema first (the cached prefix), then the conversation. An update's schema is its
- * changes only; `periodZero` is the saved model's period-0 date (`todayLine`): today on a first draft, null when not recorded.
+ * The request body: fixed instructions and schema first (the cached prefix), then the conversation. A first draft is sent all
+ * of DRAFTING_INSTRUCTIONS and the canonical schema; an edit (an update or a repair) only the MODELLING RULES and the edit
+ * schema, its changes only. The date context is the conversation's first, developer message (`dateContext`).
  */
-export function draftRequestBody(input: readonly InputMessage[], update: boolean, today: string, periodZero: string | null = today): StreamedResponsesBody {
+export function draftRequestBody(input: readonly InputMessage[], edit: boolean): StreamedResponsesBody {
+  const effort = draftReasoningEffort();
   return {
-    model: coreBudget(DRAFT_REASONING_EFFORT).model,
-    instructions: `${DRAFTING_INSTRUCTIONS}\n\n${todayLine(today, periodZero)}`,
+    model: coreBudget(effort).model,
+    instructions: edit ? MODELLING_RULES : DRAFTING_INSTRUCTIONS,
     input: input.map((m) => ({ role: m.role, content: m.content })),
-    reasoning: { effort: DRAFT_REASONING_EFFORT },
+    reasoning: { effort },
     max_output_tokens: DRAFT_MAX_OUTPUT_TOKENS,
     store: false,
-    text: { format: { type: 'json_schema', name: CANONICAL_SCHEMA_NAME, strict: true, schema: update ? UPDATE_JSON_SCHEMA : CANONICAL_JSON_SCHEMA } },
+    text: { format: { type: 'json_schema', name: CANONICAL_SCHEMA_NAME, strict: true, schema: edit ? UPDATE_JSON_SCHEMA : CANONICAL_JSON_SCHEMA } },
   };
 }
-
-/** The repair turn: the compiler's sentences, one per line. */
-export const repairMessage = (errors: readonly CompileError[], prefix = REPAIR_PREFIX): string => `${prefix}\n${errors.map((e) => `- ${e.message}`).join('\n')}`;
+/** Today and the saved period 0, as facts for reading stated time: Olumi's, in the developer role (INTEGRATION §1). */
+export const dateContext = (today: string, periodZero: string | null = today): InputMessage => ({ role: 'developer', content: todayLine(today, periodZero) });
+/** The repair's task: REPAIR_INSTRUCTIONS, then the compiler's sentences, one per line. */
+export const repairMessage = (errors: readonly CompileError[]): string => `${REPAIR_INSTRUCTIONS}\n\n${REPAIR_ERRORS_LABEL}\n${errors.map((e) => `- ${e.message}`).join('\n')}`;
+/** A shape the schema refuses, said as the compiler says one (`compileJson`), for the attempt's record. */
+const schemaErrors = (issues: readonly { readonly path: readonly PropertyKey[]; readonly message: string }[], what: string): CompileError[] =>
+  issues.slice(0, 20).map((i) => ({ code: 'schema', message: `${what} shape is wrong at ${i.path.map(String).join('.') || 'its top level'}: ${i.message}.`, items: [] }));
 
 type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'title' | 'period' | 'coaching_questions' | 'decide_by' | 'history'>;
 const FAMILIES = Object.keys(CanonicalModel.shape).filter((k) => !['version', 'question', 'title', 'period', 'coaching_questions', 'decide_by', 'history'].includes(k)) as Family[];
@@ -142,14 +160,18 @@ export function ledgeredResponsesCall(): ResponsesCall {
 }
 
 /**
- * Draft → compile → (repair → compile) ≤ MAX_REPAIRS. `sourceText` is the person's own words (the brief), against which the
- * compiler checks every quote. A call that failed ends the loop with what it has: this loop sends nothing again (strip, Paul
- * 26 Oct); the OpenAI client's own configured retries are the only resend.
+ * Draft → compile → (ONE edit-only repair → compile). `sourceText` is the person's own words (the brief). A call that failed
+ * ends with what it has: nothing here is sent again (strip, Paul 26 Oct); the OpenAI client's own configured retries are the
+ * only resend.
  * `interpret` (a FIRST draft): the model returned, compiled, saved and sent back to the agent is the compiler's reading of
- * the draft (`normalise`: a structure figure that is no structural constant is their question), never the raw draft
- * (buddy, #3709 r7). An update is read the same way, so its postimage is in the saved form. `periodZero` (an update): the
- * saved model's period-0 date, the first draft's today (`drafted_on`); a first draft counts from today; a program saved
- * before it was kept has none (PL HOLD a), and its date line says so. A position span counts from today (PL 13:40Z).
+ * the draft (`normalise`), never the raw draft (buddy, #3709 r7). An update is read the same way, so its postimage is in the
+ * saved form. `periodZero` (an update): the saved model's period-0 date, the first draft's today (`drafted_on`); a first
+ * draft counts from today; a program saved before it was kept has none (PL HOLD a), and its date context says so. A
+ * position span counts from today, the day it is said (PL 13:40Z).
+ * The repair (INTEGRATION §3 and "Update repair base"): its base is the retained schema-valid candidate, for an update the
+ * original delta materialised onto the saved model; the repair's edits are merged onto that candidate (`mergeUpdate`), never
+ * onto the saved model again, and the caller validates the final candidate against the original saved revision and the
+ * whole removal permission list (`validatePostimage`). Only the records each call returns are counted (`stated-time.ts`).
  */
 export async function draftCanonicalModel(brief: string | readonly InputMessage[], call: ResponsesCall, sourceText: string = typeof brief === 'string' ? brief : '',
   opts: { readonly interpret?: boolean; readonly onto?: CanonicalModelT; readonly periodZero?: string } = {}): Promise<DraftOutcome> {
@@ -158,53 +180,77 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
   // The day stated time is counted from: the saved period 0; a first draft's is today. An update on a model saved before its
   // period 0 was kept has none, never today (PL HOLD a): what needs it is withheld, naming the missing start date.
   const anchor = opts.periodZero ?? (onto === undefined ? today : null);
-  const input: InputMessage[] = typeof brief === 'string' ? [{ role: 'user', content: brief }] : [...brief];
+  const conversation: InputMessage[] = typeof brief === 'string' ? [{ role: 'user', content: brief }] : [...brief];
+  const dated = dateContext(today, anchor);
   const attempts: DraftAttempt[] = [];
-  let model: CanonicalModelT | null = null;
-  let compiled: CompileResult | null = null;
-  for (let a = 0; a <= MAX_REPAIRS; a += 1) {
+  /** One call: its output's text, or the attempt recorded as failed (nothing back) and null. */
+  const send = async (a: number, input: readonly InputMessage[], edit: boolean): Promise<{ readonly json: unknown; readonly out: CallOutput; readonly ms: number } | null> => {
     const t0 = Date.now();
     let out: CallOutput;
-    // The date line names the same anchor the host counts from: none recorded is said so, never today (independent read).
-    try { out = await call(draftRequestBody(input, onto !== undefined, today, anchor)); } catch (err) {
+    try { out = await call(draftRequestBody(input, edit)); } catch (err) {
       attempts.push({ attempt: a, errors: null, failed: `call failed: ${err instanceof Error ? err.name : 'error'}`, provider_error: providerErrorOf(err), status: null, usage: null, ms: Date.now() - t0 });
-      break;
+      return null;
     }
     const ms = Date.now() - t0;
     if (out.text === null) {
       attempts.push({ attempt: a, errors: null, failed: `no output (${out.status ?? 'unknown'}${out.incomplete ? `: ${out.incomplete}` : ''})`, status: out.status, usage: out.usage, ms });
-      break;
+      return null;
     }
-    let json: unknown;
-    try { json = withHostFields(JSON.parse(out.text), onto === undefined); } catch { attempts.push({ attempt: a, errors: null, failed: 'output is not JSON', status: out.status, usage: out.usage, ms }); break; }
-    // An update returns only its changes: the model it proposes is the saved one with them merged by id.
-    const update = onto === undefined ? null : CanonicalUpdate.safeParse(json);
-    const whole = update?.success ? mergeUpdate(onto!, update.data) : json;
-    const parsed = CanonicalModel.safeParse(whole);
-    // Every stated date or span counted in the model's periods by the host, never the AI (`stated-time.ts`), from the saved
-    // period 0. Only the drafter's own records (v2): a first draft's every quantity; an update's, only those it returns (on the
-    // merged model, so each is read in every window that uses it). A saved quantity is never recounted, so a figure the person
-    // gave is never overwritten.
-    const own = onto === undefined || !parsed.success ? undefined : update?.success ? new Set(update.data.quantities.map((x) => x.id))
-      : new Set(parsed.data.quantities.filter((x) => JSON.stringify(x) !== JSON.stringify(onto.quantities.find((s) => s.id === x.id))).map((x) => x.id));
-    // A position span counts from the day it is said: today (PL 13:40Z); on a first draft today is the anchor itself.
-    const counted = parsed.success ? countStatedTime(parsed.data, anchor, own, today) : undefined;
-    // The first draft's reading (`interpret`); an update takes it only where it speaks (`readUpdate`).
-    const reading = counted !== undefined && opts.interpret === true ? normalise(counted) : undefined;
-    const read = reading !== undefined && update?.success ? readUpdate(onto!, update.data, reading) : reading;
-    // A first draft (the brief alone) must give every ask its question, but its last attempt falls back to the base behaviour
-    // (an ask with no question is a typed blocker), so a draft is never refused whole for one; an update keeps the saved
-    // model's asks as they are.
-    const compileOpts = { sourceText, asksNeedQuestions: typeof brief === 'string' && a < MAX_REPAIRS };
-    const result = read !== undefined ? compile(read, compileOpts) : counted !== undefined ? compile(counted, compileOpts) : compileJson(whole, compileOpts);
-    if (counted !== undefined) { model = read ?? counted; compiled = result; }
-    attempts.push({ attempt: a, errors: result.errors, status: out.status, usage: out.usage, ms });
-    if (result.errors.length === 0 || a === MAX_REPAIRS) break;
-    // C6: an update's repair feedback is the host's (the compiler's sentences), never the person's, so it is developer-role, as
-    // the update's own text is (`proposePostimage`); a first draft's repair is sent as it always was.
-    input.push({ role: 'assistant', content: out.text }, { role: onto === undefined ? 'user' : 'developer', content: repairMessage(result.errors, onto === undefined ? REPAIR_PREFIX : UPDATE_REPAIR_PREFIX) });
+    try { return { json: JSON.parse(out.text), out, ms }; } catch { attempts.push({ attempt: a, errors: null, failed: 'output is not JSON', status: out.status, usage: out.usage, ms }); return null; }
+  };
+  /** The reading of `base` with `edit` merged onto it (an update, or a repair), only where the edit speaks. */
+  const merged = (base: CanonicalModelT, edit: CanonicalUpdateT): CanonicalModelT | null => {
+    const m = CanonicalModel.safeParse(mergeUpdate(base, edit));
+    if (!m.success) return null;
+    // A stated date or span counted by the host, from the saved period 0, on what this edit returns only: a saved or retained
+    // record is never recounted, so a figure the person gave is never overwritten. A position span counts from the day it was
+    // said, its said_on: today when stated in this message, the saved day when returned unrestated (PL 13:40Z, 14:12Z).
+    const counted = countStatedTime(m.data, anchor, new Set(edit.quantities.map((x) => x.id)), today);
+    return opts.interpret === true ? readUpdate(base, edit, normalise(counted)) : counted;
+  };
+
+  // ── the draft (or the update) ──────────────────────────────────────────────────────────────────────────────────────
+  const first = await send(0, [dated, ...conversation], onto !== undefined);
+  if (first === null) return { model: null, compiled: null, attempts, today };
+  let candidate: CanonicalModelT | null;
+  if (onto === undefined) {
+    const json = withHostFields(first.json, true);
+    const parsed = CanonicalModel.safeParse(json);
+    const counted = parsed.success ? countStatedTime(parsed.data, anchor, undefined, today) : null;
+    candidate = counted === null ? null : opts.interpret === true ? normalise(counted) : counted;
+    if (candidate === null) {
+      attempts.push({ attempt: 0, errors: compileJson(json, { sourceText }).errors, failed: 'output is not in the model schema', status: first.out.status, usage: first.out.usage, ms: first.ms });
+      return { model: null, compiled: null, attempts, today };
+    }
+  } else {
+    const update = CanonicalUpdate.safeParse(withHostFields(first.json, false));
+    candidate = update.success ? merged(onto, update.data) : null;
+    if (candidate === null) {
+      attempts.push({ attempt: 0, errors: update.success ? [] : schemaErrors(update.error.issues, 'The update\'s'), failed: 'output is not in the edit schema', status: first.out.status, usage: first.out.usage, ms: first.ms });
+      return { model: null, compiled: null, attempts, today };
+    }
   }
-  return { model, compiled, attempts, today };
+  // A first draft (the brief alone) must give every ask its question, but its repair falls back to the base behaviour (an ask
+  // with no question is a typed blocker), so a draft is never refused whole for one; an update keeps the saved model's asks.
+  const compiled = compile(candidate, { sourceText, asksNeedQuestions: typeof brief === 'string' });
+  attempts.push({ attempt: 0, errors: compiled.errors, status: first.out.status, usage: first.out.usage, ms: first.ms });
+  if (compiled.errors.length === 0) return { model: candidate, compiled, attempts, today };
+
+  // ── ONE edit-only repair, onto the retained candidate ──────────────────────────────────────────────────────────────
+  // The person's verified words stay their own messages; the candidate and the compiler's sentences are Olumi's (developer).
+  const input: InputMessage[] = [dated, ...conversation.filter((m) => m.role === 'user'), { role: 'developer', content: `${BASE_MODEL_LABEL}\n${JSON.stringify(candidate)}` },
+    { role: 'developer', content: repairMessage(compiled.errors) }];
+  const second = await send(1, input, true);
+  if (second === null) return { model: candidate, compiled, attempts, today };
+  const fix = CanonicalUpdate.safeParse(withHostFields(second.json, false));
+  const repaired = fix.success ? merged(candidate, fix.data) : null;
+  if (repaired === null) {
+    attempts.push({ attempt: 1, errors: fix.success ? [] : schemaErrors(fix.error.issues, 'The repair\'s'), failed: 'repair is not in the edit schema', status: second.out.status, usage: second.out.usage, ms: second.ms });
+    return { model: candidate, compiled, attempts, today };
+  }
+  const recompiled = compile(repaired, { sourceText, asksNeedQuestions: false });
+  attempts.push({ attempt: 1, errors: recompiled.errors, status: second.out.status, usage: second.out.usage, ms: second.ms });
+  return { model: repaired, compiled: recompiled, attempts, today };
 }
 
 /**
@@ -214,13 +260,15 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
  * validates the merged model exactly (`validatePostimage`). `periodZero`: the saved program's `drafted_on`, so a date in the
  * change counts from the model's own period 0 (undefined on a program saved before it: none, withheld where needed).
  * C6 ("Source quote, contributor and approval actor stay distinct"): `change` is the agent's own instruction, never the
- * person's words, so it is sent as Olumi's (`UPDATE_CHANGE_LABEL`), with the update's text, in the developer role; the only
- * user-role message is the person's verified words (`personWords`), where they always were. Staging 29 Oct: sent as the
- * last user-role message, "The change: Amend the existing…" came back as a quote and was shown "in your words".
+ * person's words, so it is sent as Olumi's (`UPDATE_CHANGE_LABEL`), with the update's task (UPDATE_INSTRUCTIONS) and the
+ * permitted removal ids, in the developer role; the saved model is labelled data (`SAVED_MODEL_LABEL`), also Olumi's; the
+ * only user-role message is the person's verified words (`personWords`), where they always were (prompts v2, INTEGRATION
+ * §2). Staging 29 Oct: sent as the last user-role message, "The change: Amend the existing…" came back as a quote and was
+ * shown "in your words".
  */
 export async function proposePostimage(model: CanonicalModelT, personWords: readonly string[], change: string, removals: readonly string[], call: ResponsesCall,
   periodZero?: string): Promise<DraftOutcome> {
-  const ask = `${UPDATE_PREFIX}\n${UPDATE_CHANGE_LABEL} ${change}\nRemove: ${removals.length > 0 ? removals.join(', ') : 'nothing'}`;
-  return draftCanonicalModel([{ role: 'user', content: personWords.join('\n\n') }, { role: 'assistant', content: JSON.stringify(model) }, { role: 'developer', content: ask }],
+  const ask = `${UPDATE_INSTRUCTIONS}\n\n${UPDATE_CHANGE_LABEL} ${change}\n${UPDATE_REMOVALS_LABEL} ${removals.length > 0 ? removals.join(', ') : 'none'}`;
+  return draftCanonicalModel([{ role: 'user', content: personWords.join('\n\n') }, { role: 'developer', content: `${SAVED_MODEL_LABEL}\n${JSON.stringify(model)}` }, { role: 'developer', content: ask }],
     call, personWords.join('\n'), { interpret: true, onto: model, ...(periodZero !== undefined ? { periodZero } : {}) });
 }

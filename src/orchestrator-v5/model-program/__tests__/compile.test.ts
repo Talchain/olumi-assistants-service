@@ -1499,7 +1499,9 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const sent = CANONICAL_JSON_SCHEMA as any;
     const fields = [sent.properties.options.items.properties.sets.items.properties, sent.properties.risks.items.properties];
     expect(fields.map((f) => [f.starts_after_periods.description.startsWith(`${STARTS_AFTER_PERIODS}.`), 'from_period' in f])).toEqual([[true, false], [true, false]]);
-    expect(STARTS_AFTER_PERIODS).toContain('0 = from the start ("straight away", "from the first month" and "from now" are all 0), "from month 3" is 2');
+    // 29 Oct: prompts v2 (schema-descriptions.txt, STARTS_AFTER_PERIODS / timing); before it '0 = from the start ("straight away", "from the first month" and "from now" are all 0), "from month 3" is 2'.
+    expect(STARTS_AFTER_PERIODS).toBe('Whole model periods elapsed before taking effect: 0 is immediate');
+    expect(fields[0].starts_after_periods.description).toContain('For an explicit ordinal model-period position, use one fewer elapsed periods');
     const van = (starts: number) => model({
       question: 'Should the shop book a weekly van?',
       quantities: [

@@ -1,7 +1,7 @@
 /**
  * THE DRAFTER'S WORKED EXAMPLE, AS A MODEL (r10, Paul 28 Oct: "Olumi can make assumptions and even make educated guesses on
  * data … clearly visible if Olumi has produced the assumption or data, and … the level of uncertainty"). The bakery sketch
- * in `prompt.ts` DRAFTING_INSTRUCTIONS, record for record: every figure the calculation needs is the person's or Olumi's
+ * that was in `prompt.ts` DRAFTING_INSTRUCTIONS until prompts v2 (29 Oct), record for record: every figure the calculation needs is the person's or Olumi's
  * ranged estimate, the outcome is arithmetic all the way to each aim and limit, and their own threshold stays asked. If the
  * example the drafter copies cannot calculate, no draft that copies it will; this row proves it does, by hand.
  */
@@ -24,11 +24,11 @@ const chances = (m: CanonicalModelT) => {
 };
 
 describe('r10: the worked example the drafter copies calculates on Olumi\'s labelled estimates', () => {
-  it('is the sketch in DRAFTING_INSTRUCTIONS (its brief and its Olumi estimates, word for word)', () => {
-    expect(DRAFTING_INSTRUCTIONS).toContain(`Example: "${BRIEF}"`);
-    for (const s of ['hours_capacity loaf/week fact estimated 40 (20–80)', 'sell_share 1 coefficient estimated 0.7 (0.4–0.95)', 'oven_price GBP fact estimated 4000 (2000–9000)',
-      'chance estimated 0.15 (0.05–0.3)', 'size estimated 0.8 (0.6–0.95)', 'grow_target loaf/week fact asked', 'sets [added_capacity to extra_capacity, spend to oven_price]',
-      'sets [added_capacity to hours_capacity]', 'spend <= budget']) expect(DRAFTING_INSTRUCTIONS).toContain(s);
+  // 29 Oct: prompts v2 (outbox/prompts-v2/drafting.txt, DL-adopted) sends no worked example; before it the r10 bakery sketch
+  // "Example: \"We sell 400 loaves a week…\"". This model stays as the synthetic calculable witness the rows below prove.
+  it('prompts v2: the drafter is sent no worked example, so nothing copied from one reaches a draft', () => {
+    expect(DRAFTING_INSTRUCTIONS).not.toContain(BRIEF);
+    for (const s of ['Example:', 'Sketch (', 'hours_capacity', 'sell_share', 'oven_price']) expect(DRAFTING_INSTRUCTIONS).not.toContain(s);
   });
 
   it('is a valid draft, and compiles with no errors: the sales aim and the budget calculate, every option is compared, and only their own growth threshold is asked', () => {
