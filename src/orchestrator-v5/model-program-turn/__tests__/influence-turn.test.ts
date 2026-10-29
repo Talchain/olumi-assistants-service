@@ -118,7 +118,7 @@ describe('Box 1a: the card, the counts, the update and the store', () => {
     const view = e.view as Rec;
     expect(view.goal_chance.waits_on).toEqual([
       { id: 'member_mood', code: 'unknown', label: 'How members feel', scope: ['keep_members'], answer: null, basis: MOOD_BASIS },
-      { id: 'evening_mood', code: 'unknown', label: 'Evening classes → How members feel', scope: ['keep_members', 'evening_classes'], answer: null, basis: 'Members have asked for evening slots.' },
+      { id: 'evening_mood', code: 'unknown', label: 'Evening classes → How members feel', scope: ['keep_members'], answer: null, basis: 'Members have asked for evening slots.' },
       { id: 'mood_members', code: 'unknown', label: 'How members feel → members', scope: ['keep_members'], answer: null, basis: 'Happier members stay only if the classes suit them.' },
       { id: 'instructor_leaves', code: 'unknown', label: 'The instructor leaves', scope: ['keep_members'], answer: null },
     ]);
@@ -127,13 +127,14 @@ describe('Box 1a: the card, the counts, the update and the store', () => {
         + '‘Evening classes → How members feel’, which no one can size yet (Members have asked for evening slots), '
         + '‘How members feel → members’, which no one can size yet (Happier members stay only if the classes suit them) and ‘The instructor leaves’, which no one can size yet.',
       'The risk ‘The instructor leaves’ is not in this run: The calculation cannot size it.',
-      // An option whose own effect is a link in words is not compared as if it changed nothing.
-      'The option ‘Evening classes’ is not in this run: rests on the link "Evening classes → How members feel", which is in words, never calculated.',
     ]));
+    // Evening classes' link in words reaches only the members aim, which waits on it above; the option is compared on takings (spec §3.0).
+    expect(view.goal_chance.notes.join(' ')).not.toContain('The option ‘Evening classes’ is not in this run');
     expect(JSON.stringify(view)).not.toMatch(/undefined|needs your answer/);
     // No partial chance is shown as the whole: each compared option's cell waits, not on an answer; the takings aim is shown on its own.
-    expect(view.options.map((o: Rec) => [o.option_id, o.cell.kind, o.cell.face])).toEqual([['weekend_workshops', 'withheld', 'Chance not shown yet'], ['carry_on', 'withheld', 'Chance not shown yet']]);
-    expect(view.goal_chance.targets.per_target.map((t: Rec) => [t.constraint_id, t.options.map((o: Rec) => o.display)])).toEqual([['takings_goal', ['100%', '0%']]]);
+    expect(view.options.map((o: Rec) => [o.option_id, o.cell.kind, o.cell.face])).toEqual([['evening_classes', 'withheld', 'Chance not shown yet'], ['weekend_workshops', 'withheld', 'Chance not shown yet'], ['carry_on', 'withheld', 'Chance not shown yet']]);
+    // Evening classes is compared on takings too (240 classes, £2,880): its link in words withholds only the members aim.
+    expect(view.goal_chance.targets.per_target.map((t: Rec) => [t.constraint_id, t.options.map((o: Rec) => o.display)])).toEqual([['takings_goal', ['100%', '100%', '0%']]]);
   });
 });
 
