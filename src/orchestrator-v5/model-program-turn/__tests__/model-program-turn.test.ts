@@ -1779,6 +1779,21 @@ describe('the model-program turn on the real core route', () => {
       });
   });
 
+  it('Codex r1 (29 Oct): Olumi\'s setting is not said to be "not in your words", and an authorship correction to a setting in the option\'s words still shows', () => {
+    const words = [BRIEF];
+    type Setting = CanonicalModelT['options'][number]['sets'][number];
+    const set = (m: CanonicalModelT, patch: Partial<Setting>): CanonicalModelT => ({ ...m, options: m.options.map((o) => (o.id === 'second_oven' ? { ...o, sets: o.sets.map((x, i) => (i === 0 ? { ...x, ...patch } : x)) } : o)) });
+    // The person's setting in the option's own words ('A second oven') corrected to Olumi's, with no words: shown, never refused.
+    const v = validatePostimage(bakery(), set(bakery(), { author: 'olumi', quote: null }), { removals: [], words, fresh: words });
+    expect(v.ok, JSON.stringify(v)).toBe(true);
+    expect((v.ok ? v.changes : []).find((c) => c.id === 'second_oven')).toMatchObject({ action: 'change',
+      before: 'sets "ovens added" to "one oven" 1 oven from the start', after: 'sets "ovens added" to "one oven" 1 oven from the start, as Olumi’s' });
+    // Each field alone shows too: Olumi's setting keeping their words says them; their setting with no words says so.
+    for (const patch of [{ author: 'olumi' }, { quote: null }] as Partial<Setting>[]) expect(validatePostimage(bakery(), set(bakery(), patch), { removals: [], words, fresh: words }).ok, JSON.stringify(patch)).toBe(true);
+    const keeps = validatePostimage(bakery(), set(bakery(), { author: 'olumi' }), { removals: [], words, fresh: words });
+    expect((keeps.ok ? keeps.changes : []).find((c) => c.id === 'second_oven')!.after).toBe('sets "ovens added" to "one oven" 1 oven from the start, as Olumi’s, in your words "A second oven"');
+  });
+
   it('W8 run 4 (c7.1 said once, c7.3): a changed name is not said again after the row\'s own label; words that are the label are not quoted twice; a rate unit reads "(per week)"; every change still shows', () => {
     const words = [BRIEF];
     const base = bakery();
