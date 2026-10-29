@@ -408,14 +408,11 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       expect(`${UPDATE_INSTRUCTIONS}${REPAIR_INSTRUCTIONS}`, old).not.toContain(old);
     // 29 Oct: prompts v2 (repair.txt): before it "Return all your changes again with them fixed, by the same rules…" (UPDATE_REPAIR_PREFIX).
     for (const rule of ['Return only the changed or added records, each complete with its existing or new id, in the edit schema; [] for unchanged families.', 'Never return the whole model.']) expect(count(REPAIR_INSTRUCTIONS, rule), rule).toBe(1);
-    // The program turn's guidance is prompt text: answers in order answer the questions in order, and none is asked again in the same words.
-    // Targeted answers (DL 24 Oct): a figure answer goes in answers on its figure's id; a worded answer and anything else in
-    // request (strip, Paul 26 Oct, B5; pinned as sent in core-turn.route).
-    expect(createHash('sha256').update(PROGRAM_TURN_GUIDANCE, 'utf8').digest('hex')).toBe('0ae8bd0d8121d3df8d092029dfcf55b8212e1809797e671c7084cf24b921ab46');
-    expect(count(PROGRAM_TURN_GUIDANCE, 'Answers in the order of your questions answer them in that order, and "I don\'t know" is an answer: put each on the item of the question it answers, and never ask one again in the same words.')).toBe(1);
-    expect(count(PROGRAM_TURN_GUIDANCE, 'call propose_change ONCE: an answer to a listed question that gives a figure, or says they do not know, goes in answers, on that figure\'s id; '
-      + 'an answer in words with no figure (a measure, a deadline, a date, a definition) and any other change go in request,')).toBe(1);
-    expect(PROGRAM_TURN_GUIDANCE).not.toContain('an answer to a listed question goes in answers, on that item\'s id; any other change goes in request,');
+    // coach-v2 (#3903): the program turn's guidance is now factual turn data, not prompt text.
+    expect(programTurnFacts('continuation', { awaiting_approval: [{ proposal_id: 'p1' }] }, { challenge: true }))
+      .toBe(`${PROGRAM_TURN_FACTS_PREFIX}{"trigger":"continuation","reading_card":false,"held_proposals":["p1"],"requested_challenge":true}`);
+    expect(programTurnFacts('run_press', undefined)).toBe(`${PROGRAM_TURN_FACTS_PREFIX}{"trigger":"run_press","reading_card":false,"held_proposals":null}`);
+    for (const instruction of ['propose_change', 'answers', 'Reply', 'once']) expect(programTurnFacts('first_model', { awaiting_approval: [] }, { readingCard: true })).not.toContain(instruction);
     for (const old of ['If only its direction can be defended', 'uncertainty alone is not a reason to withhold', 'what they expect without the options included', 'roughly doubles daily deliveries',
       'A goal or limit stated against today is relative to today']) expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
     // Buddy 08:48Z: a level target and a change in units are never turned into a ratio. Round 1 (27 Oct): the prompt's frame

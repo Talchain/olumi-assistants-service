@@ -2971,7 +2971,7 @@ describe('the model-program turn on the real core route', () => {
     expect(JSON.stringify(r)).not.toContain('What range would you put on it');
     // 29 Oct: prompts v2; before it "Ask for a range when a supplied approximate point feeds a goal or limit."
     expect(DRAFTING_INSTRUCTIONS.split('Ask for a range when their approximate point feeds an aim or limit.')).toHaveLength(2);
-    expect(CORE_ALIGNED_INSTRUCTIONS).not.toContain('If that figure feeds a goal or a limit, ask what range they would put on it.');
+    expect(programInstructions()).not.toContain('If that figure feeds a goal or a limit, ask what range they would put on it.');
     expect(r.within_limits.status).toBe('calculable'); // the range asked for holds nothing back
     expect(r.conversions.some((c) => c.quantity === 'oven_price')).toBe(false);
     const view = evaluateCanonical(approx, { sourceText: `${BRIEF}\n${words}`, seed: 7 }).view as Json;
