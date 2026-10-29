@@ -121,12 +121,12 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   const goals: PresentGoal[] = compiled.perGoal.filter((p) => !p.needs_measure)
     .map((p) => ({ goal_id: p.goal_id, label: labelOf.get(p.goal_id) ?? p.goal_id, status: p.status, reasons: p.reasons, asks: p.asks,
       rests_on: premisesFor(p.rests_on) }));
-  // W8 (c7.6, acceptance 29 Oct: "left out of the chance" on the canvas beside "waits on … ‘Avoid losing money’"): with an aim
-  // measured, an aim with no measure yet is left out of the chance (`leaves_out`), so its measure is not something the chance
-  // waits on. Listed still where the chance does wait on it: no aim measured, or a run that holds that aim back (`withheld`).
-  const heldBack = new Set((compiled.executable?.withheld ?? []).filter((w) => w.kind === 'goal').map((w) => w.id));
-  const leftOut = (b: Blocker) => compiled.joint.goal_ids.length > 0 && b.code === 'measure' && compiled.joint.leaves_out.includes(b.id) && !heldBack.has(b.id);
-  const blockers = blockersOf(model, compiled.blockers.filter((b) => !leftOut(b)));
+  // W8 (c7.6, acceptance 29 Oct: "left out of the chance" on the canvas beside "waits on … ‘Avoid losing money’"; PL 21:51Z):
+  // with an aim measured, an aim with no measure yet is left out of the measured joint (`joint.leaves_out`): it stays on the
+  // board and in the coaching, and is excluded from the chance, so its measure is not something the chance waits on. With no
+  // aim measured, the chance does wait on one, and every measure is listed. The AI's typed list keeps every blocker.
+  const leftOut = new Set(compiled.joint.goal_ids.length > 0 ? compiled.joint.leaves_out : []);
+  const blockers = blockersOf(model, compiled.blockers.filter((b) => !(b.code === 'measure' && leftOut.has(b.id))));
   const asks: PresentAsk[] = normalise(model).quantities.flatMap((q) => (q.unit !== null && blockers.some((b) => b.answer?.quantity_id === q.id)
     ? [{ quantity_id: q.id, label: q.label, unit: q.unit }] : []));
   const leaves_out = compiled.joint.leaves_out.map((id) => labelOf.get(id) ?? id);
@@ -144,7 +144,10 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
     const behind = [a.id, ...[a.measure?.window?.periods, a.measure?.window?.origin_offset].filter((id): id is string => typeof id === 'string' && read.quantities.find((q) => q.id === id)?.author !== 'structure')];
     return [a.id, { confirmed: behind.every((id) => records.confirmed.has(id)), accepted: behind.every((id) => records.accepted.has(id)) }] as const;
   }));
-  const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x, records), goals, asks, blockers, leaves_out, aims,
+  // The same join on the run path (PL 21:51Z): compile lists such an aim among the executable's `withheld` records, which the
+  // result reads as aims that hold the chance back; it is the measured joint's left-out aim, said in the chance's own words
+  // ("leaving out ‘…’, which has no measure yet") and its notes, never one the chance waits on.
+  const view = presentAnalysisView({ model: { ...x, withheld: (x.withheld ?? []).filter((w) => !(w.kind === 'goal' && leftOut.has(w.id))) }, result: sim, quantities: quantityMeta(model, compiled, x, records), goals, asks, blockers, leaves_out, aims,
     limit_premises: Object.fromEntries(compiled.perLimit.map((l) => [l.limit_id, premisesFor(l.rests_on)])),
     option_premises: Object.fromEntries(compiled.perOption.map((o) => [o.option_id, premisesFor(o.rests_on)])),
     left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })), sweep: admitted.operations + driverSweepOperations(x, draws) <= MAX_OPERATIONS,

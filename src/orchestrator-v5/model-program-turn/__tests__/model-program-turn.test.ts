@@ -1779,6 +1779,29 @@ describe('the model-program turn on the real core route', () => {
       });
   });
 
+  it('PL 21:51Z (c7.6, run path): an aim with no measure beside a measured one is left out of the chance, never held against it; with no aim measured, or a measured aim still waiting, the chance still waits', () => {
+    const priced = (m: CanonicalModelT) => { setQ(m, 'oven_price', { status: 'known', value: 2500, quote: 'about £2,500', question: null }); return m; };
+    const happy = (m: CanonicalModelT) => { m.goals.push({ ...m.goals[0]!, id: 'happy', label: 'Keep the regulars happy', measure: null, question: 'How would you tell the regulars are happy?' }); return m; };
+    const viewOf = (m: CanonicalModelT) => evaluateCanonical(m, { sourceText: `${BRIEF} It would cost about £2,500. Keep the regulars happy.`, seed: 7 }).view as Json;
+    const v = viewOf(happy(priced(bakery())));
+    for (const o of v.options as Json[]) {
+      expect([o.option_id, o.cell.kind]).toEqual([o.option_id, 'figure']);
+      expect(o.cell.face).toContain('leaving out ‘Keep the regulars happy’, which has no measure yet');
+    }
+    expect((v.goal_chance.waits_on ?? []).map((b: Json) => b.id)).not.toContain('happy');
+    expect(v.goal_chance.notes.join(' ')).toContain('Leaves out: ‘Keep the regulars happy’');
+    // Contrast: with no aim measured the chance does wait on a measure, and says so.
+    const none = happy(priced(bakery()));
+    none.goals = none.goals.filter((g) => g.id === 'happy');
+    const n = viewOf(none);
+    expect((n.options as Json[]).every((o) => o.cell.kind === 'withheld')).toBe(true);
+    expect((n.goal_chance.waits_on as Json[]).map((b) => [b.id, b.code])).toContainEqual(['happy', 'measure']);
+    // Contrast: a measured aim still waiting (its figure asked) still holds its chance back.
+    const asked = happy(bakery());
+    setQ(asked, 'base_sales', { status: 'asked', value: null, quote: null, question: 'How many loaves do you sell a week now?' });
+    expect(((viewOf(asked).options) as Json[]).every((o) => o.cell.kind === 'withheld')).toBe(true);
+  });
+
   it('Codex r1 (29 Oct): Olumi\'s setting is not said to be "not in your words", and an authorship correction to a setting in the option\'s words still shows', () => {
     const words = [BRIEF];
     type Setting = CanonicalModelT['options'][number]['sets'][number];
@@ -3155,20 +3178,24 @@ describe('the model-program turn on the real core route', () => {
         expect(readsFor(v, o.option_id)).toContain(premise);
         expect(readsFor(v, o.option_id)).not.toMatch(/[\r\n]/);
       }
-      // An unmeasured aim withholds the whole chance: it has a joint line, never joint words or a partial chance.
+      // PL 21:51Z (c7.6): an aim with no measure yet is left out of the measured joint, as the board says. The chance shown is
+      // the measured aims', and its own words and notes name the aim left out; it never waits on that aim's measure, and it is
+      // never said as the chance of every aim.
       m.goals.push({ ...m.goals[0]!, id: 'welcoming', label: 'Keep the hall\nwelcoming', measure: null, question: 'How would you measure a welcoming hall?', quote: 'Keep the hall\nwelcoming' });
       const waiting = evaluateCanonical(m, { sourceText: `${source} Keep the hall\nwelcoming.`, seed: 7 }).view as Json;
-      expect(waiting.goal_chance.targets.joint.status).toBe('withheld');
-      expect(waiting.goal_chance.targets.joint.line).not.toMatch(/[\r\n]/);
-      expect(waiting.goal_chance.chance_words).toBeUndefined();
+      const LEFT = 'leaving out ‘Keep the hall welcoming’, which has no measure yet';
+      expect(waiting.goal_chance.targets.joint.status).toBe('licensed');
+      expect(waiting.goal_chance.targets.joint.words).toContain(LEFT);
+      expect(waiting.goal_chance.chance_words).toContain(LEFT);
       expect(waiting.goal_chance.notes.length).toBeGreaterThan(0);
       for (const note of waiting.goal_chance.notes) expect(note).not.toMatch(/[\r\n]/);
-      expect(waiting.goal_chance.notes.join(' ')).toContain('Keep the hall welcoming');
-      expect(waiting.goal_chance.waits_on.find((b: Json) => b.id === 'welcoming').label).toBe('Keep the hall welcoming');
+      expect(waiting.goal_chance.notes.join(' ')).toContain('Leaves out: ‘Keep the hall welcoming’');
+      expect((waiting.goal_chance.waits_on ?? []).some((b: Json) => b.id === 'welcoming')).toBe(false);
       for (const target of waiting.goal_chance.targets.per_target) expect(target.words).not.toMatch(/[\r\n]/);
       for (const o of waiting.options) {
-        expect(o.cell.kind).toBe('withheld');
-        expect(o.cell.why).not.toMatch(/[\r\n]/);
+        expect(o.cell.kind).toBe('figure');
+        expect(o.cell.face).toContain(LEFT);
+        expect(o.cell.face).not.toMatch(/[\r\n]/);
       }
       expect(m.conditions[0]!.text).toBe(wrapped);
     });
@@ -4211,11 +4238,17 @@ describe('the model-program turn on the real core route', () => {
     expect(fill.status, JSON.stringify(fill)).toBe('ok');
     expect(await applyProgramChange(deps, ctx2, fill.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const view = (persisted!.living_model.runs.at(-1).result as Json).canonical_analysis_view as Json;
-    // (The launch aim still has no measure, so the joint chance waits for it and says so; this aim's own chance is shown.)
-    const aim = (view.goal_chance as Json).targets.per_target.find((t: Json) => t.constraint_id === 'increase_productivity');
-    expect(aim.options.map((o: Json) => o.option_id)).toEqual(['hire_tech_lead', 'hire_two_developers']);
-    for (const o of aim.options) expect(o.display).toMatch(/^about \d+%$/);
-    expect(aim.words).toMatch(/Olumi’s assumed relationship/);
+    // PL 21:51Z (c7.6): the launch aim still has no measure, so it is left out of the chance and named as left out; the chance
+    // shown is this aim's, on every option, and never said as the chance of both aims.
+    const left = (view.goal_chance as Json).notes.find((n: string) => n.startsWith('Covers: '));
+    expect(left).toContain(' · Leaves out: ‘an urgent launch date in the next three months’, ');
+    for (const o of view.options as Json[]) {
+      expect([o.option_id, o.cell.kind]).toEqual([o.option_id, 'figure']);
+      expect(o.cell.display).toMatch(/^about \d+%$/);
+      expect(o.cell.face).toContain(', leaving out ‘an urgent launch date in the next three months’, which has no measure yet, in this model.');
+    }
+    expect((view.options as Json[]).map((o) => o.option_id)).toEqual(['hire_tech_lead', 'hire_two_developers']);
+    expect(JSON.stringify(view)).toMatch(/Olumi’s assumed relationship/);
     for (const c of persisted!.living_model.runs.at(-1).result.chances as Json[]) expect(c.per_goal).toEqual([expect.objectContaining({ goal_id: 'increase_productivity', chance: expect.any(Number) })]);
   });
 

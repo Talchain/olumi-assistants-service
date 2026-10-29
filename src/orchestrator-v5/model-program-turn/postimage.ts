@@ -451,8 +451,9 @@ function wordsIn(m: CanonicalModelT) {
       case 'name': return family === 'relations' ? `for ${q('defines')}` : family === 'preferences' ? `about ${q('quantity')}` : family === 'dissent' ? `held by "${String(r['holder'] ?? '')}"`
         : family === 'quantities' || family === 'goals' || family === 'limits' || family === 'options' || family === 'risks' ? `named "${String(r['label'] ?? '')}"` : `worded "${String(r['text'] ?? '')}"`;
       case 'figure': return figure(r);
-      // W8 (c7.3, acceptance 29 Oct: "a prerequisite", "a challenge" read as tags).
-      case 'kind': return family === 'conditions' ? of({ prerequisite: 'must be in place first', challenge: 'stands in the way' }, r['kind']) : of({ fact: 'a fact', coefficient: 'a rate', derived: 'a result' }, r['kind']);
+      // W8 (c7.3, acceptance 29 Oct: "a prerequisite", "a challenge" read as tags): a challenge is a doubt worth raising
+      // (canonical.ts), never an established obstacle (PL 21:51Z).
+      case 'kind': return family === 'conditions' ? of({ prerequisite: 'must be in place first', challenge: 'a doubt to check' }, r['kind']) : of({ fact: 'a fact', coefficient: 'a rate', derived: 'a result' }, r['kind']);
       case 'status': return family === 'options' ? of({ live: 'in the comparison', ruled_out: 'ruled out, kept in view', removed: 'taken out of the comparison' }, r['status'])
         : of({ known: 'known', estimated: 'an estimate', asked: 'still to be given', derived: 'worked out from the model', unknown: 'not known yet', not_applicable: 'does not apply',
           unsupported: 'outside what the model can use' }, r['status']) + (family === 'quantities' && r['unit'] === null ? ', not measured' : '');
