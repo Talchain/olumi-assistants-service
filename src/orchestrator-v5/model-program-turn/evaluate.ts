@@ -129,7 +129,8 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   const blockers = blockersOf(model, compiled.blockers.filter((b) => !(b.code === 'measure' && leftOut.has(b.id))));
   const asks: PresentAsk[] = normalise(model).quantities.flatMap((q) => (q.unit !== null && blockers.some((b) => b.answer?.quantity_id === q.id)
     ? [{ quantity_id: q.id, label: q.label, unit: q.unit }] : []));
-  const leaves_out = compiled.joint.leaves_out.map((id) => labelOf.get(id) ?? id);
+  // Left out only beside an aim measured (independent read r4): with none measured, the chance waits on a measure instead.
+  const leaves_out = compiled.joint.goal_ids.length > 0 ? compiled.joint.leaves_out.map((id) => labelOf.get(id) ?? id) : [];
 
   const x = compiled.executable;
   if (x === null) {

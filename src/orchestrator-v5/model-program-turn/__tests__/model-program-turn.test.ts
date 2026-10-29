@@ -1804,6 +1804,9 @@ describe('the model-program turn on the real core route', () => {
     const n = viewOf(none);
     expect((n.options as Json[]).every((o) => o.cell.kind === 'withheld')).toBe(true);
     expect((n.goal_chance.waits_on as Json[]).map((b) => [b.id, b.code])).toContainEqual(['happy', 'measure']);
+    // Independent read r4: never also said to be left out of the chance (it is what the chance waits on).
+    expect(JSON.stringify(n)).not.toContain('‘Keep the regulars happy’ has no measure yet, so it is left out of the chance.');
+    expect(JSON.stringify(n)).not.toContain('measured goal');
     // Contrast: a measured aim still waiting (its figure asked) still holds its chance back.
     const asked = happy(bakery());
     setQ(asked, 'base_sales', { status: 'asked', value: null, quote: null, question: 'How many loaves do you sell a week now?' });
