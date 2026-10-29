@@ -58,7 +58,8 @@ describe('no threshold search on the evaluation path (alpha G10); the evaluation
     const gc = (e.view as Json).goal_chance as Json;
     expect(e.compiled.perGoal.map((p) => [p.goal_id, p.status, p.asks])).toEqual([['reach_340', 'asks', ['base_joins']]]);
     expect(gc.thresholds).toBeUndefined();
-    expect((gc.notes as string[]).some((n) => n.includes('Threshold'))).toBe(false);
+    // GAP 3 (29 Oct): with one aim waiting, its waits are said by waits_on alone, so this view may carry no notes at all.
+    expect(((gc.notes as string[] | undefined) ?? []).some((n) => n.includes('Threshold'))).toBe(false);
     expect((gc.waits_on as Json[]).map((b) => [b.id, b.code])).toContainEqual(['base_joins', 'asked']);
   });
 });
