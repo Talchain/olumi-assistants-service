@@ -81,7 +81,11 @@ export const ProgramChangeParams = z.object({
   public_label: z.string().describe('What the person is asked to approve, in plain words.'),
   basis: z.string().describe('Why Olumi proposes it.'),
   request: z.string().describe('The change the person asked for, in plain words, with their exact words for every figure of theirs.'),
-  remove: z.array(z.string()).describe('The ids of the items the person asked to remove, from read_canonical_context; [] for none.'),
+  // A simplify's removals (29 Oct, Box 3 European simplify: the agent listed Olumi's pilot option, its prerequisite and the
+  // person's figures as removals the person "asked" for, while the update prompt folds Olumi's own unused items). The list is
+  // the change's PROPOSED removals, reviewed on its card (the PL's 00:57 contract, verbatim); their figures are also refused
+  // at the host (postimage.ts theirFiguresIn).
+  remove: z.array(z.string()).describe('IDs of removals proposed for this reviewed change, from read_canonical_context. Follow the person\'s explicit named corrections/removals within protected-figure rules: keep a person-authored quantity with a figure in hand under its ID, correcting it or marking it not applicable only on their word. For a generic simplify request, only redundant or unneeded Olumi scaffolding, or non-protected records whose full consequential meaning is re-expressed in the model. A requested size never permits losing a supplied figure, useful option, causal route, prerequisite, risk, uncertainty or attribution. [] for none.'),
   answers: z.array(Answer).default([]).describe('Their answers to the listed questions, each on the figure it answers (its id from read_canonical_context); [] for none.'),
 }).strict();
 export type ProgramChangeArgs = z.input<typeof ProgramChangeParams>;

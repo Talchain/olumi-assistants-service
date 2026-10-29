@@ -159,8 +159,8 @@ export function keepTheirFigures(saved: CanonicalModelT, ids: readonly string[])
 }
 
 /**
- * Check `raw`, a whole proposed model, against the saved one. `removals`: the ids the person asked to remove, listed
- * explicitly; `words`: every word of theirs this change may quote (their earlier words and `fresh`, this change's own);
+ * Check `raw`, a whole proposed model, against the saved one. `removals`: the ids this change proposes to remove, listed
+ * explicitly for the person to review on its card; `words`: every word of theirs this change may quote (their earlier words and `fresh`, this change's own);
  * `approver`: who approves the card (its items' approved_by), and the person whose words `fresh` are (in every caller the
  * same person: the turn's own); null for a guest.
  */
@@ -187,7 +187,7 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
   const theirs = theirFiguresIn(base, [...removals]);
   if (theirs.length > 0) return refuse('figure_removed', theirs, keepTheirFigures(base, theirs));
   const omitted = FAMILIES.flatMap(([f]) => [...baseIn.get(f)!].filter((id) => !removals.has(id) && !idsOf(post, f).includes(id)));
-  if (omitted.length > 0) return refuse('omitted_record', omitted, `The proposed model leaves out ${omitted.join(', ')} without a listed removal; nothing is removed unless the person asks.`);
+  if (omitted.length > 0) return refuse('omitted_record', omitted, `The proposed model leaves out ${omitted.join(', ')} without a listed removal; nothing is removed unless the change lists it for their review.`);
   const kept = [...removals].filter((id) => FAMILIES.some(([f]) => baseIn.get(f)!.has(id) && idsOf(post, f).includes(id)));
   if (kept.length > 0) return refuse('removal_not_applied', kept, `The proposed model still has ${kept.join(', ')}, listed for removal.`);
   const withdrawn = new Set(base.history.filter((h) => h.change === 'withdrawn').map((h) => h.id));

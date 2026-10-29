@@ -3445,6 +3445,16 @@ describe('the model-program turn on the real core route', () => {
     expect(await press(keeps.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
   });
 
+  // 29 Oct (Box 3 European simplify, the first lossy boundary): the agent's remove list dropped Olumi's pilot option, its
+  // prerequisite and his figures; the tool said only the person may ask for removals while the update prompt folds Olumi's own.
+  it('a simplify\'s removals are the change\'s PROPOSED removals: their named ones within the figure rules, or Olumi\'s redundant scaffolding and records whose meaning is kept elsewhere; a size never outranks meaning', () => {
+    const d = ProgramChangeParams.shape.remove.description ?? '';
+    // The PL's 00:57 contract, verbatim: proposed removals, reviewed on the card; named corrections followed within the figure
+    // rules; a general simplify drops only redundant Olumi scaffolding or records whose meaning is kept elsewhere.
+    expect(d).toBe('IDs of removals proposed for this reviewed change, from read_canonical_context. Follow the person\'s explicit named corrections/removals within protected-figure rules: keep a person-authored quantity with a figure in hand under its ID, correcting it or marking it not applicable only on their word. For a generic simplify request, only redundant or unneeded Olumi scaffolding, or non-protected records whose full consequential meaning is re-expressed in the model. A requested size never permits losing a supplied figure, useful option, causal route, prerequisite, risk, uncertainty or attribution. [] for none.');
+    expect(d).not.toContain('the person asked to remove');
+  });
+
   it('C4 (alpha spec §3): a mixed turn keeps their exact answer after the structural merge: the drafter returning the answered figure as its own estimate leaves their figure, status, author and quote on the card and on the model it would write', async () => {
     replies = [JSON.stringify(bakery())];
     expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
@@ -3962,7 +3972,7 @@ describe('the model-program turn on the real core route', () => {
     const rewritten = await propose({ dispatch, proposals: new ProposalStore() });
     expect(rewritten.status, JSON.stringify(rewritten)).toBe('ok');
     expect(rewritten.data.changes.find((c: Json) => c.id === budget.id)).toMatchObject({ action: 'change', author: 'person' });
-    // Refused: a record left out without a listed removal; nothing is removed unless the person asks.
+    // Refused: a record left out without a listed removal; nothing is removed unless the change lists it for their review.
     const dropped = before.options[0]!.id;
     replies = [completed((d) => { d.options = d.options.filter((o) => o.id !== dropped); })];
     expect(await propose()).toMatchObject({ status: 'refused', reason: 'omitted_record', data: { ids: [dropped] } });
