@@ -32,7 +32,7 @@ import type { LivingModelT } from '../../schemas/living-model.js';
 import { seedOf } from '../../orchestrator-v5/model-program-turn/evaluate.js';
 import { programOperationId, withNewRun } from '../../orchestrator-v5/model-program-turn/program-save.js';
 import { MODEL_PROGRAM, savedProgramOf } from '../../orchestrator-v5/model-program-turn/program-store.js';
-import { PROGRAM_TURN_GUIDANCE } from '../../orchestrator-v5/model-program-turn/program-tools.js';
+import { PROGRAM_TURN_FACTS_PREFIX } from '../../orchestrator-v5/model-program-turn/program-tools.js';
 import { coreBudget } from '../../orchestrator-v5/agent-lane/model-budgets.js';
 
 type Json = Record<string, any>;
@@ -1498,7 +1498,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const challenged = calls[0]!;
       expect(challenged.instructions).toBe(STANDING);
       const one = systemItems(challenged);
-      expect(one).toEqual([expect.stringContaining(STATE_BLOCK_PREFIX), PROGRAM_TURN_GUIDANCE, expect.stringMatching(new RegExp(`^${SELECTION_NOTE_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))]);
+      // prompts-v2 (29 Oct, INTEGRATION §5): this turn's facts, then the Challenge's note.
+      expect(one).toEqual([expect.stringContaining(STATE_BLOCK_PREFIX), `${PROGRAM_TURN_FACTS_PREFIX}{"trigger":"continuation","reading_card":false,"held_proposals":[],"requested_challenge":true}`,
+        expect.stringMatching(new RegExp(`^${SELECTION_NOTE_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))]);
       expect(one[0]).toContain(TODAY_PREFIX);
 
       // A second scenario, another saved program: a typed turn, with no guidance but the program's own.
@@ -1509,7 +1511,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const second = calls[0]!;
       expect(SCENARIO).not.toBe(first.scenario);
       expect(second.instructions, 'byte-equal across the two scenarios').toBe(first.body.instructions);
-      expect(systemItems(second)).toEqual([expect.stringContaining(STATE_BLOCK_PREFIX), PROGRAM_TURN_GUIDANCE]);
+      expect(systemItems(second)).toEqual([expect.stringContaining(STATE_BLOCK_PREFIX), `${PROGRAM_TURN_FACTS_PREFIX}{"trigger":"continuation","reading_card":false,"held_proposals":[]}`]);
       expect(String(challenged.instructions), 'no Challenge note in the instructions').not.toContain(SELECTION_NOTE_PREFIX);
 
       // The prefix the provider caches (the tools, then the standing instructions) is byte-equal across the two scenarios.
@@ -1542,7 +1544,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('(6) ALPHA (23 Oct) + F1b (26 Oct): a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model is refused before any call', async () => {
       // Pinned from the request bodies the provider received on this route, not from the module that builds them.
-      const PROGRAM_SHA = '95c5eb7c73b2c60da3111bc571da6b7298f52895b576012ba2956931a2d01675'; // 29 Oct 03:2xZ: assessor AR0300 boundaries; before it d29e9d87. · 29 Oct: J2, when asked Olumi proposes labelled ranged estimates; before it 36cfc7fd. · 28 Oct: names factors and waits too; before it 232ae815…. 28 Oct: Box 3 naming sentence; before it d2bc1608…. 28 Oct: C1 no-chance comparison in words (K1's sentence plus keep any consequence worked out); before it c545b8a1…. 27 Oct: round 3 (Paul approved: said once, decisive mechanism, first questions); before it 1c0f7685…. 27 Oct: round 2, the consolidation (RESULTS the single Run-reporting owner; first-model questions in drafted order; shortened reply rules); before it e1e01c5e…. 27 Oct: round 1, first-model questions lead with the premise that could change the comparison. 27 Oct: T1, each caveat once per conversation. // 26 Oct: integrated review words#7 (the "on Olumi’s reading of …" basis). // 25 Oct: alpha G10 (no threshold sentences). // 25 Oct: alpha G5 (no note_on_item sentence). // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
+      const PROGRAM_SHA = 'd312182a6485eff690ed9cf089daa9ff46737a0f212770ea9692c8186227e467'; // 29 Oct: prompts-v2 agent-coaching.txt with the DL's C1, the program's one contract; before it 95c5eb7c. · 29 Oct 03:2xZ: assessor AR0300 boundaries; before it d29e9d87. · 29 Oct: J2, when asked Olumi proposes labelled ranged estimates; before it 36cfc7fd. · 28 Oct: names factors and waits too; before it 232ae815…. 28 Oct: Box 3 naming sentence; before it d2bc1608…. 28 Oct: C1 no-chance comparison in words (K1's sentence plus keep any consequence worked out); before it c545b8a1…. 27 Oct: round 3 (Paul approved: said once, decisive mechanism, first questions); before it 1c0f7685…. 27 Oct: round 2, the consolidation (RESULTS the single Run-reporting owner; first-model questions in drafted order; shortened reply rules); before it e1e01c5e…. 27 Oct: round 1, first-model questions lead with the premise that could change the comparison. 27 Oct: T1, each caveat once per conversation. // 26 Oct: integrated review words#7 (the "on Olumi’s reading of …" basis). // 25 Oct: alpha G10 (no threshold sentences). // 25 Oct: alpha G5 (no note_on_item sentence). // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
       const sha = (c: Json) => createHash('sha256').update(String(c.instructions), 'utf8').digest('hex');
       persisted = postimage(KNOWN_ANSWER);
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
@@ -1554,20 +1556,19 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(calls).toHaveLength(1);
       // Integrated review 26 Oct (words#7): the RESULTS rule, as SENT, keeps the basis the Run gives before approval (#3769); the
       // two-basis wording is gone, and the "if" rule stays once. Round 2 (27 Oct, consolidation): RESULTS says it in one sentence,
-      // the Run's 'if' and unconfirmed Olumi readings preserved; the words#7 wording is gone.
+      // the Run's 'if' and unconfirmed Olumi readings preserved; the words#7 wording is gone. prompts-v2 (29 Oct): in its words.
       const sent = String(calls[0]!.instructions);
-      expect(sent.split('Preserve its \'if\', unconfirmed Olumi readings and exclusions without turning them into forecasts.')).toHaveLength(2);
+      expect(sent.split("Preserve unconfirmed Olumi readings and premises; do not call the complete result \u201con your figures\u201d when it also rests on Olumi's relationships or assumptions.")).toHaveLength(2);
       expect(sent).not.toContain('"on your figures" or "if" with Olumi');
       expect(sent).not.toContain('never drop the "if" or turn it into a forecast');
       expect(sha(calls[0]!)).toBe(PROGRAM_SHA);
-      expect(String(calls[0]!.instructions)).toContain('draft the first model from their brief in that same turn, even when figures are missing');
+      expect(String(calls[0]!.instructions)).toContain('The host prepares the first model and its automatic Run before the coaching reply.');
       expect(String(calls[0]!.instructions)).not.toContain('POLYMATH COACHING');
       // Remodel coaching (DL 24 Oct, Paul's rule): a person can always choose to remodel; Olumi coaches the restatement and
       // never starts a new scenario or redrafts this one for them. Spelled as SENT.
-      expect(String(calls[0]!.instructions)).toContain('When they say Olumi has misread their situation, or you cannot tell what their brief means without guessing, say in one line '
-        + 'what may have been misread, ask them to restate it in their own words (the outcome they want, the options, what they know), and tell them they can start a new '
-        + 'scenario from that clarified brief while this one stays as it was; never start one for them or redraft this model instead, and never raise it while they are '
-        + 'answering or editing.');
+      // prompts-v2 (29 Oct): in agent-coaching.txt's words.
+      expect(String(calls[0]!.instructions)).toContain('For a fundamental misframing, explain the possible misreading and invite a clarified brief in a new scenario; '
+        + 'do not create one or replace this model automatically.');
     });
 
     it('issue 30 (24 Oct): nothing Olumi writes into the drafter\'s or the agent\'s call on a program holds a phrase from the test briefs; its examples are synthetic', async () => {
@@ -1617,11 +1618,12 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect((await typed('What does the model hold now?')).statusCode).toBe(200);
       expect(calls).toHaveLength(1);
       // Round 2 (27 Oct): the loose-figure example left the instructions; the first-model example's estimate is synthetic too.
-      expect(String(calls[0]!.instructions)).toContain('Olumi’s starting estimate, for you to correct: each extra evening adds 60 to 140 swims a month.');
+      // prompts-v2 (29 Oct): the instructions hold no example; the contrast is one of their sentences.
+      expect(String(calls[0]!.instructions)).toContain('Start from a credible reference class and adjust for the known context; state the basis, range and what to verify.');
       expect(calls[0]!.tools, 'the tool descriptions are scanned too').toBeDefined();
       const agentText = hostText(calls[0]!).join(' ');
       expect(agentText, 'the host\'s state block in the input is scanned').toContain('OLUMI STATE BLOCK');
-      expect(agentText, 'the host\'s program guidance in the input is scanned').toContain('This scenario\'s model is a model program: read_canonical_context');
+      expect(agentText, 'the host\'s turn facts in the input are scanned').toContain(`${PROGRAM_TURN_FACTS_PREFIX}{"trigger":"continuation"`);
       skipped.length = 0;
       expect(found(calls[0]!)).toEqual([]);
       // The brief opened the Conversation on the draft turn (T1), so this call carries only the new message.
@@ -1783,7 +1785,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const replyInput = (reply.input ?? []) as Json[];
       expect(replyInput.filter((i) => i.role === 'user').map((i) => String(i.content))).toEqual([BAKERY_BRIEF]);
       expect(replyInput.some((i) => i.role === 'system' && String(i.content).startsWith(STATE_BLOCK_PREFIX))).toBe(true);
-      expect(replyInput.some((i) => i.role === 'system' && String(i.content).includes('Olumi has just drafted this model'))).toBe(true);
+      expect(replyInput.some((i) => i.role === 'system' && String(i.content).startsWith(`${PROGRAM_TURN_FACTS_PREFIX}{"trigger":"first_model"`))).toBe(true);
       for (const writer of ['build_model_from_brief', 'propose_change', 'apply_change', 'run_analysis']) expect(allowedOf(reply), writer).not.toContain(writer);
       outputs = [[{ type: 'message', text: 'Thanks; I will put that on the oven price.' }]];
       expect((await typed('About £2,500 for the oven.')).statusCode).toBe(200);
@@ -1794,7 +1796,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(input.filter((i) => i.role === 'user').map((i) => String(i.content))).toEqual(['About £2,500 for the oven.']);
     });
 
-    it('C2 (alpha spec §7, 27 Oct): the first reply\'s guidance, as SENT, asks for what the calculation leaves out and why, only when the model holds any, beside the left_out record it reads', async () => {
+    it('C2 (alpha spec §7, 27 Oct): the first reply\'s instructions, as SENT, ask for what the calculation leaves out and why, only when any is, beside the left_out record it reads', async () => {
       const m = bakery();
       m.left_out.push({ id: 'shop_feel', text: 'How the shop feels to the regulars', why: 'It has no measure in this model.', question: null, concerns: [],
         author: 'olumi', quote: null, party: null, approval: 'proposed', author_id: null, approved_by: null });
@@ -1806,12 +1808,13 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // The record the reply may name is in its state block, by id and its own words (no source change needed for this).
       const state = system.find((s) => s.startsWith(STATE_BLOCK_PREFIX))!;
       for (const words of ['"shop_feel"', 'How the shop feels to the regulars', 'It has no measure in this model.']) expect(state).toContain(words);
-      // The guidance asks for it, spelled here (never read from the module): one draft-reply item carries these exact words.
-      const guidance = system.filter((s) => s.startsWith('Olumi has just drafted this model'));
-      expect(guidance).toHaveLength(1);
-      expect(guidance[0]).toContain('what Olumi assumed or added that they should check; what the calculation leaves out and why, briefly, '
-        + 'only when the model\'s left_out holds any (say nothing of it otherwise); and at most three questions: first the missing premise that could most change which option is most likely '
-        + 'to achieve the aim, saying why (confirming the aim or its measure first where it is Olumi\'s reading); inputs needed only for the arithmetic after. ');
+      // prompts-v2 (29 Oct): the instructions ask for it, spelled here (never read from the module); the turn's one facts item
+      // says it is the first model.
+      expect(String(reply.instructions)).toContain('On a first model, briefly distinguish what came from the brief, what Olumi added, and what the calculation leaves out and why, '
+        + 'when any material is excluded.');
+      const facts = system.filter((s) => s.startsWith(PROGRAM_TURN_FACTS_PREFIX));
+      expect(facts).toHaveLength(1);
+      expect(JSON.parse(facts[0]!.slice(PROGRAM_TURN_FACTS_PREFIX.length))).toMatchObject({ trigger: 'first_model' });
     });
 
     it('S3 (DL 23 Oct): on a program turn the provider receives the PROGRAM tool descriptions, read included, and the read it gets back carries the Run\'s goal_chance block unchanged', async () => {
@@ -1833,21 +1836,21 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // quoting the blocker's reason; a blocker with none (a Run stored before it) names no bound (Codex B1); never "given below 0".
       // The range_kind clause before it is unchanged.
       const readWords = String(sentTools.read_canonical_context);
-      expect(readWords).toContain('recount, their figure outside Olumi\'s reading of what it can be (a floor or ceiling): '
-        + 'ask again, quoting the blocker\'s reason, which names their figure and Olumi\'s bound, so they can correct either; '
-        + 'a blocker with no reason (a Run stored before it) gives no bound: say only that their figure is outside what Olumi reads it can be, and name none; unknown, ');
+      // prompts-v2 (29 Oct): in tool-descriptions.txt's words, quoting its reason without inventing a bound.
+      expect(readWords).toContain("range_kind needs firm-versus-rough range meaning; recount needs clarification of the stated figure or Olumi's domain reading, "
+        + 'quoting its reason without inventing a missing bound; unknown needs ');
       expect(readWords).not.toContain('given below 0');
-      expect(readWords).toContain('range_kind, whether the ends of their range are firm or a rough estimate; recount, ');
       expect(sentTools).toEqual(PROGRAM_TOOL_DESCRIPTIONS);
       for (const [name, description] of Object.entries(sentTools)) expect(description).not.toBe((TOOL_DESCRIPTIONS as Record<string, string>)[name]);
       // Targeted answers (DL 24 Oct): propose_change, as SENT, puts an answer in answers on its item's id and anything else in
       // request; its parameters carry answers, so the feature is not inert. Spelled here.
       const sentSha = (name: string) => createHash('sha256').update(String(sentTools[name]), 'utf8').digest('hex');
       // Strip (Paul 26 Oct; B5 removed): a figure answer goes in answers; a worded answer goes in request, as the AI writes it.
-      expect(String(sentTools.propose_change)).toContain('An answer to a listed question (a blocker, or an asked item\'s question) that gives a figure, or says they do not know, goes in answers, on that existing figure\'s id from read_canonical_context, saying whose it is: author person, ');
-      expect(String(sentTools.propose_change)).toContain('An answer in words with no figure (a measure, a deadline, a date, a definition) goes in request, in their exact words with the id it answers. ');
-      expect(String(sentTools.propose_change)).toContain('Anything else (a new item or link, a rename, a removal) goes in request, in plain words with their exact words for every figure of theirs, '
-        + 'with remove the exact IDs Olumi proposes to remove for the person\'s review, under the tool\'s removal rules: a generic simplify request may propose redundant scaffolding removal and fewer non-protected records re-expressing the same consequential meaning, preserving protected person-authored figure IDs, supported calculations, useful options, causal routes, prerequisites, uncertainty and attribution; include every planned removal ID, because the drafter cannot remove an unlisted record ([] for none); Olumi’s drafter writes it. ');
+      // prompts-v2 (29 Oct): in tool-descriptions.txt's words.
+      expect(String(sentTools.propose_change)).toContain('Put numerical answers whose meaning is settled on existing figures in answers; put dates, spans, measures, definitions, '
+        + 'unresolved ranges, new records and other structural edits in request.');
+      expect(String(sentTools.propose_change)).toContain('List every proposed removal in remove under its rules. After a card exists, do not propose another this turn. '
+        + 'If refused before any card exists, one corrected call may use the returned reason; never retry an unchanged request.');
       // 26 Oct (W9, european 13:44Z): a second proposal is refused only once a card is prepared, and after any refusal, while no
       // card is prepared, a corrected proposal may follow (program-tools.ts releases the turn's claim on every outcome that is not
       // ok). Before it 2bb9c6c0… (ONE correction, after does_not_compile only); the text before W9, "a second proposal in the same
@@ -1856,7 +1859,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // Strip (Paul 26 Oct, B5): a worded answer goes in request; before it 6c4611c7….
       // 26 Oct (T1, Paul): RUN_WORDS_RULE reports from the Run's own facts (chance, precision_95, driver, leader.option_id), each figure once; before it 9532ffa4….
       // 27 Oct (round 2, consolidation): RUN_WORDS_RULE is gone (RESULTS owns Run reporting), and so is the line repeating the attribution rule; before it 7996a9ef….
-      expect(sentSha('propose_change')).toBe('10bcbbebb03b61dca16f04f7dac84dd4a8be9e85bd5cf239bc7425070fe499f9');
+      // 29 Oct: prompts-v2 tool-descriptions.txt (with the DL's T1); before it 10bcbbeb….
+      expect(sentSha('propose_change')).toBe('72d57835e591f04c695ee60b688f3a13a1df288dbef735cdb14a0f7761c9bca0');
       const sentParams = (calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.parameters as Json;
       expect(Object.keys(sentParams.properties)).toEqual(['public_label', 'basis', 'request', 'remove', 'answers']);
       expect(sentParams.required).toContain('answers');
@@ -1864,11 +1868,13 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // Whose an answer is, declared by the AI (Codex r1 #3727; the host checks it, never sets it).
       expect(sentParams.properties.answers.items.properties.author.enum).toEqual(['person', 'olumi']);
       expect(sentParams.properties.answers.items.required).toContain('author');
-      // The program turn's guidance as SENT (its pin in core-prompt-arm is this text's): a figure answer goes in answers, on the
-      // figure's id; a worded answer in request (strip, Paul 26 Oct, B5; before it 4ccd4a59…).
-      const guidance = ((calls[0]!.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content)).filter((c) => c.startsWith('This scenario\'s model is a model program'));
+      // The program turn's facts as SENT (prompts-v2, 29 Oct; before it the guidance 0ae8bd0d…, which said where an answer goes:
+      // now propose_change's own description, above): one item, facts only, the held cards the state block holds.
+      const guidance = ((calls[0]!.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content)).filter((c) => c.startsWith(PROGRAM_TURN_FACTS_PREFIX));
       expect(guidance).toHaveLength(1);
-      expect(createHash('sha256').update(guidance[0]!, 'utf8').digest('hex')).toBe('0ae8bd0d8121d3df8d092029dfcf55b8212e1809797e671c7084cf24b921ab46');
+      const facts = JSON.parse(guidance[0]!.slice(PROGRAM_TURN_FACTS_PREFIX.length)) as Json;
+      expect(Object.keys(facts)).toEqual(['trigger', 'reading_card', 'held_proposals']);
+      expect(facts.trigger).toBe('continuation');
       // The read the agent got back: the Run's goal_chance exactly as stored (each goal's own line, the joint, the notes).
       const output = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'read')!.output;
       const read = JSON.parse(typeof output === 'string' ? output : JSON.stringify(output)) as Json;
@@ -1932,13 +1938,15 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(calls.length, 'well under the call limit').toBeLessThanOrEqual(2);
       // What the agent was told it can do, as SENT on the press: the card is out of date; say so and ask; never "prepare a new change".
       const sent = String(((calls[0]!.tools as Json[]).find((t) => t.name === 'apply_change') as Json).description);
-      expect(sent).toContain('superseded: the card is out of date because the model changed after it was prepared, so nothing was saved; say so, and ask whether they want that change made again.');
+      // prompts-v2 (29 Oct): in tool-descriptions.txt's words.
+      expect(sent).toContain("superseded means the card's base changed and no write occurred; ask whether to prepare that change again.");
       expect(sent).not.toContain('prepare a new change');
       // 25 Oct (measure RL mrr-r4/r5): the superseded sentence; before it 09fd261b… said "read it again and prepare a new change".
       // 26 Oct (W6 chat): RUN_WORDS_RULE gained one sentence, the leader's words as given (run.leader.words); before it 4ebb0110….
       // 26 Oct (T1, Paul): RUN_WORDS_RULE reports from the Run's own facts, each figure once; before it 8ac4ec65….
       // 27 Oct (round 2, consolidation): RUN_WORDS_RULE is gone (RESULTS owns Run reporting); before it 6a9fa6d0….
-      expect(createHash('sha256').update(sent, 'utf8').digest('hex')).toBe('d19276a6a5726c9b52b73c90a23eeeb3471bf9442130fd554fdc1ffe241f6b63');
+      // 29 Oct: prompts-v2 tool-descriptions.txt; before it d19276a6….
+      expect(createHash('sha256').update(sent, 'utf8').digest('hex')).toBe('ba69fd9f537592b2f08841ddc8f9026142ec1311c5aa62fea25d4819eb79c932');
     });
 
     it('DL 23 Oct (served capacity: a new Run unseen until reload): a program reply names the Run its turn stored in `run`, and only that Run', async () => {
@@ -2045,8 +2053,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(registered.length, 'proposing saves nothing').toBe(1);
       // The words the agent was given, as the provider received them.
       const sent = String((calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.description);
-      expect(sent).toContain('Put the whole change in ONE propose_change: once a card has been prepared, a second proposal in the same turn is refused. ');
-      expect(sent).toContain('say it plainly and ask for what is needed. After any refusal, while this turn has prepared no card, you may make a corrected propose_change, using the refusal\'s reasons.');
+      // prompts-v2 (29 Oct): in tool-descriptions.txt's words.
+      expect(sent).toContain('After a card exists, do not propose another this turn. ');
+      expect(sent).toContain('If refused before any card exists, one corrected call may use the returned reason; never retry an unchanged request.');
       // The false sentences are gone: every second proposal refused, and ONE correction only after does_not_compile (the code
       // releases the claim after every refusal). A prepared card still refuses one (the S3 row above).
       expect(sent).not.toContain('ONE propose_change: a second proposal in the same turn is refused');
@@ -2139,13 +2148,13 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       for (const gone of ['18 to 22', 'a range that reads their word', 'the range is Olumi\'s reading']) expect(sent, gone).not.toContain(gone);
     });
 
-    it('(8) Codex r1 BLOCK 2 on #3707: the whole CALCULATION BOUNDARY rides the core instructions once, with its labelled-arithmetic permission', async () => {
+    it('(8) Codex r1 BLOCK 2 on #3707: the whole CALCULATION BOUNDARY rides the program instructions once, with its labelled-arithmetic permission (prompts-v2, 29 Oct: agent-coaching.txt\'s own section)', async () => {
       const sent = await sentOnce();
       expect(sent.split('\n\nCALCULATION BOUNDARY\n'
-        + "Do not calculate or forecast an option's goal outcome, probability of success, break-even, expected value, sensitivity, robustness, or other engine-owned analytical result yourself.\n"
-        + 'You may perform transparent one-step arithmetic on figures the user supplied, or evaluate a total or difference they explicitly defined, including at the end points of a range they stated, only when it is NOT presented as a model result. '
-        + 'Show the operands and units, label it as simple arithmetic, and identify the saved setting or clearly labelled what-if used. This permission excludes every engine-owned result named above and never permits inventing a response law between quantities.\n'
-        + 'If the requested implication requires modelled relationships, use only supplied current engine output. If that output is unavailable, stale or blocked, identify the missing input or offer the appropriate model/run action instead of estimating the result.\n\n'
+        + "Do not calculate or forecast model outcomes, goal chances, break-even points, expected values, sensitivity, robustness or tipping points yourself. "
+        + 'Use current supplied engine output for implications requiring modelled relationships. '
+        + 'You may show transparent one-step arithmetic on supplied figures, or an explicitly defined total or difference, including stated range endpoints, only as labelled simple arithmetic with operands, units and the saved or hypothetical setting; it must not substitute for an engine result. '
+        + "Do no calendar counting, date subtraction, unit conversion of spans or period rounding; stated dates and spans belong in the model's time fields for host counting.\n\n"
       )).toHaveLength(2);
     });
   });

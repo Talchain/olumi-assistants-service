@@ -15,7 +15,7 @@ import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
 import { APPROXIMATE_FIGURE, CanonicalModel, withDeclaredTiming, type CanonicalModelT, type CanonicalQuantityT } from '../../model-program/canonical.js';
 import { compile, isApproximate, normalise } from '../../model-program/compile.js';
-import { CORE_ALIGNED_INSTRUCTIONS, PROGRAM_TOOL_DESCRIPTIONS } from '../../core-route/instructions.js';
+import { PROGRAM_TOOL_DESCRIPTIONS, programInstructions } from '../../core-route/instructions.js';
 import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_CHANGE_LABEL, UPDATE_JSON_SCHEMA, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX } from '../prompt.js';
@@ -975,13 +975,12 @@ describe('the model-program turn on the real core route', () => {
   });
 
   it('W6 chat: the agent can say on a later turn which option is most likely, from the Run\'s own words; the program instructions say how, and no tool description holds a choosing word', () => {
-    // Round 2 (27 Oct, consolidation): RESULTS, in the program instructions, is the single owner of the leader rule; the tool
-    // descriptions no longer repeat it (RUN_WORDS_RULE is gone).
-    const rule = 'Name a leader only from run.leader.option_id, using its option label; otherwise give run.leader.words, or say the Run names none.';
-    expect(CORE_ALIGNED_INSTRUCTIONS.split(rule)).toHaveLength(2);
-    // Round 3 (27 Oct): model-relative findings are the purpose instruction's, sent once in the same instructions.
-    expect(CORE_ALIGNED_INSTRUCTIONS.split('as a model-relative finding with its uncertainty, what it rests on and what would change it.')).toHaveLength(2);
-    expect(CORE_ALIGNED_INSTRUCTIONS).toContain('add no extra disclaimer.');
+    // Round 2 (27 Oct, consolidation): the program instructions are the single owner of the leader rule; the tool descriptions
+    // no longer repeat it (RUN_WORDS_RULE is gone). prompts-v2 (29 Oct): in agent-coaching.txt's words, each once, as sent.
+    const rule = "Name which option is most likely to achieve the aim only when the current Run's leader explicitly licenses it, using its option label and recorded qualification.";
+    expect(programInstructions().split(rule)).toHaveLength(2);
+    expect(programInstructions().split('Otherwise preserve its similarity or withholding wording.')).toHaveLength(2);
+    expect(programInstructions().split('Cut repetition and process narration before material caveats; say each thing once.')).toHaveLength(2);
     for (const [name, text] of Object.entries(PROGRAM_TOOL_DESCRIPTIONS)) {
       expect(text, name).not.toContain('run.leader');
       for (const banned of ['recommend', 'best', 'winner', 'you should']) expect(text.toLowerCase(), `${name}: ${banned}`).not.toContain(banned);
@@ -2886,7 +2885,7 @@ describe('the model-program turn on the real core route', () => {
     expect(r.blockers.some((b) => b.id === 'oven_price')).toBe(false);
     expect(JSON.stringify(r)).not.toContain('What range would you put on it');
     expect(DRAFTING_INSTRUCTIONS.split('Ask for a range when a supplied approximate point feeds a goal or limit.')).toHaveLength(2);
-    expect(CORE_ALIGNED_INSTRUCTIONS).not.toContain('If that figure feeds a goal or a limit, ask what range they would put on it.');
+    expect(programInstructions()).not.toContain('If that figure feeds a goal or a limit, ask what range they would put on it.');
     expect(r.within_limits.status).toBe('calculable'); // the range asked for holds nothing back
     expect(r.conversions.some((c) => c.quantity === 'oven_price')).toBe(false);
     const view = evaluateCanonical(approx, { sourceText: `${BRIEF}\n${words}`, seed: 7 }).view as Json;
@@ -3579,9 +3578,9 @@ describe('the model-program turn on the real core route', () => {
   // prerequisite and his figures; the tool said only the person may ask for removals while the update prompt folds Olumi's own.
   it('a simplify\'s removals are the change\'s PROPOSED removals: their named ones within the figure rules, or Olumi\'s redundant scaffolding and records whose meaning is kept elsewhere; a size never outranks meaning', () => {
     const d = ProgramChangeParams.shape.remove.description ?? '';
-    // The PL's 00:57 contract, verbatim: proposed removals, reviewed on the card; named corrections followed within the figure
-    // rules; a general simplify drops only redundant Olumi scaffolding or records whose meaning is kept elsewhere.
-    expect(d).toBe('IDs of removals proposed for this reviewed change, from read_canonical_context. Follow the person\'s explicit named corrections/removals within protected-figure rules: keep a person-authored quantity with a figure in hand under its ID, correcting it or marking it not applicable only on their word. For a generic simplify request, only redundant or unneeded Olumi scaffolding, or non-protected records whose full consequential meaning is re-expressed in the model. A requested size never permits losing a supplied figure, useful option, causal route, prerequisite, risk, uncertainty or attribution. [] for none.');
+    // The PL's 00:57 contract: proposed removals, reviewed on the card; named corrections followed within the figure rules; a
+    // general simplify drops only redundant Olumi scaffolding or records whose meaning is kept elsewhere. prompts-v2's words (29 Oct).
+    expect(d).toBe("Existing ids proposed for removal. Keep every person-authored quantity with a figure under its id; correct it or mark it not_applicable only on the person's explicit word. For generic simplification, remove only redundant Olumi scaffolding or non-protected records whose full consequential meaning is re-expressed in fewer records. Preserve supplied figures, useful options, measures, causal routes, supported calculations, conditions, risks, dissent, uncertainty and attribution. A requested size does not authorize loss. [] for none.");
     expect(d).not.toContain('the person asked to remove');
   });
 
