@@ -107,7 +107,7 @@ const StatedTime = z.object({
   date: z.string().nullable().describe('YYYY-MM-DD: your reading of a date they state ("by the end of March" read against today). Null for a span.'),
   span: z.number().nullable().describe('A length of time they state, in its own unit ("six weeks": 6). Null for a date.'),
   unit: z.enum(['day', 'week', 'month', 'year']).nullable().describe('The span\'s unit as they state it. Null for a date.'),
-  said_on: z.string().nullable().describe('YYYY-MM-DD: the day this date or span was said, which a span is counted from. Leave it null for a date or span stated in this message; keep the saved said_on when you return a record whose time is not restated. Olumi fills it in.'),
+  said_on: z.string().nullable().describe('YYYY-MM-DD: the day this date or span was said, which a span is counted from. For a date or span stated in this message, today\'s date as given above; keep the saved said_on when you return a record whose time is not restated.'),
 }).strict().nullable().describe('For a quantity that counts the model\'s periods (a window\'s length, an offset, a start): the date or span they stated, exactly as you read it. Olumi counts it in periods and sets value; you never do. Null otherwise.');
 
 export const CanonicalQuantity = z.object({

@@ -1,5 +1,5 @@
 /**
- * Stated time, counted by the host exactly, never rounded (DL v2, 29 Oct, outbox/TIME-AND-DECIDE-BY-DESIGN-v2-20261029.md,
+ * Stated time, counted by the host exactly, never rounded silently (DL v2, 29 Oct, outbox/TIME-AND-DECIDE-BY-DESIGN-v2-20261029.md,
  * with the PL's corrections A–H). The drafter writes a date or a span exactly as it reads the person's words (`stated_time`);
  * the calendar arithmetic is the host's: a week is 7 days, a month the same day of the month (clamped to the month's last
  * day, said in the basis), a year the same month and day. No prose is parsed: reading "the end of March" as a date stays the AI's.
@@ -7,12 +7,12 @@
  * Each count's role is read from where the model uses the quantity, never assumed:
  *  · POSITION (a window's `origin_offset`, an option setting's or a risk's `starts_after_periods`): periods from period 0, 0 allowed;
  *    a span counts from the day it was said (PL 13:40Z), its `said_on` (PL 14:12Z: today when stated in this message, the saved
- *    day when the record is returned unrestated), along the calendar, then from period 0 exactly as a date (a first draft is
- *    said on period 0, so there it is the span itself);
+ *    day when the record is returned unrestated; null is not known, PL 16:42Z), along the calendar, then from period 0 exactly
+ *    as a date (said on period 0, as in a first draft, it is the span itself);
  *  · LENGTH (a window's `periods`): a date counts from the window's opening, `position − (offset + start)`, at least 1; a span
  *    counts along the calendar from that opening's date.
- * A whole count is the figure, known. A count that is not whole is the person's stated meaning, which whole periods cannot hold:
- * unsupported, its basis naming both whole readings, so what rests on it is withheld through compile's existing path (PL A).
+ * A whole count is the figure, known. A count that is not whole is Olumi's provisional reading (Paul, 29 Oct, option B): the
+ * nearest whole period, author olumi, its basis naming the other whole reading so the person confirms or changes it on the card.
  * What cannot be read at all (a past date, an empty window, uses that disagree, no unit) is asked, with its own question.
  * A quantity the model uses in no timing slot has its stated time cleared: it is never read, so nothing unshown is saved.
  * The PL's HOLD (DL-3 12:50Z): a model saved without its start date has no period 0 to count a date from, never today; a
@@ -61,7 +61,7 @@ function measure(a: number, e: number, p: Period): { readonly k: number; readonl
 }
 const inPeriods = (k: number, rest: number, p: Period) => (rest === 0 ? counted(k, p) : k === 0 ? counted(rest, 'day') : `${counted(k, p)} and ${counted(rest, 'day')}`);
 
-/** One use's reading: a whole count; the person's meaning that whole periods cannot hold (unsupported); or a question. */
+/** One use's reading: a count (whole, or Olumi's provisional reading); what cannot be counted (unsupported); or a question. */
 type Reading =
   | { readonly kind: 'count'; readonly n: number; readonly olumi: boolean; readonly basis: string | null; readonly say: string }
   | { readonly kind: 'unsupported'; readonly olumi: boolean; readonly basis: string; readonly say: string }
@@ -79,11 +79,24 @@ function usesOf(model: CanonicalModelT, id: string): Use[] {
   ];
 }
 
-/** What whole periods cannot hold, said with both whole readings and their dates (PL A): a change to it is the person's to make. */
-function notWhole(what: string, from: number, k: number, rest: number, p: Period, grid: (j: number) => number, opens: string, of: 'date' | 'length of time', min: number): string {
-  const options = [k, k + 1].filter((j) => j >= min).map((j) => `${num(j)} (to ${shown(grid(j))})`);
-  return `Read as ${what} from your words: ${inPeriods(k, rest, p)} from ${shown(from)}${opens}. The model counts whole ${p}s, so ${options.join(' or ')} would be a change to your ${of}.`;
+/**
+ * A count whole periods cannot hold exactly (Paul, 29 Oct, option B): Olumi's PROVISIONAL reading, the nearest whole period,
+ * said with the other whole reading and its date, so the person confirms or changes it on the card. Olumi's own reading
+ * (author olumi), shown "not yet confirmed" until they do; never a silent rounding, and never below `min`.
+ */
+function provisional(head: string, k: number, rest: number, p: Period, grid: (j: number) => number, min: number, from: string): Reading {
+  const n = k < min ? min : rest * 2 < grid(k + 1) - grid(k) ? k : k + 1;
+  const other = n === k ? k + 1 : k;
+  const alt = other >= min ? `; confirm it, or say ${num(other)} (to ${shown(grid(other))})` : '; confirm it, or say what to change';
+  // Said as the count it gives, as a whole count is, so two uses that count it differently are asked (review 29 Oct).
+  return { kind: 'count', n, olumi: true, say: `${counted(n, p)} from ${from}`, basis: `${head} The model counts whole ${p}s, so Olumi counts it as ${counted(n, p)} (to ${shown(grid(n))}) for now${alt}.` };
 }
+
+/**
+ * The basis kept on a count that is not Olumi's reading (their span in its own unit): never one Olumi wrote for an earlier
+ * reading, which no longer says how this figure was counted (review 29 Oct: a saved provisional 5 weeks recounted as 4.5).
+ */
+const keptBasis = (q: CanonicalQuantityT): string | null => (q.author === 'olumi' ? null : q.basis);
 
 /** What cannot be counted without the model's own start date (a save from before it was kept): never counted from today. */
 const noStart = (what: string, p: Period): Reading => ({ kind: 'unsupported', olumi: true, say: 'with no start date',
@@ -93,7 +106,7 @@ const notOpen = (what: string, why: string): Reading => ({ kind: 'unsupported', 
 
 /**
  * One use of one stated time. `p0` is period 0's day, or null when the model's start date is not known; `said` the day the
- * words were said (YYYY-MM-DD: its said_on, else this message's today; a first draft's is period 0), or null when not known;
+ * words were said (YYYY-MM-DD: its said_on), or null when not known;
  * `opening` the window's opening in periods (a length), or why it cannot be known yet. Every count lands on the model's own
  * grid: whole periods from period 0 along the calendar.
  */
@@ -113,8 +126,7 @@ function readUse(t: Stated, use: Use, p: Period, p0: number | null, said: string
       const m = measure(p0, d, p);
       return m.whole
         ? { kind: 'count', n: m.k, olumi: true, basis: `Read as ${shown(d)} from your words: ${counted(m.k, p)} from ${shown(p0)}.${clampNote(p0, m.k, p)}`, say: `${counted(m.k, p)} from ${shown(p0)}` }
-        : { kind: 'unsupported', olumi: true, say: `${inPeriods(m.k, m.rest, p)} from ${shown(p0)}`,
-          basis: `${notWhole(shown(d), p0, m.k, m.rest, p, (j) => after(p0, j, p).day, '', 'date', 0)}${clampNote(p0, m.k, p) || clampNote(p0, m.k + 1, p)}` };
+        : provisional(`Read as ${shown(d)} from your words: ${inPeriods(m.k, m.rest, p)} from ${shown(p0)}.`, m.k, m.rest, p, (j) => after(p0, j, p).day, 0, shown(p0));
     }
     if (typeof opening !== 'number') return notOpen(shown(d), opening.why);
     const o = after(p0, opening, p).day;
@@ -124,8 +136,7 @@ function readUse(t: Stated, use: Use, p: Period, p0: number | null, said: string
     const n = m.k - opening;
     return m.whole
       ? { kind: 'count', n, olumi: true, basis: `Read as ${shown(d)} from your words: ${counted(n, p)} from ${shown(o)}${opens}.${clampNote(p0, m.k, p)}`, say: `${counted(n, p)} from ${shown(o)}` }
-      : { kind: 'unsupported', olumi: true, say: `${inPeriods(n, m.rest, p)} from ${shown(o)}`,
-        basis: `${notWhole(shown(d), o, n, m.rest, p, (j) => after(p0, opening + j, p).day, opens, 'date', 1)}${clampNote(p0, m.k, p) || clampNote(p0, m.k + 1, p)}` };
+      : provisional(`Read as ${shown(d)} from your words: ${inPeriods(n, m.rest, p)} from ${shown(o)}${opens}.`, n, m.rest, p, (j) => after(p0, opening + j, p).day, 1, shown(o));
   }
   if (t.span === null) return { kind: 'ask', question: 'Which date or length of time did you mean?' };
   if (t.unit === null) return { kind: 'ask', question: `Is the ${num(t.span)} in your words days, weeks, months or years?` };
@@ -153,9 +164,7 @@ function readUse(t: Stated, use: Use, p: Period, p0: number | null, said: string
     const m = measure(p0, end.day, p);
     const head = `Read as ${what} from your words, said on ${shown(now)}: to ${shown(end.day)}, ${inPeriods(m.k, m.rest, p)} from ${shown(p0)}.`;
     if (m.whole) return { kind: 'count', n: m.k, olumi: true, basis: `${head}${note || clampNote(p0, m.k, p)}`, say: `${counted(m.k, p)} from ${shown(p0)}` };
-    const options = [m.k, m.k + 1].map((j) => `${num(j)} (to ${shown(after(p0, j, p).day)})`);
-    return { kind: 'unsupported', olumi: true, say: `${inPeriods(m.k, m.rest, p)} from ${shown(p0)}`,
-      basis: `${head} The model counts whole ${p}s, so ${options.join(' or ')} would be a change to your length of time.${note || clampNote(p0, m.k, p) || clampNote(p0, m.k + 1, p)}` };
+    return provisional(head, m.k, m.rest, p, (j) => after(p0, j, p).day, 0, shown(p0));
   }
   const own = t.unit === p;
   const start = length ? opening : 0;
@@ -185,11 +194,12 @@ function readUse(t: Stated, use: Use, p: Period, p0: number | null, said: string
     }
     const k = Math.floor(n);
     const at = (j: number): number | null => (p0 === null ? null : typeof start !== 'number' ? null : after(p0, start + j, p).day);
-    const options = [k, k + 1].filter((j) => j >= (length ? 1 : 0)).map((j) => { const day = at(j); return day === null ? num(j) : `${num(j)} (to ${shown(day)})`; });
     // In the model's own terms: weeks and days, or years and months (a part of a month stays a part).
     const inOwn = p === 'week' ? inPeriods(k, (n - k) * 7, p) : p === 'year' && whole((n - k) * 12) ? `${counted(k, 'year')} and ${counted(Math.round((n - k) * 12), 'month')}` : `${num(n)} ${p}s`;
-    return { kind: 'unsupported', olumi: !own, say: inOwn,
-      basis: `Read as ${what} from your words${own || inOwn === what ? '' : `: ${inOwn}`}. The model counts whole ${p}s, so ${options.join(' or ')} would be a change to your length of time.` };
+    const min = length ? 1 : 0, c = Math.max(min, Math.round(n)), other = c > n ? c - 1 : c + 1;
+    const to = (j: number) => { const day = at(j); return day === null ? '' : ` (to ${shown(day)})`; };
+    return { kind: 'count', n: c, olumi: true, say: counted(c, p),
+      basis: `Read as ${what} from your words${own || inOwn === what ? '' : `: ${inOwn}`}. The model counts whole ${p}s, so Olumi counts it as ${counted(c, p)}${to(c)} for now${other >= min ? `; confirm it, or say ${num(other)}${to(other)}` : '; confirm it, or say what to change'}.` };
   }
   if (p0 === null) return noStart(what, p);
   if (typeof start !== 'number') return notOpen(what, start.why);
@@ -204,18 +214,17 @@ function readUse(t: Stated, use: Use, p: Period, p0: number | null, said: string
   const n = m.k - start;
   return m.whole
     ? { kind: 'count', n, olumi: true, basis: `Read as ${what} from your words: ${counted(n, p)} from ${shown(from)}${opens}.${note || clampNote(p0, m.k, p)}`, say: `${counted(n, p)} from ${shown(from)}` }
-    : { kind: 'unsupported', olumi: true, say: `${inPeriods(n, m.rest, p)} from ${shown(from)}`,
-      basis: `${notWhole(what, from, n, m.rest, p, (j) => after(p0, start + j, p).day, opens, 'length of time', length ? 1 : 0)}${note || clampNote(p0, m.k, p) || clampNote(p0, m.k + 1, p)}` };
+    : provisional(`Read as ${what} from your words: ${inPeriods(n, m.rest, p)} from ${shown(from)}${opens}.`, n, m.rest, p, (j) => after(p0, start + j, p).day, length ? 1 : 0, shown(from));
 }
 
 /**
  * The model with the stated time of each quantity in `only` (every quantity when omitted) counted from `periodZero`
- * (YYYY-MM-DD): the saved anchor, or null when the model's start date was never kept (never today on an update). `today`
- * (YYYY-MM-DD) is the day this message's words are said: an update's today; a first draft's is its period 0 (the default);
- * null when it is not known. A position span counts from the day it was said (PL 13:40Z), its `said_on`, which is today when
- * the drafter leaves it null (stated in this message); every count keeps that day (PL 14:12Z).
+ * (YYYY-MM-DD): the saved anchor, or null when the model's start date was never kept (never today on an update). A position
+ * span counts from the day it was said (PL 13:40Z), its `said_on`: the drafter writes today's date for words said in this
+ * message and keeps the saved day for a record returned unrestated; null is a day not known, on a first draft as on an
+ * update, never today (PL 16:42Z). Every count keeps that day (PL 14:12Z).
  */
-export function countStatedTime(model: CanonicalModelT, periodZero: string | null, only?: ReadonlySet<string>, today: string | null = periodZero): CanonicalModelT {
+export function countStatedTime(model: CanonicalModelT, periodZero: string | null, only?: ReadonlySet<string>): CanonicalModelT {
   const mine = (q: CanonicalQuantityT) => q.stated_time !== null && (only === undefined || only.has(q.id));
   if (!model.quantities.some(mine)) return model;
   const p = model.period;
@@ -235,6 +244,31 @@ export function countStatedTime(model: CanonicalModelT, periodZero: string | nul
     if (!FIGURE_STATUSES.has(at.status) || at.unit !== p || v === null || !Number.isInteger(v) || v < 0) return { why: `is "${at.label}", which has no whole figure in ${p}s yet` };
     return v + use.start;
   };
+  /**
+   * A stated time on a quantity the model uses in no timing slot (a duration in arithmetic, a deadline used as a bound): counted
+   * in that quantity's own unit (week, month or year) where that is exact; otherwise their figure as written if they gave one,
+   * else unsupported with its reason. Never left "known" with no figure (29 Oct benchmark: 6 of 18 drafts failed to compile).
+   */
+  const freeOf = (q: CanonicalQuantityT, t: Stated, saidOn: string | null, blank: CanonicalQuantityT): CanonicalQuantityT => {
+    // A span in the quantity's own unit, or one fixed conversion away (days and weeks, months and years), is that figure exactly:
+    // a duration in arithmetic is any amount, never a whole-period count (review 29 Oct: 1.5 weeks idle, 0 weeks).
+    const per: Readonly<Record<string, number>> = { day: 1, week: 7, month: 1, year: 12 };
+    const family = (u: string | null) => (u === 'day' || u === 'week' ? 'days' : u === 'month' || u === 'year' ? 'months' : null);
+    if (t.date === null && t.span !== null && t.span >= 0 && t.unit !== null && family(t.unit) !== null && family(t.unit) === family(q.unit)) {
+      const v = (t.span * per[t.unit]!) / per[q.unit!]!;
+      return t.unit === q.unit ? { ...blank, value: v, status: 'known', question: null, basis: keptBasis(q) }
+        : { ...blank, value: v, status: 'known', question: null, author: 'olumi', basis: `Read as ${counted(t.span, t.unit)} from your words: ${counted(v, q.unit!)}.` };
+    }
+    const own = q.unit === 'week' || q.unit === 'month' || q.unit === 'year' ? q.unit : null;
+    const r = own === null ? null : readUse(t, t.date !== null ? { role: 'position' } : { role: 'length', offset: null, start: 0 }, own, p0, saidOn, 0);
+    if (r?.kind === 'count') return { ...blank, value: r.n, status: 'known', question: null, author: r.olumi ? 'olumi' : q.author, basis: r.olumi ? r.basis : keptBasis(q) };
+    // Their figure or range as written, where they gave one and it cannot be counted.
+    if (q.value !== null || (q.low !== null && q.high !== null)) return { ...q, stated_time: null };
+    if (r?.kind === 'ask') return { ...blank, status: 'asked', question: r.question, basis: null };
+    if (r?.kind === 'unsupported') return { ...blank, status: 'unsupported', question: null, author: r.olumi ? 'olumi' : q.author, basis: r.basis };
+    return { ...blank, status: 'unsupported', question: null,
+      basis: `"${q.label}" is in ${q.unit === null ? 'no unit' : `"${q.unit}"`}, so the date or length of time read from your words cannot be counted in it.` };
+  };
   const resolve = (q: CanonicalQuantityT): CanonicalQuantityT => {
     const was = done.get(q.id);
     if (was !== undefined) return was;
@@ -242,8 +276,8 @@ export function countStatedTime(model: CanonicalModelT, periodZero: string | nul
     const t = q.stated_time!;
     // Nothing stated (no date, no span) is nothing to read; a quantity used in no timing slot is never read (both cleared).
     const uses = t.date === null && t.span === null ? [] : usesOf(model, q.id);
-    // The day it was said: its own said_on (a record returned unrestated keeps the saved one), else this message's today.
-    const saidOn = t.said_on ?? today;
+    // The day it was said: its own said_on, as the drafter wrote it; a null is a day not known, never today (PL 15:19Z, 16:42Z).
+    const saidOn = t.said_on;
     const readings = uses.map((u) => readUse(t, u, p, p0, saidOn, u.role === 'length' ? openingOf(u) : 0));
     busy.delete(q.id);
     // Its own unit and bounds are never reinterpreted: a counting quantity is in the model's period, or it is not counted.
@@ -253,13 +287,16 @@ export function countStatedTime(model: CanonicalModelT, periodZero: string | nul
     const ask = readings.find((r): r is Reading & { kind: 'ask' } => r.kind === 'ask');
     const said = [...new Set(readings.map((r) => (r.kind === 'ask' ? '' : r.say)))];
     const first = readings[0];
-    const out: CanonicalQuantityT = first === undefined ? { ...q, stated_time: null }
+    // Nothing stated and no figure: never "known" with nothing (review 29 Oct); with a figure, as written.
+    const empty = q.value === null && !(q.low !== null && q.high !== null) && FIGURE_STATUSES.has(q.status)
+      ? { ...q, stated_time: null, status: 'unsupported' as const, question: null, basis: `No figure, date or length of time was read for "${q.label}".` } : { ...q, stated_time: null };
+    const out: CanonicalQuantityT = first === undefined ? (t.date === null && t.span === null ? empty : freeOf(q, t, saidOn, blank))
       : q.unit !== p ? { ...blank, status: 'unsupported', question: null,
         basis: `"${q.label}" counts the model's periods but is in ${q.unit === null ? 'no unit' : `"${q.unit}"`}: a counting quantity is in the model's period (${p}), so its stated time is not counted.` }
       : ask !== undefined ? { ...blank, status: 'asked', question: ask.question, basis: null }
       : said.length > 1 || first.kind === 'ask' ? { ...blank, status: 'asked', basis: null,
         question: `Read from your words as ${t.date !== null ? shown(dayOf(t.date)) : counted(t.span ?? 0, t.unit ?? p)}, this counts as ${said.length === 2 ? `${said[0]} in one place and ${said[1]} in another` : `${said.slice(0, -1).join(', ')} and ${said.at(-1)} in different places`}: which did you mean?` }
-      : first.kind === 'count' ? { ...blank, value: first.n, status: 'known', question: null, author: first.olumi ? 'olumi' : q.author, basis: first.olumi ? first.basis : q.basis }
+      : first.kind === 'count' ? { ...blank, value: first.n, status: 'known', question: null, author: first.olumi ? 'olumi' : q.author, basis: first.olumi ? first.basis : keptBasis(q) }
       : { ...blank, status: 'unsupported', question: null, author: first.olumi ? 'olumi' : q.author, basis: first.basis };
     done.set(q.id, out);
     return out;

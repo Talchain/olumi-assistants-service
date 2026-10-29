@@ -142,7 +142,12 @@ export interface PresentInput {
   readonly revision?: number;
   /** False when the driver sweep would pass the Run's admission limit (alpha G11): no driver is measured, and that is said. */
   readonly sweep?: boolean;
+  /** Olumi's readings of their dates and spans that this run's windows and timings use (stated-time.ts), each with its basis:
+   * said once beside the chances, so a chance is never read as resting on their exact date (option B, PL 16:42Z). */
+  readonly time_readings?: readonly PresentTimeReading[];
 }
+/** One of Olumi's readings of their dates and spans; `timing` when a window or timing this run keeps uses it. */
+export interface PresentTimeReading { readonly id: string; readonly label: string; readonly basis: string; readonly accepted: boolean; readonly timing: boolean }
 
 export type PresentCell =
   | { readonly kind: 'figure'; readonly display: string; readonly face: string;
@@ -714,6 +719,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     return model.quantities.filter((x) => rests.has(x.id) && x.dist?.kind === 'range' && x.dist.low < x.dist.high).length
       + model.risks.filter((r) => rests.has(r.effect_on)).length;
   };
+  /** Every figure the chances read, under any option (a time reading is said where one is read: option B, review 29 Oct). */
+  const restsOnAny = new Set([null, ...model.options.map((o) => o.id)].flatMap((id) => [...upstream(roots, id)]));
   const notes: string[] = [
     ...result.options.flatMap((o) => o.per_goal.flatMap((g) => (isWithheld(g)
       ? [`${q(allGoals.find((x) => x.goal_id === g.goal_id)?.label ?? g.goal_id)} with ${q(optionLabel.get(o.option_id) ?? o.option_id)} is not shown: in ${g.withheld.count.toLocaleString('en-GB')} of ${result.draws.toLocaleString('en-GB')} simulated draws ${whatHappened(o, g.withheld.quantities)}.`]
@@ -726,6 +733,9 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     // measure, the model's left-out records); never a claim that it covers everything.
     ...(covered.length > 0 && notCovered.length > 0 ? [`Covers: ${listWords(covered)} · Leaves out: ${listWords(notCovered.map(q))}`] : []),
     ...notInRun.map((w) => `The ${w.kind} ${q(w.label)} is not in this run: ${inlineWords(w.reason)}`),
+    // Option B (Paul, 29 Oct): a window or timing counted from their words is Olumi's reading, "not yet confirmed" until accepted.
+    ...(input.time_readings ?? []).filter((r) => r.timing || restsOnAny.has(r.id))
+      .map((r) => `${q(r.label)} is Olumi’s reading${r.accepted ? '' : ' (not yet confirmed)'}. ${r.basis}`),
     ...(uncheckedLine !== undefined ? [stop(uncheckedLine)] : []),
     // W10: said once per result, where a chance shown rests on two or more uncertain inputs (ranges, and risks that fire).
     ...(options.some((o) => o.cell.kind === 'figure') && uncertainInputs() >= 2 ? [INDEPENDENCE_WORDS] : []),
