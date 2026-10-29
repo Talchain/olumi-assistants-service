@@ -4130,7 +4130,10 @@ describe('the model-program turn on the real core route', () => {
     const pctNode = nodeOf(project(pct, compile(pct, { sourceText: BRIEF })).graph)('sell_through');
     expect(pctNode.observed_state).toMatchObject({ value: 70, raw_value: 70, unit: '%', range: { low: 50, high: 90 } });
     // W10: 50 to 90 % read as the range it falls in 8 times out of 10, σ = 20/1.2815516 = 15.606 % (the √12 law: 11.55).
-    expect(pctNode.display_value).toMatch(/^50–90 %, Olumi's estimate; Olumi reads it as a spread around 70 \(sd 15\.61\)/);
+    expect(pctNode.display_value).toBe('50–90 %, Olumi\'s estimate; Olumi reads it as a rough range, provisionally'); // plain words on the card (Paul 28 Oct)
+    // The σ is the law's, never the card's words (Paul 28 Oct): 0.15606 in the compiler's fraction scale.
+    const pctLaw = compile(pct, { sourceText: BRIEF }).conversions.find((x) => x.kind === 'range_law' && x.quantity === 'sell_through') as { reading: { sd_below: number; sd_above: number } } | undefined;
+    expect([pctLaw?.reading.sd_below, pctLaw?.reading.sd_above].map((x) => Math.round((x ?? 0) * 1e5) / 1e5)).toEqual([0.15606, 0.15606]);
 
     // DL 24 Oct (board 3de98183): a bare range of theirs IS the level. The centre the card draws is Olumi's reading, labelled
     // Olumi's; the range and their words stay theirs. A figure they state keeps their source.

@@ -236,12 +236,14 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     if (has(q.low) && has(q.high) && q.low !== q.high) {
       // A range is not a law: the person's (or Olumi's) bounds, then Olumi's provisional reading of them, said as Olumi's.
       const r = lawFor(q);
-      // The disclosure says the CONDITIONED moments (what the draws have) and where the spread is kept, as Olumi's.
+      // Plain words on the card (Paul, 28 Oct: no raw science numbers by default): whose range it is, how Olumi reads its ends and
+      // any hard limit the calculation keeps it within (PL 00:06: a real restriction stays visible). The CONDITIONED moments stay
+      // in this item's `law` (lawOf), for a disclosure, never in the card's words.
       const kept = (lo: number, hi: number) => (Number.isFinite(lo) && Number.isFinite(hi) ? `, kept between ${fmt(lo)} and ${fmt(hi)}`
         : Number.isFinite(lo) ? `, never below ${fmt(lo)}` : Number.isFinite(hi) ? `, never above ${fmt(hi)}` : '');
       const law = q.author === 'person' && !has(q.range_kind) ? 'how to read it is asked'
-        : r.kind === 'normal' ? `Olumi reads it as a spread around ${fmt(r.mean)} (sd ${fmt(r.sd_conditioned)})${kept(r.lower, r.upper)}, provisionally`
-          : 'Olumi cannot use it as a spread yet';
+        : r.kind === 'normal' ? `${q.range_kind === 'bounds' ? 'Olumi reads its ends as firm' : 'Olumi reads it as a rough range'}${kept(r.lower, r.upper)}, provisionally`
+          : 'Olumi cannot use it as a range yet';
       return `${has(q.value) ? `about ${fmt(q.value)}, ` : ''}${fmt(q.low)}–${fmt(q.high)}${unit}${owner}; ${law}`;
     }
     return `${fmt(q.value ?? q.low!)}${unit}${owner}`;
