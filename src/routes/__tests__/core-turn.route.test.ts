@@ -941,6 +941,39 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect([figure('oven_price'), figure('base_sales')], 'the edit saved on what the approval saved').toEqual([2500, 320]);
     });
 
+    it('A1 (PL 23:51Z, 23:53Z): replay_only is a lookup only: a typed miss that claims, writes and runs nothing; with a recorded answer, the same replay; unreadable cards are unavailable, never none', async () => {
+      const turnId = randomUUID(), message = 'What does the model hold for the oven today?';
+      const lookup = (text = message) => post({ turn_id: turnId, message: text, source: 'composer', replay_only: true });
+      const callsBefore = calls.length, rowsBefore = turnRows.size;
+      const miss = await lookup();
+      expect(miss.statusCode, miss.body).toBe(404);
+      expect(miss.json()).toMatchObject({ durability: 'unknown', error: { code: 'REPLAY_NOT_RECORDED', retry_safe: true, nothing_saved: false } });
+      expect([calls.length - callsBefore, turnRows.size - rowsBefore], 'no model call, no claim or row written').toEqual([0, 0]);
+      // No claim was taken: the same turn, sent for real, runs once.
+      const real = await typed(message, turnId);
+      expect(real.statusCode, real.body).toBe(200);
+      const callsAfterReal = calls.length;
+      // Recorded now: the lookup is that turn's replay, byte for byte, with no model call.
+      const hit = await lookup();
+      expect(hit.statusCode, hit.body).toBe(200);
+      expect(hit.json()).toMatchObject({ durability: 'replayed', assistant_text: (real.json() as Json).assistant_text, error: null });
+      expect(calls.length).toBe(callsAfterReal);
+      // The flag is no request identity: another body under this turn id is a reuse, never replayed.
+      expect(((await lookup('Something else entirely.')).json() as Json).durability).not.toBe('replayed');
+      // An unreadable held-card read is unavailable for a lookup; a plain resend keeps today's reading (no card known).
+      const read = store.readMostRecentPendingActions as unknown as { mockRejectedValueOnce: (e: Error) => void };
+      read.mockRejectedValueOnce(new Error('read failed'));
+      const unreadable = await lookup();
+      expect(unreadable.statusCode, unreadable.body).toBe(503);
+      expect(unreadable.json()).toMatchObject({ durability: 'unknown', error: { code: 'REPLAY_CARDS_UNREADABLE', retry_safe: true, nothing_saved: false } });
+      read.mockRejectedValueOnce(new Error('read failed'));
+      expect(((await typed(message, turnId)).json() as Json)).toMatchObject({ durability: 'replayed', cards: [] });
+      // A canvas edit is never looked up: refused before anything runs.
+      const edit = await post({ kind: 'system_event', turn_id: randomUUID(), replay_only: true, event: { kind: 'factor_value_edit', target_id: 'base_sales', raw_value: 320 } });
+      expect([edit.statusCode, (edit.json() as Json).error?.code]).toEqual([422, 'BAD_INPUT']);
+      expect(calls.length).toBe(callsAfterReal);
+    });
+
     it('the same edit resent replays it: no second change', async () => {
       const turnId = randomUUID();
       expect((await canvasEdit(turnId)).statusCode).toBe(200);
