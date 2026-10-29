@@ -814,7 +814,8 @@ export function costOf(model: ExecutableModel, draws: number): { readonly operat
   const sorts = Math.ceil(Math.log2(draws + 1)) * (ranged + options * checks.length);
   const pairs = (options * (options - 1)) / 2;
   return { operations: draws * (options * (times * reads + windows + 8 * walks + 8 * model.risks.length) + sets * (times + 1) + sorts + pairs),
-    bytes: draws * (16 * ranged + 8 * model.risks.length + options * (9 * checks.length + 4) + 8) + 8 * times * model.quantities.length + 72 * options * walks };
+    // runOption holds two grids of times × quantities Float64s, the values and their rounding bounds (`vals`, `errs`).
+    bytes: draws * (16 * ranged + 8 * model.risks.length + options * (9 * checks.length + 4) + 8) + 16 * times * model.quantities.length + 72 * options * walks };
 }
 
 export function simulate(model: ExecutableModel, opts: SimulateOptions): SimResult {
