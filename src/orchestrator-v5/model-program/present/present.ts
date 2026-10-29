@@ -289,6 +289,9 @@ export function listWords(parts: readonly string[]): string {
 }
 /** Display words stay on one line; the authored model and its quoted source are never rewritten. */
 export const inlineWords = (text: string): string => text.trim().replace(/\s+/g, ' ');
+/** Aims left out of the chance for want of a measure, by label, said once (PL 21:51Z: visible, never one the chance waits on). */
+export const leftOutWords = (labels: readonly string[]): string =>
+  `${listWords(labels.map((l) => `‘${inlineWords(l)}’`))} ${labels.length === 1 ? 'has' : 'have'} no measure yet, so ${labels.length === 1 ? 'it is' : 'they are'} left out of the chance.`;
 const q = (label: string): string => `‘${inlineWords(label)}’`;
 /** A sentence's full stop, unless it already ends in one (a question keeps its "?"). */
 const stop = (x: string): string => (/[.?!]$/.test(x) ? x : `${x}.`);
@@ -777,7 +780,9 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       : waiting.map((g) => stop(`${q(g.label)} ${goalWaits(g)}`))),
     // The 11 Oct decision (:74): what the chance covers (the measured aims it uses) and what it leaves out (aims with no
     // measure, the model's left-out records); never a claim that it covers everything.
-    ...(covered.length > 0 && notCovered.length > 0 ? [`Covers: ${listWords(covered)} · Leaves out: ${listWords(notCovered.map(q))}`] : []),
+    ...(covered.length > 0 && notCovered.length > 0 ? [`Covers: ${listWords(covered)} · Leaves out: ${listWords(notCovered.map(q))}`]
+      // PL 21:51Z: an aim left out for want of a measure stays named wherever the result says nothing of it otherwise.
+      : (input.leaves_out ?? []).length > 0 ? [leftOutWords(input.leaves_out!)] : []),
     ...notInRun.map((w) => `The ${w.kind} ${q(w.label)} is not in this run: ${inlineWords(w.reason)}`),
     // Option B (Paul, 29 Oct): a window or timing counted from their words is Olumi's reading, "not yet confirmed" until accepted.
     ...(input.time_readings ?? []).filter((r) => r.timing || restsOnAny.has(r.id))
@@ -826,7 +831,10 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const name = (id: string): string => q(optionLabel.get(id) ?? id);
     const basis = sharedBasisWords(roots, [...new Map([...premisesOf(model.goals.map((g) => g.id)), ...model.limits.flatMap((l) => input.limit_premises?.[l.id] ?? [])]
       .map((p) => [p.id, p] as const)).values()], [...model.goals, ...model.limits].map((c) => c.id), saidOnce);
-    const aim = model.goals.length === 1 ? 'the goal' : 'every goal together';
+    // PL 21:51Z (never a measured subset as the whole): with an aim left out for want of a measure, the finding is said of the
+    // aims measured (the chance's own words name the one left out).
+    const measuredOnly = (input.leaves_out ?? []).length > 0;
+    const aim = model.goals.length === 1 ? (measuredOnly ? 'the measured goal' : 'the goal') : measuredOnly ? 'every measured goal together' : 'every goal together';
     /** Each option's chance, in the model's order (a withheld finding ranks nothing). */
     const each = listWords(said.map((x) => `${x.display} for ${name(x.id)}`));
     const withheld = (similar: readonly string[], words: string): PresentedLeader => ({ licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: similar, words });
@@ -872,7 +880,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       : reading === undefined && !conditional ? 'It rests on your figures.'
       : `Like each option’s chance, it rests on ${[...(reading !== undefined ? [reading.replace(/^on /, '')] : []), ...(conditional ? ['the assumptions listed with it'] : [])].join(' and ')}.`;
     return { licence: 'permitted', option_id: null, goal_chance_leader: top.id, similar_option_ids: [],
-      words: `In this model, ${name(top.id)} is the option most likely to achieve ${aim}: ${top.display} chance, against ${next.display} for ${name(next.id)}, the next most likely. ${restsOnWords}`
+      // PL 22:19Z: the finding names exactly what it is of, the aims left out included, said once where it is made.
+      words: `In this model, ${name(top.id)} is the option most likely to achieve ${aim}${measuredOnly ? ` (leaving out ${listWords(input.leaves_out!.map(q))}, which ${input.leaves_out!.length === 1 ? 'has' : 'have'} no measure yet)` : ''}: ${top.display} chance, against ${next.display} for ${name(next.id)}, the next most likely. ${restsOnWords}`
         + (top.c.precision_95[1] < 0.5 ? ` Even so, in this model it is more likely to miss ${aim} than to meet it.` : '') + rests };
   })();
   const known = input.current !== undefined && input.run !== undefined;

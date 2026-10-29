@@ -526,10 +526,11 @@ function wordsIn(m: CanonicalModelT) {
           : given !== undefined ? figure(given) : timed(String(x['to']));
         return `sets ${nm(x['quantity'])} to ${to} ${start(x['starts_after_periods'] as number | string)}${typeof x['question'] === 'string' ? `, Olumi asks "${x['question']}"` : ''}`
           + `${x['author'] === 'structure' ? `, as ${WHO_WORDS['structure']}` : x['author'] !== r['author'] ? `, as ${of(WHO_WORDS, x['author'])}` : ''}`
-          // A setting shares the option's words only when it is the option's own author's; Olumi's setting is never said to be
-          // "not in your words" (its mark says whose), and one carrying their words says them (Codex r1: an authorship
-          // correction to a setting must still show which words it drops).
-          + `${x['quote'] === r['quote'] && x['author'] === r['author'] ? '' : typeof x['quote'] === 'string' ? `, in your words "${x['quote']}"` : x['author'] === 'structure' || x['author'] === 'olumi' ? '' : ', not in your words'}`;
+          // A setting shares the option's words only when it is the option's own author's. Olumi's setting on an option not
+          // Olumi's says "as Olumi's", so it is never also said to be "not in your words"; one carrying their words says them
+          // (Codex r1, r3: an authorship or quote change to a setting must still read differently).
+          + `${x['quote'] === r['quote'] && x['author'] === r['author'] ? '' : typeof x['quote'] === 'string' ? `, in your words "${x['quote']}"`
+            : x['author'] === 'structure' || (x['author'] === 'olumi' && x['author'] !== r['author']) ? '' : ', not in your words'}`;
       }
       // Box 1a: a link in words, by what it joins, which way and how sure; and a risk no one can size, or one on an aim, a
       // limit or an option, with what is not known yet and its own direction (a sized risk's sign is its severity's).

@@ -1789,6 +1789,14 @@ describe('the model-program turn on the real core route', () => {
       expect(o.cell.face).toContain('leaving out ‘Keep the regulars happy’, which has no measure yet');
     }
     expect((v.goal_chance.waits_on ?? []).map((b: Json) => b.id)).not.toContain('happy');
+    // PL 22:19Z: the leader is the measured goal's, naming the aim left out; never the whole goal's.
+    expect(v.leader_licence).toBe('permitted');
+    expect(v.leader.words).toContain('is the option most likely to achieve the measured goal (leaving out ‘Keep the regulars happy’, which has no measure yet): ');
+    expect(v.leader.words).toContain('more likely to miss the measured goal than to meet it');
+    // Contrast: with no aim left out, the leader is the goal's, as before.
+    const whole = viewOf(priced(bakery()));
+    expect(whole.leader.words).toContain('is the option most likely to achieve the goal: ');
+    expect(JSON.stringify(whole)).not.toContain('measured goal');
     expect(v.goal_chance.notes.join(' ')).toContain('Leaves out: ‘Keep the regulars happy’');
     // Contrast: with no aim measured the chance does wait on a measure, and says so.
     const none = happy(priced(bakery()));
@@ -1799,7 +1807,10 @@ describe('the model-program turn on the real core route', () => {
     // Contrast: a measured aim still waiting (its figure asked) still holds its chance back.
     const asked = happy(bakery());
     setQ(asked, 'base_sales', { status: 'asked', value: null, quote: null, question: 'How many loaves do you sell a week now?' });
-    expect(((viewOf(asked).options) as Json[]).every((o) => o.cell.kind === 'withheld')).toBe(true);
+    const a = viewOf(asked);
+    expect((a.options as Json[]).every((o) => o.cell.kind === 'withheld')).toBe(true);
+    // Codex r3: the aim left out stays named where nothing else in the result says it.
+    expect(JSON.stringify(a)).toContain('‘Keep the regulars happy’ has no measure yet, so it is left out of the chance.');
   });
 
   it('Codex r1 (29 Oct): Olumi\'s setting is not said to be "not in your words", and an authorship correction to a setting in the option\'s words still shows', () => {
@@ -1813,6 +1824,12 @@ describe('the model-program turn on the real core route', () => {
       before: 'sets "ovens added" to "one oven" 1 oven from the start', after: 'sets "ovens added" to "one oven" 1 oven from the start, as Olumi’s' });
     // Each field alone shows too: Olumi's setting keeping their words says them; their setting with no words says so.
     for (const patch of [{ author: 'olumi' }, { quote: null }] as Partial<Setting>[]) expect(validatePostimage(bakery(), set(bakery(), patch), { removals: [], words, fresh: words }).ok, JSON.stringify(patch)).toBe(true);
+    // Codex r3: an Olumi option's Olumi setting in the option's words, its words cleared, still shows ("not in your words").
+    const olumis = (m: CanonicalModelT): CanonicalModelT => ({ ...m, options: m.options.map((o) => (o.id === 'second_oven' ? { ...o, author: 'olumi' } : o)) });
+    const both = olumis(set(bakery(), { author: 'olumi' }));
+    const cleared = validatePostimage(both, set(both, { quote: null }), { removals: [], words, fresh: words });
+    expect(cleared.ok, JSON.stringify(cleared)).toBe(true);
+    expect((cleared.ok ? cleared.changes : []).find((c) => c.id === 'second_oven')!.after).toBe('sets "ovens added" to "one oven" 1 oven from the start, not in your words');
     const keeps = validatePostimage(bakery(), set(bakery(), { author: 'olumi' }), { removals: [], words, fresh: words });
     expect((keeps.ok ? keeps.changes : []).find((c) => c.id === 'second_oven')!.after).toBe('sets "ovens added" to "one oven" 1 oven from the start, as Olumi’s, in your words "A second oven"');
   });
@@ -3191,6 +3208,9 @@ describe('the model-program turn on the real core route', () => {
       for (const note of waiting.goal_chance.notes) expect(note).not.toMatch(/[\r\n]/);
       expect(waiting.goal_chance.notes.join(' ')).toContain('Leaves out: ‘Keep the hall welcoming’');
       expect((waiting.goal_chance.waits_on ?? []).some((b: Json) => b.id === 'welcoming')).toBe(false);
+      // Codex r3: the finding is said of the aims measured, never of every aim.
+      expect(JSON.stringify(waiting)).not.toContain('every goal together');
+      expect(waiting.leader.words).toContain('the option most likely to achieve every measured goal together (leaving out ‘Keep the hall welcoming’, which has no measure yet): ');
       for (const target of waiting.goal_chance.targets.per_target) expect(target.words).not.toMatch(/[\r\n]/);
       for (const o of waiting.options) {
         expect(o.cell.kind).toBe('figure');

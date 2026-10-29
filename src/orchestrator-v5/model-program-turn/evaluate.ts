@@ -20,7 +20,7 @@ import type { ExecutableModel } from '../model-program/executable.js';
 import { costOf, simulate } from '../model-program/simulate/simulate.js';
 import type { SimResult } from '../model-program/simulate/result.js';
 import {
-  driverSweepOperations, inlineWords, needsAnswer, presentAnalysisView, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentPremise, type PresentQuantity,
+  driverSweepOperations, inlineWords, leftOutWords, needsAnswer, presentAnalysisView, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentPremise, type PresentQuantity,
   type PresentedAnalysisView, type PresentTimeReading,
 } from '../model-program/present/present.js';
 
@@ -226,6 +226,8 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
     leader_licence: 'withheld',
     options: ids.map((option_id) => ({ option_id, cell: cellOf(option_id), main_driver: { kind: 'not_recorded' as const } })),
     goal_chance: { notes: [...(refused !== undefined ? [refused] : []), ...goals.filter((g) => g.status !== 'calculable').map((g) => sentence(`‘${inlineWords(g.label)}’ ${waitsOnWords(blockers, new Set([g.goal_id]), sizedOnce) ?? `is not in the chance yet: ${inlineWords(g.reasons.join(' '))}`}`)),
+      // PL 21:51Z: an aim left out of the measured joint for want of a measure is named, never dropped from what they read.
+      ...(compiled.joint.goal_ids.length > 0 && compiled.joint.leaves_out.length > 0 ? [leftOutWords(compiled.joint.leaves_out.map((id) => m.goals.find((g) => g.id === id)?.label ?? id))] : []),
     ], ...(blockers.length > 0 ? { waits_on: blockers.map((b) => ({ ...b, label: inlineWords(b.label) })) } : {}) },
   };
 }
