@@ -41,6 +41,10 @@ import { PROGRAM_MODEL_STATE_PREFIX } from '../../agent-lane/turn-context.js';
 import { responsesSse } from '../../agent-lane/__tests__/stream-when-asked.js';
 import { AGENTS_CLIENT_MAX_RETRIES } from '../../../adapters/llm/openai-agents-client.js';
 import { at, bakery, bakeryWithDefect, BRIEF, club, CLUB_BRIEF, q, updateOf } from './bakery.fixture.js';
+/** What a person reads for one option's chance: its own line, then what every option's chance rests on alike, said once
+ *  beside the chances (acceptance 29 Oct, c7.1: one assumption under every option). */
+const readsFor = (v: Json, id: string): string => [(v.options as Json[]).find((o) => o.option_id === id)!.cell.face as string,
+  ...((v.goal_chance?.notes ?? []) as string[]).filter((x) => /^Each (option’s chance rests|assumes|uses)/.test(x))].join(' ');
 
 /** A draft captured before a field existed, read in today's format (the saved-model reader's own mapping). */
 const savedDraft = (file: string) => { const s = JSON.parse(readFileSync(new URL(file, import.meta.url), 'utf8')) as { brief: string; canonical: unknown }; return { brief: s.brief, canonical: withDeclaredTiming(s.canonical) as CanonicalModelT }; };
@@ -940,8 +944,10 @@ describe('the model-program turn on the real core route', () => {
     expect([oven.main_driver.kind, d.quantity, d.author]).toEqual(['available', 'sell_through', 'olumi']);
     // W8 (c7.1, c7.2): the finding, its two chances and what it rests on, each once; the settings are said with the option's chance.
     const words = `In this model, ‘A second oven’ is the option most likely to achieve the goal: ${oven.cell.display} chance, against 0% for ‘Keep our one oven’, `
-      + 'the next most likely. Like each option’s chance, it rests on Olumi’s reading of your figures (not yet confirmed) and the assumptions listed with it. '
+      // Acceptance 29 Oct (c7.1): what both chances rest on alike is said once beside the chances; the finding points to it.
+      + 'the next most likely. It rests on the same reading and assumptions as each option’s chance. '
       + 'Even so, in this model it is more likely to miss the goal than to meet it. Its chance is most sensitive to ‘sell through’ (Olumi’s estimate).';
+    expect(view.goal_chance.notes[0]).toMatch(/^Each option’s chance rests on Olumi’s reading of your figures \(not yet confirmed\)\. Each assumes /);
     expect(oven.main_driver.detail).toContain(`held at its low end (0.5), the chance is ${d.low.display}; at its middle (0.7), ${d.middle.display}; at its high end (0.9), ${d.high.display}.`);
     expect(view.goal_chance.chance_words).toBe(`chance of ${BAKERY_SALES}, while ‘spend’ is at most £3,000`);
     expect(view.leader).toEqual({ licence: 'permitted', option_id: null, goal_chance_leader: 'second_oven', similar_option_ids: [], words });
@@ -1230,7 +1236,7 @@ describe('the model-program turn on the real core route', () => {
     // The chance's basis: Olumi's range for the promotion's effect, drawn within its declared floor, says so with the floor.
     const m = club();
     m.quantities = m.quantities.map((x) => (x.id === 'promo_effect' ? { ...x, floor: 0 } : x));
-    const face = ((evaluateCanonical(m, { sourceText: CLUB_BRIEF, seed: 7 }).view as Json).options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
+    const face = readsFor(evaluateCanonical(m, { sourceText: CLUB_BRIEF, seed: 7 }).view as Json, 'promotion');
     // Codex B1 on #3801: the floor is 3/1.56061 = 1.92 σ below the low end, inside the 4 σ the tail needs to be whole, so no
     // frequency is said (the same range with no floor keeps its 8 in 10: HALL below).
     expect(face).toContain('‘promo effect’ follows Olumi’s provisional reading of Olumi’s own estimated range, 3 to 7 members per promotion per month, '
@@ -1615,7 +1621,8 @@ describe('the model-program turn on the real core route', () => {
       expect(withoutHostFields(saved)).toEqual(withoutHostFields(before));
       expect(persisted!.living_model.runs).toHaveLength(2);
       expect(persisted!.living_model.runs[0]).toEqual(registered[0]!.graph.living_model.runs[0]);
-      expect(body.assistant_text).toBe(`Saved: 2 items confirmed. ${ids.length - 2} still to check.`);
+      // Acceptance 29 Oct (c7.4): the reply names the next row to check (Olumi's reading first; none is left open here).
+      expect(body.assistant_text).toBe(`Saved: 2 items confirmed. ${ids.length - 2} still to check. Next, is ‘Within the £3,000’ right?`);
       // Offered again, for the open rows only, in the card's order, on the new model.
       expect(body.cards.map((c: Json) => [c.reading, c.approve_action.label])).toEqual([[true, 'Yes, that’s what I meant']]);
       expect(body.cards[0].proposal_id).not.toBe(card.proposal_id);
@@ -1763,13 +1770,71 @@ describe('the model-program turn on the real core route', () => {
         // W8 run 4 (c7.1): its words are its label, "A second oven", so they are theirs without being quoted twice.
         second_oven: 'sets "ovens added" to "one oven" 1 oven from the start, in your words',
         keep_one: 'carries on as now, in your words "keep our one oven"',
-        sold_rel: 'worked out as "extra per oven" multiplied by "sell through", in loaves per oven per week',
+        sold_rel: '"extra per oven" times "sell through", in loaves per oven per week',
         sales_rel: 'starts from "base sales" and changes by "sold per oven" for each "ovens added", link 1 is yours, in your words "A second oven adds about 100 loaves a week", in loaves per week',
-        spend_rel: 'worked out as "oven price" multiplied by "ovens added", in £',
+        spend_rel: '"oven price" times "ovens added", in £',
         sell_through: 'from 0.5 to 0.9, most likely 0.7 (a plausible range), an estimate, based on "New capacity sells only as far as demand grows."',
         oven_price: 'no figure yet (in £ per oven), Olumi asks "What would the second oven cost?"',
         sales: undefined,
       });
+  });
+
+  it('PL 21:51Z (c7.6, run path): an aim with no measure beside a measured one is left out of the chance, never held against it; with no aim measured, or a measured aim still waiting, the chance still waits', () => {
+    const priced = (m: CanonicalModelT) => { setQ(m, 'oven_price', { status: 'known', value: 2500, quote: 'about £2,500', question: null }); return m; };
+    const happy = (m: CanonicalModelT) => { m.goals.push({ ...m.goals[0]!, id: 'happy', label: 'Keep the regulars happy', measure: null, question: 'How would you tell the regulars are happy?' }); return m; };
+    const viewOf = (m: CanonicalModelT) => evaluateCanonical(m, { sourceText: `${BRIEF} It would cost about £2,500. Keep the regulars happy.`, seed: 7 }).view as Json;
+    const v = viewOf(happy(priced(bakery())));
+    for (const o of v.options as Json[]) {
+      expect([o.option_id, o.cell.kind]).toEqual([o.option_id, 'figure']);
+      expect(o.cell.face).toContain('leaving out ‘Keep the regulars happy’, which has no measure yet');
+    }
+    expect((v.goal_chance.waits_on ?? []).map((b: Json) => b.id)).not.toContain('happy');
+    // PL 22:19Z: the leader is the measured goal's, naming the aim left out; never the whole goal's.
+    expect(v.leader_licence).toBe('permitted');
+    expect(v.leader.words).toContain('is the option most likely to achieve the measured goal (leaving out ‘Keep the regulars happy’, which has no measure yet): ');
+    expect(v.leader.words).toContain('more likely to miss the measured goal than to meet it');
+    // Contrast: with no aim left out, the leader is the goal's, as before.
+    const whole = viewOf(priced(bakery()));
+    expect(whole.leader.words).toContain('is the option most likely to achieve the goal: ');
+    expect(JSON.stringify(whole)).not.toContain('measured goal');
+    expect(v.goal_chance.notes.join(' ')).toContain('Leaves out: ‘Keep the regulars happy’');
+    // Contrast: with no aim measured the chance does wait on a measure, and says so.
+    const none = happy(priced(bakery()));
+    none.goals = none.goals.filter((g) => g.id === 'happy');
+    const n = viewOf(none);
+    expect((n.options as Json[]).every((o) => o.cell.kind === 'withheld')).toBe(true);
+    expect((n.goal_chance.waits_on as Json[]).map((b) => [b.id, b.code])).toContainEqual(['happy', 'measure']);
+    // Independent read r4: never also said to be left out of the chance (it is what the chance waits on).
+    expect(JSON.stringify(n)).not.toContain('‘Keep the regulars happy’ has no measure yet, so it is left out of the chance.');
+    expect(JSON.stringify(n)).not.toContain('measured goal');
+    // Contrast: a measured aim still waiting (its figure asked) still holds its chance back.
+    const asked = happy(bakery());
+    setQ(asked, 'base_sales', { status: 'asked', value: null, quote: null, question: 'How many loaves do you sell a week now?' });
+    const a = viewOf(asked);
+    expect((a.options as Json[]).every((o) => o.cell.kind === 'withheld')).toBe(true);
+    // Codex r3: the aim left out stays named where nothing else in the result says it.
+    expect(JSON.stringify(a)).toContain('‘Keep the regulars happy’ has no measure yet, so it is left out of the chance.');
+  });
+
+  it('Codex r1 (29 Oct): Olumi\'s setting is not said to be "not in your words", and an authorship correction to a setting in the option\'s words still shows', () => {
+    const words = [BRIEF];
+    type Setting = CanonicalModelT['options'][number]['sets'][number];
+    const set = (m: CanonicalModelT, patch: Partial<Setting>): CanonicalModelT => ({ ...m, options: m.options.map((o) => (o.id === 'second_oven' ? { ...o, sets: o.sets.map((x, i) => (i === 0 ? { ...x, ...patch } : x)) } : o)) });
+    // The person's setting in the option's own words ('A second oven') corrected to Olumi's, with no words: shown, never refused.
+    const v = validatePostimage(bakery(), set(bakery(), { author: 'olumi', quote: null }), { removals: [], words, fresh: words });
+    expect(v.ok, JSON.stringify(v)).toBe(true);
+    expect((v.ok ? v.changes : []).find((c) => c.id === 'second_oven')).toMatchObject({ action: 'change',
+      before: 'sets "ovens added" to "one oven" 1 oven from the start', after: 'sets "ovens added" to "one oven" 1 oven from the start, as Olumi’s' });
+    // Each field alone shows too: Olumi's setting keeping their words says them; their setting with no words says so.
+    for (const patch of [{ author: 'olumi' }, { quote: null }] as Partial<Setting>[]) expect(validatePostimage(bakery(), set(bakery(), patch), { removals: [], words, fresh: words }).ok, JSON.stringify(patch)).toBe(true);
+    // Codex r3: an Olumi option's Olumi setting in the option's words, its words cleared, still shows ("not in your words").
+    const olumis = (m: CanonicalModelT): CanonicalModelT => ({ ...m, options: m.options.map((o) => (o.id === 'second_oven' ? { ...o, author: 'olumi' } : o)) });
+    const both = olumis(set(bakery(), { author: 'olumi' }));
+    const cleared = validatePostimage(both, set(both, { quote: null }), { removals: [], words, fresh: words });
+    expect(cleared.ok, JSON.stringify(cleared)).toBe(true);
+    expect((cleared.ok ? cleared.changes : []).find((c) => c.id === 'second_oven')!.after).toBe('sets "ovens added" to "one oven" 1 oven from the start, not in your words');
+    const keeps = validatePostimage(bakery(), set(bakery(), { author: 'olumi' }), { removals: [], words, fresh: words });
+    expect((keeps.ok ? keeps.changes : []).find((c) => c.id === 'second_oven')!.after).toBe('sets "ovens added" to "one oven" 1 oven from the start, as Olumi’s, in your words "A second oven"');
   });
 
   it('W8 run 4 (c7.1 said once, c7.3): a changed name is not said again after the row\'s own label; words that are the label are not quoted twice; a rate unit reads "(per week)"; every change still shows', () => {
@@ -2255,7 +2320,7 @@ describe('the model-program turn on the real core route', () => {
     replies = [savedWith((m) => setQ(m, 'promo_effect', { value: 6, low: null, high: null, range_kind: null, status: 'known', author: 'person', basis: null, quote: 'a promotion brings 6 more a month' }))];
     const p = await proposeProgramChange(deps, ctx, { public_label: 'Promotion effect 6 a month', basis: 'their experience', request: 'The promotion brings 6 more a month, in their words.', remove: [] }) as Json;
     expect(p.data.changes.map((c: Json) => [c.id, c.action, c.before, c.after])).toEqual([['promo_effect', 'change',
-      'from 3 to 7 members per promotion per month, most likely 5 (a plausible range), an estimate, based on "Promotions at clubs this size bring a few extra joins a month.", Olumi’s, not in your words',
+      'from 3 to 7 members per promotion per month, most likely 5 (a plausible range), an estimate, based on "Promotions at clubs this size bring a few extra joins a month.", Olumi’s',
       '6 members per promotion per month, known, no basis given, yours, in your words "a promotion brings 6 more a month"']]);
     expect(await applyProgramChange(deps, ctx, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const m3 = persisted!.living_model.canonical as CanonicalModelT;
@@ -2342,7 +2407,7 @@ describe('the model-program turn on the real core route', () => {
         after: '£2,000 per oven, known, no question, in your words "the oven is £2,000"', author: 'person', family: 'quantity' },
       { id: 'keep_one', kind: 'option', action: 'remove', label: 'Keep our one oven', before: 'carries on as now, in your words "keep our one oven"', after: null, author: 'person', family: 'option' },
       { id: 'landlord_agrees', kind: 'record', action: 'add', label: 'Only once the landlord agrees.', before: null,
-        after: 'a prerequisite, about "A second oven", in your words "our landlord must agree first"', author: 'person', family: 'conditions' },
+        after: 'must be in place first, about "A second oven", in your words "our landlord must agree first"', author: 'person', family: 'conditions' },
     ];
     expect(p.data.changes).toEqual(changes);
     // The card the UI reads carries the same changes, on the held proposal's own projection (and in its digest).
@@ -2899,7 +2964,7 @@ describe('the model-program turn on the real core route', () => {
     expect(r.within_limits.status).toBe('calculable'); // the range asked for holds nothing back
     expect(r.conversions.some((c) => c.quantity === 'oven_price')).toBe(false);
     const view = evaluateCanonical(approx, { sourceText: `${BRIEF}\n${words}`, seed: 7 }).view as Json;
-    expect(JSON.stringify(view)).toContain('It also uses £2,500 per oven for ‘oven price’ for now — you said ‘It would cost about £2,500.’');
+    expect(JSON.stringify(view)).toContain('Each also uses £2,500 per oven for ‘oven price’ for now — you said ‘It would cost about £2,500.’');
     expect(JSON.stringify(view)).not.toContain('your range');
     expect(JSON.stringify(view)).not.toContain('as you stated it');
     // Contrast: the ends in their own words are their range, read as theirs, and no range is asked for.
@@ -3081,8 +3146,7 @@ describe('the model-program turn on the real core route', () => {
   describe('R8: a result\'s basis names the premises and Olumi\'s figures it rests on (real path: compile → simulate → present)', () => {
     const HALL = `${CLUB_BRIEF} The council must let us use the hall.`;
     const OWN = `${CLUB_BRIEF} The promotion brings five extra joins a month.`;
-    const faceOf = (m: CanonicalModelT, sourceText: string, option = 'promotion') =>
-      ((evaluateCanonical(m, { sourceText, seed: 7 }).view as Json).options as Json[]).find((o) => o.option_id === option)!.cell.face as string;
+    const faceOf = (m: CanonicalModelT, sourceText: string, option = 'promotion') => readsFor(evaluateCanonical(m, { sourceText, seed: 7 }).view as Json, option);
     const approved = (m: CanonicalModelT) => JSON.parse(JSON.stringify(m).replaceAll('"approval":"proposed"', '"approval":"approved"')) as CanonicalModelT;
     /** The club with every figure, relation and link the person's own (the promotion's effect given in their words). */
     const allTheirs = () => {
@@ -3105,7 +3169,7 @@ describe('the model-program turn on the real core route', () => {
         if (kind === 'assumption') m.assumptions.push({ id: 'fees', text, applied: true, concerns: ['reach_340'], author: 'person', quote, ...at, party, approval: 'approved' });
         else m.conditions.push({ ...hall, party });
         const v = evaluateCanonical(m, { sourceText: source, seed: 7 }).view as Json;
-        const face = (v.options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
+        const face = readsFor(v, 'promotion');
         const premise = `${party}’s ${kind} ‘${quote}’ ${kind === 'assumption' ? 'holds' : 'is met'}`;
         expect(face).toContain(premise);
         expect(v.goal_chance.targets.per_target[0].words).toContain(premise);
@@ -3131,23 +3195,30 @@ describe('the model-program turn on the real core route', () => {
       expect(detail.targets.joint.words).not.toMatch(/[\r\n]/);
       expect(detail.chance_words).not.toMatch(/[\r\n]/);
       for (const o of v.options) {
-        expect(o.cell.face).toContain(premise);
-        expect(o.cell.face).not.toMatch(/[\r\n]/);
+        expect(readsFor(v, o.option_id)).toContain(premise);
+        expect(readsFor(v, o.option_id)).not.toMatch(/[\r\n]/);
       }
-      // An unmeasured aim withholds the whole chance: it has a joint line, never joint words or a partial chance.
+      // PL 21:51Z (c7.6): an aim with no measure yet is left out of the measured joint, as the board says. The chance shown is
+      // the measured aims', and its own words and notes name the aim left out; it never waits on that aim's measure, and it is
+      // never said as the chance of every aim.
       m.goals.push({ ...m.goals[0]!, id: 'welcoming', label: 'Keep the hall\nwelcoming', measure: null, question: 'How would you measure a welcoming hall?', quote: 'Keep the hall\nwelcoming' });
       const waiting = evaluateCanonical(m, { sourceText: `${source} Keep the hall\nwelcoming.`, seed: 7 }).view as Json;
-      expect(waiting.goal_chance.targets.joint.status).toBe('withheld');
-      expect(waiting.goal_chance.targets.joint.line).not.toMatch(/[\r\n]/);
-      expect(waiting.goal_chance.chance_words).toBeUndefined();
+      const LEFT = 'leaving out ‘Keep the hall welcoming’, which has no measure yet';
+      expect(waiting.goal_chance.targets.joint.status).toBe('licensed');
+      expect(waiting.goal_chance.targets.joint.words).toContain(LEFT);
+      expect(waiting.goal_chance.chance_words).toContain(LEFT);
       expect(waiting.goal_chance.notes.length).toBeGreaterThan(0);
       for (const note of waiting.goal_chance.notes) expect(note).not.toMatch(/[\r\n]/);
-      expect(waiting.goal_chance.notes.join(' ')).toContain('Keep the hall welcoming');
-      expect(waiting.goal_chance.waits_on.find((b: Json) => b.id === 'welcoming').label).toBe('Keep the hall welcoming');
+      expect(waiting.goal_chance.notes.join(' ')).toContain('Leaves out: ‘Keep the hall welcoming’');
+      expect((waiting.goal_chance.waits_on ?? []).some((b: Json) => b.id === 'welcoming')).toBe(false);
+      // Codex r3: the finding is said of the aims measured, never of every aim.
+      expect(JSON.stringify(waiting)).not.toContain('every goal together');
+      expect(waiting.leader.words).toContain('the option most likely to achieve every measured goal together (leaving out ‘Keep the hall welcoming’, which has no measure yet): ');
       for (const target of waiting.goal_chance.targets.per_target) expect(target.words).not.toMatch(/[\r\n]/);
       for (const o of waiting.options) {
-        expect(o.cell.kind).toBe('withheld');
-        expect(o.cell.why).not.toMatch(/[\r\n]/);
+        expect(o.cell.kind).toBe('figure');
+        expect(o.cell.face).toContain(LEFT);
+        expect(o.cell.face).not.toMatch(/[\r\n]/);
       }
       expect(m.conditions[0]!.text).toBe(wrapped);
     });
@@ -3178,12 +3249,12 @@ describe('the model-program turn on the real core route', () => {
       m.conditions.push(hall);
       const face = faceOf(m, HALL);
       // The club's members stock is Olumi's (accepted, but never theirs): Olumi's reading, named, with no "(not yet confirmed)".
-      expect(face).toContain(', in this model. It rests on Olumi’s reading of ‘members’. It assumes your condition ‘The council must let us use the hall’ is met. It also assumes ‘promo effect’ follows Olumi’s provisional reading of '
+      expect(face).toContain('Each option’s chance rests on Olumi’s reading of ‘members’. Each assumes your condition ‘The council must let us use the hall’ is met. Each also assumes ‘promo effect’ follows Olumi’s provisional reading of '
         + 'Olumi’s own estimated range, 3 to 7 members per promotion per month, as the range it falls in 8 times out of 10, with 5 members per promotion per month as the middle value. '
-        + 'It also assumes ‘joins’ follows Olumi’s assumed relationship.');
+        + 'Each also assumes ‘joins’ follows Olumi’s assumed relationship.');
       expect(face).not.toContain('on your figures');
       // The exact 0% names it too, before what fixes it.
-      expect(faceOf(m, HALL, 'carry_on')).toContain(', in this model. It rests on Olumi’s reading of ‘members’. It assumes your condition ‘The council must let us use the hall’ is met. It also assumes ‘promo effect’');
+      expect(faceOf(m, HALL, 'carry_on')).toContain('Each option’s chance rests on Olumi’s reading of ‘members’. Each assumes your condition ‘The council must let us use the hall’ is met. Each also assumes ‘promo effect’');
     });
 
     it('integrated review 26 Oct: an applied assumption on a risk is a premise of what the risk reaches: named, never "on your figures"', () => {
@@ -3196,7 +3267,7 @@ describe('the model-program turn on the real core route', () => {
       expect(faceOf(approved(m), RISK)).toContain(', in this model. It rests on your figures.');
       m.assumptions.push({ id: 'quiet_once', text: 'A quiet month happens at most once.', applied: true, concerns: ['quiet_month'], author: 'olumi', quote: null, ...at });
       const face = faceOf(approved(m), RISK);
-      expect(face).toContain('It assumes Olumi’s assumption ‘A quiet month happens at most once’ holds');
+      expect(face).toContain('Each assumes Olumi’s assumption ‘A quiet month happens at most once’ holds');
       expect(face).not.toContain('on your figures');
     });
 
@@ -3204,7 +3275,7 @@ describe('the model-program turn on the real core route', () => {
       const m = approved(allTheirs());
       m.assumptions.push({ id: 'fees', text: 'Membership fees stay the same.', applied: true, concerns: [], author: 'olumi', quote: null, ...at });
       const face = faceOf(m, OWN);
-      expect(face).toContain(', in this model. It assumes Olumi’s assumption ‘Membership fees stay the same’ holds. Whatever the uncertain figures turn out to be, ‘members’ is 345 members');
+      expect(face).toContain('Each assumes Olumi’s assumption ‘Membership fees stay the same’ holds.');
       expect(face).not.toContain('on your figures');
     });
 
@@ -3221,16 +3292,16 @@ describe('the model-program turn on the real core route', () => {
     });
 
     it('their figures not yet confirmed (a first draft) are said as Olumi\'s reading of them, all or by name', () => {
-      expect(faceOf(allTheirs(), OWN)).toContain(', in this model. It rests on Olumi’s reading of your figures (not yet confirmed). Whatever the uncertain figures turn out to be,');
+      expect(faceOf(allTheirs(), OWN)).toContain('Each option’s chance rests on Olumi’s reading of your figures (not yet confirmed).');
       const one = approved(allTheirs());
       one.quantities = one.quantities.map((x) => (x.id === 'members_now' ? { ...x, approval: 'proposed' } : x));
       const face = faceOf(one, OWN);
-      expect(face).toContain(', in this model. It rests on Olumi’s reading of ‘members now’ (not yet confirmed). Whatever the uncertain figures turn out to be,');
+      expect(face).toContain('Each option’s chance rests on Olumi’s reading of ‘members now’ (not yet confirmed).');
       expect(face).not.toContain('on your figures');
       // With a condition too: the reading leads, then what the chance is conditional on.
       const both = allTheirs();
       both.conditions.push(hall);
-      expect(faceOf(both, `${OWN} The council must let us use the hall.`)).toContain(', in this model. It rests on Olumi’s reading of your figures (not yet confirmed). It assumes your condition ‘The council must let us use the hall’ is met. Whatever the uncertain figures turn out to be,');
+      expect(faceOf(both, `${OWN} The council must let us use the hall.`)).toContain('Each option’s chance rests on Olumi’s reading of your figures (not yet confirmed). Each assumes your condition ‘The council must let us use the hall’ is met.');
     });
 
     it('Codex #3738: their relation not yet accepted, a link of Olumi\'s in it, and their link not yet accepted are each Olumi\'s reading', () => {
@@ -3242,11 +3313,11 @@ describe('the model-program turn on the real core route', () => {
       const terms = (t: { author?: 'person' | 'olumi'; quote?: string | null; approval?: 'proposed' | 'approved' }) =>
         (r: CanonicalModelT['relations'][number]) => (r.form === 'effect' ? { ...r, terms: r.terms.map((x) => ({ ...x, ...t })) } : r);
       for (const face of [joins((r) => ({ ...r, approval: 'proposed' })), joins(terms({ approval: 'proposed' }))]) {
-        expect(face).toContain(', in this model. It rests on Olumi’s reading of ‘joins’ (not yet confirmed). Whatever the uncertain figures turn out to be,');
+        expect(face).toContain('Each option’s chance rests on Olumi’s reading of ‘joins’ (not yet confirmed).');
         expect(face).not.toContain('on your figures');
       }
       // Olumi's link, accepted: Olumi's reading, never theirs, and not "not yet confirmed".
-      expect(joins(terms({ author: 'olumi', quote: null }))).toContain(', in this model. It rests on Olumi’s reading of ‘joins’. Whatever the uncertain figures turn out to be,');
+      expect(joins(terms({ author: 'olumi', quote: null }))).toContain('Each option’s chance rests on Olumi’s reading of ‘joins’.');
     });
 
     it('DL #3738: an accepted Olumi stock is Olumi\'s reading with no "(not yet confirmed)"; unaccepted, it keeps it; mixed, each says its own', () => {
@@ -3257,11 +3328,11 @@ describe('the model-program turn on the real core route', () => {
         return faceOf(m, OWN);
       };
       const accepted = stock('approved');
-      expect(accepted).toContain(', in this model. It rests on Olumi’s reading of ‘members’. Whatever the uncertain figures turn out to be,');
+      expect(accepted).toContain('Each option’s chance rests on Olumi’s reading of ‘members’.');
       expect(accepted).not.toMatch(/not yet confirmed|on your figures/);
-      expect(stock('proposed')).toContain(', in this model. It rests on Olumi’s reading of ‘members’ (not yet confirmed). Whatever the uncertain figures turn out to be,');
+      expect(stock('proposed')).toContain('Each option’s chance rests on Olumi’s reading of ‘members’ (not yet confirmed).');
       const mixed = stock('approved', (m) => { m.quantities = m.quantities.map((x) => (x.id === 'members_now' ? { ...x, approval: 'proposed' } : x)); });
-      expect(mixed).toContain(', in this model. It rests on Olumi’s reading of ‘members now’ (not yet confirmed) and ‘members’. Whatever the uncertain figures turn out to be,');
+      expect(mixed).toContain('Each option’s chance rests on Olumi’s reading of ‘members now’ (not yet confirmed) and ‘members’.');
     });
 
     // Codex r3 #3738: the goal is read with its own record (and its measure's author and its window's figure), and so is a limit.
@@ -3279,7 +3350,7 @@ describe('the model-program turn on the real core route', () => {
         m.goals = m.goals.map((g) => (g.id === 'reach_340' ? goal(g) : g));
         also(m);
         const face = faceOf(m, OWN);
-        expect(face).toContain(`, in this model. It rests ${lead}. Whatever the uncertain figures turn out to be,`);
+        expect(face).toContain(`Each option’s chance rests ${lead}.`);
         expect(face).not.toContain('on your figures');
       });
     }
@@ -3296,11 +3367,11 @@ describe('the model-program turn on the real core route', () => {
       const proposed = approved(allTheirs());
       proposed.conditions.push({ ...hall, approval: 'proposed' });
       const face = faceOf(proposed, `${OWN} The council must let us use the hall.`);
-      expect(face).toContain(', in this model. It assumes the condition ‘The council must let us use the hall’ is met (not yet confirmed). Whatever the uncertain figures turn out to be,');
+      expect(face).toContain('Each assumes the condition ‘The council must let us use the hall’ is met (not yet confirmed).');
       expect(face).not.toMatch(/your condition|Olumi’s condition|on your figures/);
       const unfound = approved(allTheirs());
       unfound.conditions.push(hall);
-      expect(faceOf(unfound, OWN)).toContain('It assumes your condition ‘The council must let us use the hall’ is met');
+      expect(faceOf(unfound, OWN)).toContain('Each assumes your condition ‘The council must let us use the hall’ is met');
     });
 
     it('Codex #3738: the same premise reaching the chance twice (both goals rest on it, one also names it) is named once', () => {
@@ -3310,10 +3381,10 @@ describe('the model-program turn on the real core route', () => {
       m.assumptions.push({ id: 'fees', text: 'Membership fees stay the same.', applied: true, concerns: [], author: 'olumi', quote: null, ...at });
       m.goals = m.goals.map((g) => (g.id === 'reach_340' ? { ...g, measure: { ...g.measure!, assumptions: ['fees'] } } : g));
       const v = evaluateCanonical(m, { sourceText: `${OWN} And keep at least 320 members.`, seed: 7 }).view as Json;
-      const face = (v.options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
+      const face = readsFor(v, 'promotion');
       const FEES = 'Olumi’s assumption ‘Membership fees stay the same’ holds';
       expect(face.split(FEES).length - 1).toBe(1);
-      expect(face).toContain(`, in this model. It assumes ${FEES}. Whatever the uncertain figures turn out to be,`);
+      expect(face).toContain(`Each assumes ${FEES}.`);
       expect((v.goal_chance.targets.per_target as Json[]).map((t) => t.words)).toEqual([
         `‘members’ being at least 340 members at 3 months from the start of this model, in this model, if ${FEES}`,
         `‘members’ being at least 320 members at 3 months from the start of this model, in this model, if ${FEES}`]);
@@ -3326,7 +3397,7 @@ describe('the model-program turn on the real core route', () => {
       m.goals.push({ ...m.goals[0]!, id: 'keep_320', label: 'Keep at least 320 members', measure: { ...m.goals[0]!.measure!, target: 'floor' }, quote: 'keep at least 320 members' });
       return evaluateCanonical(m, { sourceText: HALL_WORDS, seed: 7 }).view as Json;
     };
-    const optionFace = (v: Json, id: string) => (v.options as Json[]).find((o) => o.option_id === id)!.cell.face as string;
+    const optionFace = (v: Json, id: string) => readsFor(v, id);
     const HALL_MET = 'if your condition ‘The council must let us use the hall’ is met';
     const REACH = '‘members’ being at least 340 members at 3 months from the start of this model, in this model,';
 
@@ -3335,7 +3406,7 @@ describe('the model-program turn on the real core route', () => {
       m.conditions.push({ ...hall, concerns: ['within_budget'] });
       const v = viewOf(m);
       for (const id of ['promotion', 'carry_on']) {
-        expect(optionFace(v, id)).toContain(`. It assumes your condition ‘The council must let us use the hall’ is met`);
+        expect(optionFace(v, id)).toContain(`Each assumes your condition ‘The council must let us use the hall’ is met`);
         expect(optionFace(v, id)).not.toContain('on your figures');
       }
       expect((v.goal_chance.targets.per_target as Json[])[0]!.words).toBe(`${REACH} on your figures`);
@@ -3363,7 +3434,7 @@ describe('the model-program turn on the real core route', () => {
       const words = (id: string) => (v.goal_chance.targets.per_target as Json[]).find((t) => t.constraint_id === id)!.words as string;
       expect(words('keep_320')).toBe('‘members’ being at least 320 members at 3 months from the start of this model, in this model, if your condition ‘The council must let us use the hall’ is met');
       expect(words('reach_340')).toBe('‘members’ being at least 340 members at 3 months from the start of this model, in this model, on your figures');
-      expect(((v.options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string)).toContain(', in this model. It assumes your condition ‘The council must let us use the hall’ is met. Whatever the uncertain figures turn out to be,');
+      expect(readsFor(v, 'promotion')).toContain('Each assumes your condition ‘The council must let us use the hall’ is met.');
     });
   });
 
@@ -3873,7 +3944,7 @@ describe('the model-program turn on the real core route', () => {
         low: null, high: null, range_kind: null, party: null, quote: 'All of the new loaves sell', basis: 'Olumi reads “all” as 100%.', author: 'person' }] })) as Json;
     expect(p.status, JSON.stringify(p)).toBe('ok');
     expect(sent).toHaveLength(0);
-    expect(p.data.changes).toEqual([{ id: 'sell_through', kind: 'quantity', action: 'change', label: 'sell through', before: 'from 0.5 to 0.9, most likely 0.7 (a plausible range), an estimate, based on "New capacity sells only as far as demand grows.", Olumi’s, not in your words',
+    expect(p.data.changes).toEqual([{ id: 'sell_through', kind: 'quantity', action: 'change', label: 'sell through', before: 'from 0.5 to 0.9, most likely 0.7 (a plausible range), an estimate, based on "New capacity sells only as far as demand grows.", Olumi’s',
       after: '1, known, based on "Olumi reads “all” as 100%.", yours, in your words "All of the new loaves sell"', author: 'person', family: 'quantity' }]);
   });
 
@@ -4190,11 +4261,17 @@ describe('the model-program turn on the real core route', () => {
     expect(fill.status, JSON.stringify(fill)).toBe('ok');
     expect(await applyProgramChange(deps, ctx2, fill.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const view = (persisted!.living_model.runs.at(-1).result as Json).canonical_analysis_view as Json;
-    // (The launch aim still has no measure, so the joint chance waits for it and says so; this aim's own chance is shown.)
-    const aim = (view.goal_chance as Json).targets.per_target.find((t: Json) => t.constraint_id === 'increase_productivity');
-    expect(aim.options.map((o: Json) => o.option_id)).toEqual(['hire_tech_lead', 'hire_two_developers']);
-    for (const o of aim.options) expect(o.display).toMatch(/^about \d+%$/);
-    expect(aim.words).toMatch(/Olumi’s assumed relationship/);
+    // PL 21:51Z (c7.6): the launch aim still has no measure, so it is left out of the chance and named as left out; the chance
+    // shown is this aim's, on every option, and never said as the chance of both aims.
+    const left = (view.goal_chance as Json).notes.find((n: string) => n.startsWith('Covers: '));
+    expect(left).toContain(' · Leaves out: ‘an urgent launch date in the next three months’, ');
+    for (const o of view.options as Json[]) {
+      expect([o.option_id, o.cell.kind]).toEqual([o.option_id, 'figure']);
+      expect(o.cell.display).toMatch(/^about \d+%$/);
+      expect(o.cell.face).toContain(', leaving out ‘an urgent launch date in the next three months’, which has no measure yet, in this model.');
+    }
+    expect((view.options as Json[]).map((o) => o.option_id)).toEqual(['hire_tech_lead', 'hire_two_developers']);
+    expect(JSON.stringify(view)).toMatch(/Olumi’s assumed relationship/);
     for (const c of persisted!.living_model.runs.at(-1).result.chances as Json[]) expect(c.per_goal).toEqual([expect.objectContaining({ goal_id: 'increase_productivity', chance: expect.any(Number) })]);
   });
 
@@ -4608,20 +4685,21 @@ describe('the model-program turn on the real core route', () => {
       m.quantities.push(q('growth', '%', { value: 10, quote: 'grow sales by 10%' }));
       m.goals = [{ ...m.goals[0]!, measure: { ...m.goals[0]!.measure!, target: 'growth', frame: 'change_rel', reference: { kind: 'now', option: null, quantity: null } } }];
       const e = evaluateCanonical(m, { sourceText: `${BRIEF} We want to grow sales by 10%.`, seed: 7 });
-      return { e, face: ((e.view as Json).options as Json[]).find((o) => o.option_id === 'second_oven')!.cell.face as string };
+      return { e, face: readsFor(e.view as Json, 'second_oven') };
     };
     const today = rel('sales relative to today');
     expect(today.e.compiled.executable!.quantities.find((x) => x.id === 'sales__today')!.label).toBe('sales relative to today');
+    // Acceptance 29 Oct (c7.1): what both options' chances rest on alike is said once, beside the chances.
     expect(today.face).toBe('‘A second oven’: more than 99% chance of ‘Relative change in sales relative to today’ being at least 10%, in this model. '
+      + 'Not yet checked: ‘Within the £3,000’ — needs "oven price". '
       // G9 (#3738): a first draft is Olumi's reading until the person confirms it, and its basis says so.
-      + 'It rests on Olumi’s reading of your figures (not yet confirmed). It assumes ‘sell through’ follows Olumi’s provisional reading of Olumi’s own estimated range, 0.5 to 0.9, as the range it falls in 8 times '
-      + 'out of 10, with 0.7 as the middle value. It also assumes ‘sales relative to today’ follows Olumi’s assumed relationship. '
-      + 'Not yet checked: ‘Within the £3,000’ — needs "oven price".');
+      + 'Each option’s chance rests on Olumi’s reading of your figures (not yet confirmed). Each assumes ‘sell through’ follows Olumi’s provisional reading of Olumi’s own estimated range, 0.5 to 0.9, as the range it falls in 8 times '
+      + 'out of 10, with 0.7 as the middle value. Each also assumes ‘sales relative to today’ follows Olumi’s assumed relationship.');
     expect(JSON.stringify(today.e.view)).not.toContain('today today');
     // Contrast: a quantity not already said "today" keeps its shadow's "today", listed as before.
     const plain = rel('sales');
     expect(plain.e.compiled.executable!.quantities.find((x) => x.id === 'sales__today')!.label).toBe('sales today');
-    expect(plain.face).toContain('. It also assumes ‘sales’ follows Olumi’s assumed relationship. It also assumes ‘sales today’ follows Olumi’s assumed relationship.');
+    expect(plain.face).toContain('. Each also assumes ‘sales’ follows Olumi’s assumed relationship. Each also assumes ‘sales today’ follows Olumi’s assumed relationship.');
   });
 
   it('a bound an option moves is never said as the base figure (Codex r2 #3719 case on the figure cell): a second oven takes the budget from £3,000 to £2,000; every chance line names the budget instead', () => {
@@ -4778,9 +4856,9 @@ describe('the model-program turn on the real core route', () => {
       'The chance also waits on 1 other thing, listed with the result.'].join('\n\n'));
     // The result lists every one of them, by label, with the figure its answer box fills; no question of the code's anywhere.
     const waits = r.canonical_analysis_view.goal_chance.waits_on as Json[];
+    // Acceptance 29 Oct (c7.6, PL 18:22Z): with 'more loaves' measured, the two aims with no measure are left out of the chance
+    // (asked as questions 1 and 2 above), so the result does not list them as something it waits on; the AI's list keeps them.
     expect(waits).toEqual([
-      { id: 'regulars', code: 'measure', label: 'Keep the regulars happy', scope: ['regulars'], answer: null },
-      { id: 'staff_happy', code: 'measure', label: 'Keep the staff happy', scope: ['staff_happy'], answer: null },
       { id: 'friendly', code: 'measure', label: 'Keep it friendly', scope: ['friendly'], answer: null },
       { id: 'base_sales', code: 'asked', label: 'base sales', scope: ['more_loaves'], answer: { quantity_id: 'base_sales' } },
       { id: 'extra_per_oven', code: 'range_kind', label: 'extra per oven', scope: ['more_loaves'], answer: { quantity_id: 'extra_per_oven' } },
@@ -4811,10 +4889,11 @@ describe('the model-program turn on the real core route', () => {
       { id: 'oven_price', code: 'asked', label: 'oven price', scope: ['within_budget'], answer: { quantity_id: 'oven_price' } },
     ]);
     // The goal waits only on what no one can size yet: never the needs-your-answer face; the why is their own basis, said once.
-    for (const o of r.canonical_analysis_view.options as Json[]) {
-      expect(o.cell.face, o.option_id).toBe('Chance not shown yet');
-      expect(o.cell.why, o.option_id).toContain('‘base sales’, which no one can size yet (Not given yet) and ‘sell through’, which no one can size yet (Cannot yet be sized)');
-    }
+    // Acceptance 29 Oct (c7.1): the first option explains them; the next names them only.
+    const full = '‘base sales’, which no one can size yet (Not given yet) and ‘sell through’, which no one can size yet (Cannot yet be sized)';
+    for (const o of r.canonical_analysis_view.options as Json[]) expect(o.cell.face, o.option_id).toBe('Chance not shown yet');
+    expect((r.canonical_analysis_view.options as Json[]).map((o) => o.cell.why)).toEqual([`The chance waits on ${full}.`, 'The chance waits on ‘base sales’ and ‘sell through’.']);
+    expect(JSON.stringify(r.canonical_analysis_view).split('which no one can size yet').length - 1).toBe(2);
     // The AI sees the same list, typed, on its read context; the stored Run keeps it.
     expect(r.model_program.blockers).toEqual(waits.map((w) => ({ id: w.id, code: w.code, scope: w.scope })));
     expect((persisted!.living_model.runs.at(-1).result as Json).compile.blockers).toEqual(r.model_program.blockers);

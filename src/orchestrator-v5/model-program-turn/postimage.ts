@@ -364,7 +364,8 @@ const DIRECTION_WORDS: Record<string, string> = { raises: '↑ raises', lowers: 
 /** A link in words (Box 1a): its verb between what moves and what it moves, and what follows when no way is settled. */
 const INFLUENCE_WORDS: Record<string, readonly [string, string]> = { up: ['↑ raises', ''], down: ['↓ lowers', ''], unknown: ['affects', ', in a direction not known yet'],
   conditional: ['affects', ', depending on conditions'], disputed: ['affects', ', in a disputed direction'] };
-const CONFIDENCE_WORDS: Record<string, string> = { likely: 'judged likely', unsure: 'judged unsure', unknown: 'how sure is not known' };
+// W8 (c7.3, acceptance 29 Oct: "judged likely", "judged unsure" read as tags): how sure, said of the link itself.
+const CONFIDENCE_WORDS: Record<string, string> = { likely: 'likely to hold', unsure: 'may not hold', unknown: 'not known whether it holds' };
 /** A risk's direction on what it acts on, if it happens. */
 const RISK_WAY: Record<string, string> = { up: '↑ raising it', down: '↓ lowering it', unknown: 'in a direction not known yet' };
 const WHO_WORDS: Record<string, string> = { person: 'yours', olumi: 'Olumi’s', structure: 'part of how the model is set up' };
@@ -435,8 +436,10 @@ function wordsIn(m: CanonicalModelT) {
   /** Whose words an item is in: the person's own, or someone they report, by name. */
   // W8 faithful (dev H03, R3/R5: "in CFO’s words" over the person's own sentence about the CFO): a quote is always the person's
   // own words (C6 checks it against what they wrote); a party is whom they report, named first ("from our supplier").
+  // W8 (c7.1, acceptance 29 Oct: "as Olumi’s, not in your words" up to five times in one detail): Olumi's own item, or the
+  // model's structure, is never in their words, and its mark says whose it is, so nothing more is said.
   const words = (r: Rec) => (typeof r['quote'] === 'string' ? `${typeof r['party'] === 'string' ? `from ${r['party']}, ` : ''}in your words "${r['quote']}"`
-    : typeof r['party'] === 'string' ? `said by ${r['party']}` : 'not in your words');
+    : typeof r['party'] === 'string' ? `said by ${r['party']}` : r['author'] === 'olumi' || r['author'] === 'structure' ? '' : 'not in your words');
   const measured = (r: Rec, say: (mm: Rec) => string) => (isRec(r['measure']) ? say(r['measure']) : 'no measure yet');
   const reference = (ref: unknown) => (!isRec(ref) || ref['kind'] === 'now' ? 'now' : ref['kind'] === 'option' ? `"${named(String(ref['option']))}"` : timed(String(ref['quantity'])));
   /** One group of an item's fields, said as one plain phrase from the item itself (`at`: its list entry, for `#`). */
@@ -448,7 +451,9 @@ function wordsIn(m: CanonicalModelT) {
       case 'name': return family === 'relations' ? `for ${q('defines')}` : family === 'preferences' ? `about ${q('quantity')}` : family === 'dissent' ? `held by "${String(r['holder'] ?? '')}"`
         : family === 'quantities' || family === 'goals' || family === 'limits' || family === 'options' || family === 'risks' ? `named "${String(r['label'] ?? '')}"` : `worded "${String(r['text'] ?? '')}"`;
       case 'figure': return figure(r);
-      case 'kind': return family === 'conditions' ? of({ prerequisite: 'a prerequisite', challenge: 'a challenge' }, r['kind']) : of({ fact: 'a fact', coefficient: 'a rate', derived: 'a result' }, r['kind']);
+      // W8 (c7.3, acceptance 29 Oct: "a prerequisite", "a challenge" read as tags): a challenge is a doubt worth raising
+      // (canonical.ts), never an established obstacle (PL 21:51Z).
+      case 'kind': return family === 'conditions' ? of({ prerequisite: 'must be in place first', challenge: 'a doubt to check' }, r['kind']) : of({ fact: 'a fact', coefficient: 'a rate', derived: 'a result' }, r['kind']);
       case 'status': return family === 'options' ? of({ live: 'in the comparison', ruled_out: 'ruled out, kept in view', removed: 'taken out of the comparison' }, r['status'])
         : of({ known: 'known', estimated: 'an estimate', asked: 'still to be given', derived: 'worked out from the model', unknown: 'not known yet', not_applicable: 'does not apply',
           unsupported: 'outside what the model can use' }, r['status']) + (family === 'quantities' && r['unit'] === null ? ', not measured' : '');
@@ -470,9 +475,11 @@ function wordsIn(m: CanonicalModelT) {
         }
         if (r['form'] !== 'definition') return 'no calculation';
         const said = parts.map((x, i) => (r['op'] === 'product'
-          ? `${i === 0 ? (x['power'] === -1 ? 'one divided by ' : '') : x['power'] === -1 ? ' divided by ' : ' multiplied by '}${nm(x['id'])}`
+          ? `${i === 0 ? (x['power'] === -1 ? 'one divided by ' : '') : x['power'] === -1 ? ' divided by ' : ' times '}${nm(x['id'])}`
           : `${i === 0 ? (x['sign'] === -1 ? 'minus ' : '') : x['sign'] === -1 ? ' minus ' : ' plus '}${nm(x['id'])}`)).join('');
-        return `worked out as ${said}`;
+        // W8 (c7.7, acceptance 29 Oct: "worked out as "X" multiplied by "Y"" read as a filled template): the sum or product
+        // itself, as a person writes it under the line it works out.
+        return said;
       }
       case 'link#': {
         // A link's own authorship is said where it is not the item's (the card's mark), and its words where it has them.
@@ -519,7 +526,11 @@ function wordsIn(m: CanonicalModelT) {
           : given !== undefined ? figure(given) : timed(String(x['to']));
         return `sets ${nm(x['quantity'])} to ${to} ${start(x['starts_after_periods'] as number | string)}${typeof x['question'] === 'string' ? `, Olumi asks "${x['question']}"` : ''}`
           + `${x['author'] === 'structure' ? `, as ${WHO_WORDS['structure']}` : x['author'] !== r['author'] ? `, as ${of(WHO_WORDS, x['author'])}` : ''}`
-          + `${x['quote'] === r['quote'] ? '' : typeof x['quote'] === 'string' ? `, in your words "${x['quote']}"` : x['author'] === 'structure' ? '' : ', not in your words'}`;
+          // A setting shares the option's words only when it is the option's own author's. Olumi's setting on an option not
+          // Olumi's says "as Olumi's", so it is never also said to be "not in your words"; one carrying their words says them
+          // (Codex r1, r3: an authorship or quote change to a setting must still read differently).
+          + `${x['quote'] === r['quote'] && x['author'] === r['author'] ? '' : typeof x['quote'] === 'string' ? `, in your words "${x['quote']}"`
+            : x['author'] === 'structure' || (x['author'] === 'olumi' && x['author'] !== r['author']) ? '' : ', not in your words'}`;
       }
       // Box 1a: a link in words, by what it joins, which way and how sure; and a risk no one can size, or one on an aim, a
       // limit or an option, with what is not known yet and its own direction (a sized risk's sign is its severity's).
@@ -532,10 +543,15 @@ function wordsIn(m: CanonicalModelT) {
       case 'chance': return typeof r['occurrence'] === 'string' ? `with a chance of ${q('occurrence')}` : 'with a chance not known yet';
       case 'effect': {
         const on = Q.has(String(r['effect_on'])) ? q('effect_on') : nm(r['effect_on']);
-        const size = typeof r['severity'] === 'string' ? q('severity') : 'a size not known yet';
-        const how = r['mode'] === 'multiply' ? `multiplying ${on} by ${size}` : r['mode'] === 'add' ? `adding ${size} to ${on}` : `affecting ${on}, by ${size}`;
+        const size = typeof r['severity'] === 'string' ? q('severity') : 'an amount not known yet';
+        // W8 (c7.3, acceptance 29 Oct: "by a size not known yet, ↓ lowering it" read as machinery): a risk no one can size yet
+        // is said as what it would do, which way, by an amount not known yet.
+        const unsized = typeof r['severity'] !== 'string' && r['mode'] !== 'multiply' && r['mode'] !== 'add';
+        const verb = ({ up: 'would raise', down: 'would lower' } as Record<string, string>)[String(r['direction'])];
+        const how = unsized ? (verb !== undefined ? `${verb} ${on}, by an amount not known yet` : `would change ${on}, by an amount and in a direction not known yet`)
+          : r['mode'] === 'multiply' ? `multiplying ${on} by ${size}` : r['mode'] === 'add' ? `adding ${size} to ${on}` : `affecting ${on}, by ${size}`;
         const sized = typeof r['occurrence'] === 'string' && typeof r['severity'] === 'string' && typeof r['mode'] === 'string' && Q.has(String(r['effect_on']));
-        const way = r['direction'] === 'unknown' && sized ? '' : RISK_WAY[String(r['direction'])] ?? '';
+        const way = unsized || (r['direction'] === 'unknown' && sized) ? '' : RISK_WAY[String(r['direction'])] ?? '';
         return [...(typeof r['occurrence'] === 'string' ? [] : ['with a chance not known yet']), how, way].filter((x) => x !== '').join(', ');
       }
       case 'starts': return start(r['starts_after_periods'] as number | string);

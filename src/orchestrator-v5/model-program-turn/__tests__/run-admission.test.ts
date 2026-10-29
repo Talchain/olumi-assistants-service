@@ -116,8 +116,10 @@ describe('the Run admission limit (alpha G11)', () => {
     const v = e.view as Json;
     expect(v.options.map((o: Json) => o.cell.kind)).toEqual(['figure', 'figure']);
     // Both options rest on the promotion's effect (carry on holds it switched off, structurally upstream all the same).
-    const notMeasured = { kind: 'none_licensed', reason: 'This model is too large to test each figure one at a time in one run, so what the chance rests on most is not measured.' };
+    // Shared by both options: said once beside the chances, and neither option repeats it (acceptance 29 Oct, c7.1).
+    const notMeasured = { kind: 'none_licensed', reason: '' };
     expect(Object.fromEntries((v.options as Json[]).map((o) => [o.option_id, o.main_driver]))).toEqual({ promotion: notMeasured, carry_on: notMeasured });
+    expect((v.goal_chance.notes as string[]).filter((n) => n === 'This model is too large to test each figure one at a time in one run, so what the chances rest on most is not measured.')).toHaveLength(1);
   });
 
   it('contrast: the club over its own three months runs the headline and the sweep (one ranged input, three settings)', () => {
@@ -155,8 +157,9 @@ describe('C14: the Run admission boundary on the real evaluation path (club, RUN
     const v = e.view as Json;
     expect(v.options.map((o: Json) => [o.option_id, o.cell.kind])).toEqual([['promotion', 'figure'], ['carry_on', 'figure']]);
     expect(JSON.stringify(v)).not.toContain('too large to work out in one run');
-    const notMeasured = { kind: 'none_licensed', reason: 'This model is too large to test each figure one at a time in one run, so what the chance rests on most is not measured.' };
+    const notMeasured = { kind: 'none_licensed', reason: '' };
     expect((v.options as Json[]).map((o) => o.main_driver)).toEqual([notMeasured, notMeasured]);
+    expect((v.goal_chance.notes as string[]).filter((n) => n === 'This model is too large to test each figure one at a time in one run, so what the chances rest on most is not measured.')).toHaveLength(1);
   }, 60_000);
 
   it('352 months, the first refused: costOf is 150,030,000 operations; refused by name, the simulator never called', () => {

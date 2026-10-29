@@ -155,18 +155,23 @@ describe('W10: the words say how the range was read, once, and what is assumed a
 
   it('(g) the 8-in-10 reading, its middle value and whose range it is, once in the view (W8 c7.1), each chance naming the range by its ends; the independence clause once per result', () => {
     const one = view(promo(fixed('start', 100, 'member')));
-    const faces = (v: Rec) => (v.options as Rec[]).map((o) => o.cell.face as string).join(' ');
+    // Acceptance 29 Oct (c7.1): a range both chances rest on is named once, beside the chances, for each option; neither
+    // option's own line repeats it. `faces`: every chance as the person reads it, with that shared line.
+    const faces = (v: Rec) => [...(v.options as Rec[]).map((o) => o.cell.face as string),
+      ...((v.goal_chance?.notes ?? []) as string[]).filter((n) => /^Each (option’s chance rests|assumes|uses)/.test(n))].join(' ');
     for (const o of one.options) {
       expect(o.cell.kind).toBe('figure');
-      expect(count(o.cell.face, ENDS)).toBe(1);
+      expect(count(o.cell.face, ENDS)).toBe(0);
     }
+    expect(count(faces(one), ENDS)).toBe(1);
     expect(count(faces(one), READING)).toBe(1);
     expect(count(faces(one), EIGHT_IN_TEN_WORDS)).toBe(1);
     // One uncertain figure: nothing to vary together, so no independence clause (contrast).
     expect(JSON.stringify(one)).not.toContain(INDEPENDENCE_WORDS);
     // Two: the clause once in the whole result, in its notes, never in a chance's own words.
     const two = view(promo(range('start', 95, 105, { unit: 'member' })));
-    expect(INDEPENDENCE_WORDS).toBe('Olumi treats these figures as varying independently, except where the model links them.');
+    // Acceptance 29 Oct (c7.3): said as what it means for their figures, with the check that would change it.
+    expect(INDEPENDENCE_WORDS).toBe('Olumi assumes each uncertain figure here can come out high or low on its own, unless the model links it to another. If two of them tend to rise or fall together, say so.');
     expect(count(JSON.stringify(two), INDEPENDENCE_WORDS)).toBe(1);
     expect(two.goal_chance.notes).toContain(INDEPENDENCE_WORDS);
     expect(count(faces(two), EIGHT_IN_TEN_WORDS)).toBe(2); // each range said in full once in the view
@@ -181,7 +186,7 @@ describe('W10: the words say how the range was read, once, and what is assumed a
 
   it('(g) an end on a hard edge is said "never below" it, with the other end\'s 1 in 10, and no 8-in-10 claim', () => {
     const m = promo(range('start', 100, 110, { unit: 'member', domain: { min: 100 } }));
-    const face = view(m).options[0].cell.face as string;
+    const v = view(m), face = [v.options[0].cell.face as string, ...(v.goal_chance.notes as string[]).filter((n) => n.startsWith('Each '))].join(' ');
     expect(face).toContain('‘Members today’ follows Olumi’s provisional reading of your range, 100 to 110 members, as never below 100 members and above '
       + '110 members only 1 time in 10, with 105 members as the middle value');
     expect(count(face, EIGHT_IN_TEN_WORDS)).toBe(1); // the promotion effect's, not the edged one's

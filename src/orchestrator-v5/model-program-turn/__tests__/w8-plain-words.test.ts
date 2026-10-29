@@ -98,8 +98,10 @@ describe('W8 c7: the words a person reads, at their producers', () => {
     const labels = card().map((c) => c.label);
     expect(labels.filter((l) => l === 'total jobs')).toHaveLength(1);
     expect(labels.filter((l) => l === 'extra jobs')).toHaveLength(1);
-    expect(after('total_rel')).toBe('worked out as "jobs now" plus "extra jobs", in jobs per week');
-    expect(after('extra_rel')).toBe('worked out as "extra mechanics" multiplied by "per mechanic", in jobs per week');
+    // Acceptance 29 Oct (c7.7: "worked out as "X" multiplied by "Y"" read as a filled template): the sum or product itself.
+    expect(after('total_rel')).toBe('"jobs now" plus "extra jobs", in jobs per week');
+    expect(after('extra_rel')).toBe('"extra mechanics" times "per mechanic", in jobs per week');
+    expect(card().map((c) => c.after ?? '').join(' ')).not.toMatch(/worked out as|multiplied by/);
     // The first reply's counts read the same map, so a folded figure is counted once, as its line.
     expect(readingGroups(shop(), () => true).has('total_jobs')).toBe(false);
   });
@@ -130,16 +132,25 @@ describe('W8 c7: the words a person reads, at their producers', () => {
   it('analysis, c7.1: a range\'s reading ("values near its middle are likelier …") is said once in the whole view', () => {
     const text = JSON.stringify(view());
     expect(count(text, 'values near its middle are likelier than values near its ends')).toBe(1);
-    // Every chance still names the range it rests on.
-    for (const id of ['hire', 'keep']) expect(cellOf(view(), id).cell.face).toContain('‘per mechanic’ follows Olumi’s provisional reading of your range, 10 to 20 jobs per mechanic per week');
+    // Acceptance 29 Oct (c7.1: the same assumption under every option): the range both chances rest on is named once, beside
+    // the chances, for each option; neither option's own line says it again.
+    const reading = '‘per mechanic’ follows Olumi’s provisional reading of your range, 10 to 20 jobs per mechanic per week';
+    expect(count(text, reading)).toBe(1);
+    expect((view().goal_chance.notes as string[]).filter((n) => n.includes(`Each assumes ${reading}`))).toHaveLength(1);
+    for (const id of ['hire', 'keep']) expect(cellOf(view(), id).cell.face).not.toContain(reading);
   });
 
   it('analysis, c7.2 and c7.3: a chance, then what it rests on, one point per sentence, in plain words', () => {
     const v = view(), keep = cellOf(v, 'keep').cell.face as string, hire = cellOf(v, 'hire').cell.face as string;
-    expect(hire.startsWith(`‘Hire one mechanic’: ${cellOf(v, 'hire').cell.display} chance of ‘total jobs’ being at least 75 jobs per week, in this model. It rests on Olumi’s reading of your figures (not yet confirmed). It assumes ‘per mechanic’ follows`)).toBe(true);
+    // Acceptance 29 Oct (c7.1): what both chances rest on alike is said once, beside the chances, one point per sentence.
+    expect(hire).toBe(`‘Hire one mechanic’: ${cellOf(v, 'hire').cell.display} chance of ‘total jobs’ being at least 75 jobs per week, in this model.`);
+    const shared = (v.goal_chance.notes as string[]).filter((n) => n.startsWith('Each option’s chance rests'));
+    expect(shared).toHaveLength(1);
+    expect(shared[0]!.startsWith('Each option’s chance rests on Olumi’s reading of your figures (not yet confirmed). Each assumes ‘per mechanic’ follows')).toBe(true);
+    expect(count(JSON.stringify(v), 'Olumi’s reading of your figures (not yet confirmed)')).toBe(1);
     expect(keep).toContain('Whatever the uncertain figures turn out to be, ‘total jobs’ is 60 jobs per week, below 75 jobs per week.');
     for (const face of [hire, keep, v.leader.words as string]) expect(face).not.toMatch(/with each option in effect|simulated draw| \/ |, if /);
-    expect(v.leader.words).toContain('the next most likely. Like each option’s chance, it rests on Olumi’s reading of your figures (not yet confirmed) and the assumptions listed with it.');
+    expect(v.leader.words).toContain('the next most likely. It rests on the same reading and assumption as each option’s chance.');
   });
 
   it('canvas provenance (DL, served 1c16eb41): a figure Olumi asks of the person, with no words of theirs, claims no origin: not "From your brief", not Olumi\'s', () => {

@@ -20,7 +20,7 @@ import type { ExecutableModel } from '../model-program/executable.js';
 import { costOf, simulate } from '../model-program/simulate/simulate.js';
 import type { SimResult } from '../model-program/simulate/result.js';
 import {
-  driverSweepOperations, inlineWords, needsAnswer, presentAnalysisView, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentPremise, type PresentQuantity,
+  driverSweepOperations, inlineWords, leftOutWords, needsAnswer, presentAnalysisView, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentPremise, type PresentQuantity,
   type PresentedAnalysisView, type PresentTimeReading,
 } from '../model-program/present/present.js';
 
@@ -121,10 +121,16 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   const goals: PresentGoal[] = compiled.perGoal.filter((p) => !p.needs_measure)
     .map((p) => ({ goal_id: p.goal_id, label: labelOf.get(p.goal_id) ?? p.goal_id, status: p.status, reasons: p.reasons, asks: p.asks,
       rests_on: premisesFor(p.rests_on) }));
-  const blockers = blockersOf(model, compiled.blockers);
+  // W8 (c7.6, acceptance 29 Oct: "left out of the chance" on the canvas beside "waits on … ‘Avoid losing money’"; PL 21:51Z):
+  // with an aim measured, an aim with no measure yet is left out of the measured joint (`joint.leaves_out`): it stays on the
+  // board and in the coaching, and is excluded from the chance, so its measure is not something the chance waits on. With no
+  // aim measured, the chance does wait on one, and every measure is listed. The AI's typed list keeps every blocker.
+  const leftOut = new Set(compiled.joint.goal_ids.length > 0 ? compiled.joint.leaves_out : []);
+  const blockers = blockersOf(model, compiled.blockers.filter((b) => !(b.code === 'measure' && leftOut.has(b.id))));
   const asks: PresentAsk[] = normalise(model).quantities.flatMap((q) => (q.unit !== null && blockers.some((b) => b.answer?.quantity_id === q.id)
     ? [{ quantity_id: q.id, label: q.label, unit: q.unit }] : []));
-  const leaves_out = compiled.joint.leaves_out.map((id) => labelOf.get(id) ?? id);
+  // Left out only beside an aim measured (independent read r4): with none measured, the chance waits on a measure instead.
+  const leaves_out = compiled.joint.goal_ids.length > 0 ? compiled.joint.leaves_out.map((id) => labelOf.get(id) ?? id) : [];
 
   const x = compiled.executable;
   if (x === null) {
@@ -139,7 +145,10 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
     const behind = [a.id, ...[a.measure?.window?.periods, a.measure?.window?.origin_offset].filter((id): id is string => typeof id === 'string' && read.quantities.find((q) => q.id === id)?.author !== 'structure')];
     return [a.id, { confirmed: behind.every((id) => records.confirmed.has(id)), accepted: behind.every((id) => records.accepted.has(id)) }] as const;
   }));
-  const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x, records), goals, asks, blockers, leaves_out, aims,
+  // The same join on the run path (PL 21:51Z): compile lists such an aim among the executable's `withheld` records, which the
+  // result reads as aims that hold the chance back; it is the measured joint's left-out aim, said in the chance's own words
+  // ("leaving out ‘…’, which has no measure yet") and its notes, never one the chance waits on.
+  const view = presentAnalysisView({ model: { ...x, withheld: (x.withheld ?? []).filter((w) => !(w.kind === 'goal' && leftOut.has(w.id))) }, result: sim, quantities: quantityMeta(model, compiled, x, records), goals, asks, blockers, leaves_out, aims,
     limit_premises: Object.fromEntries(compiled.perLimit.map((l) => [l.limit_id, premisesFor(l.rests_on)])),
     option_premises: Object.fromEntries(compiled.perOption.map((o) => [o.option_id, premisesFor(o.rests_on)])),
     left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })), sweep: admitted.operations + driverSweepOperations(x, draws) <= MAX_OPERATIONS,
@@ -197,11 +206,12 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
   // What the chance waits on, from the compiler's typed blockers only (S4): the measured aims' and THIS option's own (its
   // setting or timing, batch 4 hiring-r1); with no measured aim, every blocker not a limit's alone (an aim's measure, or the
   // result they want). A figure no one can give has no blocker: the compiler's own reason for it is said.
+  const sizedOnce = new Set<string>();
   const cellOf = (optionId: string) => {
     const own = compiled.perOption.find((p) => p.option_id === optionId);
     const ids = goals.length > 0 ? new Set([...goals.map((g) => g.goal_id), optionId])
       : new Set(blockers.flatMap((b) => b.scope).filter((id) => !limitIds.has(id)));
-    const waits = waitsOnWords(blockers, ids);
+    const waits = waitsOnWords(blockers, ids, sizedOnce);
     // #3789 review: the compiler's reasons quote labels and bases as written; display words stay on one line.
     const withheldWhy = inlineWords([...goals.filter((g) => g.status === 'withheld').flatMap((g) => g.reasons), ...(own?.reasons ?? [])].join(' '));
     const why = refused !== undefined ? refused : failing ? 'The model does not compile yet, so no chance can be worked out.'
@@ -216,7 +226,9 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
     staleness: { stale: null, revision: null, run_revision: null, basis: 'analysis_graph_hash_interim', reason: null, limitation: 'Currentness is unknown because an analysis hash is unavailable.' },
     leader_licence: 'withheld',
     options: ids.map((option_id) => ({ option_id, cell: cellOf(option_id), main_driver: { kind: 'not_recorded' as const } })),
-    goal_chance: { notes: [...(refused !== undefined ? [refused] : []), ...goals.filter((g) => g.status !== 'calculable').map((g) => sentence(`‘${inlineWords(g.label)}’ ${waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${inlineWords(g.reasons.join(' '))}`}`)),
+    goal_chance: { notes: [...(refused !== undefined ? [refused] : []), ...goals.filter((g) => g.status !== 'calculable').map((g) => sentence(`‘${inlineWords(g.label)}’ ${waitsOnWords(blockers, new Set([g.goal_id]), sizedOnce) ?? `is not in the chance yet: ${inlineWords(g.reasons.join(' '))}`}`)),
+      // PL 21:51Z: an aim left out of the measured joint for want of a measure is named, never dropped from what they read.
+      ...(compiled.joint.goal_ids.length > 0 && compiled.joint.leaves_out.length > 0 ? [leftOutWords(compiled.joint.leaves_out.map((id) => m.goals.find((g) => g.id === id)?.label ?? id))] : []),
     ], ...(blockers.length > 0 ? { waits_on: blockers.map((b) => ({ ...b, label: inlineWords(b.label) })) } : {}) },
   };
 }

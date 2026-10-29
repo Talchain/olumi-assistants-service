@@ -202,8 +202,10 @@ export interface PresentedLeader {
  * ONE REASON (simplify v1 S4): what a chance not shown yet waits on, said once from the compiler's typed blockers, by label,
  * in their order: the blockers holding up any of `ids` (a no-goal blocker holds up every chance). Undefined when none does:
  * the caller then says the compiler's own reason for a figure no one can give, never a sentence of its own.
+ * `once` (W8 c7.1, acceptance 29 Oct: "which no one can size yet" after each of two overlapping lists): the view's own record
+ * of what it has explained; a figure no one can size is explained the first time it is named, and named alone after that.
  */
-export function waitsOnWords(blockers: readonly PresentBlocker[], ids: ReadonlySet<string>): string | undefined {
+export function waitsOnWords(blockers: readonly PresentBlocker[], ids: ReadonlySet<string>, once?: Set<string>): string | undefined {
   const said = blockers.filter((b) => b.code === 'no_goal' || b.scope.some((s) => ids.has(s))).map((b) => {
     const name = q(b.label);
     switch (b.code) {
@@ -212,7 +214,11 @@ export function waitsOnWords(blockers: readonly PresentBlocker[], ids: ReadonlyS
       case 'deadline': return `a deadline for ${name}`;
       case 'range_kind': return `how to read the range for ${name}`;
       case 'recount': return `${name} again`;
-      case 'unknown': return `${name}, which no one can size yet${b.basis?.trim() ? ` (${inlineWords(b.basis).replace(/[.!]+$/, '')})` : ''}`;
+      case 'unknown': {
+        const first = once === undefined || !once.has(b.id);
+        once?.add(b.id);
+        return first ? `${name}, which no one can size yet${b.basis?.trim() ? ` (${inlineWords(b.basis).replace(/[.!]+$/, '')})` : ''}` : name;
+      }
       default: return name;
     }
   });
@@ -249,7 +255,15 @@ export const EIGHT_IN_TEN_WORDS = 'the range it falls in 8 times out of 10';
 /** Codex B1 on #3801: an end's 1 in 10 is said only where its domain edge is at least this many of that half's σ beyond it. */
 const TAIL_ROOM = 4;
 /** W10: once per result, where the chances shown rest on two or more uncertain inputs (each drawn on its own stream, prng.ts). */
-export const INDEPENDENCE_WORDS = 'Olumi treats these figures as varying independently, except where the model links them.';
+// W8 (c7.3, acceptance 29 Oct: "varying independently, except where the model links them" read as machinery): said as what it
+// means for their figures, with the check that would change it.
+export const INDEPENDENCE_WORDS = 'Olumi assumes each uncertain figure here can come out high or low on its own, unless the model links it to another. If two of them tend to rise or fall together, say so.';
+/** One option's reason no figure is named as what its chance rests on most, as said once for every option that shares it. */
+const SHARED_NO_DRIVER: Readonly<Record<string, string>> = {
+  [NO_DRIVER_REASON]: 'Tested one at a time at each figure’s low end, middle and high end, no figure moved any option’s chance by more than 5 points.',
+  [NO_RANGE_REASON]: 'No figure these chances rest on has a range to test.',
+  [NOT_SWEPT_REASON]: 'This model is too large to test each figure one at a time in one run, so what the chances rest on most is not measured.',
+};
 /** "Your figures" rests on Olumi's reading of who said what (each record's author is the drafter's): its fallibility is said
  *  once per result wherever a basis says "your figures" (SPEC §4, line 157; GAP 3). */
 export const AUTHORSHIP_WORDS = 'Olumi read from your words which figures are yours; if it has one wrong, say so.';
@@ -266,6 +280,7 @@ export type PresentMainDriver =
   | { readonly kind: 'available'; readonly detail: string; readonly driver: { readonly quantity: string; readonly author: 'person' | 'olumi';
       readonly low: End; readonly middle: End; readonly high: End; readonly swing_points: number; readonly draws: number;
       readonly untested: readonly { readonly quantity: string; readonly settings: readonly string[] }[] } }
+  /** `reason` empty: the reason is one every option shares, said once in `goal_chance.notes` (W8 c7.1). */
   | { readonly kind: 'none_licensed'; readonly reason: string }
   | { readonly kind: 'not_recorded' };
 
@@ -274,6 +289,9 @@ export function listWords(parts: readonly string[]): string {
 }
 /** Display words stay on one line; the authored model and its quoted source are never rewritten. */
 export const inlineWords = (text: string): string => text.trim().replace(/\s+/g, ' ');
+/** Aims left out of the chance for want of a measure, by label, said once (PL 21:51Z: visible, never one the chance waits on). */
+export const leftOutWords = (labels: readonly string[]): string =>
+  `${listWords(labels.map((l) => `‘${inlineWords(l)}’`))} ${labels.length === 1 ? 'has' : 'have'} no measure yet, so ${labels.length === 1 ? 'it is' : 'they are'} left out of the chance.`;
 const q = (label: string): string => `‘${inlineWords(label)}’`;
 /** A sentence's full stop, unless it already ends in one (a question keeps its "?"). */
 const stop = (x: string): string => (/[.?!]$/.test(x) ? x : `${x}.`);
@@ -448,10 +466,14 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   /** One assumption as its own sentence (W8 c7.2: one point per sentence): "It assumes …", then "It also assumes …". */
   const assumeSentences = (conds: readonly string[], lead = 'It'): string[] => conds.map((c, i) => (c.startsWith('using ')
     ? `${lead} ${i === 0 ? '' : 'also '}uses ${c.slice('using '.length)}.` : `${lead} ${i === 0 ? '' : 'also '}assumes ${c}.`));
-  /** The same basis as short sentences: what it reads, then each assumption once, each on its own. */
-  const basisSentences = (ids: ReadonlySet<string>, premises: readonly PresentPremise[], aimIds: readonly string[], once: Set<string>): string => {
-    const lead = unconfirmed(ids, aimIds), a = conditions(ids, premises, once);
-    return [...(lead !== undefined ? [`It rests ${lead}.`] : a.length === 0 ? ['It rests on your figures.'] : []), ...assumeSentences(a)].join(' ');
+  /** The same basis as short sentences: what it reads, then each assumption once, each on its own. `shared`: what every option's
+   *  chance rests on alike, said once beside the chances, so this option says only its own (nothing when it has none). */
+  type Shared = { readonly lead: string | undefined; readonly ids: ReadonlySet<string>; readonly premises: ReadonlySet<string> };
+  const basisSentences = (ids: ReadonlySet<string>, premises: readonly PresentPremise[], aimIds: readonly string[], once: Set<string>, shared?: Shared): string => {
+    const own = unconfirmed(ids, aimIds), lead = shared?.lead !== undefined && own === shared.lead ? undefined : own;
+    const a = conditions(new Set([...ids].filter((id) => shared?.ids.has(id) !== true)), premises.filter((p) => shared?.premises.has(p.id) !== true), once);
+    const sharesAny = shared !== undefined && (shared.lead !== undefined || assumptions(shared.ids).length > 0 || shared.premises.size > 0);
+    return [...(lead !== undefined ? [`It rests ${lead}.`] : a.length === 0 && !sharesAny ? ['It rests on your figures.'] : []), ...assumeSentences(a)].join(' ');
   };
   /**
    * A target's basis covers every option: the shared model's basis, then each option's own assumptions, named by option
@@ -572,8 +594,10 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const blockers = input.blockers ?? [];
   const limitIds = new Set([...model.limits.map((l) => l.id), ...givenLimits.map((l) => l.limit_id), ...unchecked.map((l) => l.limit_id)]);
   /** A goal's own reason, from the blockers; for a figure no one can give (no blocker), the compiler's own words for it. */
-  const goalWaits = (g: PresentGoal): string => waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${inlineWords(g.reasons.join(' '))}`;
-  const waitingWords = waitsOnWords(blockers, new Set(waiting.map((g) => g.goal_id)));
+  /** What this view has explained about a figure no one can size yet: the first time only (W8 c7.1). */
+  const sizedOnce = new Set<string>();
+  const goalWaits = (g: PresentGoal): string => waitsOnWords(blockers, new Set([g.goal_id]), sizedOnce) ?? `is not in the chance yet: ${inlineWords(g.reasons.join(' '))}`;
+  const waitingWords = waitsOnWords(blockers, new Set(waiting.map((g) => g.goal_id)), sizedOnce);
   const withheldCell = (): Extract<PresentCell, { kind: 'withheld' }> => ({
     kind: 'withheld', face: waitingWords !== undefined && needsAnswer(blockers, new Set(waiting.map((g) => g.goal_id))) ? NEEDS_ANSWER_FACE : NOT_SHOWN_FACE,
     why: waiting.length > 0
@@ -682,6 +706,23 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   };
   /** What this view has said in full (W8 c7.1): each range's reading, the first time only. */
   const saidOnce = new Set<string>();
+  const aimIds = [...model.goals, ...model.limits].map((c) => c.id);
+  // W8 (c7.1, acceptance 29 Oct: "It assumes Olumi’s assumption ‘…’ holds" under each of three options): what two or more
+  // options' chances rest on alike (the same reading, the same assumption, the same premise) is said once, beside the
+  // chances; each option's own line says only what is its own.
+  const shownIds = model.goals.length === 0 || waiting.length > 0 || jointWords === undefined ? []
+    : result.options.filter((o) => !isWithheld(o.joint_within_limits)).map((o) => o.option_id);
+  const shared: Shared | undefined = shownIds.length < 2 ? undefined : (() => {
+    const leads = shownIds.map((id) => unconfirmed(upstream(roots, id), aimIds));
+    const ids = shownIds.map((id) => upstream(roots, id)).reduce((a, b) => new Set([...a].filter((x) => b.has(x))));
+    const premises = shownIds.map((id) => new Set(optionPremises(id).map((p) => p.id))).reduce((a, b) => new Set([...a].filter((x) => b.has(x))));
+    return { lead: leads.every((l) => l !== undefined && l === leads[0]) ? leads[0] : undefined, ids, premises };
+  })();
+  const sharedConds = shared === undefined ? [] : conditions(shared.ids, optionPremises(shownIds[0]!).filter((p) => shared.premises.has(p.id)), saidOnce);
+  const sharedWords = shared === undefined ? undefined
+    : [...(shared.lead !== undefined ? [`Each option’s chance rests ${shared.lead}.`] : []), ...assumeSentences(sharedConds, 'Each')].join(' ') || undefined;
+  /** What the shared line holds, as the leader points to it. */
+  const sharedWhat = listWords([...(shared?.lead !== undefined ? ['reading'] : []), ...(sharedConds.length > 0 ? [sharedConds.length === 1 ? 'assumption' : 'assumptions'] : [])]);
   const options = result.options.map((o: OptionResult) => {
     const name = optionLabel.get(o.option_id) ?? o.option_id;
     const notRecorded = { kind: 'not_recorded' as const };
@@ -704,7 +745,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const why = headline.precision_95[0] === headline.precision_95[1] ? fixedWhy(o, headline.chance === 1) : undefined;
     const cell: PresentCell = { kind: 'figure', display: s.display,
       // W8 (c7.2): the chance, then what it rests on, one point per sentence.
-      face: `${q(name)}: ${s.display} chance of ${jointWords}, in this model. ${basisSentences(upstream(roots, o.option_id), optionPremises(o.option_id), [...model.goals, ...model.limits].map((c) => c.id), saidOnce)}`
+      face: [`${q(name)}: ${s.display} chance of ${jointWords}, in this model.`, basisSentences(upstream(roots, o.option_id), optionPremises(o.option_id), aimIds, saidOnce, shared)]
+        .filter((x) => x !== '').join(' ')
         + (why !== undefined ? ` ${why.charAt(0).toUpperCase()}${why.slice(1)}.` : '')
         + (model.limits.length > 0 ? ` Each limit on its own: ${limitLines(o).join('; ')}.` : '')
         + (uncheckedLine !== undefined ? ` ${stop(uncheckedLine)}` : ''),
@@ -721,7 +763,14 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   };
   /** Every figure the chances read, under any option (a time reading is said where one is read: option B, review 29 Oct). */
   const restsOnAny = new Set([null, ...model.options.map((o) => o.id)].flatMap((id) => [...upstream(roots, id)]));
+  // W8 (c7.1, acceptance 29 Oct: "Tested one at a time … no figure moved this chance by more than 5 points." under each
+  // option): a reason every option shares is said once, beside the chances, and each option's own is then empty (none shown).
+  const firstDriver = options[0]?.main_driver;
+  const sharedNoDriver = options.length >= 2 && firstDriver?.kind === 'none_licensed'
+    && options.every((o) => o.main_driver.kind === 'none_licensed' && o.main_driver.reason === firstDriver.reason) ? SHARED_NO_DRIVER[firstDriver.reason] : undefined;
   const notes: string[] = [
+    ...(sharedWords !== undefined ? [sharedWords] : []),
+    ...(sharedNoDriver !== undefined ? [sharedNoDriver] : []),
     ...result.options.flatMap((o) => o.per_goal.flatMap((g) => (isWithheld(g)
       ? [`${q(allGoals.find((x) => x.goal_id === g.goal_id)?.label ?? g.goal_id)} with ${q(optionLabel.get(o.option_id) ?? o.option_id)} is not shown: in ${g.withheld.count.toLocaleString('en-GB')} of ${result.draws.toLocaleString('en-GB')} simulated draws ${whatHappened(o, g.withheld.quantities)}.`]
       : []))),
@@ -731,7 +780,9 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       : waiting.map((g) => stop(`${q(g.label)} ${goalWaits(g)}`))),
     // The 11 Oct decision (:74): what the chance covers (the measured aims it uses) and what it leaves out (aims with no
     // measure, the model's left-out records); never a claim that it covers everything.
-    ...(covered.length > 0 && notCovered.length > 0 ? [`Covers: ${listWords(covered)} · Leaves out: ${listWords(notCovered.map(q))}`] : []),
+    ...(covered.length > 0 && notCovered.length > 0 ? [`Covers: ${listWords(covered)} · Leaves out: ${listWords(notCovered.map(q))}`]
+      // PL 21:51Z: an aim left out for want of a measure stays named wherever the result says nothing of it otherwise.
+      : (input.leaves_out ?? []).length > 0 ? [leftOutWords(input.leaves_out!)] : []),
     ...notInRun.map((w) => `The ${w.kind} ${q(w.label)} is not in this run: ${inlineWords(w.reason)}`),
     // Option B (Paul, 29 Oct): a window or timing counted from their words is Olumi's reading, "not yet confirmed" until accepted.
     ...(input.time_readings ?? []).filter((r) => r.timing || restsOnAny.has(r.id))
@@ -780,7 +831,10 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const name = (id: string): string => q(optionLabel.get(id) ?? id);
     const basis = sharedBasisWords(roots, [...new Map([...premisesOf(model.goals.map((g) => g.id)), ...model.limits.flatMap((l) => input.limit_premises?.[l.id] ?? [])]
       .map((p) => [p.id, p] as const)).values()], [...model.goals, ...model.limits].map((c) => c.id), saidOnce);
-    const aim = model.goals.length === 1 ? 'the goal' : 'every goal together';
+    // PL 21:51Z (never a measured subset as the whole): with an aim left out for want of a measure, the finding is said of the
+    // aims measured (the chance's own words name the one left out).
+    const measuredOnly = (input.leaves_out ?? []).length > 0;
+    const aim = model.goals.length === 1 ? (measuredOnly ? 'the measured goal' : 'the goal') : measuredOnly ? 'every measured goal together' : 'every goal together';
     /** Each option's chance, in the model's order (a withheld finding ranks nothing). */
     const each = listWords(said.map((x) => `${x.display} for ${name(x.id)}`));
     const withheld = (similar: readonly string[], words: string): PresentedLeader => ({ licence: 'withheld', option_id: null, goal_chance_leader: null, similar_option_ids: similar, words });
@@ -816,13 +870,18 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     // W8 (c7.1, c7.2: the closing paragraph restated every chance, condition and setting): the finding, its two chances, and
     // what it rests on, each once; the settings tested are said with the option's own chance, never again here.
     const rests = d.kind === 'available' ? ` Its chance is most sensitive to ${q(label(d.driver.quantity) ?? d.driver.quantity)} ${whoseRange(d.driver.author)}.`
-      : d.kind === 'none_licensed' ? ` ${d.reason}` : '';
+      : d.kind === 'none_licensed' && sharedNoDriver === undefined ? ` ${d.reason}` : '';
     const reading = unconfirmed(new Set([null, ...model.options.map((o) => o.id)].flatMap((id) => [...upstream(roots, id)])), [...model.goals, ...model.limits].map((c) => c.id));
     const conditional = basis !== 'on your figures' && basis !== reading;
-    const restsOnWords = reading === undefined && !conditional ? 'It rests on your figures.'
+    // W8 (c7.1, acceptance 29 Oct): what every option's chance rests on alike is said once beside the chances; this points to it.
+    const ownToo = shared !== undefined && (conditions(new Set([...upstream(roots, top.id)].filter((id) => !shared.ids.has(id))),
+      optionPremises(top.id).filter((p) => !shared.premises.has(p.id))).length > 0 || (shared.lead === undefined && unconfirmed(upstream(roots, top.id), aimIds) !== undefined));
+    const restsOnWords = sharedWords !== undefined ? `It rests on the same ${sharedWhat} as each option’s chance${ownToo ? ', and on its own, listed with it' : ''}.`
+      : reading === undefined && !conditional ? 'It rests on your figures.'
       : `Like each option’s chance, it rests on ${[...(reading !== undefined ? [reading.replace(/^on /, '')] : []), ...(conditional ? ['the assumptions listed with it'] : [])].join(' and ')}.`;
     return { licence: 'permitted', option_id: null, goal_chance_leader: top.id, similar_option_ids: [],
-      words: `In this model, ${name(top.id)} is the option most likely to achieve ${aim}: ${top.display} chance, against ${next.display} for ${name(next.id)}, the next most likely. ${restsOnWords}`
+      // PL 22:19Z: the finding names exactly what it is of, the aims left out included, said once where it is made.
+      words: `In this model, ${name(top.id)} is the option most likely to achieve ${aim}${measuredOnly ? ` (leaving out ${listWords(input.leaves_out!.map(q))}, which ${input.leaves_out!.length === 1 ? 'has' : 'have'} no measure yet)` : ''}: ${top.display} chance, against ${next.display} for ${name(next.id)}, the next most likely. ${restsOnWords}`
         + (top.c.precision_95[1] < 0.5 ? ` Even so, in this model it is more likely to miss ${aim} than to meet it.` : '') + rests };
   })();
   const known = input.current !== undefined && input.run !== undefined;
@@ -840,7 +899,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     },
     leader_licence: leader?.licence ?? 'withheld',
     ...(leader !== undefined ? { leader } : {}),
-    options,
+    options: sharedNoDriver === undefined ? options : options.map((o) => ({ ...o, main_driver: { kind: 'none_licensed' as const, reason: '' } })),
     ...(Object.keys(disclosed).length > 0 ? { goal_chance: disclosed } : {}),
   };
 }
