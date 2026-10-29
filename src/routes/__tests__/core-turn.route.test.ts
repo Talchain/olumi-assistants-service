@@ -1739,7 +1739,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect((await typed(said)).statusCode).toBe(200);
       const output = (calls.at(-1)!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'more')!.output;
       expect(JSON.parse(typeof output === 'string' ? output : JSON.stringify(output))).toMatchObject({ status: 'ok',
-        data: { changes: [{ id: 'base_sales', action: 'change', before: '300 loaf/week', after: '301 loaf/week', author: 'person' }] } });
+        data: { changes: [{ id: 'base_sales', action: 'change', before: '300 loaves per week', after: '301 loaves per week', author: 'person' }] } });
       expect(JSON.stringify((persisted as Json).living_model)).toBe(saved);
       const line = info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : [])).at(-1)!;
       expect(line.tool_calls).toEqual([expect.objectContaining({ name: 'propose_change', outcome: 'ok' })]);

@@ -35,7 +35,7 @@ describe('a withheld chance says what happened in the draws it is withheld for',
     expect(cell.kind).toBe('withheld');
     const count = (promotion.joint_within_limits as { withheld: { count: number } }).withheld.count;
     expect(count).toBeGreaterThan(0);
-    expect(cell.why).toBe(`In ${count.toLocaleString('en-GB')} of 10,000 simulated draws ‘joins’ fell below what it can be (never below 0 member / month), `
+    expect(cell.why).toBe(`In ${count.toLocaleString('en-GB')} of 10,000 simulated draws ‘joins’ fell below what it can be (never below 0 members per month), `
       + 'and then ‘members’ could not be worked out, so this model cannot give the chance yet.');
     expect(cell.why).not.toMatch(/division by zero/);
   });
@@ -46,7 +46,7 @@ describe('a withheld chance says what happened in the draws it is withheld for',
     expect(promotion.outside).toEqual({ joins: 'outside', members: 'follows' });
     const count = (promotion.joint_within_limits as { withheld: { count: number } }).withheld.count;
     const why = cellOf(e.view as Json, 'promotion').why as string;
-    expect(why).toBe(`In ${count.toLocaleString('en-GB')} of 10,000 simulated draws ‘joins’ went outside what it can be (0 member / month to 40 member / month), `
+    expect(why).toBe(`In ${count.toLocaleString('en-GB')} of 10,000 simulated draws ‘joins’ went outside what it can be (0 to 40 members per month), `
       + 'and then ‘members’ could not be worked out, so this model cannot give the chance yet.');
     expect(why).not.toMatch(/fell below|rose above/);
   });
