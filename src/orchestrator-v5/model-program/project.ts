@@ -603,7 +603,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     nodes.push({
       id: k.id, kind: 'risk', label: k.label, ...provenanceOf(k), ...quoteOf(k, k.id), ...participation(inCalc || (!notCompiling && inModel.has(k.effect_on))),
       ...eventRiskOf(occ),
-      description: `Chance: ${occ ? display(occ) : 'not given'}. If it happens: ${effect} ${sev ? display(sev) : 'not given'}, ${typeof k.starts_after_periods === 'number' ? (k.starts_after_periods === 0 ? 'from the start' : `after ${k.starts_after_periods} ${model.period}s`) : riskStartWords(k.starts_after_periods)}.`,
+      // A risk in force from the start says no timing: "from the start" on their risk read as a timing they never gave (r10 K01,
+      // K02, strict judge). A later start, or one a figure holds, is still said.
+      description: `Chance: ${occ ? display(occ) : 'not given'}. If it happens: ${effect} ${sev ? display(sev) : 'not given'}${typeof k.starts_after_periods === 'number' ? (k.starts_after_periods === 0 ? '' : `, after ${k.starts_after_periods} ${model.period}s`) : `, ${riskStartWords(k.starts_after_periods)}`}.`,
     });
     items.push({ record_id: k.id, family: 'risk', shown_as: { node: k.id }, in_calculation: inCalc, why_out: why(inCalc, 'What it affects is not used by anything that can be worked out yet.'), author: who, approval: k.approval });
     // How it acts if it happens (adds, or multiplies), so the link can say "−" or "×" (C13, 27 Oct).

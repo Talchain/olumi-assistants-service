@@ -13,8 +13,9 @@
  *    has unit null (Box 1a, Q1 28 Oct): no scale, never executed, unknown or asked;
  *  · a quantity's author is the person (their words, quoted), Olumi (an estimate: always low AND high) or STRUCTURE (an exact
  *    constant that defines the model: a unit conversion, a 0/1 switch, a count; never shown as an Olumi estimate);
- *  · a quantity is a FACT (the person's own situation: asked when missing, never estimated) or a COEFFICIENT (a mechanism's
- *    size: Olumi may estimate it, labelled and ranged);
+ *  · a quantity is a FACT (the person's own situation) or a COEFFICIENT (a mechanism's size). A figure the calculation needs that
+ *    they did not give may be Olumi's estimate (Paul, 28 Oct: AI knowledge used, never hidden): author olumi, status estimated,
+ *    always ranged, its basis what is typical for situations like theirs; their aims, targets, limits and choices never are;
  *  · a figure only the person can give and did not is `asked` (null + a question). Asking is a legitimate, successful outcome:
  *    it withholds only what that figure feeds, and the compiler never removes it or gives it a value;
  *  · relations are canonical forms only: a definition (a signed SUM, or a PRODUCT of powers ±1: difference, ratio and mixed
@@ -78,10 +79,11 @@ const attribution = {
 export const QUANTITY_STATUSES = ['known', 'estimated', 'asked', 'derived', 'unknown', 'not_applicable', 'unsupported'] as const;
 /**
  * FACT vs COEFFICIENT vs DERIVED (DL, from the blind phase 0 score; contradiction fixed 23 Oct): a fact is about the person's
- * own situation (their price, costs, headcount, dates, members today) and only they can give it, so a missing fact is ASKED,
- * never estimated. A coefficient is a mechanism's size (how much a driver moves what it drives, a rate, a share): Olumi may
- * estimate it, labelled and ranged, and it stays a coefficient even when it is worked out from other quantities. A derived
- * quantity that is not a link's size is neither: it is derived (worked out by its relation).
+ * own situation (their price, costs, headcount, dates, members today). A coefficient is a mechanism's size (how much a driver
+ * moves what it drives, a rate, a share), and it stays a coefficient even when it is worked out from other quantities. A
+ * derived quantity that is not a link's size is neither: it is derived (worked out by its relation). Either figure, when they
+ * did not give it, may be Olumi's estimate, labelled and ranged (Paul, 28 Oct, superseding "a missing fact is asked, never
+ * estimated"); a target, limit or choice of theirs is asked, never estimated.
  */
 export const QUANTITY_KINDS = ['fact', 'coefficient', 'derived'] as const;
 export type QuantityStatusT = (typeof QUANTITY_STATUSES)[number];
@@ -111,12 +113,12 @@ export const CanonicalQuantity = z.object({
   floor: z.number().nullable().describe('Olumi\'s reading of the physically lowest value in this quantity\'s unit: 0 for nonnegative levels or counts; -100 in % or -1 in unit 1 for a change removing at most a whole share; null for other changes, differences, profit or an unjustified bound. A coefficient\'s bound follows its own meaning, never other terms. Never a target, budget or uncertainty endpoint.'),
   ceiling: z.number().nullable().describe('Olumi\'s reading of the physically highest value in this quantity\'s unit: 100 for a share in %, 1 in unit 1; null unless certain from its own meaning. Never a target, budget or uncertainty endpoint.'),
   kind: z.enum(QUANTITY_KINDS).describe(
-    'fact: a figure about their situation, including observed shares, mixes and allocations; missing facts are asked, never estimated. coefficient: a causal response per unit of driver, still a coefficient when derived; estimate only when a stated relation or established mechanism supports numerical scale, otherwise unknown even if direction is plausible. derived: a quantity worked out by its relation that is not a link\'s size. Structural constants are facts.'),
+    'fact: a figure about their situation, including observed shares, mixes and allocations. coefficient: a causal response per unit of driver, still a coefficient when derived. derived: a quantity worked out by its relation that is not a link\'s size. Structural constants are facts.'),
   status: z.enum(QUANTITY_STATUSES).describe(
-    'known: a figure in hand. estimated: an Olumi coefficient estimate with plausible low/high. asked: an answer is awaited, every figure null and a question required. derived: computed by exactly one relation, every figure null. unknown: no defensible numerical range yet, every figure null. not_applicable: unused in this situation. unsupported: their statement cannot be expressed by these forms, every figure null.'),
+    'known: a figure in hand. estimated: Olumi\'s estimate of a figure they did not give (a fact or a coefficient), author olumi, with plausible low/high the true figure falls inside about 8 times in 10. asked: an answer is awaited, every figure null and a question required; for their target, limit or choice, or a figure no reasonable range exists for. derived: computed by exactly one relation, every figure null. unknown: no reasonable range yet, even from what is typical, every figure null. not_applicable: unused in this situation. unsupported: their statement cannot be expressed by these forms, every figure null.'),
   question: z.string().nullable().describe('For asked: the one plain question to the person that would give this figure, in their words, never internal terms. Null otherwise.'),
   basis: z.string().nullable().describe(
-    `For a person's approximate single figure, exactly: "${APPROXIMATE_FIGURE}". For estimated: what supports the numerical scale. For structure: what the constant is ("12 months in a year"). For unknown, not_applicable or unsupported: why and what would resolve it. Null otherwise.`),
+    `For a person's approximate single figure, exactly: "${APPROXIMATE_FIGURE}". For estimated: what it rests on, in a few words: what is typical for situations like theirs, adjusted for what they said. For structure: what the constant is ("12 months in a year"). For unknown, not_applicable or unsupported: why and what would resolve it. Null otherwise.`),
   direction: z.enum(['raises', 'lowers']).nullable().describe(
     'For a link\'s size (a coefficient), used only when no figure is given (no most likely figure, and no range or one that spans zero): raises when more of the driver means more of what it moves, lowers when it means less; null when no one can say which. Null for every other quantity.'),
   author: z.enum(QUANTITY_AUTHORS).describe(
@@ -329,7 +331,7 @@ export type CanonicalOptionSetT = z.infer<typeof CanonicalOptionSet>;
 export const CanonicalOption = z.object({
   id,
   label: z.string().describe('A short neutral name ("Second oven").'),
-  sets: z.array(CanonicalOptionSet).describe('[] means no numerical setting here; what the option changes in words is its influence links.'),
+  sets: z.array(CanonicalOptionSet).describe('The input quantities this option changes and what it sets each to. Where the brief states the option\'s effect as a figure (staff or capacity it adds, a price, a cost), that effect is a setting here on the input it changes. [] only when no figure sizes what it changes, which then stays an influence link.'),
   status: z.enum(OPTION_STATUSES).describe('live: compared. ruled_out: the person rules it out but keeps it in view. removed: taken out of the comparison.'),
   developed_from: id.nullable().describe('The id of the option this is a variant of. A record, not a cause. Null otherwise.'),
   carry_on: z.boolean().describe('true only for the option of carrying on as now; false for every other.'),
