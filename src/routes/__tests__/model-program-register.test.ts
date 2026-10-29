@@ -127,7 +127,7 @@ describe('a model program\'s postimage through the real /graph/register', () => 
     const node = (id: string) => (body.graph as { nodes: Rec[] }).nodes.find((n) => n.id === id)!;
     expect((node('second_oven').interventions as Rec).ovens_added).toMatchObject({ source: 'brief_extraction' });
     expect(node('sales').value_basis).toMatchObject({ kind: 'worked_out' });
-    expect(node('oven_price')).toMatchObject({ analysis_participation: 'included', display_value: 'Waiting for your answer' });
+    expect(node('oven_price')).toMatchObject({ analysis_participation: 'included', display_value: '?' }); // Q1 (28 Oct): a deciding unknown shows as "?"
     expect(((body.current_read as Rec).analysis_ready as Rec).goal_threshold_raw).toBe(380);
     // DL 23 Oct: the legacy readiness and blocker producers never run on a program. Its readiness is the program's own:
     // the bakery's goal can be worked out now (its limit waits on the oven's price), so a Run may run; no legacy verdict.
