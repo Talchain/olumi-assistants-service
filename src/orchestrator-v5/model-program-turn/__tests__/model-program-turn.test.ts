@@ -18,7 +18,7 @@ import { compile, isApproximate, normalise } from '../../model-program/compile.j
 import { CORE_ALIGNED_INSTRUCTIONS, PROGRAM_TOOL_DESCRIPTIONS } from '../../core-route/instructions.js';
 import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
-import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_JSON_SCHEMA, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX } from '../prompt.js';
+import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_CHANGE_LABEL, UPDATE_JSON_SCHEMA, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX } from '../prompt.js';
 import { runModelProgramTurn } from '../turn.js';
 import { evaluateCanonical, seedOf, RUN_DRAWS } from '../evaluate.js';
 import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, sourceTextOf } from '../program-store.js';
@@ -1903,9 +1903,11 @@ describe('the model-program turn on the real core route', () => {
     expect(proposed.status, JSON.stringify(proposed)).toBe('ok');
     // One drafter call per proposal: the person's words, the saved model and the change.
     expect(sent).toHaveLength(2);
-    expect(sent[1]!.input.map((m: Json) => m.role)).toEqual(['user', 'assistant', 'user']);
+    // C6 (29 Oct): the update's own text and the agent's change are Olumi's (developer role, the change labelled as Olumi's
+    // instruction), never the person's: re-pinned knowingly from ['user', 'assistant', 'user'] and "The change:".
+    expect(sent[1]!.input.map((m: Json) => m.role)).toEqual(['user', 'assistant', 'developer']);
     // The update's request is prompt.ts's text, then the change (DL 24 Oct: the update text is prompt code).
-    expect(sent[1]!.input[2].content).toBe(`${UPDATE_PREFIX}\nThe change: The oven price is their answer: about £2,500.\nRemove: nothing`);
+    expect(sent[1]!.input[2].content).toBe(`${UPDATE_PREFIX}\n${UPDATE_CHANGE_LABEL} The oven price is their answer: about £2,500.\nRemove: nothing`);
     // The card shows the change's substance, before and after, and whose it is.
     expect(proposed.data.changes).toEqual([{ id: 'oven_price', kind: 'quantity', action: 'change', label: 'oven price', before: 'no figure yet (in £ per oven), still to be given, Olumi asks "What would the second oven cost?", no basis given, not in your words',
       after: `£2,500 per oven, known, no question, based on "${APPROXIMATE_FIGURE}", in your words "The oven would cost about £2,500."`, author: 'person', family: 'quantity' }]);
@@ -2104,8 +2106,9 @@ describe('the model-program turn on the real core route', () => {
     expect(Object.keys((UPDATE_JSON_SCHEMA as Json).properties).sort()).toEqual([...families, 'coaching_questions', 'period', 'question', 'remove', 'version'].sort()); // Box 2 (Paul Q1/Q2, 28 Oct): + Olumi's questions
     expect((UPDATE_JSON_SCHEMA as Json).properties.remove.items).toEqual({ type: 'string' });
     expect((UPDATE_JSON_SCHEMA as Json).properties.question.anyOf.map((x: Json) => x.type)).toEqual(['string', 'null']);
-    expect(sent[0]!.input.map((m: Json) => m.role)).toEqual(['user', 'assistant', 'user']);
-    expect(sent[0]!.input[2].content).toBe(`${UPDATE_PREFIX}\nThe change: Base sales are 320 a week; the landlord must agree first.\nRemove: nothing`);
+    // C6 (29 Oct): the change is Olumi's instruction, in the developer role; re-pinned knowingly from ['user', 'assistant', 'user'] and "The change:".
+    expect(sent[0]!.input.map((m: Json) => m.role)).toEqual(['user', 'assistant', 'developer']);
+    expect(sent[0]!.input[2].content).toBe(`${UPDATE_PREFIX}\n${UPDATE_CHANGE_LABEL} Base sales are 320 a week; the landlord must agree first.\nRemove: nothing`);
 
     // (2) + (3) A new id is added after the saved ones; an id in remove (listed by the person) is deleted, on the card and in
     // history; everything else is the saved one, byte for byte.
@@ -2155,6 +2158,8 @@ describe('the model-program turn on the real core route', () => {
     expect(sent).toHaveLength(3);
     expect(sent[1]!.input.at(-2)).toEqual({ role: 'assistant', content: JSON.stringify({ ...none, ...broken }) });
     expect(String(sent[1]!.input.at(-1).content).startsWith(`${UPDATE_REPAIR_PREFIX}\n- `)).toBe(true);
+    // C6 (29 Oct): the update's repair feedback is the host's, in the developer role, never the person's (content unchanged).
+    expect(sent[1]!.input.map((m: Json) => m.role)).toEqual(['user', 'assistant', 'developer', 'assistant', 'developer']);
     expect(stableStringify(sent[2]!.text.format.schema)).toBe(stableStringify(UPDATE_JSON_SCHEMA));
     expect(registered).toHaveLength(1); // proposing saves nothing
   });
@@ -2526,17 +2531,136 @@ describe('the model-program turn on the real core route', () => {
     const r = await applyCanvasFigure({ dispatch }, SCENARIO, { target: { quantity_id: 'base_sales' }, value: 320, operation_key: randomUUID(), approver: null });
     expect(r).toMatchObject({ status: 'saved' });
     expect(sent).toHaveLength(0);
+    // D074 (C6, 29 Oct): their words are the figure as entered ("320"), never the host's "base sales: 320 loaf/week" (a label
+    // and a unit they never typed). Re-pinned knowingly from that host sentence.
     expect(r.changes).toEqual([{ id: 'base_sales', kind: 'quantity', action: 'change', label: 'base sales', before: '300 loaves per week, in your words "We bake 300 loaves a week"',
-      after: '320 loaves per week, in your words "base sales: 320 loaf/week"', author: 'person', family: 'quantity' }]);
+      after: '320 loaves per week, in your words "320"', author: 'person', family: 'quantity' }]);
     const after = persisted!.living_model.canonical as CanonicalModelT;
     // C6 (27 Oct 2026): who approved it is recorded apart from who said it (a guest: neither known).
-    expect(after.history.at(-1)).toEqual({ id: 'base_sales', change: 'superseded', old: JSON.stringify(before.quantities.find((x) => x.id === 'base_sales')), quote: 'base sales: 320 loaf/week', author_id: null, approved_by: null });
-    expect(after.quantities.find((x) => x.id === 'base_sales')).toMatchObject({ value: 320, author: 'person', quote: 'base sales: 320 loaf/week', approval: 'approved', status: 'known' });
+    // D074: the entry records the edit as entered on the canvas (re-pinned knowingly from 'superseded'); the replaced record is kept whole in `old`.
+    expect(after.history.at(-1)).toEqual({ id: 'base_sales', change: 'entered', old: JSON.stringify(before.quantities.find((x) => x.id === 'base_sales')), quote: '320', author_id: null, approved_by: null });
+    expect(after.quantities.find((x) => x.id === 'base_sales')).toMatchObject({ value: 320, author: 'person', quote: '320', approval: 'approved', status: 'known' });
+    expect(persisted!.living_model.person_words.at(-1)).toBe('320');
     // Through the route, a goal's target typed on its card: saved, still no AI call.
     const t = await turn({ kind: 'system_event', event: { kind: 'goal_target_edit', goal_node_id: 'more_loaves', constraint_type: 'at_least', raw_value: 400, unit: 'loaf/week', base_graph_hash: hashOf(persisted) } });
     expect(t.statusCode, t.body).toBe(200);
     expect(sent).toHaveLength(0);
     expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'sales_target')).toMatchObject({ value: 400, author: 'person' });
+  });
+
+  // ── D074 (SPEC C6, "Source quote, contributor and approval actor stay distinct"): a figure typed on the canvas is saved in the
+  // figure as entered (the edit receives a NUMBER, never the literal keystrokes: "100", or "80 to 100" for a range), and it is
+  // theirs as set later by the edit's own history entry (`entered`), never by its words. The brief says "100" ("adds about 100
+  // loaves a week"), so a typed 100 is found in the brief as words: it must still read as set by them. ──
+  describe('D074: a figure typed on the canvas is theirs as set later, by its own history entry', () => {
+    const nodeOf = (id: string) => (persisted!.nodes as Json[]).find((n) => n.id === id);
+    const origin = (id: string) => { const n = nodeOf(id)!; return [n.provenance, n.observed_state?.source, n.source_quote]; };
+    const canonicalNow = () => persisted!.living_model.canonical as CanonicalModelT;
+
+    it('A1: base sales typed as 100, a figure the brief also says: saved as "100" (the figure as entered), read as set by them (user_set, user_override), never "from your brief"', async () => {
+      replies = [JSON.stringify(bakery())];
+      await turn({ message: BRIEF });
+      expect(BRIEF).toContain('100');
+      // Positive control: before the edit, the brief's figure reads as the brief's.
+      expect(origin('base_sales')).toEqual(['from_brief', 'brief_extraction', 'We bake 300 loaves a week']);
+      const r = await applyCanvasFigure({ dispatch }, SCENARIO, { target: { quantity_id: 'base_sales' }, value: 100, operation_key: randomUUID(), approver: null });
+      expect(r, JSON.stringify(r)).toMatchObject({ status: 'saved' });
+      expect(r.changes?.[0]?.after).toBe('100 loaves per week, in your words "100"');
+      expect(canonicalNow().quantities.find((x) => x.id === 'base_sales')).toMatchObject({ value: 100, author: 'person', quote: '100', approval: 'approved' });
+      expect(persisted!.living_model.person_words.at(-1)).toBe('100');
+      expect(canonicalNow().history.at(-1)).toMatchObject({ id: 'base_sales', change: 'entered', quote: '100' });
+      // The collision: "100" is in the brief, and the figure is still theirs as set later ("Set by you").
+      expect(origin('base_sales')).toEqual(['user_set', 'user_override', '100']);
+      // Contrast: a figure quoted from the brief and never edited stays the brief's.
+      expect(origin('ovens_added')).toEqual(['from_brief', 'brief_extraction', 'our one oven']);
+    });
+
+    it('A2: a goal\'s target it shares with another goal, typed as 100 on its card, is split into its own figure that keeps its canvas origin ("entered", replacing no record), never "brief_extraction"', async () => {
+      const m = bakery();
+      // A second goal on the same target figure, so a typed target is split off for the edited goal alone.
+      m.goals.push({ ...m.goals[0]!, id: 'hold_loaves', label: 'Hold 380 loaves a week', quote: 'reach 380 loaves a week' });
+      replies = [JSON.stringify(m)];
+      expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+      expect(nodeOf('more_loaves')).toMatchObject({ provenance: 'from_brief', threshold_source: 'brief_extraction' });
+      const edit = await turn({ kind: 'system_event', event: { kind: 'goal_target_edit', goal_node_id: 'more_loaves', constraint_type: 'at_least', raw_value: 100, unit: 'loaf/week', base_graph_hash: hashOf(persisted) } });
+      expect([edit.statusCode, edit.json().error], edit.body).toEqual([200, null]);
+      const saved = canonicalNow();
+      // The split: the edited goal has its own target in the figure as entered; the other goal keeps the shared figure.
+      expect(saved.goals.find((g) => g.id === 'more_loaves')!.measure!.target).toBe('more_loaves_target');
+      expect(saved.quantities.find((x) => x.id === 'more_loaves_target')).toMatchObject({ value: 100, author: 'person', quote: '100', approval: 'approved' });
+      expect(saved.quantities.find((x) => x.id === 'sales_target')).toMatchObject({ value: 380, quote: 'reach 380 loaves a week' });
+      // Its history entry is the edit's own: entered, and replacing no record ("null"), never a predecessor it did not have.
+      expect(saved.history.filter((h) => h.id === 'more_loaves_target')).toEqual([{ id: 'more_loaves_target', change: 'entered', old: 'null', quote: '100', author_id: null, approved_by: null }]);
+      expect(saved.history.find((h) => h.id === 'more_loaves')).toMatchObject({ change: 'superseded', quote: 'want to reach 380 loaves a week' });
+      // Their target as set later, though "100" is in the brief; the goal's own words stay the brief's.
+      expect(nodeOf('more_loaves')).toMatchObject({ provenance: 'from_brief', threshold_source: 'user' });
+      expect(nodeOf('more_loaves')!.threshold_source).not.toBe('brief_extraction');
+      // Contrast: the other goal on the shared figure is untouched, and its target stays the brief's.
+      expect(nodeOf('hold_loaves')).toMatchObject({ provenance: 'from_brief', threshold_source: 'brief_extraction' });
+    });
+
+    it('A3 (contrast): an approved change that only re-quotes a brief figure in other words of the brief, and a brief figure never edited, still read "from your brief"', async () => {
+      replies = [JSON.stringify(bakery())];
+      await turn({ message: BRIEF });
+      const deps = { dispatch, proposals: new ProposalStore() };
+      const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [], user_turn_text: 'Quote it as I put it.' };
+      const longer = 'We bake 300 loaves a week with our one oven';
+      expect(BRIEF).toContain(longer);
+      replies = [savedWith((d) => setQ(d, 'base_sales', { quote: longer }))];
+      const p = await proposeProgramChange(deps, ctx, { public_label: 'Their words', basis: 'their request', request: 'Quote base sales in the brief\'s fuller words.', remove: [] }) as Json;
+      expect(p.status, JSON.stringify(p)).toBe('ok');
+      expect(await applyProgramChange(deps, ctx, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+      // A quote-only change on an approved card: superseded, never entered, so the brief rule reads it, as before.
+      expect(canonicalNow().history.at(-1)).toMatchObject({ id: 'base_sales', change: 'superseded', quote: longer });
+      expect(origin('base_sales')).toEqual(['from_brief', 'brief_extraction', longer]);
+      expect(origin('ovens_added')).toEqual(['from_brief', 'brief_extraction', 'our one oven']);
+      // Positive control on the same board: a figure typed on the canvas after it reads as theirs as set later.
+      expect(await applyCanvasFigure({ dispatch }, SCENARIO, { target: { quantity_id: 'base_sales' }, value: 100, operation_key: randomUUID(), approver: null })).toMatchObject({ status: 'saved' });
+      expect(origin('base_sales')).toEqual(['user_set', 'user_override', '100']);
+      expect(origin('ovens_added')).toEqual(['from_brief', 'brief_extraction', 'our one oven']);
+    });
+
+    it('A4: a range typed on the canvas is saved as "low to high" (both ends as entered) and is theirs as set later, though the brief says the same words', async () => {
+      const brief = `${BRIEF} On a slow week we sell 80 to 100 fewer.`;
+      replies = [JSON.stringify(bakery())];
+      await turn({ message: brief });
+      const r = await applyCanvasFigure({ dispatch }, SCENARIO, { target: { quantity_id: 'base_sales' }, value: null, low: 80, high: 100, operation_key: randomUUID(), approver: null });
+      expect(r, JSON.stringify(r)).toMatchObject({ status: 'saved' });
+      expect(canonicalNow().quantities.find((x) => x.id === 'base_sales')).toMatchObject({ value: null, low: 80, high: 100, author: 'person', quote: '80 to 100' });
+      expect(canonicalNow().history.at(-1)).toMatchObject({ id: 'base_sales', change: 'entered', quote: '80 to 100' });
+      expect(brief).toContain('80 to 100');
+      expect([nodeOf('base_sales')!.provenance, nodeOf('base_sales')!.source_quote]).toEqual(['user_set', '80 to 100']);
+    });
+  });
+
+  // ── C6 (29 Oct, staging: a capacity card showed the agent's "Amend the existing…" as "in your words", though the person typed
+  // only the staff-absence figure). The card shows whatever quote the drafter returns (S1 strip: no quote check, by design), so
+  // the contract holds at the PRODUCER: the update call presents the agent's change as Olumi's instruction (developer role,
+  // labelled), and the person's verified words, separately, as the only user-role message. A fake drafter that echoed the
+  // instruction would still be shown: this row binds what the real update call sends instead. ──
+  it('B1: the update call sends the agent\'s change as Olumi\'s instruction (developer role, labelled), never in a user-role message; the person\'s verified words are the only user-role message', async () => {
+    replies = [JSON.stringify(bakery())];
+    await turn({ message: BRIEF });
+    sent.length = 0;
+    const typed = 'About 20 loaves a week go to waste.';
+    const request = 'Amend the existing sales calculation so the 20 loaves of weekly waste are taken off base sales, keeping their figure as given.';
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [typed], user_turn_text: typed };
+    replies = [savedWith((d) => setQ(d, 'base_sales', { value: 280, quote: typed }))];
+    const p = await proposeProgramChange(deps, ctx, { public_label: 'Waste', basis: 'their figure', request, remove: [] }) as Json;
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    expect(sent).toHaveLength(1);
+    const input = sent[0]!.input as Json[];
+    expect(input.map((x) => x.role)).toEqual(['user', 'assistant', 'developer']);
+    // The person's verified words, where they always were: the brief and what they typed this turn, and nothing of the agent's.
+    expect(input[0]).toEqual({ role: 'user', content: `${BRIEF}\n\n${typed}` });
+    // The agent's instruction, said as Olumi's, in the developer role with the update's own text.
+    expect(input[2]).toEqual({ role: 'developer', content: `${UPDATE_PREFIX}\n${UPDATE_CHANGE_LABEL} ${request}\nRemove: nothing` });
+    expect(UPDATE_CHANGE_LABEL).toMatch(/^Olumi's instruction for this change \(written by Olumi, never their words/);
+    // No user-role message carries any of the agent's words.
+    expect(input.filter((x) => x.role === 'user').some((x) => String(x.content).includes('Amend the existing'))).toBe(false);
+    // The card shows the person's own words as theirs.
+    expect(p.data.changes.find((c: Json) => c.id === 'base_sales').after).toContain(`in your words "${typed}"`);
   });
 
   // ── HC0 (spec §3, "Authorship and acceptance are separate"): the route passed no user, so a card edit saved author_id null and
@@ -2585,10 +2709,11 @@ describe('the model-program turn on the real core route', () => {
       expect(sent).toHaveLength(0);
       const after = persisted!.living_model.canonical as CanonicalModelT;
       const now = recordsOf(after);
-      // The edited record: their typed figure, in the words they typed, approved by the editor (never by no one, never by the earlier approver).
-      expect(now.get('quantities/base_sales')).toEqual({ ...was.get('quantities/base_sales'), value: 320, quote: 'base sales: 320 loaf/week', approval: 'approved', approved_by: EDITOR, author_id: EDITOR });
+      // The edited record: their typed figure, in the figure as entered, approved by the editor (never by no one, never by the earlier approver).
+      // D074 (C6): re-pinned knowingly from the host's "base sales: 320 loaf/week" to the figure as entered, and the entry from 'superseded' to 'entered'.
+      expect(now.get('quantities/base_sales')).toEqual({ ...was.get('quantities/base_sales'), value: 320, quote: '320', approval: 'approved', approved_by: EDITOR, author_id: EDITOR });
       expect(after.history).toEqual([...before.history,
-        { id: 'base_sales', change: 'superseded', old: JSON.stringify(was.get('quantities/base_sales')), quote: 'base sales: 320 loaf/week', author_id: EDITOR, approved_by: EDITOR }]);
+        { id: 'base_sales', change: 'entered', old: JSON.stringify(was.get('quantities/base_sales')), quote: '320', author_id: EDITOR, approved_by: EDITOR }]);
       // The earlier approver is never erased: the record they approved is kept whole in the edit's history entry.
       expect(JSON.parse(after.history.at(-1)!.old)).toMatchObject({ value: 300, quote: 'We bake 300 loaves a week', approval: 'approved', author_id: EARLIER });
       othersAsSaved(was, now, 'quantities/base_sales');
@@ -2606,8 +2731,9 @@ describe('the model-program turn on the real core route', () => {
       expect([edit.statusCode, edit.json().error], edit.body).toEqual([200, null]);
       const after = persisted!.living_model.canonical as CanonicalModelT;
       const now = recordsOf(after);
-      expect(now.get('quantities/sales_target')).toEqual({ ...was.get('quantities/sales_target'), value: 400, quote: 'Reach 380 loaves a week target: 400 loaf/week', approval: 'approved', approved_by: EDITOR, author_id: EDITOR });
-      expect(after.history.at(-1)).toEqual({ id: 'sales_target', change: 'superseded', old: JSON.stringify(was.get('quantities/sales_target')), quote: 'Reach 380 loaves a week target: 400 loaf/week', author_id: EDITOR, approved_by: EDITOR });
+      // D074 (C6): re-pinned knowingly from the host's "Reach 380 loaves a week target: 400 loaf/week" to the figure as entered, and the entry to 'entered'.
+      expect(now.get('quantities/sales_target')).toEqual({ ...was.get('quantities/sales_target'), value: 400, quote: '400', approval: 'approved', approved_by: EDITOR, author_id: EDITOR });
+      expect(after.history.at(-1)).toEqual({ id: 'sales_target', change: 'entered', old: JSON.stringify(was.get('quantities/sales_target')), quote: '400', author_id: EDITOR, approved_by: EDITOR });
       othersAsSaved(was, now, 'quantities/sales_target');
     });
 
@@ -2620,8 +2746,9 @@ describe('the model-program turn on the real core route', () => {
       expect([edit.statusCode, edit.json().error], edit.body).toEqual([200, null]);
       const after = persisted!.living_model.canonical as CanonicalModelT;
       const now = recordsOf(after);
-      expect(now.get('quantities/base_sales')).toEqual({ ...was.get('quantities/base_sales'), value: 320, quote: 'base sales: 320 loaf/week', approval: 'approved', author_id: null });
-      expect(after.history.at(-1)).toEqual({ id: 'base_sales', change: 'superseded', old: JSON.stringify(was.get('quantities/base_sales')), quote: 'base sales: 320 loaf/week', author_id: null, approved_by: null });
+      // D074 (C6): re-pinned knowingly from the host's "base sales: 320 loaf/week" to the figure as entered, and the entry to 'entered'.
+      expect(now.get('quantities/base_sales')).toEqual({ ...was.get('quantities/base_sales'), value: 320, quote: '320', approval: 'approved', author_id: null });
+      expect(after.history.at(-1)).toEqual({ id: 'base_sales', change: 'entered', old: JSON.stringify(was.get('quantities/base_sales')), quote: '320', author_id: null, approved_by: null });
       othersAsSaved(was, now, 'quantities/base_sales');
     });
 
@@ -2636,8 +2763,9 @@ describe('the model-program turn on the real core route', () => {
       const inside = await cardEdit({ kind: 'factor_value_edit', target_id: 'base_sales', value: 310 }, EDITOR);
       expect([inside.statusCode, inside.json().error], inside.body).toEqual([200, null]);
       const now = recordsOf(persisted!.living_model.canonical as CanonicalModelT);
+      // D074 (C6): what they entered on their own range is the one figure, "310"; re-pinned knowingly from the host's "base sales: 310 loaf/week, within 280 to 320".
       expect(now.get('quantities/base_sales')).toEqual({ ...was.get('quantities/base_sales'), value: 310, low: 280, high: 320, range_kind: 'bounds',
-        quote: 'base sales: 310 loaf/week, within 280 to 320', approval: 'approved', approved_by: EDITOR, author_id: EDITOR });
+        quote: '310', approval: 'approved', approved_by: EDITOR, author_id: EDITOR });
       othersAsSaved(was, now, 'quantities/base_sales');
       // Contrast: Olumi's estimate is a range of Olumi's; the person types one figure, so the figure is theirs and the range goes.
       expect(now.get('quantities/sell_through')).toMatchObject({ value: 0.7, low: 0.5, high: 0.9, author: 'olumi', approval: 'proposed', author_id: null });
@@ -3339,7 +3467,8 @@ describe('the model-program turn on the real core route', () => {
     const p = await ask([], c, request);
     expect(p.status, JSON.stringify(p)).toBe('ok');
     expect(sent).toHaveLength(1);
-    expect((sent[0]!.input as Json[])[2]).toEqual({ role: 'user', content: `${UPDATE_PREFIX}\nThe change: ${request}\nRemove: nothing` });
+    // C6 (29 Oct): Olumi's instruction, in the developer role; re-pinned knowingly from the user role and "The change:".
+    expect((sent[0]!.input as Json[])[2]).toEqual({ role: 'developer', content: `${UPDATE_PREFIX}\n${UPDATE_CHANGE_LABEL} ${request}\nRemove: nothing` });
     expect(p.data.changes.map((x: Json) => [x.id, x.kind, x.action, x.before, x.after, x.author])).toEqual([
       ['more_loaves_target', 'quantity', 'add', null, `380 loaves per week, in your words "${words}"`, 'person'],
       ['more_loaves_window', 'quantity', 'add', null, `4 weeks, in your words "${words}"`, 'person'],
@@ -3384,7 +3513,8 @@ describe('the model-program turn on the real core route', () => {
     const p = await ask([], ctx(), request);
     expect(p.status, JSON.stringify(p)).toBe('ok');
     expect(sent).toHaveLength(1);
-    expect((sent[0]!.input as Json[])[2]).toEqual({ role: 'user', content: `${UPDATE_PREFIX}\nThe change: ${request}\nRemove: nothing` });
+    // C6 (29 Oct): Olumi's instruction, in the developer role; re-pinned knowingly from the user role and "The change:".
+    expect((sent[0]!.input as Json[])[2]).toEqual({ role: 'developer', content: `${UPDATE_PREFIX}\n${UPDATE_CHANGE_LABEL} ${request}\nRemove: nothing` });
     expect(p.data.changes.map((x: Json) => [x.id, x.kind, x.action, x.author])).toEqual([['oven_weeks', 'quantity', 'change', 'olumi']]);
     // B20 removed: a drafter update that leaves the item as saved is no "read no figure" refusal of the host's.
     replies = [savedWith((d) => setQ(d, 'oven_weeks', { basis: 'No date given.' }))];
@@ -4262,7 +4392,8 @@ describe('the model-program turn on the real core route', () => {
     expect(r.statusCode, r.body).toBe(200);
     expect(sent).toHaveLength(0);
     const after = persisted!.living_model.canonical as CanonicalModelT;
-    expect(after.quantities.find((x) => x.id === 'base_sales')).toMatchObject({ value: 320, author: 'person', quote: 'base sales: 320 loaf/week' });
+    // D074 (C6): the figure as entered, re-pinned knowingly from the host's "base sales: 320 loaf/week".
+    expect(after.quantities.find((x) => x.id === 'base_sales')).toMatchObject({ value: 320, author: 'person', quote: '320' });
     expect(persisted!.living_model.runs).toHaveLength(2);
     // The applied graph the canvas checks the edit against carries the typed figure, as the person's.
     const drawn = (r.json().model.graph.nodes as Json[]).find((n) => n.id === 'base_sales')!;

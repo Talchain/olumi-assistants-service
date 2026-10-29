@@ -14,7 +14,8 @@
  *    plain rendering or reads the same on both sides, the proposal is refused;
  *  · compile: it compiles (the caller's `withNewRun` evaluates it).
  * Host-owned, never the AI's: approval, approved_by and author_id (an item on an approved card is accepted by its approver,
- * and who said it is unchanged: C6), and the history (each change and removal appended, with who said it and who approved it).
+ * and who said it is unchanged: C6), and the history (each change and removal appended, with who said it and who approved it;
+ * a figure typed on the canvas as entered, D074).
  */
 import { ProposalChangeSchema, type ProposalChange } from '../agent-lane/proposal.js';
 import { foldedInto, readingGroups } from './reading-groups.js';
@@ -162,10 +163,12 @@ export function keepTheirFigures(saved: CanonicalModelT, ids: readonly string[])
  * Check `raw`, a whole proposed model, against the saved one. `removals`: the ids this change proposes to remove, listed
  * explicitly for the person to review on its card; `words`: every word of theirs this change may quote (their earlier words and `fresh`, this change's own);
  * `approver`: who approves the card (its items' approved_by), and the person whose words `fresh` are (in every caller the
- * same person: the turn's own); null for a guest.
+ * same person: the turn's own); null for a guest. `entered`: only on a figure typed on the canvas (`applyCanvasFigure`), the id
+ * of the one record whose figure the person typed, so its history entry says so (D074, C6).
  */
 export function validatePostimage(saved: CanonicalModelT, raw: unknown,
-  opts: { readonly removals: readonly string[]; readonly words: readonly string[]; readonly fresh: readonly string[]; readonly approver?: string | null }): PostimageResult {
+  opts: { readonly removals: readonly string[]; readonly words: readonly string[]; readonly fresh: readonly string[]; readonly approver?: string | null;
+    readonly entered?: string }): PostimageResult {
   const parsed = CanonicalModel.safeParse(raw);
   if (!parsed.success) return { ok: false, code: 'schema', reason: 'The proposed model is not in the model format.', ids: [] };
   // Both sides as written: the host clears no direction (B3 off the path, S1 strip), so a direction change is a change, shown.
@@ -278,8 +281,12 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
       if (old !== undefined && fields.length === 0 && !unshown.some((u) => u.startsWith(`${String(r['id'])} (`))) return old;
       const record = accepted(r, opts.approver ?? null, opts.fresh, old) as Rec;
       changes.push(entry(String(r['id']), old === undefined ? 'add' : 'change', fields, now.title(family, record), authorOf(record), r));
-      if (old !== undefined) history.push({ id: String(r['id']), change: 'superseded', old: JSON.stringify(old), quote: typeof r['quote'] === 'string' ? r['quote'] : null,
-        author_id: typeof record['author_id'] === 'string' ? record['author_id'] : null, approved_by: opts.approver ?? null });
+      // D074 (C6): the figure the person typed on the canvas (`entered`) is recorded as entered, on an existing record (the record
+      // it replaced in `old`) and on a goal's target that edit split off (`old` "null": it replaced none). Every other change to a
+      // saved record is superseded, and any other added record has no entry, as before.
+      const entered = opts.entered !== undefined && String(r['id']) === opts.entered;
+      if (old !== undefined || entered) history.push({ id: String(r['id']), change: entered ? 'entered' : 'superseded', old: JSON.stringify(old ?? null),
+        quote: typeof r['quote'] === 'string' ? r['quote'] : null, author_id: typeof record['author_id'] === 'string' ? record['author_id'] : null, approved_by: opts.approver ?? null });
       return record;
     });
     for (const [id, old] of before) if (removals.has(id)) {

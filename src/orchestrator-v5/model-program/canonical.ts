@@ -398,10 +398,18 @@ export const CanonicalLeftOut = z.object({
   concerns, ...attribution,
 }).strict();
 
+/**
+ * D074 (C6, "Source quote, contributor and approval actor stay distinct"): `entered` is the host's own record that the person
+ * typed this record's figure on the canvas (`program-tools.ts` applyCanvasFigure), so that change gave it its present words,
+ * the figure as entered; the projection reads a canvas figure's origin from this entry alone (`project.ts`), never from its
+ * words. A goal's target split off from a figure it shared is a record that edit MADE: its entry's `old` is "null", the JSON of
+ * no record, never a predecessor it did not have. Host-owned, like all of history: in neither schema the drafter is sent.
+ */
 export const CanonicalHistoryEntry = z.object({
   id: z.string().describe('The id of the record that changed.'),
-  change: z.enum(['superseded', 'withdrawn']),
-  old: z.string().describe('The earlier record, as JSON text, so a correction never loses what it replaced.'),
+  change: z.enum(['superseded', 'withdrawn', 'entered']).describe(
+    'superseded: an approved change replaced the record; withdrawn: an approved removal took it out; entered: the person typed its figure on the canvas.'),
+  old: z.string().describe('The earlier record, as JSON text, so a correction never loses what it replaced; "null" when the change made the record (a goal\'s own target split off by a figure typed on the canvas).'),
   quote: attribution.quote,
   author_id: attribution.author_id,
   approved_by: z.string().nullable().describe('Set by Olumi\'s host: which person approved this change; null when not known.'),
