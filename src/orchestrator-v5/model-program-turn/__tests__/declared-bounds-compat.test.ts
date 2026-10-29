@@ -82,6 +82,38 @@ describe('declared physical bounds on saved models', () => {
     expect(revisionDigest({ ...bounded, quantities: [{ ...bounded.quantities[0]!, [field]: -1 }] }, words)).not.toBe(revisionDigest(bounded, words));
   });
 
+  it('TIME-AND-DECIDE-BY (29 Oct): includes a stated time and a decide-by date in revision identity, and keeps null equivalent to absent', () => {
+    const old = legacyModel();
+    const read = CanonicalModel.parse(withDeclaredTiming(old));
+    expect([read.decide_by, read.quantities[0]!.stated_time]).toEqual([null, null]);
+    expect(revisionDigest(read, words)).toBe(legacyDigest(old));
+    const stated = { ...read, quantities: [{ ...read.quantities[0]!, stated_time: { date: '2027-03-31', span: null, unit: null, said_on: null } }] };
+    const spanned = { ...read, quantities: [{ ...read.quantities[0]!, stated_time: { date: null, span: 6, unit: 'week' as const, said_on: null } }] };
+    const dated = { ...read, decide_by: { date: '2026-11-05', quote: 'the board meets on the 5th' } };
+    const digests = [read, stated, spanned, dated, { ...dated, decide_by: { date: '2026-11-12', quote: 'the board meets on the 5th' } }].map((m) => revisionDigest(m, words));
+    expect(new Set(digests).size).toBe(5);
+    // PL G: a model saved before them, with its Run, reopens with that Run current, the Run and the saved bytes exactly as stored.
+    const saved = savedBeforeBounds();
+    const before = JSON.stringify(saved);
+    expect(before).not.toMatch(/stated_time|decide_by/);
+    const cold = JSON.parse(before);
+    const opened = reopenProgram(cold, priorVersions)!;
+    expect([opened.program.canonical.decide_by, opened.program.canonical.quantities[0]!.stated_time]).toEqual([null, null]);
+    expect([opened.current, opened.engine_current]).toEqual([true, true]);
+    expect(JSON.stringify(opened.run)).toBe(JSON.stringify(saved.living_model.runs[0]));
+    expect(JSON.stringify(cold)).toBe(before);
+  });
+
+  it('PL 14:12Z (e): a stated time saved before said_on reads it as null, its revision digest unchanged; a said_on is part of the revision', () => {
+    const old = legacyModel();
+    const stated = { ...old, quantities: [{ ...old.quantities[0]!, stated_time: { date: null, span: 6, unit: 'week' } }] };
+    const read = CanonicalModel.parse(withDeclaredTiming(stated));
+    expect(read.quantities[0]!.stated_time).toEqual({ date: null, span: 6, unit: 'week', said_on: null });
+    expect(revisionDigest(read, words)).toBe(legacyDigest(stated));
+    const said = { ...read, quantities: [{ ...read.quantities[0]!, stated_time: { ...read.quantities[0]!.stated_time!, said_on: '2026-10-29' } }] };
+    expect(revisionDigest(said, words)).not.toBe(revisionDigest(read, words));
+  });
+
   it.each([{ floor: Infinity }, { ceiling: '10' }])('leaves an invalid declaration for the saved-model schema to refuse: %j', (bad) => {
     const saved = savedBeforeBounds();
     const malformed = { living_model: { ...saved.living_model, canonical: {
@@ -210,9 +242,10 @@ describe('titles and coaching questions (Paul, approved 27 Oct 2026): a model sa
     expect(['title' in s.canonical, 'coaching_questions' in s.canonical]).toEqual([false, false]);
     const said = [s.brief];
     // The model as it read before this change: today's reading, less the two new fields,
-    // and less Box 1a's read-time defaults (carry_on, risk direction).
-    const { title: _t, coaching_questions: _c, ...readToday } = CanonicalModel.parse(withDeclaredTiming(s.canonical));
-    const readBefore = { ...readToday, options: readToday.options.map(({ carry_on: _carry, ...o }) => o), risks: readToday.risks.map(({ direction: _direction, ...k }) => k) };
+    // and less Box 1a's read-time defaults (carry_on, risk direction) and the later stated time and decide-by (29 Oct).
+    const { title: _t, coaching_questions: _c, decide_by: _d, ...readToday } = CanonicalModel.parse(withDeclaredTiming(s.canonical));
+    const readBefore = { ...readToday, options: readToday.options.map(({ carry_on: _carry, ...o }) => o), risks: readToday.risks.map(({ direction: _direction, ...k }) => k),
+      quantities: readToday.quantities.map(({ stated_time: _st, ...q }) => q) };
     const digest = digestBefore(readBefore, said);
     const run: StoredRun = {
       run_id: 'mp_run_saved_before_titles', computed_at: '2026-10-27T10:00:00.000Z',

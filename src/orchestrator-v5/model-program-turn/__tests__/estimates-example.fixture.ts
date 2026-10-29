@@ -56,6 +56,7 @@ export function example(withRisk = true): CanonicalModelT {
     conditions: [{ id: 'staff_cover', text: 'Only if staff can cover the longer hours', kind: 'prerequisite', concerns: ['longer_hours'], ...olumi, ...at }],
     left_out: [{ id: 'beyond_loaves', text: 'Growth beyond loaf sales, such as new lines', why: 'Not in this model.', question: null, concerns: ['grow'], ...olumi, ...at }],
     coaching_questions: ['How many of the extra 150 loaves a week do you expect to sell?', 'What would the second oven cost?', 'Is the £5,000 for the oven alone, or for everything this choice needs?'],
+    decide_by: null,
     history: [],
   };
 }

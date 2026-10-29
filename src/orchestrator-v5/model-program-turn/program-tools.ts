@@ -249,7 +249,10 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
  * THE S2 BUILDER (no AI call): one figure set on its item, every other record as saved. A goal's target it shares with
  * another goal or a limit is split off first (`splitFor`, that goal's id), so the other keeps its figure.
  */
-export function figurePostimage(canonical: CanonicalModelT, filled: CanonicalQuantityT, splitFor?: string): CanonicalModelT {
+export function figurePostimage(canonical: CanonicalModelT, given: CanonicalQuantityT, splitFor?: string): CanonicalModelT {
+  // A figure set here is theirs (an answer or the canvas): the stated time it replaces is cleared, so it is never counted again
+  // over their figure (TIME-AND-DECIDE-BY v2).
+  const filled = { ...given, stated_time: null };
   return splitFor === undefined ? { ...canonical, quantities: canonical.quantities.map((x) => (x.id === filled.id ? filled : x)) }
     : { ...canonical, quantities: [...canonical.quantities, filled], goals: canonical.goals.map((g) => (g.id === splitFor ? { ...g, measure: { ...g.measure!, target: filled.id } } : g)) };
 }

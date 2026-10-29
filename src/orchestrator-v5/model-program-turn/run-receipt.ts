@@ -70,21 +70,28 @@ type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 /** The digest of what an evaluation reads: the canonical model and the person's words. */
 export function revisionDigest(canonical: CanonicalModelT, personWords: readonly string[]): string {
+  // A said_on that reads as null (a stated time saved before it, PL 14:12Z) leaves the digest as it was; a day is part of it.
+  const said = ({ said_on, ...t }: NonNullable<CanonicalModelT['quantities'][number]['stated_time']>) => (said_on === null || said_on === undefined ? t : { ...t, said_on });
   // Absent declarations read as null without changing an old model's digest. A declared bound still changes its identity.
-  const quantities = canonical.quantities.map(({ direction, floor, ceiling, ...q }) => ({
+  // So does a stated time (TIME-AND-DECIDE-BY, 29 Oct): none (null) is what a model saved before it reads as; a stated one
+  // is part of the revision.
+  const quantities = canonical.quantities.map(({ direction, floor, ceiling, stated_time, ...q }) => ({
     ...q,
     ...(direction === null || direction === undefined ? {} : { direction }),
     ...(floor === null || floor === undefined ? {} : { floor }),
     ...(ceiling === null || ceiling === undefined ? {} : { ceiling }),
+    ...(stated_time === null || stated_time === undefined ? {} : { stated_time: said(stated_time) }),
   }));
   // C6: an approved_by that reads as null (a model saved before it, a draft, a guest) leaves the digest as it was; a named
   // approver is part of the revision.
   const lean = (v: unknown): unknown => (Array.isArray(v) ? v.map(lean)
     : isRec(v) ? Object.fromEntries(Object.entries(v).filter(([k, x]) => !(k === 'approved_by' && x == null)).map(([k, x]) => [k, lean(x)])) : v);
   // A title that reads as null and no coaching questions (a model saved before them) leave the digest as it was; a title or
-  // a question is part of the revision.
-  const { title, coaching_questions: coaching, ...rest } = canonical;
-  const named = { ...rest, ...(title === null || title === undefined ? {} : { title }), ...(coaching === undefined || coaching.length === 0 ? {} : { coaching_questions: coaching }) };
+  // a question is part of the revision. No decide-by date (null, a model saved before it) leaves it as it was; a date is part
+  // of the revision (TIME-AND-DECIDE-BY, 29 Oct).
+  const { title, coaching_questions: coaching, decide_by: decideBy, ...rest } = canonical;
+  const named = { ...rest, ...(title === null || title === undefined ? {} : { title }), ...(coaching === undefined || coaching.length === 0 ? {} : { coaching_questions: coaching }),
+    ...(decideBy === null || decideBy === undefined ? {} : { decide_by: decideBy }) };
   // Box 1a: an option that declares no carry-on (false) and a risk of unknown direction are what a model saved before them
   // reads as, so they leave the digest as it was; a declared carry-on or a direction is part of the revision.
   const options = canonical.options.map(({ carry_on, ...o }) => (carry_on === true ? { ...o, carry_on } : o));

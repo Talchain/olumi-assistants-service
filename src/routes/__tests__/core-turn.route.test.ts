@@ -1536,7 +1536,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(drafted.statusCode).toBe(200);
       expect(calls[0]!.text?.format?.name).toBe('canonical_model');
       const london = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-      expect(calls[0]!.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is ${london} (Europe/London). A date they state counts in whole periods from today, which is period 0.`);
+      // 29 Oct: stated time and decide-by (TIME-AND-DECIDE-BY design); before it "… (Europe/London). A date they state counts in whole periods from today, which is period 0."
+      expect(calls[0]!.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is ${london} (Europe/London), period 0. Read the dates they state against it.`);
       draftCalls = [...calls];
       calls.length = 0;
       return String((drafted.json() as Json).assistant_text);

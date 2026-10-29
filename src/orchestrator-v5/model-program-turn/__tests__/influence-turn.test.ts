@@ -13,6 +13,7 @@ import type { CanonicalModelT } from '../../model-program/canonical.js';
 import { compile } from '../../model-program/compile.js';
 import { project } from '../../model-program/project.js';
 import { mergeUpdate } from '../draft.js';
+import { countStatedTime } from '../stated-time.js';
 import { CanonicalUpdate, UPDATE_JSON_SCHEMA } from '../prompt.js';
 import { evaluateCanonical } from '../evaluate.js';
 import { readingOf, validatePostimage, verbatimIn } from '../postimage.js';
@@ -61,6 +62,10 @@ describe('Box 1a: the card, the counts, the update and the store', () => {
       ['carry-on withdrawn', 'carry_on', (m) => { m.options[2]!.carry_on = false; }],
       ['carry-on declared', 'evening_classes', (m) => { m.options[0]!.carry_on = true; }],
       ['unit null', 'members', (m) => { m.quantities.find((x) => x.id === 'members')!.unit = null; }],
+      // TIME-AND-DECIDE-BY (29 Oct): when they must decide is its own card row.
+      ['decide-by', 'decide_by', (m) => { m.decide_by = { date: '2026-11-05', quote: null }; }],
+      // A quantity's stated_time is deliberately not a case: the card's diff leaves it out (postimage `bare`), because the figure
+      // the host counts from it and the basis that names it are what the card says. Its change shows through them (below).
     ];
     const said = cases.map(([name, id, mutate]) => {
       const v = validatePostimage(studio(), one(mutate), { removals: [], words: WORDS, fresh: [] });
@@ -74,6 +79,17 @@ describe('Box 1a: the card, the counts, the update and the store', () => {
     expect(change('members', cases[12]![2])).toEqual(['150 members', '150, not measured']);
     expect(change('instructor_leaves', cases[9]![2])).toEqual(['with a chance not known yet, affecting "Keep at least 140 members", by a size not known yet, ↓ lowering it',
       'with a chance not known yet, adding a size not known yet to "Keep at least 140 members", ↓ lowering it']);
+    // A stated time changed alone, counted by the host (countStatedTime) as the drafting path does, is said through the counted
+    // figure and its basis: when the evening classes start, 29 Mar 2027 is exactly 5 months from 29 Oct 2026, 29 Jan 2027 is 3.
+    const stated = (date: string) => countStatedTime(one((m) => {
+      m.quantities.push(q('months_left', 'month', { stated_time: { date, span: null, unit: null, said_on: null } }));
+      m.options[0] = { ...m.options[0]!, sets: m.options[0]!.sets.map((x) => ({ ...x, starts_after_periods: 'months_left' })) };
+    }), '2026-10-29');
+    const t = validatePostimage(stated('2027-03-29'), stated('2027-01-29'), { removals: [], words: WORDS, fresh: [] });
+    const counted = t.ok ? t.changes.find((x) => x.id === 'months_left') : undefined;
+    expect([t.ok ? 'ok' : t.code, counted !== undefined && counted.before !== counted.after]).toEqual(['ok', true]);
+    expect([counted!.before, counted!.after]).toEqual(['5 months, based on "Read as 29 Mar 2027 from your words: 5 months from 29 Oct 2026."',
+      '3 months, based on "Read as 29 Jan 2027 from your words: 3 months from 29 Oct 2026."']);
   });
 
   it('reading groups: a link of theirs in their words is used, Olumi\'s link and risk are inferred, and no link is said on another line', () => {
@@ -91,7 +107,7 @@ describe('Box 1a: the card, the counts, the update and the store', () => {
     const saved = studio();
     const changed = { ...saved.relations[2]!, confidence: 'unsure' } as CanonicalModelT['relations'][number];
     const added = { ...saved.relations[3]!, id: 'workshop_mood', from: 'weekend_workshops', to: 'member_mood', direction: 'up', basis: null } as CanonicalModelT['relations'][number];
-    const update = { version: 'canonical.v1' as const, question: null, period: null, coaching_questions: null, quantities: [], relations: [changed, added], goals: [], limits: [], preferences: [], options: [], risks: [],
+    const update = { version: 'canonical.v1' as const, question: null, period: null, coaching_questions: null, decide_by: null, quantities: [], relations: [changed, added], goals: [], limits: [], preferences: [], options: [], risks: [],
       claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: ['mood_members'] };
     const merged = mergeUpdate(saved, update);
     expect(merged.relations.map((r) => r.id)).toEqual(['classes_rel', 'takings_rel', 'evening_mood', 'workshop_mood']);
@@ -145,6 +161,9 @@ describe('Box 1a: a model saved before links, carry-on and risk direction', () =
       q('lost_loaves', 'loaf/week', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: -100, low: -150, high: -50, range_kind: 'plausible', basis: 'A week without an oven.' }));
     m.risks = [{ id: 'breakdown', label: 'The oven breaks down', occurrence: 'breakdown_chance', severity: 'lost_loaves', effect_on: 'sales', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...at }];
     m.history = [{ id: 'budget', change: 'superseded', old: '{"id":"budget","unit":"GBP","value":2500}', quote: null, author_id: null, approved_by: null }];
+    // Saved before stated time and decide-by too (29 Oct), which the bakery fixture now carries.
+    m.quantities = m.quantities.map(({ stated_time: _st, ...x }: Rec) => x);
+    delete m.decide_by;
     return m;
   };
   /** The revision digest as computed before Box 1a, written out independently of run-receipt.ts. */
@@ -193,7 +212,7 @@ describe('Box 2 (Paul Q1/Q2, 28 Oct): an update returns Olumi\'s questions only 
   const NEW_QS = ['How sure are you that customers want more loaves?'];
   const coached = (): CanonicalModelT => ({ ...bakery(), coaching_questions: [...SAVED_QS] });
   /** An update that returns nothing: every family [], the question and time step null, Olumi's questions as given. */
-  const none = (m: CanonicalModelT, coaching_questions: string[] | null) => ({ version: m.version, question: null, period: null, coaching_questions, quantities: [], relations: [],
+  const none = (m: CanonicalModelT, coaching_questions: string[] | null) => ({ version: m.version, question: null, period: null, coaching_questions, decide_by: null, quantities: [], relations: [],
     goals: [], limits: [], preferences: [], options: [], risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: [] as string[] });
   const opts = { removals: [], words: [BRIEF], fresh: [] };
 

@@ -26,7 +26,7 @@ import { unitWords } from '../model-program/present/display-words.js';
 import { placeFigure } from '../agent-lane/say-figure.js';
 
 type Rec = Record<string, unknown>;
-type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'title' | 'period' | 'coaching_questions' | 'history'>;
+type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'title' | 'period' | 'coaching_questions' | 'decide_by' | 'history'>;
 const FAMILIES: readonly (readonly [Family, ProposalChange['kind']])[] = [
   ['quantities', 'quantity'], ['relations', 'relation'], ['goals', 'goal'], ['limits', 'record'], ['preferences', 'record'], ['options', 'option'],
   ['risks', 'risk'], ['claims', 'record'], ['evidence', 'record'], ['assumptions', 'record'], ['dissent', 'record'], ['conditions', 'record'], ['left_out', 'left_out'],
@@ -139,8 +139,9 @@ const withPath = (r: Rec, path: string, value: unknown): Rec => {
   if (isRec(at) || Array.isArray(at)) { if (value === undefined) delete (at as Rec)[keys.at(-1)!]; else (at as Rec)[keys.at(-1)!] = value; }
   return copy;
 };
-/** A record as the card compares it: without its id (the change's own) and what the host owns. */
-const bare = (r: Rec | undefined): unknown => (r === undefined ? undefined : withoutHost(Object.fromEntries(Object.entries(r).filter(([k]) => k !== 'id'))));
+/** A record as the card compares it: without its id (the change's own) and what the host owns. A stated date or span
+ *  (`stated_time`) is the source of the figure the host counts and of the basis that names it, both of which the card shows. */
+const bare = (r: Rec | undefined): unknown => (r === undefined ? undefined : withoutHost(Object.fromEntries(Object.entries(r).filter(([k]) => k !== 'id' && k !== 'stated_time'))));
 const idsOf = (m: CanonicalModelT, f: Family): string[] => (m[f] as readonly { id: string }[]).map((r) => r.id);
 
 /**
@@ -298,6 +299,17 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
   if (unshown.length > 0) return refuse('unshown_change', unshown, `The card cannot show every change to ${unshown.join('; ')}; nothing is proposed.`);
   for (const [key, label] of [['question', 'The question'], ['period', 'The time step']] as const) {
     if (base[key] !== post[key]) changes.push({ id: key, kind: 'record', action: 'change', label, before: base[key], after: post[key], author: 'olumi' });
+  }
+  // When they must decide (TIME-AND-DECIDE-BY v2, PL F): shown like the question; its date is always Olumi's reading of their
+  // words, said as Olumi's, and their words are said as theirs, never merged into one.
+  const day = (iso: string) => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : iso);
+  const decideBy = (d: CanonicalModelT['decide_by']) => (d === null || (d.date === null && d.quote === null) ? 'Not given'
+    : d.date === null ? `“${d.quote}”, with no date Olumi could read from it` : `${day(d.date)}, Olumi’s reading${d.quote === null ? '' : ` of “${d.quote}”`}`);
+  if (JSON.stringify(base.decide_by) !== JSON.stringify(post.decide_by)) {
+    changes.push({ id: 'decide_by', kind: 'record', action: 'change', label: 'When you must decide', before: decideBy(base.decide_by), after: decideBy(post.decide_by), author: 'olumi' });
+    // Recoverable from the history, as a changed record is (PL HOLD f): what it replaced, or what a clear withdrew.
+    if (base.decide_by !== null) history.push({ id: 'decide_by', change: post.decide_by === null ? 'withdrawn' : 'superseded', old: JSON.stringify(base.decide_by),
+      quote: post.decide_by?.quote ?? null, author_id: null, approved_by: opts.approver ?? null });
   }
   // Box 2 (Paul Q1/Q2, 28 Oct): Olumi's questions, refreshed or cleared by an update, are ONE entry with both lists in full, in
   // their order; none reads "No questions", never null (null reads as an add or a removal).

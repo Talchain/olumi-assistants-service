@@ -102,6 +102,14 @@ export const RANGE_KINDS = ['bounds', 'plausible'] as const;
 const RANGE_KIND = z.enum(RANGE_KINDS).nullable().describe(
   'For endpoints only: bounds means hard ends; plausible means a rough span, including supported Olumi estimates. An approximate single figure is known with its stated value, low/high/range_kind null and the approximate basis; never manufacture endpoints from about, roughly or ~. A stated range of unresolved meaning stays asked with range_kind null.');
 
+/** A date or a span the person states, as the AI reads it; Olumi's host counts it in the model's periods (`stated-time.ts`). */
+const StatedTime = z.object({
+  date: z.string().nullable().describe('YYYY-MM-DD: your reading of a date they state ("by the end of March" read against today). Null for a span.'),
+  span: z.number().nullable().describe('A length of time they state, in its own unit ("six weeks": 6). Null for a date.'),
+  unit: z.enum(['day', 'week', 'month', 'year']).nullable().describe('The span\'s unit as they state it. Null for a date.'),
+  said_on: z.string().nullable().describe('YYYY-MM-DD: the day this date or span was said, which a span is counted from. Leave it null for a date or span stated in this message; keep the saved said_on when you return a record whose time is not restated. Olumi fills it in.'),
+}).strict().nullable().describe('For a quantity that counts the model\'s periods (a window\'s length, an offset, a start): the date or span they stated, exactly as you read it. Olumi counts it in periods and sets value; you never do. Null otherwise.');
+
 export const CanonicalQuantity = z.object({
   id,
   label: z.string().describe('A short plain name the person would recognise ("Loaves sold per week").'),
@@ -117,6 +125,7 @@ export const CanonicalQuantity = z.object({
   status: z.enum(QUANTITY_STATUSES).describe(
     'known: a figure in hand. estimated: Olumi\'s estimate of a figure they did not give (a fact or a coefficient), author olumi, with plausible low/high the true figure falls inside about 8 times in 10. asked: an answer is awaited, every figure null and a question required; for their target, limit or choice, or a figure no reasonable range exists for. derived: computed by exactly one relation, every figure null. unknown: no reasonable range yet, even from what is typical, every figure null. not_applicable: unused in this situation. unsupported: their statement cannot be expressed by these forms, every figure null.'),
   question: z.string().nullable().describe('For asked: the one plain question to the person that would give this figure, in their words, never internal terms. Null otherwise.'),
+  stated_time: StatedTime,
   basis: z.string().nullable().describe(
     `For a person's approximate single figure, exactly: "${APPROXIMATE_FIGURE}". For estimated: what it rests on, in a few words: what is typical for situations like theirs, adjusted for what they said. For structure: what the constant is ("12 months in a year"). For unknown, not_applicable or unsupported: why and what would resolve it. Null otherwise.`),
   direction: z.enum(['raises', 'lowers']).nullable().describe(
@@ -222,7 +231,7 @@ export const CanonicalWindow = z.object({
   origin_event: z.string().nullable().describe('Null when the window counts from now. Otherwise the event it counts from, as written ("the opening").'),
   origin_offset: id.nullable().describe('For an event: a quantity in the model\'s period unit giving how many periods from now it happens (asked when not stated). Null when the window counts from now.'),
   start: z.number().int().describe('Periods after the origin the window opens: 0 = at the origin ("in the first four weeks after opening" is 0). Counting is ordinal: "in months 6 to 8" opens at 5, with 3 periods.'),
-  periods: id.describe('A quantity in the model\'s period unit giving how many periods the window lasts ("within 5 weeks" on a weekly model: 5 week, the person\'s quote). When no deadline was stated: an asked quantity with the question "By when?". A calendar date ("by the end of March") is Olumi\'s reading: known, author olumi, its basis naming the date.'),
+  periods: id.describe('A quantity in the model\'s period unit giving how many periods the window lasts ("within 5 weeks" on a weekly model: 5 week, the person\'s quote). When no deadline was stated: an asked quantity with the question "By when?". A calendar date ("by the end of March") or a length in another unit goes in its stated_time; Olumi counts the periods.'),
 }).strict();
 export type CanonicalWindowT = z.infer<typeof CanonicalWindow>;
 
@@ -297,16 +306,19 @@ const timing = z.union([z.number().int(), id]).describe(`${STARTS_AFTER_PERIODS}
  *  so does a missing approved_by on a record, a link or a history entry (C6): an earlier approver stays where it was saved.
  *  A model saved before titles reads with no title (null) and no coaching questions ([]). A model saved before Box 1a reads
  *  with no carry-on declared on any option (false: no claim, never inferred from its settings or name) and each risk's
- *  direction unknown.
+ *  direction unknown. A model saved before stated time reads with none on any quantity and no decide-by date (null); a
+ *  stated time saved before said_on reads with said_on null.
  *  A model that has both timing names, or neither, is left for the schema to judge. */
 export function withDeclaredTiming(raw: unknown): unknown {
   const rec = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
   const renamed = (x: unknown) => { if (!rec(x) || !('from_period' in x) || 'starts_after_periods' in x) return x; const { from_period, ...rest } = x; return { ...rest, starts_after_periods: from_period }; };
   if (!rec(raw) || !Array.isArray(raw['options']) || !Array.isArray(raw['risks'])) return raw;
-  const declaredQuantity = (x: unknown) => (rec(x) ? { direction: null, floor: null, ceiling: null, ...x } : x);
+  // A stated time saved before said_on (PL 14:12Z) reads with none: the day it was said, not kept, is never guessed.
+  const said = (t: unknown) => (rec(t) && !('said_on' in t) ? { ...t, said_on: null } : t);
+  const declaredQuantity = (x: unknown) => (rec(x) ? { direction: null, floor: null, ceiling: null, stated_time: null, ...x, ...('stated_time' in x ? { stated_time: said(x['stated_time']) } : {}) } : x);
   const approver = (x: unknown): unknown => (Array.isArray(x) ? x.map(approver) : !rec(x) ? x
     : Object.fromEntries([...Object.entries(x).map(([k, v]) => [k, approver(v)] as const), ...('approval' in x && !('approved_by' in x) ? [['approved_by', null] as const] : [])]));
-  const read = { ...raw, ...('title' in raw ? {} : { title: null }), ...('coaching_questions' in raw ? {} : { coaching_questions: [] }),
+  const read = { ...raw, ...('title' in raw ? {} : { title: null }), ...('decide_by' in raw ? {} : { decide_by: null }), ...('coaching_questions' in raw ? {} : { coaching_questions: [] }),
     ...(Array.isArray(raw['quantities']) ? { quantities: raw['quantities'].map(declaredQuantity) } : {}),
     options: raw['options'].map((o) => (rec(o) && Array.isArray(o['sets']) ? { carry_on: false, ...o, sets: o['sets'].map(renamed) } : o)),
     risks: raw['risks'].map((k) => renamed(rec(k) ? { direction: 'unknown', ...k } : k)) };
@@ -439,6 +451,10 @@ export const CanonicalModel = z.object({
   left_out: z.array(CanonicalLeftOut),
   coaching_questions: z.array(z.string()).describe(
     'Ordered first-screen questions, up to three, each plain, non-leading, open and asking one thing; a selected item question uses its exact wording. [] when none would help.'),
+  decide_by: z.object({
+    date: z.string().nullable().describe('YYYY-MM-DD: always Olumi\'s reading of the quote, never their words ("mid-November" read as 2026-11-15 is Olumi\'s), or null when no calendar date can be read.'),
+    quote: z.string().nullable().describe('Their words saying when, exactly, kept apart from the date read from them.'),
+  }).strict().nullable().describe('When they say the decision must be made ("the board meets on the 14th"). Never part of a calculation. Null when they say nothing about it.'),
   history: z.array(CanonicalHistoryEntry).describe('Kept by Olumi\'s host: [] in a first draft.'),
 }).strict().describe('One statement, one record across all families; never paraphrase it into another. Evidence and assumptions get separate records only for distinct statements.');
 export type CanonicalModelT = z.infer<typeof CanonicalModel>;

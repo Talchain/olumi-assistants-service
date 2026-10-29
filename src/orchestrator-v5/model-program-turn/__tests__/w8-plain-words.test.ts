@@ -42,7 +42,7 @@ function shop(): CanonicalModelT {
       { id: 'keep', label: 'Keep the team', sets: [], status: 'live', developed_from: null, carry_on: true, author: 'person', quote: 'keep the team as it is', ...at },
     ],
     risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [],
-    title: null, coaching_questions: [],
+    title: null, coaching_questions: [], decide_by: null,
   } as CanonicalModelT;
 }
 const card = () => {

@@ -16,7 +16,7 @@ const record = { party: null, approval: 'approved' as const, approved_by: null, 
 const bounds = { floor: null, ceiling: null };
 const quantity = (id: string, unit: string, value: number | null, patch: Partial<CanonicalQuantityT> = {}): CanonicalQuantityT => ({
   id, label: id, unit, value, kind: 'fact', status: 'known', low: null, high: null, range_kind: null,
-  question: null, basis: null, direction: null, author: 'person', quote: `${id}: ${value} ${unit}`,
+  question: null, stated_time: null, basis: null, direction: null, author: 'person', quote: `${id}: ${value} ${unit}`,
   ...record, ...bounds, ...patch,
 });
 function scenario(): CanonicalModelT {
@@ -38,7 +38,7 @@ function scenario(): CanonicalModelT {
     options: [{ id: 'increase', label: 'Make the change', status: 'live', developed_from: null, carry_on: false, ...record, author: 'person', quote: 'Make the change.',
       sets: [{ quantity: 'switch', to: 'one', value: null, low: null, high: null, range_kind: null, question: null,
         starts_after_periods: 0, author: 'person', quote: 'Make the change.' }] }],
-    limits: [], preferences: [], risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [], title: null, coaching_questions: [],
+    limits: [], preferences: [], risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [], title: null, coaching_questions: [], decide_by: null,
   };
 }
 function projected(model: CanonicalModelT) {

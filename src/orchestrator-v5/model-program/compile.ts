@@ -196,7 +196,7 @@ export function normalise(model: CanonicalModelT): CanonicalModelT {
         kind: 'fact',
         value: s.value, low: s.low, high: s.high, range_kind: s.range_kind, status: fig ? 'known' : 'asked', question: s.question,
         basis: s.author === 'olumi' ? (proposal ? `Olumi's proposed setting for its option "${o.label}".` : `Olumi's estimate of what "${o.label}" sets this to.`) : s.author === 'structure' ? `"${o.label}" switched on.` : null,
-        direction: null, floor: null, ceiling: null, author: s.author, party: null, quote: s.quote, approval: o.approval, approved_by: o.approved_by, author_id: o.author_id,
+        stated_time: null, direction: null, floor: null, ceiling: null, author: s.author, party: null, quote: s.quote, approval: o.approval, approved_by: o.approved_by, author_id: o.author_id,
       });
       return { ...s, to: id, value: null, low: null, high: null, range_kind: null, question: null };
     }),
