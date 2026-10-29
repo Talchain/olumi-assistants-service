@@ -149,7 +149,7 @@ export function ledgeredResponsesCall(): ResponsesCall {
  * the draft (`normalise`: a structure figure that is no structural constant is their question), never the raw draft
  * (buddy, #3709 r7). An update is read the same way, so its postimage is in the saved form. `periodZero` (an update): the
  * saved model's period-0 date, the first draft's today (`drafted_on`); a first draft counts from today; a program saved
- * before it was kept has none (PL HOLD a), and its date line says so. A position span counts from today (PL 13:40Z).
+ * before it was kept has none (PL HOLD a), and its date line says so. A position span counts from its said_on (PL 13:40Z, 16:42Z).
  */
 export async function draftCanonicalModel(brief: string | readonly InputMessage[], call: ResponsesCall, sourceText: string = typeof brief === 'string' ? brief : '',
   opts: { readonly interpret?: boolean; readonly onto?: CanonicalModelT; readonly periodZero?: string } = {}): Promise<DraftOutcome> {
@@ -187,8 +187,8 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
     // gave is never overwritten.
     const own = onto === undefined || !parsed.success ? undefined : update?.success ? new Set(update.data.quantities.map((x) => x.id))
       : new Set(parsed.data.quantities.filter((x) => JSON.stringify(x) !== JSON.stringify(onto.quantities.find((s) => s.id === x.id))).map((x) => x.id));
-    // A position span counts from the day it is said: today (PL 13:40Z); on a first draft today is the anchor itself.
-    const counted = parsed.success ? countStatedTime(parsed.data, anchor, own, today) : undefined;
+    // A position span counts from the day it is said, its said_on as the drafter wrote it (PL 13:40Z, 16:42Z).
+    const counted = parsed.success ? countStatedTime(parsed.data, anchor, own) : undefined;
     // The first draft's reading (`interpret`); an update takes it only where it speaks (`readUpdate`).
     const reading = counted !== undefined && opts.interpret === true ? normalise(counted) : undefined;
     const read = reading !== undefined && update?.success ? readUpdate(onto!, update.data, reading) : reading;

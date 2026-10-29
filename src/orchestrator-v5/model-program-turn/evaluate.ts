@@ -21,7 +21,7 @@ import { costOf, simulate } from '../model-program/simulate/simulate.js';
 import type { SimResult } from '../model-program/simulate/result.js';
 import {
   driverSweepOperations, inlineWords, needsAnswer, presentAnalysisView, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentPremise, type PresentQuantity,
-  type PresentedAnalysisView,
+  type PresentedAnalysisView, type PresentTimeReading,
 } from '../model-program/present/present.js';
 
 export const RUN_DRAWS = 10_000;
@@ -142,8 +142,25 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x, records), goals, asks, blockers, leaves_out, aims,
     limit_premises: Object.fromEntries(compiled.perLimit.map((l) => [l.limit_id, premisesFor(l.rests_on)])),
     option_premises: Object.fromEntries(compiled.perOption.map((o) => [o.option_id, premisesFor(o.rests_on)])),
-    left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })), sweep: admitted.operations + driverSweepOperations(x, draws) <= MAX_OPERATIONS });
+    left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })), sweep: admitted.operations + driverSweepOperations(x, draws) <= MAX_OPERATIONS,
+    time_readings: timeReadings(read, x, records) });
   return { compiled, sim, projection, view };
+}
+
+/**
+ * Olumi's readings of their dates and spans (stated-time.ts: author olumi, with its basis): a whole count from a date, a
+ * conversion, or a provisional reading. `timing`: a window or timing of this run's goals, limits, risks, or of a setting the
+ * run keeps, uses it; present also says one the chances read as a figure (a target, a bound, a figure in arithmetic).
+ */
+function timeReadings(read: CanonicalModelT, x: ExecutableModel, records: Records): PresentTimeReading[] {
+  const inRun = new Set([...x.goals, ...x.limits, ...x.risks].map((r) => r.id));
+  const kept = new Map(x.options.map((o) => [o.id, new Set(o.sets.map((s) => s.quantity))] as const));
+  const timing = new Set<unknown>([
+    ...[...read.goals, ...read.limits].filter((a) => inRun.has(a.id)).flatMap((a) => [a.measure?.window?.periods, a.measure?.window?.origin_offset]),
+    ...read.options.flatMap((o) => o.sets.filter((s) => kept.get(o.id)?.has(s.quantity) === true).map((s) => s.starts_after_periods)),
+    ...read.risks.filter((k) => inRun.has(k.id)).map((k) => k.starts_after_periods)]);
+  return read.quantities.flatMap((q) => (q.stated_time !== null && q.author === 'olumi' && q.status === 'known' && q.basis !== null
+    ? [{ id: q.id, label: q.label, basis: q.basis, accepted: records.accepted.has(q.id), timing: timing.has(q.id) }] : []));
 }
 
 /**

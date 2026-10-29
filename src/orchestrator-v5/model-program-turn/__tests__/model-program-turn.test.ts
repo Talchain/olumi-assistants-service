@@ -3761,9 +3761,10 @@ describe('the model-program turn on the real core route', () => {
     m.goals = m.goals.map((g) => ({ ...g, measure: { ...g.measure!, window: { origin_event: null, origin_offset: null, start: 0, periods: 'weeks' } } }));
     replies = [JSON.stringify(m)];
     expect((await turn({ message: `${BRIEF} We have four and a half weeks.` })).json().model_program.saved).toBe(true);
-    // Their 4.5 weeks, which whole weeks cannot hold: saved as their meaning, unsupported, its stated time kept.
+    // Their 4.5 weeks, which whole weeks cannot hold: saved as Olumi's provisional reading, 5 (Paul, 29 Oct, option B), its stated
+    // time kept; their answer confirming it makes it theirs.
     expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'weeks'))
-      .toMatchObject({ status: 'unsupported', value: null, stated_time: { date: null, span: 4.5, unit: 'week' } });
+      .toMatchObject({ status: 'known', value: 5, author: 'olumi', stated_time: { date: null, span: 4.5, unit: 'week' } });
     const deps = { dispatch, proposals: new ProposalStore() };
     const words = 'Call it five weeks.';
     sent.length = 0;
