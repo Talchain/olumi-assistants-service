@@ -141,14 +141,17 @@ describe('present: the canonical analysis view from a simulated model', () => {
     // W8 (c7.1): the reading is said in full once in the view (the first chance), and by its ends after.
     const reading = '‘Customers lost per £1 of price rise’ follows Olumi’s provisional reading of Olumi’s own estimated range, -2.2 to -1.4 customers';
     const conversion = `${reading}, as the range it falls in 8 times out of 10, with -1.8 customers as the middle value`;
-    expect(cell(olumi, 'hold').face).toContain(`, in this model. It assumes ${conversion}.`);
-    expect(cell(olumi, 'raise').face).toContain(`, in this model. It assumes ${reading}.`);
+    // Acceptance 29 Oct (c7.1): what both chances rest on alike is said once, beside the chances, in full; neither repeats it.
+    expect(olumi.goal_chance.notes.filter((n: string) => n === `Each assumes ${conversion}.`)).toHaveLength(1);
+    for (const id of ['hold', 'raise']) expect(cell(olumi, id).face).not.toContain('Customers lost per £1');
     for (const id of ['hold', 'raise']) expect(cell(olumi, id).face).not.toContain('on your figures');
     expect(olumi.goal_chance.targets.per_target[1].words).toContain(`${CUST_WORDS}, in this model, if ${reading}`);
     // (ii) The person's own range for the price: the ends are theirs, the reading is Olumi's provisional reading of them (W10).
     const theirs = present(model([...MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')).filter((x) => x.id !== 'price'),
       range('price', 39, 59, 49, '£', 'person_range')], MRR_GOALS, MRR_OPTIONS), MRR_LABELS);
-    expect(cell(theirs, 'hold').face).toContain(', in this model. It assumes ‘Price’ follows Olumi’s provisional reading of your range, £39 to £59, as the range it falls in 8 times out of 10, with £49 as the middle value.');
+    // Both chances read it (the simulator's own dependency authority): said once, beside the chances (acceptance 29 Oct, c7.1).
+    expect(theirs.goal_chance.notes.filter((n: string) => n === 'Each assumes ‘Price’ follows Olumi’s provisional reading of your range, £39 to £59, as the range it falls in 8 times out of 10, with £49 as the middle value.')).toHaveLength(1);
+    expect(cell(theirs, 'hold').face).not.toContain('‘Price’ follows');
     // (iii) An option's own Olumi figure: only that option's chance is conditional on it; the target says which option.
     const own = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers'), fixed('price_59', 59, '£', 'state', 'olumi')), MRR_GOALS, MRR_OPTIONS),
       MRR_LABELS);
@@ -232,13 +235,15 @@ describe('present: the canonical analysis view from a simulated model', () => {
 
   it('a chance on fixed figures only names no driver (no range to test); no Run: currentness unknown', () => {
     const v = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')), MRR_GOALS, MRR_OPTIONS), MRR_LABELS);
-    expect(v.options.map((o: Rec) => o.main_driver)).toEqual([{ kind: 'none_licensed', reason: NO_RANGE_REASON }, { kind: 'none_licensed', reason: NO_RANGE_REASON }]);
+    // Acceptance 29 Oct (c7.1): the reason both options share is said once, beside the chances; neither option repeats it.
+    expect(v.options.map((o: Rec) => o.main_driver)).toEqual([{ kind: 'none_licensed', reason: '' }, { kind: 'none_licensed', reason: '' }]);
+    expect(v.goal_chance.notes.filter((n: string) => n === 'No figure these chances rest on has a range to test.')).toHaveLength(1);
     // W6: Hold meets both goals in every draw (100%, exact) and Raise misses one in every draw (0%, exact): no overlap, so the
     // words say which is most likely to achieve every goal together, both chances, the basis and that no figure has a range.
     expect(v.leader_licence).toBe('permitted');
     expect(v.leader).toEqual({ licence: 'permitted', option_id: null, goal_chance_leader: 'hold', similar_option_ids: [],
       words: 'In this model, ‘Hold’ is the option most likely to achieve every goal together: 100% chance, '
-        + `against 0% for ‘Raise to £59’, the next most likely. It rests on your figures. ${NO_RANGE_REASON}` });
+        + 'against 0% for ‘Raise to £59’, the next most likely. It rests on your figures.' });
     expect(v.run).toBeNull();
     expect(v.staleness).toEqual({ stale: null, revision: null, run_revision: null, basis: 'analysis_graph_hash_interim', reason: null,
       limitation: 'Currentness is unknown because an analysis hash is unavailable.' });
@@ -576,7 +581,10 @@ describe('present: what each computed chance rests on most (one figure at a time
 
   it('a chance resting on no range says so; a withheld chance records no driver', () => {
     const fixedOnly = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')), MRR_GOALS, MRR_OPTIONS), MRR_LABELS);
-    expect(driver(fixedOnly, 'hold')).toEqual({ kind: 'none_licensed', reason: NO_RANGE_REASON });
+    // Shared by both options: said once beside the chances (acceptance 29 Oct, c7.1). Contrast: one option says its own.
+    expect(driver(fixedOnly, 'hold')).toEqual({ kind: 'none_licensed', reason: '' });
+    const alone = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')), MRR_GOALS, MRR_OPTIONS.filter((o: Rec) => o.id === 'hold')), MRR_LABELS);
+    expect(driver(alone, 'hold')).toEqual({ kind: 'none_licensed', reason: NO_RANGE_REASON });
     const m = model([fixed('revenue', 10, '£'), fixed('seats', 0, 'seats'), def('per_seat', 'ratio', ['revenue', 'seats'], '£/seat'), fixed('zero', 0, '£/seat')],
       [goal('g', 'per_seat', '>=', 'zero')], [option('hold', 'Hold')]);
     expect(driver(present(m, { revenue: person('Revenue'), seats: person('Seats'), per_seat: person('Revenue per seat', true), zero: person('Zero') }), 'hold')).toEqual({ kind: 'not_recorded' });
@@ -610,7 +618,7 @@ describe('present: which option is most likely to achieve the goal, in this mode
     expect(v.leader).toEqual({ licence: 'permitted', option_id: null, goal_chance_leader: 'add', similar_option_ids: [], words: expect.any(String) });
     // At c = 10, 20, 30 the chance is P(d ≥ 5) = 0, P(d ≥ −5) = 1, 1: the driver's own three settings, as the cell's detail says them.
     expect(v.leader.words).toBe(`In this model, ‘Add one specialist’ is the option most likely to achieve the goal: ${add.display} chance, `
-      + 'against less than 1% for ‘Keep’, the next most likely. Like each option’s chance, it rests on the assumptions listed with it. '
+      + 'against less than 1% for ‘Keep’, the next most likely. It rests on the same assumptions as each option’s chance. '
       + DRIVER_C);
     expect(driver(v, 'add').detail).toContain('the chance is less than 1%; at its middle (20 tickets), more than 99%; at its high end (30 tickets), more than 99%.');
     expect(v.leader.words).not.toContain('more likely to miss');

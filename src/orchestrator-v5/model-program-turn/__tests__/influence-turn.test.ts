@@ -34,10 +34,10 @@ describe('Box 1a: the card, the counts, the update and the store', () => {
     const rows = new Map((r.ok ? r.changes : []).map((c) => [c.id, c] as const));
     const row = (id: string) => { const c = rows.get(id)!; return [c.label, c.after]; };
     expect(row('evening_mood')).toEqual(['Evening classes → How members feel',
-      '"Evening classes" ↑ raises "How members feel", judged likely, based on "Members have asked for evening slots.", in your words "Members have asked for evening slots"']);
+      '"Evening classes" ↑ raises "How members feel", likely to hold, based on "Members have asked for evening slots.", in your words "Members have asked for evening slots"']);
     expect(row('mood_members')).toEqual(['How members feel → members',
-      '"How members feel" affects "members", depending on conditions, judged unsure, based on "Happier members stay only if the classes suit them."']);
-    expect(row('instructor_leaves')).toEqual(['The instructor leaves', 'with a chance not known yet, affecting "Keep at least 140 members", by a size not known yet, ↓ lowering it, from the start']);
+      '"How members feel" affects "members", depending on conditions, may not hold, based on "Happier members stay only if the classes suit them."']);
+    expect(row('instructor_leaves')).toEqual(['The instructor leaves', 'with a chance not known yet, would lower "Keep at least 140 members", by an amount not known yet, from the start']);
     expect(row('carry_on')).toEqual(['Carry on as now', 'carries on as now, in your words "carry on as now"']);
     expect(row('member_mood')).toEqual(['How members feel', `not known yet, not measured, based on "${MOOD_BASIS}"`]);
     // An option that declares no carry-on says nothing of one (false is no claim).
@@ -77,8 +77,8 @@ describe('Box 1a: the card, the counts, the update and the store', () => {
     expect(change('evening_mood', cases[2]![2])).toEqual(['"Evening classes" ↑ raises "How members feel"', '"Evening classes" affects "How members feel", in a disputed direction']);
     expect(change('carry_on', cases[10]![2])).toEqual(['carries on as now', null]);
     expect(change('members', cases[12]![2])).toEqual(['150 members', '150, not measured']);
-    expect(change('instructor_leaves', cases[9]![2])).toEqual(['with a chance not known yet, affecting "Keep at least 140 members", by a size not known yet, ↓ lowering it',
-      'with a chance not known yet, adding a size not known yet to "Keep at least 140 members", ↓ lowering it']);
+    expect(change('instructor_leaves', cases[9]![2])).toEqual(['with a chance not known yet, would lower "Keep at least 140 members", by an amount not known yet',
+      'with a chance not known yet, adding an amount not known yet to "Keep at least 140 members", ↓ lowering it']);
     // A stated time changed alone, counted by the host (countStatedTime) as the drafting path does, is said through the counted
     // figure and its basis: when the evening classes start, 29 Mar 2027 is exactly 5 months from 29 Oct 2026, 29 Jan 2027 is 3.
     const stated = (date: string) => countStatedTime(one((m) => {
@@ -115,9 +115,9 @@ describe('Box 1a: the card, the counts, the update and the store', () => {
     const v = validatePostimage(saved, merged, { removals: ['mood_members'], words: WORDS, fresh: [] });
     expect(v.ok).toBe(true);
     expect((v.ok ? v.changes : []).map((c) => [c.id, c.action, c.label, c.before, c.after])).toEqual([
-      ['evening_mood', 'change', 'Evening classes → How members feel', 'judged likely', 'judged unsure'],
-      ['workshop_mood', 'add', 'Weekend workshops → How members feel', null, '"Weekend workshops" ↑ raises "How members feel", judged unsure'],
-      ['mood_members', 'remove', 'How members feel → members', '"How members feel" affects "members", depending on conditions, judged unsure, based on "Happier members stay only if the classes suit them."', null],
+      ['evening_mood', 'change', 'Evening classes → How members feel', 'likely to hold', 'may not hold'],
+      ['workshop_mood', 'add', 'Weekend workshops → How members feel', null, '"Weekend workshops" ↑ raises "How members feel", may not hold'],
+      ['mood_members', 'remove', 'How members feel → members', '"How members feel" affects "members", depending on conditions, may not hold, based on "Happier members stay only if the classes suit them."', null],
     ]);
     expect((v.ok ? v.model.history : []).map((h) => [h.id, h.change])).toEqual([['evening_mood', 'superseded'], ['mood_members', 'withdrawn']]);
   });

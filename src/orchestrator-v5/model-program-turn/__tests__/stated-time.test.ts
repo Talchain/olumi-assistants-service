@@ -81,14 +81,15 @@ describe('a stated date or span is counted exactly, or as Olumi\'s provisional r
     expect(notes(accepted)).toContain(`‘weeks’ is Olumi’s reading. ${of(m, 'weeks').basis}`);
     // Their answer replaces it: their figure, its stated time cleared, and no reading of a date is said.
     const answered = figurePostimage(m, { ...of(m, 'weeks'), value: 21, author: 'person', quote: '21 weeks', basis: null });
-    expect(notes(answered).filter((n) => n.includes('Olumi’s reading'))).toEqual([]);
+    // A time reading's note is "‘X’ is Olumi’s reading" (the shared basis beside the chances says "rests on Olumi’s reading of").
+    expect(notes(answered).filter((n) => n.includes('is Olumi’s reading'))).toEqual([]);
     // CONTRAST: their span in the model's own unit is theirs, and no reading is said.
-    expect(notes(countStatedTime(timed(span(22, 'week')), P0)).filter((n) => n.includes('Olumi’s reading'))).toEqual([]);
+    expect(notes(countStatedTime(timed(span(22, 'week')), P0)).filter((n) => n.includes('is Olumi’s reading'))).toEqual([]);
   });
 
   it('review 29 Oct: a reading is said where the run reads it (a target), never for a setting the run does not keep', () => {
     const notes = (m: CanonicalModelT) => (((evaluateCanonical(m, { sourceText: BRIEF, seed: 7 }).view as Rec).goal_chance?.notes ?? []) as string[]);
-    const readings = (m: CanonicalModelT) => notes(m).filter((n) => n.includes('Olumi’s reading'));
+    const readings = (m: CanonicalModelT) => notes(m).filter((n) => n.includes('is Olumi’s reading'));
     // A deadline used as the goal's target, with no window: counted as a figure (22 weeks, provisional) and said.
     const target = bakery();
     target.quantities.push(q('build_time', 'week', { value: 21.9, quote: 'about 21.9 weeks to build' }), q('launch_by', 'week', { quote: 'by the end of March', stated_time: date('2027-03-31') }));

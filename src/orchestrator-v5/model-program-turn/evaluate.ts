@@ -121,7 +121,12 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   const goals: PresentGoal[] = compiled.perGoal.filter((p) => !p.needs_measure)
     .map((p) => ({ goal_id: p.goal_id, label: labelOf.get(p.goal_id) ?? p.goal_id, status: p.status, reasons: p.reasons, asks: p.asks,
       rests_on: premisesFor(p.rests_on) }));
-  const blockers = blockersOf(model, compiled.blockers);
+  // W8 (c7.6, acceptance 29 Oct: "left out of the chance" on the canvas beside "waits on … ‘Avoid losing money’"): with an aim
+  // measured, an aim with no measure yet is left out of the chance (`leaves_out`), so its measure is not something the chance
+  // waits on. Listed still where the chance does wait on it: no aim measured, or a run that holds that aim back (`withheld`).
+  const heldBack = new Set((compiled.executable?.withheld ?? []).filter((w) => w.kind === 'goal').map((w) => w.id));
+  const leftOut = (b: Blocker) => compiled.joint.goal_ids.length > 0 && b.code === 'measure' && compiled.joint.leaves_out.includes(b.id) && !heldBack.has(b.id);
+  const blockers = blockersOf(model, compiled.blockers.filter((b) => !leftOut(b)));
   const asks: PresentAsk[] = normalise(model).quantities.flatMap((q) => (q.unit !== null && blockers.some((b) => b.answer?.quantity_id === q.id)
     ? [{ quantity_id: q.id, label: q.label, unit: q.unit }] : []));
   const leaves_out = compiled.joint.leaves_out.map((id) => labelOf.get(id) ?? id);
@@ -197,11 +202,12 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
   // What the chance waits on, from the compiler's typed blockers only (S4): the measured aims' and THIS option's own (its
   // setting or timing, batch 4 hiring-r1); with no measured aim, every blocker not a limit's alone (an aim's measure, or the
   // result they want). A figure no one can give has no blocker: the compiler's own reason for it is said.
+  const sizedOnce = new Set<string>();
   const cellOf = (optionId: string) => {
     const own = compiled.perOption.find((p) => p.option_id === optionId);
     const ids = goals.length > 0 ? new Set([...goals.map((g) => g.goal_id), optionId])
       : new Set(blockers.flatMap((b) => b.scope).filter((id) => !limitIds.has(id)));
-    const waits = waitsOnWords(blockers, ids);
+    const waits = waitsOnWords(blockers, ids, sizedOnce);
     // #3789 review: the compiler's reasons quote labels and bases as written; display words stay on one line.
     const withheldWhy = inlineWords([...goals.filter((g) => g.status === 'withheld').flatMap((g) => g.reasons), ...(own?.reasons ?? [])].join(' '));
     const why = refused !== undefined ? refused : failing ? 'The model does not compile yet, so no chance can be worked out.'
@@ -216,7 +222,7 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
     staleness: { stale: null, revision: null, run_revision: null, basis: 'analysis_graph_hash_interim', reason: null, limitation: 'Currentness is unknown because an analysis hash is unavailable.' },
     leader_licence: 'withheld',
     options: ids.map((option_id) => ({ option_id, cell: cellOf(option_id), main_driver: { kind: 'not_recorded' as const } })),
-    goal_chance: { notes: [...(refused !== undefined ? [refused] : []), ...goals.filter((g) => g.status !== 'calculable').map((g) => sentence(`‘${inlineWords(g.label)}’ ${waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${inlineWords(g.reasons.join(' '))}`}`)),
+    goal_chance: { notes: [...(refused !== undefined ? [refused] : []), ...goals.filter((g) => g.status !== 'calculable').map((g) => sentence(`‘${inlineWords(g.label)}’ ${waitsOnWords(blockers, new Set([g.goal_id]), sizedOnce) ?? `is not in the chance yet: ${inlineWords(g.reasons.join(' '))}`}`)),
     ], ...(blockers.length > 0 ? { waits_on: blockers.map((b) => ({ ...b, label: inlineWords(b.label) })) } : {}) },
   };
 }

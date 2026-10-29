@@ -201,13 +201,17 @@ const ROWS_REFUSED: Readonly<Record<string, readonly [string, string]>> = {
   not_a_reading_card: NOT_WAITING, not_authorised: NOT_WAITING, not_on_the_card: NOT_WAITING, not_proposed: NOT_WAITING,
 };
 const ROWS_NOT_APPROVED = 'Those items could not be confirmed just now. Nothing in your model was changed.';
-/** The host's reply to the reading card's ticked rows: what was saved and how many are still open, never a model's words. */
-function rowsReply(outcome: ToolOutcome, open: number): string {
+/** The host's reply to the reading card's ticked rows: what was saved and how many are still open, never a model's words.
+ *  W8 (c7.4, acceptance 29 Oct: "Saved: 2 items confirmed. 10 still to check." left nothing to do): the next row to check is
+ *  named, Olumi's own reading first (the card's `inferred` group), else the card's first, in the card's order. */
+function rowsReply(outcome: ToolOutcome, still: readonly { readonly label: string; readonly group?: string }[]): string {
+  const open = still.length, next = still.find((c) => c.group === 'inferred') ?? still[0];
   if (outcome.status === 'unavailable') return 'The save could not be confirmed, so the model may or may not have changed. Reload to see the current model before changing it again.';
   if (outcome.status === 'refused') return outcome.reason === 'registration_refused' ? 'The save was refused, so nothing was written and your model is unchanged.' : ROWS_REFUSED[outcome.reason]?.[1] ?? ROWS_NOT_APPROVED;
   if (outcome.data['already_saved'] === true) return 'Those items were already confirmed and saved.';
   const n = Number(outcome.data['approved'] ?? 0);
-  return `Saved: ${n} ${n === 1 ? 'item' : 'items'} confirmed.${open > 0 ? ` ${open} still to check.` : ''}`;
+  return `Saved: ${n} ${n === 1 ? 'item' : 'items'} confirmed.${open > 0 ? ` ${open} still to check.` : ''}`
+    + (next === undefined ? '' : ` Next, is ${next.group === 'inferred' ? 'Olumi’s reading of ' : ''}‘${next.label.trim().replace(/\s+/g, ' ').replace(/[.!?]+$/, '')}’ right?`);
 }
 
 /** Each saved version this turn's tools reported, with who authorised it: an approved card is the person's; a Run the AI started, Olumi's. */
@@ -747,7 +751,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         const data = saved ? outcome.data : {};
         programPayload = { canonical_analysis_view: null, model_program: { turn: 'approve_rows', saved, approved: saved ? data['approved'] ?? 0 : 0, still_open: card?.changes?.length ?? 0 } };
         const ms = Date.now() - t0;
-        result = { assistant_text: rowsReply(outcome, card?.changes?.length ?? 0), items: [],
+        result = { assistant_text: rowsReply(outcome, card?.changes ?? []), items: [],
           tool_calls: [{ name: 'approve_rows', ok: saved, outcome: outcome.status, mutated: saved && outcome.mutated, ...(saved ? {} : { refusal: outcome.reason }) },
             ...(card !== undefined ? [{ name: CONFIRM_READING, ok: true, outcome: 'ok', mutated: false, proposal_id: card.proposal_id }] : [])],
           tool_results: [{ ok: saved, mutated: saved && outcome.mutated, ...(saved && isRec(data['receipt']) ? { model_version: data['receipt'] } : {}) },
