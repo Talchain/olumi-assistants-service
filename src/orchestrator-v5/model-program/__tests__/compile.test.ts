@@ -1163,14 +1163,17 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       .toMatchObject({ lower: 0.1, upper: 0.3 }); // contrast: their bounds alone
   });
 
-  it('numbers#2 (c), S1 strip (A20b off): a fixed timing given below the floor Olumi declares on it is never asked again; it is read as written, as at or above it', () => {
+  it('numbers#2 (c), S1 strip (A20b off) + GAP 2 (29 Oct): a fixed timing given below the floor Olumi declares on it is never asked again; it is held, naming it, as a drawn figure outside its domain is (spec §3.7), and read as written at or above it', () => {
     const starting = (floor: number | null) => {
       const g = gymFilled();
       g.quantities.push(qty('promo_start', 'month', { value: 1, quote: 'the promotion starts in a month', floor }));
       g.options = g.options.map((o) => (o.id === 'promo' ? { ...o, sets: o.sets.map((s) => ({ ...s, starts_after_periods: 'promo_start' })) } : o));
       return compile(g);
     };
-    for (const floor of [2, 1, null]) {
+    const below = starting(2);
+    expect(below.blockers.filter((b) => b.code === 'recount' || b.code === 'asked')).toEqual([]);
+    expect(below.perOption.find((o) => o.option_id === 'promo')).toMatchObject({ status: 'withheld', asks: [], reasons: ['rests on "promo start": it is 1 month, but Olumi reads it as at least 2 month.'] });
+    for (const floor of [1, null]) {
       const r = starting(floor);
       expect(r.blockers, `floor ${floor}`).toEqual([]);
       expect(r.executable!.options.find((o) => o.id === 'promo')!.sets.map((s) => s.from_period), `floor ${floor}`).toEqual([1]);
@@ -1382,7 +1385,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(exactInitialValues(zeroed.executable!).get('share')).toBe(0);
   });
 
-  it('Codex r2 numbers#2 (4), S1 strip (A20b off): a window length given outside Olumi\'s reading of it is read as written; reversed bounds on it (A20d, kept) withhold', () => {
+  it('Codex r2 numbers#2 (4), S1 strip (A20b off) + GAP 2 (29 Oct): a window length given outside Olumi\'s reading of it is held, naming it, never asked again (spec §3.7); reversed bounds on it (A20d, kept) withhold', () => {
     const windowed = (f: Partial<CanonicalQuantityT>) => {
       const g = gymFilled();
       g.quantities = g.quantities.map((q) => (q.id === 'half_year' ? { ...q, value: 12, quote: 'within a year', ...f } : q));
@@ -1390,8 +1393,10 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     };
     const capped = windowed({ ceiling: 6 });
     expect(capped.errors).toEqual([]);
-    expect(capped.blockers).toEqual([]);
-    expect(capped.executable!.goals.map((x) => x.window)).toEqual([{ start_period: 0, periods: 12 }, { start_period: 0, periods: 12 }]);
+    for (const p of capped.perGoal) {
+      expect(p, p.goal_id).toMatchObject({ status: 'withheld', asks: [], reasons: ['rests on "half year": it is 12 month, but Olumi reads it as at most 6 month.'] });
+    }
+    expect(capped.executable).toBeNull();
     const reversed = windowed({ floor: 10, ceiling: 5 });
     for (const p of reversed.perGoal) {
       expect(p, p.goal_id).toMatchObject({ status: 'withheld', asks: [], reasons: ['rests on "half year": Olumi reads "half year" as never below 10 month and never above 5 month, which leaves nothing it can be.'] });

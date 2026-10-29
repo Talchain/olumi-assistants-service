@@ -269,6 +269,9 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
   const windowQs = new Set(windowed.flatMap(({ w }) => [w.periods, ...(has(w.origin_offset) ? [w.origin_offset] : [])]));
   /** Set and risk timings that name a quantity: a fixed one resolves to a whole period; an uncertain one goes into the run. */
   const timingQs = new Set(timings);
+  /** Figures read once, as written, never drawn: a sized risk on one cannot change it in a draw, so what rests on it is
+   *  withheld naming the risk, never run as if the risk could not happen (GAP 1 review, 29 Oct). */
+  const readOnce = new Set([...windowQs, ...[...timingQs].filter((t) => { const q = model.quantities.find((x) => x.id === t); return !(has(q?.low) && has(q?.high) && q!.low !== q!.high); })]);
 
   // ── relations ──────────────────────────────────────────────────────────────────────────────────────────────────────
   const R = new Map<string, NumericRelationT>();
@@ -403,7 +406,7 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
   const inWords = (closure: ReadonlySet<string>, own?: string): string[] => {
     const at = (x: string) => closure.has(x) || x === own;
     const links = influences.filter((i) => at(i.to));
-    return [...links.map((i) => i.id), ...model.risks.filter((k) => !sized(k) && (at(k.effect_on) || links.some((i) => i.from === k.id))).map((k) => k.id)];
+    return [...links.map((i) => i.id), ...model.risks.filter((k) => (!sized(k) ? at(k.effect_on) || links.some((i) => i.from === k.id) : readOnce.has(k.effect_on) && at(k.effect_on))).map((k) => k.id)];
   };
 
   // ── timing: a whole period, or a quantity holding one ──────────────────────────────────────────────────────────────
@@ -653,6 +656,20 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
       : `${read} below ${at(floor!)}, but a chance is never above ${at(1 / (U.get(q.id)?.scale ?? 1))}`;
   };
   const nothing = new Map(model.quantities.flatMap((q) => { const why = roomless(q); return why === undefined ? [] : [[q.id, why] as const]; }));
+  /**
+   * A window's or a timing's one figure outside what Olumi reads it can be (its floor and ceiling): it is read once, as whole
+   * periods, never drawn, so the Run's domain check never sees it. What rests on it is held with the reason, as a drawn figure
+   * outside its domain is (spec §3.7), never run with the bound ignored.
+   */
+  const outside = new Map(model.quantities.flatMap((q) => {
+    if (!(windowQs.has(q.id) || timingQs.has(q.id)) || !FIGURE_STATUSES.has(q.status) || q.unit === null || nothing.has(q.id)) return [];
+    if (has(q.low) && has(q.high) && q.low !== q.high) return [];
+    const v = q.value ?? q.low, { floor, ceiling } = boundsOf(q);
+    if (!has(v) || !((floor !== null && v < floor) || (ceiling !== null && v > ceiling))) return [];
+    const at = (x: number) => `${x} ${q.unit}`;
+    const can = floor !== null && ceiling !== null ? `between ${at(floor)} and ${at(ceiling)}` : floor !== null ? `at least ${at(floor)}` : `at most ${at(ceiling!)}`;
+    return [[q.id, `it is ${at(v)}, but Olumi reads it as ${can}`] as const];
+  }));
   // A chance and a timing are read against what they declare as any figure is (spec §3.7): the timing reader never uses one
   // outside it, as an option or risk resting on it is asked or held.
   // A20b, the re-route of a figure outside a floor or ceiling, is off the path (S1 strip, Paul 26 Oct): such a figure goes to
@@ -669,7 +686,7 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
   const held = new Map([...[...readings].filter(([, r]) => r.kind === 'held').map(([id, r]) => [id, (r as { reason: string }).reason] as const),
     ...[...contradictory].filter(([id]) => Q.get(id)!.author !== 'person').map(([id, why]) => [id, `${why}; Olumi's ${has(Q.get(id)!.low) ? 'range' : 'figure'} is unsupported`] as const),
     ...[...derivedTimings].map((id) => [id, 'a start time worked out by a relation is unsupported'] as const),
-    ...nothing]);
+    ...nothing, ...outside]);
   /** The person's figures given outside what they can be: theirs to give again, with the reason. */
   const recheck = new Map([...contradictory].filter(([id]) => Q.get(id)!.author === 'person'));
 
@@ -680,14 +697,17 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
   const isAsk = (q: CanonicalQuantityT) => q.status === 'asked' || unresolved.has(q.id) || recheck.has(q.id);
   const blockersOf = (closure: Iterable<string>) => [...closure].map((x) => Q.get(x)).filter((q): q is CanonicalQuantityT => !!q && (isAsk(q) || withholds(q)));
   const describe = (q: CanonicalQuantityT) => (q.unit === null ? `rests on "${q.label}", which is not measured${has(q.basis) ? `: ${q.basis}` : '.'}`
-    : q.status === 'asked' ? `needs "${q.label}".` : held.has(q.id) ? `rests on "${q.label}": ${held.get(q.id)}${nothing.has(q.id) ? '.' : '; give a most likely figure, or ask'}`
+    : q.status === 'asked' ? `needs "${q.label}".` : held.has(q.id) ? `rests on "${q.label}": ${held.get(q.id)}${nothing.has(q.id) || outside.has(q.id) ? '.' : '; give a most likely figure, or ask'}`
       : unresolved.has(q.id) ? `needs how to read "${q.label}" (firm ends, or a rough estimate).` : recheck.has(q.id) ? `needs "${q.label}" again: ${recheck.get(q.id)}.`
         : `rests on "${q.label}", which is ${q.status.replace('_', ' ')}${has(q.basis) ? `: ${q.basis}` : '.'}`);
   const labelOf = (id: string) => Q.get(id)?.label ?? [...model.options, ...model.risks, ...model.goals, ...model.limits].find((r) => r.id === id)?.label ?? id;
   /** A link in words, or a risk the calculation cannot size, said by what it joins or its own name. */
   const sayInWords = (id: string) => {
     const i = influences.find((x) => x.id === id);
-    return i !== undefined ? `rests on the link "${labelOf(i.from)} → ${labelOf(i.to)}", which is in words, never calculated.` : `rests on the risk "${labelOf(id)}", which the calculation cannot size.`;
+    const k = i === undefined ? model.risks.find((x) => x.id === id) : undefined;
+    return i !== undefined ? `rests on the link "${labelOf(i.from)} → ${labelOf(i.to)}", which is in words, never calculated.`
+      : k !== undefined && sized(k) ? `rests on the risk "${k.label}" on "${labelOf(k.effect_on)}", which the calculation reads once as written and cannot change in a draw.`
+        : `rests on the risk "${labelOf(id)}", which the calculation cannot size.`;
   };
   const outcomeOf = (closure: Set<string>, win?: WinState, words: readonly string[] = []): { status: Outcome; reasons: string[]; asks: string[] } => {
     const blockers = blockersOf([...closure, ...(win?.blockers ?? [])]);
@@ -720,7 +740,7 @@ export function compile(input: CanonicalModelT, _opts: CompileOptions = {}): Com
   const unknownWindowRefs = (w: CanonicalWindowT | null | undefined) => [w?.periods, w?.origin_offset].filter((x): x is string => has(x) && Q.get(x)?.status === 'unknown');
   /** A window's own figures that break what Olumi reads them as (a bound, or bounds leaving nothing): the window is read from
    *  them, so the goal or limit rests on them, asked or held, never run on that window (spec §3.7). */
-  const outsideWindowRefs = (w: CanonicalWindowT | null | undefined) => [w?.periods, w?.origin_offset].filter((x): x is string => has(x) && (contradictory.has(x) || nothing.has(x)));
+  const outsideWindowRefs = (w: CanonicalWindowT | null | undefined) => [w?.periods, w?.origin_offset].filter((x): x is string => has(x) && (contradictory.has(x) || nothing.has(x) || outside.has(x)));
   /** A goal's or limit's own window figures (its length and origin timing, every one the closures above gather): a link in
    *  words or a risk on one, or on anything one rests on, reaches what is read over that window (Box 1a; GAP 1 review: an
    *  option's link into a risk's chance on the window's length withholds the aim, never only the option). */
