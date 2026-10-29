@@ -75,7 +75,7 @@ import { approveReadingRows, rowsOperationKey } from '../orchestrator-v5/model-p
 import type { ToolOutcome } from '../orchestrator-v5/path-b/tools/outcome.js';
 import { isProgramGraph, programReadOf, reopenProgram, savedProgramOf, sourceTextOf, unreadableWords } from '../orchestrator-v5/model-program-turn/program-store.js';
 import { compile } from '../orchestrator-v5/model-program/compile.js';
-import { applyCanvasFigure, draftReplyGuidance, HOST_REPLY_WITHHELD_TOOLS, PROGRAM_TURN_GUIDANCE, readProgramContext, RUN_REPLY_GUIDANCE } from '../orchestrator-v5/model-program-turn/program-tools.js';
+import { applyCanvasFigure, HOST_REPLY_WITHHELD_TOOLS, programTurnFacts, readProgramContext } from '../orchestrator-v5/model-program-turn/program-tools.js';
 import { programOperationId } from '../orchestrator-v5/model-program-turn/program-save.js';
 import { findOperationSave } from '../orchestrator-v5/path-b/tools/core-write.js';
 import { registrationTurnId } from '../orchestrator-v5/graph-registration/registration-identity.js';
@@ -791,8 +791,9 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
                 const freshRevision = isRec(fresh.data.revision) ? str(fresh.data.revision.graph_hash) : null;
                 const freshRun = isRec(fresh.data.run) ? str(fresh.data.run.run_id) : null;
                 const reply = await runCoreTurn({ ...agentTurn(),
-                  // A draft names its reading card only when this turn holds one (`turn.ts`: a refused reading holds none).
-                  turnGuidance: [PROGRAM_TURN_GUIDANCE, runPress ? RUN_REPLY_GUIDANCE : draftReplyGuidance(result.tool_calls.some((c) => c.name === CONFIRM_READING && c.ok === true))],
+                  // This turn's facts (prompts-v2): a draft holds its reading card only when this turn made one (`turn.ts`: a refused reading holds none).
+                  turnGuidance: [runPress ? programTurnFacts('run_press', fresh.data)
+                    : programTurnFacts('first_model', fresh.data, { readingCard: result.tool_calls.some((c) => c.name === CONFIRM_READING && c.ok === true) })],
                   briefText: saved.graph === null ? undefined : saved.briefText,
                   canonicalState: fresh.data, withheldTools: [...HOST_REPLY_WITHHELD_TOOLS],
                   ...(freshRevision !== null ? { traceMeta: { revision: freshRevision, ...(freshRun !== null ? { run_id: freshRun } : {}) } } : {}) });
@@ -806,7 +807,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             result = noCallAnswer();
           } else {
             result = await runCoreTurn({ ...agentTurn(),
-              turnGuidance: [PROGRAM_TURN_GUIDANCE, ...(challenge === null ? [] : [challenge.note])],
+              turnGuidance: [programTurnFacts('continuation', canonical?.status === 'ok' ? canonical.data : undefined, { challenge: challenge !== null }),
+                ...(challenge === null ? [] : [challenge.note])],
               briefText: saved.briefText,
               // A program's first agent turn opens its Conversation with the turns before it, the host-written draft reply included.
               ...(program ? { earlierTurns } : {}),

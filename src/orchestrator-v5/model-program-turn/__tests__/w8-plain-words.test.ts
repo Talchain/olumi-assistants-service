@@ -9,7 +9,8 @@ import { compile } from '../../model-program/compile.js';
 import { project } from '../../model-program/project.js';
 import { evaluateCanonical } from '../evaluate.js';
 import { readingOf } from '../postimage.js';
-import { draftReplyGuidance } from '../program-tools.js';
+import { PROGRAM_TURN_FACTS_PREFIX, programTurnFacts } from '../program-tools.js';
+import { programInstructions } from '../../core-route/instructions.js';
 import { readingGroups } from '../reading-groups.js';
 import { at, q } from './bakery.fixture.js';
 
@@ -84,14 +85,13 @@ describe('W8 c7: the words a person reads, at their producers', () => {
     expect(card('asked').filter((c) => (c.after ?? '').includes('How many mechanics could you share')).map((c) => c.id)).toEqual(['share__extra_mechanics']);
   });
 
-  it('reply, W8 run 3: the first reply is asked to name the reading card only when the turn holds one', () => {
-    const held = draftReplyGuidance(true), none = draftReplyGuidance(false);
-    expect(held).toContain('a card asks them to confirm or change Olumi\'s reading of their brief');
-    expect(held).toContain('End by asking them to confirm the reading on the card or say what to change.');
-    expect(none).not.toMatch(/card/);
-    // Everything else the reply is asked for is the same words either way.
-    expect(none.replace('. Reply', '; X. Reply')).toBe(held.replace('; a card asks them to confirm or change Olumi\'s reading of their brief. Reply', '; X. Reply')
-      .replace('End by asking them to confirm the reading on the card or say what to change. ', ''));
+  it('reply, W8 run 3: the first reply\'s facts hold a reading card only when the turn holds one, and the reply names a card only when the state holds it', () => {
+    // prompts-v2 (29 Oct, INTEGRATION §5): the turn's guidance is facts only; the rule is the program instructions', said once.
+    const facts = (readingCard: boolean) => JSON.parse(programTurnFacts('first_model', { awaiting_approval: readingCard ? [{ proposal_id: 'p1', reading: true }] : [] }, { readingCard })
+      .slice(PROGRAM_TURN_FACTS_PREFIX.length)) as Record<string, unknown>;
+    expect(facts(true)).toEqual({ trigger: 'first_model', reading_card: true, held_proposals: ['p1'] });
+    expect(facts(false)).toEqual({ trigger: 'first_model', reading_card: false, held_proposals: [] });
+    expect(programInstructions().split('Refer to a reading or change card only when the supplied state actually holds it.')).toHaveLength(2);
   });
 
   it('card, c7.1 and c7.7: a worked-out figure is one line with its relation, said as a short sentence by name, never "X is Y 0 multiplied by Z"', () => {

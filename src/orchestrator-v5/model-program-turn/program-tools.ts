@@ -25,7 +25,7 @@ import { createProposal, type ProposalChange, type ProposalOperation, type Propo
 import { findOperationSave, type RegistrationRowRead } from '../path-b/tools/core-write.js';
 import { isNoModelYet, isSavedRead, readSaved } from './saved-read.js';
 import { ok, refused, unavailable, type ToolOutcome } from '../path-b/tools/outcome.js';
-import { CanonicalQuantity, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
+import { APPROXIMATE_FIGURE, CanonicalQuantity, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
 import { compile } from '../model-program/compile.js';
 import { ledgeredResponsesCall, proposePostimage } from './draft.js';
 import { keepTheirFigures, theirFiguresIn, validatePostimage } from './postimage.js';
@@ -41,52 +41,66 @@ type Ctx = Pick<AgentToolContext, 'scenario_id' | 'authenticated_user_id' | 'tur
 /** `readTurn`: the store's read of a committed row, so a save that minted no version (a guest's) is found from its own row (C8). */
 export interface ProgramToolDeps { readonly dispatch: InternalDispatch; readonly proposals: ProposalStore; readonly readTurn?: RegistrationRowRead }
 
-/** Said with the turn's state on a program scenario: how its tools work. The standing instructions stay byte for byte. */
-export const PROGRAM_TURN_GUIDANCE = 'This scenario\'s model is a model program: read_canonical_context gives its quantities (with who gave each figure), goals, limits, options, open questions and its stored Run. '
-  + 'Only when the person asks to change the model (an answer, a correction, a new item or a removal), call propose_change ONCE: an answer to a listed question that gives a figure, or says they do not know, goes in answers, on that figure\'s id; '
-  + 'an answer in words with no figure (a measure, a deadline, a date, a definition) and any other change go in request, with their exact words for every figure of theirs, and in remove the exact ids (from read_canonical_context) Olumi proposes to remove for their review, under remove\'s rules: anything they asked to remove and, for a generic simplify request, redundant scaffolding and the non-protected records the change re-expresses in fewer records; every planned removal id is listed, because the drafter cannot remove an unlisted record. Answers in the order of your questions answer them in that order, and "I don\'t know" is an answer: put each on the item of the question it answers, and never ask one again in the same words. '
-  + 'Olumi\'s drafter writes a change in request, and the card shows every change. Explanations and questions need no proposal. '
-  + 'A turn shows one card; the person approves it, and apply_change then saves the model with a new Run.';
-
 /** The tools a reply the AI writes after the host's own work (a first draft, a Run press) may not call: it explains only. */
 export const HOST_REPLY_WITHHELD_TOOLS: readonly string[] = ['build_model_from_brief', 'propose_change', 'apply_change', 'run_analysis'];
+
+/** What a program turn the agent replies on began with: the host's first draft, a Run press, or any other turn. */
+export type ProgramTurnTrigger = 'first_model' | 'run_press' | 'continuation';
+export const PROGRAM_TURN_FACTS_PREFIX = 'THIS TURN: ';
 /**
- * T1 (Paul 26 Oct, "concise, science-grounded, bulleted, action-oriented coaching"): the AI writes the reply to a first draft
- * and to a Run press, from the model and Run in its state block. The host has already drafted, saved and run the model.
- * C2 (alpha spec §7, 27 Oct): the first reply also says what the calculation leaves out and why (the model's left_out
- * records), only when it holds any, so it tells apart what was used, what Olumi added and what is left out.
- * W8 run 3 (qualitative, its reading card refused): the card is named only when the turn holds one, so a reply never asks the
- * person to confirm a card that is not there.
+ * THIS TURN'S FACTS (prompts-v2, INTEGRATION §5, 29 Oct): sent after the state block in place of the turn guidance, which said
+ * what to do (the program instructions and each tool's description now say it, once). Facts only, never an instruction:
+ *  · trigger: first_model, the host has drafted the first model from the brief and saved and run it (T1: the reply is the AI's,
+ *    from the state block read after that save); run_press, the person pressed Run, and the state block's Run is the one just
+ *    shown to them; continuation, every other turn;
+ *  · reading_card: whether a card asks them to confirm or change Olumi's reading of their brief (W8 run 3: a refused reading
+ *    holds none). On a first draft the caller says, from the turn's own tool calls; otherwise it is the state block's;
+ *  · held_proposals: the cards the state block holds awaiting approval, by id; null when the state could not be read;
+ *  · requested_challenge: present only on a Challenge press on one card, whose selection note follows.
  */
-export const draftReplyGuidance = (cardHeld: boolean): string => 'Olumi has just drafted this model from the person\'s brief, saved it and run it once'
-  + (cardHeld ? '; a card asks them to confirm or change Olumi\'s reading of their brief. ' : '. ')
-  + 'Reply as their reasoning partner in a few short bullets: what the model shows for each option, by the Run\'s own facts, and the one thing it rests on most; '
-  + 'what Olumi assumed or added that they should check; what the calculation leaves out and why, briefly, only when the model\'s left_out holds any (say nothing of it otherwise); '
-  + 'and at most three questions: first the missing premise that could most change which option is most likely to achieve the aim, saying why (confirming the aim or its measure first where it is Olumi\'s reading); inputs needed only for the arithmetic after. '
-  + (cardHeld ? 'End by asking them to confirm the reading on the card or say what to change. ' : '') + 'Plain words, each thing said once.';
-export const RUN_REPLY_GUIDANCE = 'The person pressed Run; the Run in the state block is the one just shown to them. '
-  + 'Reply as their reasoning partner in a few short bullets: each option\'s result by the Run\'s own facts, what it rests on, what would change it, '
-  + 'and one next step that would test the assumption it rests on most. Plain words, each thing said once.';
+export function programTurnFacts(trigger: ProgramTurnTrigger, state: unknown, given: { readonly readingCard?: boolean; readonly challenge?: boolean } = {}): string {
+  const held = state !== null && typeof state === 'object' && Array.isArray((state as Rec)['awaiting_approval']) ? (state as Rec)['awaiting_approval'] as Rec[] : null;
+  return `${PROGRAM_TURN_FACTS_PREFIX}${JSON.stringify({ trigger,
+    reading_card: given.readingCard ?? (held ?? []).some((p) => p['reading'] === true),
+    held_proposals: held === null ? null : held.map((p) => p['proposal_id']),
+    ...(given.challenge === true ? { requested_challenge: true } : {}) })}`;
+}
 
 /**
  * AN ANSWER to a listed question (DL 24 Oct): the figure it answers, declared by the AI with the canonical model's own fields,
  * its status and whose it is, as the AI declares them (the host never assigns them; strip, Paul 26 Oct): known, their
  * figure in their exact words; unknown, their "I don't know", quoted, the basis saying what would size it (never asked again);
- * estimated, Olumi's estimate with its range and basis, never their words.
+ * estimated, Olumi's estimate with its range and basis, never their words. prompts-v2 (29 Oct, `tool-descriptions.txt`): each
+ * field's words are an answer's own; its fields and their types are the canonical quantity's, unchanged. The approximate-figure
+ * basis is quoted exactly, since the compiler knows it by its exact words (`isApproximate`).
  */
+const Q = CanonicalQuantity.shape;
+const ENDPOINT = "Both supplied or estimated range endpoints, otherwise null. Do not manufacture endpoints for an approximate point.";
 const Answer = CanonicalQuantity.pick({ id: true, value: true, low: true, high: true, range_kind: true, party: true, quote: true, basis: true })
-  .extend({ status: z.enum(['known', 'estimated', 'unknown']), author: z.enum(['person', 'olumi']).describe('Whose answer it is: person, their words this turn; olumi, Olumi\'s estimate.') }).strict();
+  .extend({
+    id: Q.id.describe("The existing quantity id whose listed question is answered."),
+    value: Q.value.describe("The supplied point or an Olumi estimate's most likely point inside its range; null if absent or unknown."),
+    low: Q.low.describe(ENDPOINT),
+    high: Q.high.describe(ENDPOINT),
+    range_kind: Q.range_kind.describe("bounds for explicitly firm ends; plausible for explicitly rough ends or an Olumi estimate; null for a point. For unresolved human range meaning, use request with the original endpoints and words rather than guess."),
+    party: Q.party.describe("The reported speaker exactly as supplied; null otherwise."),
+    quote: Q.quote.describe("An unbroken verbatim span from the person's actual answer; null for Olumi's estimate. Never quote an Olumi request or explanation as theirs."),
+    basis: Q.basis.describe(`For a reading such as an unambiguous “all”, say how their words were read. For an approximate point use the canonical approximate-figure basis, exactly: "${APPROXIMATE_FIGURE}". `
+      + "For Olumi's estimate give its reference class and context; for unknown say what evidence could size it. Otherwise null. If their inability needs an estimate as well, use request to retain the uncertainty separately and let the drafter propose the estimate."),
+    status: z.enum(['known', 'estimated', 'unknown']).describe("known for a supplied figure; estimated for a responsible Olumi estimate; unknown for an explicit inability to give a figure. Unknown is never zero."),
+    author: z.enum(['person', 'olumi']).describe("person for their supplied figure or uncertainty; olumi for Olumi's estimate."),
+  }).strict();
 type AnswerT = z.infer<typeof Answer>;
 export const ProgramChangeParams = z.object({
-  public_label: z.string().describe('What the person is asked to approve, in plain words.'),
-  basis: z.string().describe('Why Olumi proposes it.'),
-  request: z.string().describe('The change the person asked for, in plain words, with their exact words for every figure of theirs.'),
+  public_label: z.string().describe("One short, plain description of the change the person would approve."),
+  basis: z.string().describe("Why this change follows their request and helps their reasoning."),
+  request: z.string().describe("Olumi's instruction for the structural change, naming affected ids and preserving the exact verified human wording for supplied figures. Empty when answers alone express the complete change. This instruction is never itself a human quote."),
   // A simplify's removals (29 Oct, Box 3 European simplify: the agent listed Olumi's pilot option, its prerequisite and the
   // person's figures as removals the person "asked" for, while the update prompt folds Olumi's own unused items). The list is
-  // the change's PROPOSED removals, reviewed on its card (the PL's 00:57 contract, verbatim); their figures are also refused
-  // at the host (postimage.ts theirFiguresIn).
-  remove: z.array(z.string()).describe('IDs of removals proposed for this reviewed change, from read_canonical_context. Follow the person\'s explicit named corrections/removals within protected-figure rules: keep a person-authored quantity with a figure in hand under its ID, correcting it or marking it not applicable only on their word. For a generic simplify request, only redundant or unneeded Olumi scaffolding, or non-protected records whose full consequential meaning is re-expressed in the model. A requested size never permits losing a supplied figure, useful option, causal route, prerequisite, risk, uncertainty or attribution. [] for none.'),
-  answers: z.array(Answer).default([]).describe('Their answers to the listed questions, each on the figure it answers (its id from read_canonical_context); [] for none.'),
+  // the change's PROPOSED removals, reviewed on its card (the PL's 00:57 contract; prompts-v2's words since 29 Oct); their
+  // figures are also refused at the host (postimage.ts theirFiguresIn).
+  remove: z.array(z.string()).describe("Existing ids proposed for removal. Keep every person-authored quantity with a figure under its id; correct it or mark it not_applicable only on the person's explicit word. For generic simplification, remove only redundant Olumi scaffolding or non-protected records whose full consequential meaning is re-expressed in fewer records. Preserve supplied figures, useful options, measures, causal routes, supported calculations, conditions, risks, dissent, uncertainty and attribution. A requested size does not authorize loss. [] for none."),
+  answers: z.array(Answer).default([]).describe("Exact answers to listed questions on existing quantity ids; [] for none. An ambiguous destination needs clarification. A direct answer cannot change a quantity's unit; it replaces the figure and any date or span it was counted from. A new date or span goes in request."),
 }).strict();
 export type ProgramChangeArgs = z.input<typeof ProgramChangeParams>;
 
