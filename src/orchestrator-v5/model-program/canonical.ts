@@ -62,7 +62,7 @@ export const HOST_OWNED_FIELDS = ['approval', 'approved_by', 'author_id'] as con
 /** Who asserted it, in whose words, and whether the person has accepted it. Separate facts, never one. */
 const attribution = {
   author: z.enum(AUTHORS).describe(
-    'Who introduced this assertion: person for verified human content, including reported speech, uncertainty or a question; olumi for additions or interpretations. Keep added interpretation separately attributed; certainty and approval do not determine origin.'),
+    'Who introduced this assertion: person for verified human content, including reported speech, uncertainty or a question; olumi for additions or interpretations. Keep added interpretation separately attributed; certainty and acceptance do not determine origin.'),
   party: z.string().nullable().describe(
     'When the person reports someone else\'s statement ("our accountant says"): that someone, as written. Null otherwise.'),
   quote: z.string().nullable().describe(
@@ -131,7 +131,7 @@ export const CanonicalQuantity = z.object({
   direction: z.enum(['raises', 'lowers']).nullable().describe(
     'For an unsized coefficient: raises or lowers only when the causal direction is supported; null if unknown or the uncertainty crosses zero. Null for a sized coefficient or other quantity.'),
   author: z.enum(QUANTITY_AUTHORS).describe(
-    'person for their supplied figure, date, span or uncertainty; olumi for an added estimate or interpretation; structure only for necessary exact mathematical constants with a known point and no range. A structural zero may mean no added activity, never an unknown current level. Retain a stated time\'s human quote; place any added calendar convention on a separate Olumi assumption.'),
+    'person for their supplied figure, date, span or uncertainty; olumi for an added estimate or interpretation; structure only for necessary exact mathematical constants with a known point and no range. A structural zero may mean no added activity, never an unknown current level. Retain a stated time\'s human quote; the host sets who a count from it is from.'),
   party: attribution.party,
   quote: attribution.quote,
   approval: attribution.approval,
