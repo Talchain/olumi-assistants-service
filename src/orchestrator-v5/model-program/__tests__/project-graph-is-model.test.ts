@@ -35,9 +35,11 @@ describe('the board draws the saved model: Paul\'s hiring scenario, 27 Oct', () 
     expect(sizes.map((id) => [id, nodeOf(p, id).kind, nodeOf(p, id).value_basis?.kind])).toEqual([
       ['developer_productivity_gain', 'factor', 'worked_out'], ['lead_defect_effect', 'factor', 'worked_out'], ['developer_defect_effect', 'factor', 'worked_out'],
     ]);
-    // Q1 (28 Oct): the hires are said on the option cards, so each size's link starts from the option that hires.
+    // Q1 (28 Oct): an off/on hire is said on its option card, so its size's link starts from the option that hires.
+    // DET-HARM D186 (28 Oct): two developers (0 to 2) keep "Developers hired" as a card, so a per-developer size is never drawn
+    // as the option's whole effect. Changed knowingly.
     expect(sizes.map((id) => (p.graph.edges as Rec[]).filter((e) => e.coefficient_id === id).map((e) => e.id))).toEqual([
-      ['hire_two_developers__productivity'], ['hire_tech_lead__defect_rate'], ['hire_two_developers__defect_rate'],
+      ['developers_added__productivity'], ['hire_tech_lead__defect_rate'], ['developers_added__defect_rate'],
     ]);
     // Contrast (right before, unchanged): what the model works out as a result is an outcome; the one with an exact figure
     // today carries it in the model's own unit (1 / 6 per developer); an estimated size used only on its link has no card.
@@ -75,12 +77,14 @@ describe('the board draws the saved model: Paul\'s hiring scenario, 27 Oct', () 
     ]);
     // Q1 (Paul, 28 Oct: the situation, not the arithmetic): "Tech leads hired" and "Developers hired" are the levers the
     // options set, said on each option's card with their own label and figure, never their own cards.
-    expect(['tech_leads_added', 'developers_added'].map((id) => [nodeOf(p, id), itemOf(p, id).shown_as])).toEqual([
-      [undefined, { on_node: 'hire_tech_lead' }], [undefined, { on_node: 'hire_two_developers' }]]);
+    // DET-HARM D185/D186 (28 Oct): only the tech-lead hire is an off/on switch (0 to 1); two developers (0 to 2) multiply the
+    // per-developer sizes, so "Developers hired" keeps its own card and its links keep their true sizes. Changed knowingly.
+    expect([nodeOf(p, 'tech_leads_added'), itemOf(p, 'tech_leads_added').shown_as]).toEqual([undefined, { on_node: 'hire_tech_lead' }]);
+    expect([nodeOf(p, 'developers_added')?.label, itemOf(p, 'developers_added').shown_as]).toEqual(['Developers hired', { node: 'developers_added' }]);
     expect(nodeOf(p, 'hire_two_developers').interventions.developers_added).toMatchObject({ label: 'Developers hired', value: 2 });
     expect((p.graph.edges as Rec[]).filter((e) => 'strength' in e || 'strength_mean' in e || 'weight' in e).map((e) => e.id)).toEqual([]);
     // Contrast (right before, unchanged): every sign the model does state is kept, a negative estimate's included.
-    expect(['current_developers__full_developer_contribution', 'hire_tech_lead__productivity', 'hire_tech_lead__productivity__via__tech_leads_added', 'hire_two_developers__productivity__via__developers_added', 'lead_spend__total_spend']
+    expect(['current_developers__full_developer_contribution', 'hire_tech_lead__productivity', 'hire_tech_lead__productivity__via__tech_leads_added', 'developers_added__productivity__2', 'lead_spend__total_spend']
       .map((id) => edgeOf(p, id).effect_direction)).toEqual(['negative', 'positive', 'negative', 'negative', 'positive']);
   });
 

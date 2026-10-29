@@ -654,7 +654,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const to = has(s.to) ? Q.get(s.to) : undefined;
     // An exact setting above where the switch stands. Any range keeps the switch drawn: a plausible span gives no bound, and
     // its ends are never read as one (Codex r3 6; PL 04:07Z).
-    return to !== undefined && has(to.value) && !(has(to.low) && has(to.high) && to.low !== to.high) && to.value > q.value!;
+    // An off/on switch only (DET-HARM D185/D186, 28 Oct): 0 to exactly 1, so the option's link carries the switch link's size
+    // one for one. Turned to any other figure (0 to 2), the size would be multiplied, so the switch keeps its card.
+    return to !== undefined && has(to.value) && !(has(to.low) && has(to.high) && to.low !== to.high) && q.value === 0 && to.value === 1;
   }));
   const switches = new Map(model.quantities.filter((q) => q.author === 'structure' && q.status === 'known' && q.kind === 'fact' && controlled.has(q.id) && has(q.value)
     && !(has(q.low) && has(q.high) && q.low !== q.high) && foldable(q) && turnsUp(q)).map((q) => [q.id, optionsSetting(q.id)[0]!] as const));

@@ -342,7 +342,9 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(p.graph.nodes.filter((n) => notes.some((i) => i.record_id === n.id))).toEqual([]);
     expect(p.graph.nodes.filter((n) => n.kind === 'action').map((n) => n.id)).toEqual(['mp:limit:maintain_code_quality']);
     // Q1 (Paul, 28 Oct: the situation, not the arithmetic): the two hiring levers are said on their option cards (16 → 14).
-    expect(p.graph.nodes).toHaveLength(14);
+    // DET-HARM D185/D186 (28 Oct): only the tech-lead hire is an off/on switch (0 to 1); two developers (0 to 2) multiply the
+    // per-developer size, so "Developers hired" keeps its card (14 → 15). Changed knowingly.
+    expect(p.graph.nodes).toHaveLength(15);
   });
 
   it('W3 contrast (26 Oct), a saved draft with no notes has no text card; its cards in order (Q1, 28 Oct: its total and zero are said on the goal)', () => {
