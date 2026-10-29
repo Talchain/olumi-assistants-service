@@ -245,6 +245,9 @@ export const EIGHT_IN_TEN_WORDS = 'the range it falls in 8 times out of 10';
 const TAIL_ROOM = 4;
 /** W10: once per result, where the chances shown rest on two or more uncertain inputs (each drawn on its own stream, prng.ts). */
 export const INDEPENDENCE_WORDS = 'Olumi treats these figures as varying independently, except where the model links them.';
+/** "Your figures" rests on Olumi's reading of who said what (each record's author is the drafter's): its fallibility is said
+ *  once per result wherever a basis says "your figures" (SPEC §4, line 157; GAP 3). */
+export const AUTHORSHIP_WORDS = 'Olumi read from your words which figures are yours; if it has one wrong, say so.';
 const whoseRange = (author: 'person' | 'olumi'): string => (author === 'person' ? '(your range)' : '(Olumi’s estimate)');
 /**
  * WHEN AN OPTION IS NAMED AS MOST LIKELY TO ACHIEVE THE GOAL (W6): the Run's shared draws separate it from every other option,
@@ -715,7 +718,10 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     ...result.options.flatMap((o) => o.per_goal.flatMap((g) => (isWithheld(g)
       ? [`${q(allGoals.find((x) => x.goal_id === g.goal_id)?.label ?? g.goal_id)} with ${q(optionLabel.get(o.option_id) ?? o.option_id)} is not shown: in ${g.withheld.count.toLocaleString('en-GB')} of ${result.draws.toLocaleString('en-GB')} simulated draws ${whatHappened(o, g.withheld.quantities)}.`]
       : []))),
-    ...waiting.map((g) => stop(`${q(g.label)} ${goalWaits(g)}`)),
+    // Said once (Paul, 27 Oct): with one aim waiting, what it waits on is the view's own waits_on list, which the UI shows as
+    // its headline; a note restating it is never sent. With two or more, each note says which aim waits on what.
+    ...(waiting.length === 1 && (input.blockers ?? []).length > 0 && waitsOnWords(blockers, new Set([waiting[0]!.goal_id])) !== undefined ? []
+      : waiting.map((g) => stop(`${q(g.label)} ${goalWaits(g)}`))),
     // The 11 Oct decision (:74): what the chance covers (the measured aims it uses) and what it leaves out (aims with no
     // measure, the model's left-out records); never a claim that it covers everything.
     ...(covered.length > 0 && notCovered.length > 0 ? [`Covers: ${listWords(covered)} · Leaves out: ${listWords(notCovered.map(q))}`] : []),
@@ -810,6 +816,9 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
         + (top.c.precision_95[1] < 0.5 ? ` Even so, in this model it is more likely to miss ${aim} than to meet it.` : '') + rests };
   })();
   const known = input.current !== undefined && input.run !== undefined;
+  // GAP 3: once per result, wherever any of its words call figures "yours".
+  const saysYours = JSON.stringify([options, leader ?? null, goal_chance]).includes('your figures');
+  const disclosed = saysYours ? { ...goal_chance, notes: [...(goal_chance.notes ?? []), AUTHORSHIP_WORDS] } : goal_chance;
   return {
     schema: 'canonical_analysis_view.v1', source: 'stored_run_facts',
     run: input.run ?? null,
@@ -822,7 +831,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     leader_licence: leader?.licence ?? 'withheld',
     ...(leader !== undefined ? { leader } : {}),
     options,
-    ...(Object.keys(goal_chance).length > 0 ? { goal_chance } : {}),
+    ...(Object.keys(disclosed).length > 0 ? { goal_chance: disclosed } : {}),
   };
 }
 

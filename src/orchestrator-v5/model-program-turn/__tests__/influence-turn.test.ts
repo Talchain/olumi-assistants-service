@@ -122,12 +122,9 @@ describe('Box 1a: the card, the counts, the update and the store', () => {
       { id: 'mood_members', code: 'unknown', label: 'How members feel → members', scope: ['keep_members'], answer: null, basis: 'Happier members stay only if the classes suit them.' },
       { id: 'instructor_leaves', code: 'unknown', label: 'The instructor leaves', scope: ['keep_members'], answer: null },
     ]);
-    expect(view.goal_chance.notes).toEqual(expect.arrayContaining([
-      '‘Keep at least 140 members’ waits on ‘How members feel’, which no one can size yet (No one can measure how members feel yet; repeat bookings might show it), '
-        + '‘Evening classes → How members feel’, which no one can size yet (Members have asked for evening slots), '
-        + '‘How members feel → members’, which no one can size yet (Happier members stay only if the classes suit them) and ‘The instructor leaves’, which no one can size yet.',
-      'The risk ‘The instructor leaves’ is not in this run: The calculation cannot size it.',
-    ]));
+    // Said once (29 Oct): one aim waits, so what it waits on is the waits_on list above (with each item's basis), not a note too.
+    expect(view.goal_chance.notes).toEqual(expect.arrayContaining(['The risk ‘The instructor leaves’ is not in this run: The calculation cannot size it.']));
+    expect(view.goal_chance.notes.join(' ')).not.toContain('‘Keep at least 140 members’ waits on');
     // Evening classes' link in words reaches only the members aim, which waits on it above; the option is compared on takings (spec §3.0).
     expect(view.goal_chance.notes.join(' ')).not.toContain('The option ‘Evening classes’ is not in this run');
     expect(JSON.stringify(view)).not.toMatch(/undefined|needs your answer/);

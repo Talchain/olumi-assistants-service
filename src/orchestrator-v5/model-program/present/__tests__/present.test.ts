@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { ExecutableModel, FixedAuthor, Goal, Limit, Option, Quantity, Reading, Withheld } from '../../executable.js';
 import { simulate } from '../../simulate/simulate.js';
 import { separated } from '../../simulate/paired.js';
-import { NO_DRIVER_REASON, NO_RANGE_REASON, presentAnalysisView, type PresentInput, type PresentQuantity } from '../present.js';
+import { AUTHORSHIP_WORDS, NO_DRIVER_REASON, NO_RANGE_REASON, presentAnalysisView, type PresentInput, type PresentQuantity } from '../present.js';
 
 type Rec = Record<string, any>;
 const ONE: Goal['window'] = { start_period: 0, periods: 1 };
@@ -120,6 +120,19 @@ describe('present: the canonical analysis view from a simulated model', () => {
     expect(cell(v, 'raise').face).toBe(`‘Raise to £59’: 0% chance of ${joint}, in this model. It rests on your figures. ${RAISE_WHY}.`);
   });
 
+  it('GAP 3 (SPEC §4): wherever a result calls figures "yours", it says once that this is Olumi\'s reading of who said what', () => {
+    // Every input is the person's: the cells and both targets say "on your figures", and the notes say the reading once.
+    const v = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')), MRR_GOALS, MRR_OPTIONS), MRR_LABELS);
+    expect(cell(v, 'hold').face).toContain('It rests on your figures.');
+    expect(v.goal_chance.notes.filter((n: string) => n === AUTHORSHIP_WORDS)).toEqual([AUTHORSHIP_WORDS]);
+    expect(AUTHORSHIP_WORDS).toBe('Olumi read from your words which figures are yours; if it has one wrong, say so.');
+    // Contrast: an Olumi range on the path, with no figure called theirs anywhere in the result: no such note.
+    const olumi = present(model(MRR_QUANTITIES(range('per_pound', -2.2, -1.4, -1.8, 'customers', 'olumi_estimate')), MRR_GOALS, MRR_OPTIONS),
+      { ...MRR_LABELS, per_pound: { label: 'Customers lost per £1 of price rise', author: 'olumi' } });
+    expect(JSON.stringify(olumi).replace(AUTHORSHIP_WORDS, '')).not.toContain('your figures');
+    expect(olumi.goal_chance?.notes ?? []).not.toContain(AUTHORSHIP_WORDS);
+  });
+
   it('(b) the basis: "on your figures" only when every input is the person’s; otherwise "if" with Olumi’s assumptions listed', () => {
     // (i) Olumi's own estimated range for the per-£ loss, −2.2 to −1.4 around −1.8 (W10: read as the range it falls in 8 times
     //     out of 10, a spread): conditional on Olumi's provisional reading of its own range, for every option and every target.
@@ -170,7 +183,8 @@ describe('present: the canonical analysis view from a simulated model', () => {
         reasons: [{ code: 'goal_asks', message: 'It needs your answer.' }] });
     }
     expect(v.goal_chance.waits_on).toEqual(waits_on);
-    expect(v.goal_chance.notes).toContain('‘Reach 100 cases’ waits on ‘Cases per specialist’.');
+    // Said once (29 Oct): with one aim waiting, its cells' why and the waits_on list say it; no note restates it.
+    expect(v.goal_chance.notes ?? []).not.toContain('‘Reach 100 cases’ waits on ‘Cases per specialist’.');
     expect(JSON.stringify(v)).not.toContain('?');
     expect(v.goal_chance.chance_words).toBeUndefined();
     expect(v.goal_chance.targets.joint).toEqual({ status: 'withheld',
