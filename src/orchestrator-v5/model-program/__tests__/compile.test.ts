@@ -32,7 +32,7 @@ import { evaluateCanonical } from '../../model-program-turn/evaluate.js';
 // ── builders ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 const base = { party: null, approval: 'proposed' as const, approved_by: null, author_id: null };
 const qty = (id: string, unit: string, f: Partial<CanonicalQuantityT>): CanonicalQuantityT => ({
-  id, label: id.replace(/_/g, ' '), unit, kind: 'fact', value: null, low: null, high: null, range_kind: null, status: 'known', question: null, basis: null, direction: null, floor: null, ceiling: null, author: 'person', quote: null, ...base, ...f,
+  id, label: id.replace(/_/g, ' '), unit, kind: 'fact', value: null, low: null, high: null, range_kind: null, status: 'known', question: null, stated_time: null, basis: null, direction: null, floor: null, ceiling: null, author: 'person', quote: null, ...base, ...f,
 });
 const person = (id: string, unit: string, value: number, quote: string) => qty(id, unit, { value, quote });
 const structure = (id: string, unit: string, value: number, basis: string) => qty(id, unit, { value, author: 'structure', basis });
@@ -67,7 +67,7 @@ const limit = (id: string, label: string, quantity: string, cmp: '>=' | '<=' | '
 const model = (over: Partial<CanonicalModelT>): CanonicalModelT => ({
   version: 'canonical.v1', question: 'Should the bakery buy a second oven?', period: 'week',
   quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [],
-  claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [], title: null, coaching_questions: [], ...over,
+  claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [], title: null, coaching_questions: [], decide_by: null, ...over,
 });
 const codes = (r: ReturnType<typeof compile>) => r.errors.map((e) => e.code);
 /**

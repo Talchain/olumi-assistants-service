@@ -355,6 +355,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   // before. Olumi's coaching questions ride on it, at most the three the first screen shows (Paul 27 Oct).
   const title = has(model.title) && model.title.trim() !== '' ? model.title : null;
   nodes.push({ id: DECISION_NODE_ID, kind: 'decision', label: title ?? model.question, ...(title !== null ? { description: model.question } : {}),
+    // When they must decide, as they said it, never part of a calculation (TIME-AND-DECIDE-BY 29 Oct).
+    ...(model.decide_by ? { decide_by: model.decide_by } : {}),
     ...(model.coaching_questions.length > 0 ? { coaching_questions: model.coaching_questions.slice(0, 3) } : {}) });
   for (const g of model.goals) {
     const per = compiled.perGoal.find((p) => p.goal_id === g.id);

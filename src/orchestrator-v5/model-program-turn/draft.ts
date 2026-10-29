@@ -12,6 +12,7 @@ import { coreBudget } from '../agent-lane/model-budgets.js';
 import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
 import { todayInLondon } from '../goal-target/deadline-date.js';
+import { countStatedTime } from './stated-time.js';
 import { compile, compileJson, normalise, type CompileError, type CompileResult } from '../model-program/compile.js';
 import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, CanonicalUpdate, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, todayLine, UPDATE_CHANGE_LABEL, UPDATE_JSON_SCHEMA, UPDATE_PREFIX,
   UPDATE_REPAIR_PREFIX, type CanonicalUpdateT } from './prompt.js';
@@ -61,9 +62,9 @@ export type DraftOutcome = {
 
 /**
  * The request body: fixed instructions and schema first (the cached prefix), then the conversation. An update's schema is its
- * changes only; `periodZero` is the saved model's period-0 date (`todayLine`), today when it has none.
+ * changes only; `periodZero` is the saved model's period-0 date (`todayLine`): today on a first draft, null when not recorded.
  */
-export function draftRequestBody(input: readonly InputMessage[], update: boolean, today: string, periodZero: string = today): StreamedResponsesBody {
+export function draftRequestBody(input: readonly InputMessage[], update: boolean, today: string, periodZero: string | null = today): StreamedResponsesBody {
   return {
     model: coreBudget(DRAFT_REASONING_EFFORT).model,
     instructions: `${DRAFTING_INSTRUCTIONS}\n\n${todayLine(today, periodZero)}`,
@@ -78,8 +79,8 @@ export function draftRequestBody(input: readonly InputMessage[], update: boolean
 /** The repair turn: the compiler's sentences, one per line. */
 export const repairMessage = (errors: readonly CompileError[], prefix = REPAIR_PREFIX): string => `${prefix}\n${errors.map((e) => `- ${e.message}`).join('\n')}`;
 
-type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'title' | 'period' | 'coaching_questions' | 'history'>;
-const FAMILIES = Object.keys(CanonicalModel.shape).filter((k) => !['version', 'question', 'title', 'period', 'coaching_questions', 'history'].includes(k)) as Family[];
+type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'title' | 'period' | 'coaching_questions' | 'decide_by' | 'history'>;
+const FAMILIES = Object.keys(CanonicalModel.shape).filter((k) => !['version', 'question', 'title', 'period', 'coaching_questions', 'decide_by', 'history'].includes(k)) as Family[];
 /**
  * THE HOST'S FIELDS ON A DRAFT (Paul 26 Oct: no unnecessary AI work). The drafter is never sent approval, approved_by or author_id
  * (`prompt.ts`), so before its JSON is read, every record and every link in a relation takes the host's values: proposed,
@@ -110,8 +111,11 @@ export function mergeUpdate(saved: CanonicalModelT, update: CanonicalUpdateT): C
     return [f, [...was.filter((r) => !gone.has(r.id)).map((r) => back.find((x) => x.id === r.id) ?? r),
       ...back.filter((r, i) => !ids.has(r.id) || back.findIndex((x) => x.id === r.id) !== i)]];
   }));
+  // When they must decide (TIME-AND-DECIDE-BY v2): null keeps the saved one; {date: null, quote: null} clears it; any other replaces it.
+  const d = update.decide_by;
+  const decideBy = d === null ? saved.decide_by : d.date === null && d.quote === null ? null : d;
   return { ...saved, ...families, question: update.question ?? saved.question, period: update.period ?? saved.period,
-    coaching_questions: update.coaching_questions ?? saved.coaching_questions } as CanonicalModelT;
+    coaching_questions: update.coaching_questions ?? saved.coaching_questions, decide_by: decideBy } as CanonicalModelT;
 }
 /**
  * An update read as a first draft is, only where it speaks (Codex BLOCK on #3740): `read` is the first draft's reading of
@@ -144,14 +148,16 @@ export function ledgeredResponsesCall(): ResponsesCall {
  * `interpret` (a FIRST draft): the model returned, compiled, saved and sent back to the agent is the compiler's reading of
  * the draft (`normalise`: a structure figure that is no structural constant is their question), never the raw draft
  * (buddy, #3709 r7). An update is read the same way, so its postimage is in the saved form. `periodZero` (an update): the
- * saved model's period-0 date, the first draft's today (`drafted_on`); a first draft, and a program saved before it was kept,
- * count from today.
+ * saved model's period-0 date, the first draft's today (`drafted_on`); a first draft counts from today; a program saved
+ * before it was kept has none (PL HOLD a), and its date line says so. A position span counts from today (PL 13:40Z).
  */
 export async function draftCanonicalModel(brief: string | readonly InputMessage[], call: ResponsesCall, sourceText: string = typeof brief === 'string' ? brief : '',
   opts: { readonly interpret?: boolean; readonly onto?: CanonicalModelT; readonly periodZero?: string } = {}): Promise<DraftOutcome> {
   const onto = opts.onto;
   const today = todayInLondon(new Date());
-  const periodZero = opts.periodZero ?? today;
+  // The day stated time is counted from: the saved period 0; a first draft's is today. An update on a model saved before its
+  // period 0 was kept has none, never today (PL HOLD a): what needs it is withheld, naming the missing start date.
+  const anchor = opts.periodZero ?? (onto === undefined ? today : null);
   const input: InputMessage[] = typeof brief === 'string' ? [{ role: 'user', content: brief }] : [...brief];
   const attempts: DraftAttempt[] = [];
   let model: CanonicalModelT | null = null;
@@ -159,7 +165,8 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
   for (let a = 0; a <= MAX_REPAIRS; a += 1) {
     const t0 = Date.now();
     let out: CallOutput;
-    try { out = await call(draftRequestBody(input, onto !== undefined, today, periodZero)); } catch (err) {
+    // The date line names the same anchor the host counts from: none recorded is said so, never today (independent read).
+    try { out = await call(draftRequestBody(input, onto !== undefined, today, anchor)); } catch (err) {
       attempts.push({ attempt: a, errors: null, failed: `call failed: ${err instanceof Error ? err.name : 'error'}`, provider_error: providerErrorOf(err), status: null, usage: null, ms: Date.now() - t0 });
       break;
     }
@@ -174,15 +181,23 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
     const update = onto === undefined ? null : CanonicalUpdate.safeParse(json);
     const whole = update?.success ? mergeUpdate(onto!, update.data) : json;
     const parsed = CanonicalModel.safeParse(whole);
+    // Every stated date or span counted in the model's periods by the host, never the AI (`stated-time.ts`), from the saved
+    // period 0. Only the drafter's own records (v2): a first draft's every quantity; an update's, only those it returns (on the
+    // merged model, so each is read in every window that uses it). A saved quantity is never recounted, so a figure the person
+    // gave is never overwritten.
+    const own = onto === undefined || !parsed.success ? undefined : update?.success ? new Set(update.data.quantities.map((x) => x.id))
+      : new Set(parsed.data.quantities.filter((x) => JSON.stringify(x) !== JSON.stringify(onto.quantities.find((s) => s.id === x.id))).map((x) => x.id));
+    // A position span counts from the day it is said: today (PL 13:40Z); on a first draft today is the anchor itself.
+    const counted = parsed.success ? countStatedTime(parsed.data, anchor, own, today) : undefined;
     // The first draft's reading (`interpret`); an update takes it only where it speaks (`readUpdate`).
-    const reading = parsed.success && opts.interpret === true ? normalise(parsed.data) : undefined;
+    const reading = counted !== undefined && opts.interpret === true ? normalise(counted) : undefined;
     const read = reading !== undefined && update?.success ? readUpdate(onto!, update.data, reading) : reading;
     // A first draft (the brief alone) must give every ask its question, but its last attempt falls back to the base behaviour
     // (an ask with no question is a typed blocker), so a draft is never refused whole for one; an update keeps the saved
     // model's asks as they are.
     const compileOpts = { sourceText, asksNeedQuestions: typeof brief === 'string' && a < MAX_REPAIRS };
-    const result = read !== undefined ? compile(read, compileOpts) : compileJson(whole, compileOpts);
-    if (parsed.success) { model = read ?? parsed.data; compiled = result; }
+    const result = read !== undefined ? compile(read, compileOpts) : counted !== undefined ? compile(counted, compileOpts) : compileJson(whole, compileOpts);
+    if (counted !== undefined) { model = read ?? counted; compiled = result; }
     attempts.push({ attempt: a, errors: result.errors, status: out.status, usage: out.usage, ms });
     if (result.errors.length === 0 || a === MAX_REPAIRS) break;
     // C6: an update's repair feedback is the host's (the compiler's sentences), never the person's, so it is developer-role, as
@@ -197,7 +212,7 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
  * conversation holding the person's words, the saved model and the change, returns only the records it changes or adds and
  * the ids it removes; the host merges them by id onto the saved model (`mergeUpdate`), read as a first draft is. The caller
  * validates the merged model exactly (`validatePostimage`). `periodZero`: the saved program's `drafted_on`, so a date in the
- * change counts from the model's own period 0 (undefined on a program saved before it: today, as before).
+ * change counts from the model's own period 0 (undefined on a program saved before it: none, withheld where needed).
  * C6 ("Source quote, contributor and approval actor stay distinct"): `change` is the agent's own instruction, never the
  * person's words, so it is sent as Olumi's (`UPDATE_CHANGE_LABEL`), with the update's text, in the developer role; the only
  * user-role message is the person's verified words (`personWords`), where they always were. Staging 29 Oct: sent as the

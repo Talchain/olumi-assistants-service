@@ -514,7 +514,7 @@ describe('the model-program turn on the real core route', () => {
       expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
       const read = programReadOf(persisted!);
       const saved = (read.kind === 'program' ? read.program.canonical : null)!;
-      const none = { version: saved.version, question: null, period: null, coaching_questions: null, quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [], claims: [],
+      const none = { version: saved.version, question: null, period: null, coaching_questions: null, decide_by: null, quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [], claims: [],
         evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: [] };
       const broken = { ...none, claims: [{ id: 'nowhere', text: 'Bread sells.', concerns: ['no_such_record'], author: 'olumi', quote: null, party: null, approval: 'proposed', approved_by: null, author_id: null }] };
       const landlord = { id: 'landlord_agrees', text: 'Only once the landlord agrees.', kind: 'prerequisite', concerns: ['second_oven'], author: 'person', party: null,
@@ -551,7 +551,8 @@ describe('the model-program turn on the real core route', () => {
     expect(body.reasoning).toEqual({ effort: 'medium' });
     // Alpha G14: today's date (Europe/London) follows the fixed instructions, so a stated date counts from it.
     const london = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-    expect(body.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is ${london} (Europe/London). A date they state counts in whole periods from today, which is period 0.`);
+    // 29 Oct: stated time and decide-by (TIME-AND-DECIDE-BY design); before it "… (Europe/London). A date they state counts in whole periods from today, which is period 0."
+    expect(body.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is ${london} (Europe/London), period 0. Read the dates they state against it.`);
     // The date sent is recorded beside the fixed instructions' hash, so the record says exactly what was sent (Codex on #3760).
     expect(r.json().model_program.draft).toMatchObject({ prompt_sha256: createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex'), today: london });
     expect(body.text.format).toMatchObject({ type: 'json_schema', name: 'canonical_model', strict: true });
@@ -1090,7 +1091,8 @@ describe('the model-program turn on the real core route', () => {
     it('(a) neither schema the drafter is sent (first draft, update) holds approval or author_id anywhere, and each stays valid strict output', () => {
       // Positive control: the walker reaches every attributed object (each record family, the five relation forms, a link, an
       // option's setting); neither holds a history entry (W2: the host's).
-      for (const [name, schema, quoted] of [['draft', CANONICAL_JSON_SCHEMA, 19], ['update', UPDATE_JSON_SCHEMA, 19]] as const) {
+      // 29 Oct: stated time and decide-by (TIME-AND-DECIDE-BY design); before it 19 and 19 (decide_by is one more object holding a quote).
+      for (const [name, schema, quoted] of [['draft', CANONICAL_JSON_SCHEMA, 20], ['update', UPDATE_JSON_SCHEMA, 20]] as const) {
         const a = audit(schema);
         expect([a.host, a.loose, a.quoted], name).toEqual([[], [], quoted]);
         expect(JSON.stringify(schema), name).not.toMatch(/approval|author_id/);
@@ -1098,7 +1100,8 @@ describe('the model-program turn on the real core route', () => {
       // Contrast: the same walker on the STORED format finds every one: approval on 18 objects, author_id on those and the
       // history entry, each as a property and a required key.
       const stored = audit(z.toJSONSchema(CanonicalModel));
-      expect([stored.host.length, stored.quoted]).toEqual([74, 20]);
+      // 29 Oct: stated time and decide-by (TIME-AND-DECIDE-BY design); before it [74, 20] (decide_by holds a quote, no host field).
+      expect([stored.host.length, stored.quoted]).toEqual([74, 21]);
       expect(stored.host).toEqual(expect.arrayContaining(['$.properties.history.items.properties.author_id', '$.properties.goals.items.properties.approval', '$.properties.goals.items.required.approval']));
     });
 
@@ -1120,7 +1123,7 @@ describe('the model-program turn on the real core route', () => {
 
     it('(b) an update WITHOUT the host fields is merged and read as before: the record it returns takes the host\'s values, every other record is the saved one', async () => {
       const saved = approvedBakery();
-      const none = { version: saved.version, question: null, period: null, coaching_questions: null, quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [], claims: [],
+      const none = { version: saved.version, question: null, period: null, coaching_questions: null, decide_by: null, quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [], claims: [],
         evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: [] };
       const link = saved.relations.find((x) => x.form === 'effect')!;
       const update = unhosted({ ...none, relations: [link] });
@@ -1424,8 +1427,11 @@ describe('the model-program turn on the real core route', () => {
       // C6 (27 Oct 2026): who approved it, apart from who said it.
       approved_by: 'host-owned, at any depth (postimage HOST_FIELDS)',
       author_id: 'host-owned, at any depth (postimage HOST_FIELDS)',
+      // TIME-AND-DECIDE-BY (29 Oct): the card says the figure the host counts from it and the basis that names it (postimage `bare`).
+      stated_time: 'the source of the figure the host counts and of its basis, both of which the card says (postimage `bare`)',
     };
-    const exemptAs = (path: string) => (path === 'id' ? 'id' : ['approval', 'approved_by', 'author_id'].find((k) => path === k || path.endsWith(`.${k}`)));
+    const exemptAs = (path: string) => (path === 'id' ? 'id' : path === 'stated_time' || path.startsWith('stated_time.') ? 'stated_time'
+      : ['approval', 'approved_by', 'author_id'].find((k) => path === k || path.endsWith(`.${k}`)));
     const defOf = (s: z.ZodType) => s._zod.def as Record<string, any>;
     /** Every field of a schema, as the card's diff names it: records key by key, a list's entries as `*`. */
     const fields = (s: z.ZodType, path = ''): string[] => {
@@ -1446,7 +1452,8 @@ describe('the model-program turn on the real core route', () => {
       title: 'the first draft\'s: an update never returns it (CanonicalUpdate omits it), so no change carries it' };
     // The model's own fields the card says as their own entry (Codex #3742). Box 2 (Paul Q1/Q2, 28 Oct): Olumi's coaching
     // questions moved here from the exemptions: an update now returns the whole new list when it makes them out of date.
-    const ROOT_SAID = ['question', 'period', 'coaching_questions'];
+    // When they must decide (TIME-AND-DECIDE-BY, 29 Oct): its own entry, like the question.
+    const ROOT_SAID = ['question', 'period', 'coaching_questions', 'decide_by'];
     const families = Object.keys(shape).filter((k) => defOf(shape[k]!).type === 'array' && ROOT_EXEMPT[k] === undefined && !ROOT_SAID.includes(k));
     expect(families.sort()).toEqual(Object.keys(GROUPS).sort());
     const unsaid = (family: string, schema: z.ZodType) => fields(schema).filter((p) => GROUPS[family as keyof typeof GROUPS][p] === undefined && exemptAs(p) === undefined);
@@ -1470,6 +1477,8 @@ describe('the model-program turn on the real core route', () => {
     }
     const coached = validatePostimage(bakery(), { ...bakery(), coaching_questions: ['Who else must agree?'] }, { removals: [], words: [BRIEF], fresh: [] });
     expect(coached.ok ? coached.changes.map((c) => [c.id, c.after]) : coached.code).toEqual([['coaching_questions', '1. Who else must agree?']]);
+    const deciding = validatePostimage(bakery(), { ...bakery(), decide_by: { date: '2026-11-05', quote: null } }, { removals: [], words: [BRIEF], fresh: [] });
+    expect(deciding.ok ? deciding.changes.map((c) => [c.id, c.before, c.after]) : deciding.code).toEqual([['decide_by', 'Not given', '5 Nov 2026, Olumi’s reading']]);
     // Contrast: a field of the model's own with neither is caught.
     expect(unsaidRoot(Object.keys(CanonicalModel.extend({ new_unlisted_field: z.string() }).shape))).toEqual(['new_unlisted_field']);
   });
@@ -2070,7 +2079,7 @@ describe('the model-program turn on the real core route', () => {
     const words = 'We bake 320 loaves a week now. The oven would cost £2,500, and the landlord must agree first.';
     const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words });
     // What the drafter returns: nothing but what it lists (every family [] otherwise), never the history.
-    const none = { version: saved.version, question: null, period: null, coaching_questions: null, quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [], claims: [],
+    const none = { version: saved.version, question: null, period: null, coaching_questions: null, decide_by: null, quantities: [], relations: [], goals: [], limits: [], preferences: [], options: [], risks: [], claims: [],
       evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: [] };
     const propose = async (update: Json, more: Json = {}, n = 1) => {
       replies = Array.from({ length: n }, () => JSON.stringify({ ...none, ...update })); sent.length = 0;
@@ -2102,7 +2111,8 @@ describe('the model-program turn on the real core route', () => {
     expect(stableStringify(format.schema)).toBe(stableStringify(UPDATE_JSON_SCHEMA));
     const families = ['quantities', 'relations', 'goals', 'limits', 'preferences', 'options', 'risks', 'claims', 'evidence', 'assumptions', 'dissent', 'conditions', 'left_out'];
     for (const f of families) expect(stableStringify((UPDATE_JSON_SCHEMA as Json).properties[f].items), f).toBe(stableStringify((CANONICAL_JSON_SCHEMA as Json).properties[f].items));
-    expect(Object.keys((UPDATE_JSON_SCHEMA as Json).properties).sort()).toEqual([...families, 'coaching_questions', 'period', 'question', 'remove', 'version'].sort()); // Box 2 (Paul Q1/Q2, 28 Oct): + Olumi's questions
+    // 29 Oct: stated time and decide-by (TIME-AND-DECIDE-BY design); before it [...families, 'coaching_questions', 'period', 'question', 'remove', 'version'].
+    expect(Object.keys((UPDATE_JSON_SCHEMA as Json).properties).sort()).toEqual([...families, 'coaching_questions', 'decide_by', 'period', 'question', 'remove', 'version'].sort()); // Box 2 (Paul Q1/Q2, 28 Oct): + Olumi's questions
     expect((UPDATE_JSON_SCHEMA as Json).properties.remove.items).toEqual({ type: 'string' });
     expect((UPDATE_JSON_SCHEMA as Json).properties.question.anyOf.map((x: Json) => x.type)).toEqual(['string', 'null']);
     // C6 (29 Oct): the change is Olumi's instruction, in the developer role; re-pinned knowingly from ['user', 'assistant', 'user'] and "The change:".
@@ -2173,7 +2183,7 @@ describe('the model-program turn on the real core route', () => {
     // The update: a new switched-on figure, and the promotion's setting pointed at it; one_promo is not returned.
     const promotion = saved.options.find((o) => o.id === 'promotion')!;
     const twoPromos = q('two_promos', 'promotion', { value: 2, author: 'structure', basis: 'The promotion run twice.' });
-    replies = [JSON.stringify({ version: saved.version, question: null, period: null, coaching_questions: null, quantities: [twoPromos], relations: [], goals: [], limits: [], preferences: [],
+    replies = [JSON.stringify({ version: saved.version, question: null, period: null, coaching_questions: null, decide_by: null, quantities: [twoPromos], relations: [], goals: [], limits: [], preferences: [],
       options: [{ ...promotion, sets: promotion.sets.map((x) => (x.quantity === 'promo_on' ? { ...x, to: 'two_promos' } : x)) }],
       risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: [] })];
     const p = await proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words },
@@ -3656,7 +3666,7 @@ describe('the model-program turn on the real core route', () => {
     expect(marks.sort()).toEqual([[r.proposal_id, true], [c.data.proposal_id, null]].sort());
   });
 
-  it('words#5, one model, one period 0: the first draft\'s day is kept with the saved program, and an update on a later day counts a stated date from THAT day, naming both; a program saved before it counts from today as before, and reopens and rewrites exactly as stored', async () => {
+  it('words#5, one model, one period 0: the first draft\'s day is kept with the saved program, and an update on a later day counts a stated date from THAT day, naming both; a program saved before it is told today and that its period 0 is not recorded, and reopens and rewrites exactly as stored', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       // Drafted on Monday 26 October 2026 (GMT): the oven's arrival is asked, counted over eight weeks.
@@ -3667,7 +3677,8 @@ describe('the model-program turn on the real core route', () => {
       m.options = m.options.map((o) => (o.id === 'second_oven' ? { ...o, sets: o.sets.map((x) => ({ ...x, starts_after_periods: 'oven_weeks' })) } : o));
       replies = [JSON.stringify(m)];
       expect((await turn({ message: `${BRIEF} We count eight weeks.` })).json().model_program.saved).toBe(true);
-      expect(sent[0]!.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is 2026-10-26 (Europe/London). A date they state counts in whole periods from today, which is period 0.`);
+      // 29 Oct: stated time and decide-by (TIME-AND-DECIDE-BY design); before it "… (Europe/London). A date they state counts in whole periods from today, which is period 0."
+      expect(sent[0]!.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is 2026-10-26 (Europe/London), period 0. Read the dates they state against it.`);
       expect(persisted!.living_model.drafted_on).toBe('2026-10-26');
       const drafted = JSON.parse(JSON.stringify(persisted)) as Json;
       // A program saved before the day was kept: the same stored JSON without it.
@@ -3684,7 +3695,7 @@ describe('the model-program turn on the real core route', () => {
         request: `The answer to oven_weeks, in their words: "${words}"`, remove: [], answers: [] })) as Promise<Json>; };
 
       // Contrast first, the program saved before: it reopens exactly as stored (the same newest Run, current, its view byte for
-      // byte), is rewritten with no new key, and its update counts from the day it runs, the line as it always was.
+      // byte), is rewritten with no new key, and its update is told today, for reading their words, and that period 0 is not recorded.
       persisted = JSON.parse(JSON.stringify(old)) as Json;
       const reopened = reopenProgram(JSON.parse(JSON.stringify(old)))!;
       expect([reopened.run!.run_id, reopened.current, reopened.engine_current]).toEqual([oldLiving.runs.at(-1).run_id, true, true]);
@@ -3694,7 +3705,10 @@ describe('the model-program turn on the real core route', () => {
       replies = [savedWith((d) => setQ(d, 'oven_weeks', { status: 'known', question: null, value: 2, author: 'olumi', quote: null, basis: 'Two whole weeks from today, 9 November 2026.' }))];
       expect((await ask(ctx())).status).toBe('ok');
       expect(sent).toHaveLength(1);
-      expect(sent[0]!.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is 2026-11-09 (Europe/London). A date they state counts in whole periods from today, which is period 0.`);
+      // 29 Oct (independent read): no start date recorded is said so, never "period 0" for today; before it "Today is
+      // 2026-11-09 (Europe/London), period 0. Read the dates they state against it."
+      expect(sent[0]!.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is 2026-11-09 (Europe/London). This model's period 0, the day it was first drafted, is not recorded: `
+        + 'read the dates they state against today.');
 
       // The program with its day: the drafter is told both days, and counts their date from 26 October, the model's period 0.
       persisted = JSON.parse(JSON.stringify(drafted)) as Json;
@@ -3703,8 +3717,9 @@ describe('the model-program turn on the real core route', () => {
       const p = await ask(c);
       expect(p.status, JSON.stringify(p)).toBe('ok');
       expect(sent).toHaveLength(1);
+      // 29 Oct: stated time and decide-by (TIME-AND-DECIDE-BY design); before it "… the day it was first drafted: a date they state, and anything they time from today, counts in whole periods from 2026-10-26."
       expect(sent[0]!.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is 2026-11-09 (Europe/London). This model's period 0 is 2026-10-26, the day it was first drafted: `
-        + 'a date they state, and anything they time from today, counts in whole periods from 2026-10-26.');
+        + 'read the dates they state against today; Olumi counts them from 2026-10-26.');
       // Approved, the update is saved with the SAME period 0, and the drafter's four weeks exactly as it wrote them (B4 removed:
       // never re-stamped as theirs).
       expect(await applyProgramChange(deps, c as never, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
@@ -3738,6 +3753,27 @@ describe('the model-program turn on the real core route', () => {
     const gc = goalChance(measured([], true, same), same);
     expect(JSON.stringify(gc)).not.toContain('regulars');
     expect((gc.notes as string[]).some((n) => n.startsWith('Covers:'))).toBe(false);
+  });
+
+  it('TIME-AND-DECIDE-BY v2: an answer that sets a figure clears its stated time, so the figure is theirs and is never counted again', async () => {
+    const m = bakery();
+    m.quantities.push(q('weeks', 'week', { quote: 'four and a half weeks', stated_time: { date: null, span: 4.5, unit: 'week', said_on: null } }));
+    m.goals = m.goals.map((g) => ({ ...g, measure: { ...g.measure!, window: { origin_event: null, origin_offset: null, start: 0, periods: 'weeks' } } }));
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: `${BRIEF} We have four and a half weeks.` })).json().model_program.saved).toBe(true);
+    // Their 4.5 weeks, which whole weeks cannot hold: saved as their meaning, unsupported, its stated time kept.
+    expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'weeks'))
+      .toMatchObject({ status: 'unsupported', value: null, stated_time: { date: null, span: 4.5, unit: 'week' } });
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const words = 'Call it five weeks.';
+    sent.length = 0;
+    const p = await proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words },
+      ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request: '', remove: [],
+        answers: [{ id: 'weeks', status: 'known', value: 5, low: null, high: null, range_kind: null, party: null, quote: 'five weeks', basis: null, author: 'person' }] })) as Json;
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    expect(sent).toHaveLength(0); // an answer is set with no redraft
+    const held = (deps.proposals.get(p.data.proposal_id)!.living_model as { canonical: CanonicalModelT }).canonical;
+    expect(held.quantities.find((x) => x.id === 'weeks')).toMatchObject({ status: 'known', value: 5, author: 'person', quote: 'five weeks', stated_time: null });
   });
 
   it('targeted answers (DL 24 Oct): an answer to a listed question is set on the existing item it answers, exactly, with no redraft: one item changes and every other record is byte-identical; "all" is read as 100% with Olumi\'s reading shown; "I don\'t know" is theirs and never asked again; a structural change still uses the redraft', async () => {

@@ -52,6 +52,6 @@ export function studio(): CanonicalModelT {
     ],
     risks: [{ id: 'instructor_leaves', label: 'The instructor leaves', occurrence: null, severity: null, effect_on: 'keep_members', direction: 'down', mode: null,
       starts_after_periods: 0, author: 'olumi', quote: null, ...at }],
-    claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], coaching_questions: [], history: [],
+    claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], coaching_questions: [], decide_by: null, history: [],
   };
 }
