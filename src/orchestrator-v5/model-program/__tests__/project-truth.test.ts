@@ -72,9 +72,10 @@ describe('W3b 1 · links say what the model holds: no strength, a sign only wher
     const p = draft('hiring-alpha3.saved.json');
     expect(edgesOf(p).filter((e) => 'strength' in e).map((e) => e.id)).toEqual([]);
     const parts = edgesOf(p).filter((e) => e.provenance?.definitional === true).map((e) => [e.id, e.effect_direction, e.provenance.reasoning]);
-    // Q1 (28 Oct): the hires each option sets are said on its card, so each product's lever part starts from that option.
+    // Q1 (28 Oct): an off/on hire is said on its option card, so its product's lever part starts from that option. DET-HARM
+    // D185/D186: the two-developer hire (0 to 2) keeps its own card, so its part starts from it. Changed knowingly.
     expect(parts).toEqual([
-      ['hire_two_developers__developer_spend', 'positive', 'multiplied'], ['developer_hiring_cost__developer_spend', 'positive', 'multiplied'],
+      ['developers_hired__developer_spend', 'positive', 'multiplied'], ['developer_hiring_cost__developer_spend', 'positive', 'multiplied'],
       ['hire_tech_lead__tech_lead_spend', 'positive', 'multiplied'], ['tech_lead_hiring_cost__tech_lead_spend', 'positive', 'multiplied'],
       ['developer_spend__total_hiring_spend', 'positive', 'added'], ['tech_lead_spend__total_hiring_spend', 'positive', 'added'],
     ]);
