@@ -72,7 +72,8 @@ const fmt = (n: number) => (Number.isInteger(n) ? n.toLocaleString('en-GB') : St
 const OLUMIS_FIGURE = { source: 'cee_inference', extractionType: 'inferred' } as const;
 
 /** `brief`: the person's first words. A figure of theirs quoted from it is the brief's; one given later (an answer, a card
- * edit) is theirs as entered. Absent: every quoted figure of theirs is read as the brief's. */
+ * edit) is theirs as entered: a card edit by its own history entry (`entered`, D074), wherever its words also appear. Absent:
+ * every quoted figure of theirs is read as the brief's, but one a card edit entered. */
 export function project(input: CanonicalModelT, compiled: CompileResult = compile(input), opts: { readonly brief?: string } = {}): Projection {
   const model = normalise(input); // an option's inline value is a named quantity, drawn on its option card
   const x = compiled.executable;
@@ -95,7 +96,17 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const Q = new Map(model.quantities.map((q) => [q.id, q] as const));
   const why = (inCalc: boolean, reason: string) => (inCalc ? null : notCompiling ? 'The model does not compile yet.' : reason);
   const plain = (t: string) => t.toLowerCase().replace(/\s+/g, ' ').trim();
-  const fromBrief = (quote: string | null) => opts.brief === undefined || (has(quote) && plain(opts.brief).includes(plain(quote)));
+  /**
+   * D074 (C6, "Source quote, contributor and approval actor stay distinct"): a figure the person typed on the canvas is theirs as
+   * set later, by the host's own history entry for it (`entered`, the last one per record, with the words it gave), never by
+   * reading its words. A record still in those words is never the brief's, wherever else they appear in the brief (a typed
+   * "100" beside the brief's "adds about 100 loaves a week"). Any other change, an approved re-quotation of the brief's own
+   * words included, keeps the brief rule below, as before.
+   */
+  const entered = new Map<string, string | null>();
+  for (const h of model.history) if (h.change === 'entered') entered.set(h.id, h.quote);
+  const fromBrief = (rec: { readonly id: string; readonly quote: string | null }) => !(has(rec.quote) && entered.get(rec.id) === rec.quote)
+    && (opts.brief === undefined || (has(rec.quote) && plain(opts.brief).includes(plain(rec.quote))));
   /**
    * Who put the record on the board, in the canvas's origin vocabulary, by the same brief rule as its figure (`figureSource`):
    * the person's record whose words are not in their brief (an answer or a change they approved, a figure they typed) is
@@ -106,16 +117,16 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   // "From your brief" (nothing there supports it), and it is not Olumi's either: canonical.ts `quote` is null for any
   // unanswered input, so asked with no quote cannot show who introduced it (PL/assessor AH-224727). A quoted record keeps the brief rule.
   const askedUnquoted = (rec: { author: string; quote: string | null; status?: unknown }) => rec.author === 'person' && rec.status === 'asked' && !has(rec.quote);
-  const provenanceOf = (rec: { author: string; quote: string | null; status?: unknown }) => {
+  const provenanceOf = (rec: { id: string; author: string; quote: string | null; status?: unknown }) => {
     const who = whoOf(rec, '');
-    return who === 'structure' || askedUnquoted(rec) ? {} : { provenance: who === 'olumi' ? 'ai_inferred' : has(rec.quote) && !fromBrief(rec.quote) ? 'user_set' : 'from_brief' };
+    return who === 'structure' || askedUnquoted(rec) ? {} : { provenance: who === 'olumi' ? 'ai_inferred' : has(rec.quote) && !fromBrief(rec) ? 'user_set' : 'from_brief' };
   };
   /** Whose figure it is, in the canvas's value vocabulary: none claimed for a structural constant. */
   const figureSource = (q: CanonicalQuantityT): Rec => {
     const who = whoOf(q, q.id);
     if (who === 'olumi') return OLUMIS_FIGURE;
     if (who !== 'person') return {};
-    return fromBrief(q.quote) ? { source: 'brief_extraction', extractionType: 'explicit' } : { source: 'user_override' };
+    return fromBrief(q) ? { source: 'brief_extraction', extractionType: 'explicit' } : { source: 'user_override' };
   };
   /** Edge ids: `from__to`, and a second link between the same two cards (a part used twice) gets its own. */
   const edgeIds = new Map<string, number>();
@@ -336,7 +347,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const words = `Set by ‘${o.label}’`;
     if (who === 'olumi') return { source: 'cee_hypothesis', source_words: `${words}, Olumi’s figure` };
     if (who !== 'person') return {};
-    return fromBrief(own ? to.quote : o.quote) ? { source: 'brief_extraction', source_words: `${words}, from your brief` } : { source: 'user_specified', source_words: `${words}, as you gave it` };
+    return fromBrief(own ? to : o) ? { source: 'brief_extraction', source_words: `${words}, from your brief` } : { source: 'user_specified', source_words: `${words}, as you gave it` };
   };
 
   // ── the question, goals, options ───────────────────────────────────────────────────────────────────────────────────

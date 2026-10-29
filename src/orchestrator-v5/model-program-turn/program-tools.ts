@@ -361,7 +361,8 @@ export async function runProgram(deps: ProgramToolDeps, ctx: Ctx): Promise<ToolO
 /**
  * The canvas's own figure edits on a program scenario: the person's own hand on ONE figure, by the id it is drawn under
  * (a card's id is its quantity id; a link carries its coefficient's id; a goal's target edit names the goal). Saved at
- * once with a new Run, as the core canvas edit saves; the words the person typed are kept as theirs. `approver`: who typed
+ * once with a new Run, as the core canvas edit saves; the figure as entered (a number, or "low to high": never the literal
+ * keystrokes, which this edit does not receive) is kept as their words, and its history entry records it as entered (D074). `approver`: who typed
  * it (the caller's user id; null for a guest, never guessed): the edited figure's author_id and approved_by, and its history
  * entry's, exactly as `validatePostimage` records an approved card's (C6). A record the edit does not change is as saved,
  * its approval, approved_by and author_id included.
@@ -387,11 +388,14 @@ export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch' |
     const where = edit.value! < q.low! || edit.value! > q.high! ? 'outside' : edit.value === q.low || edit.value === q.high ? 'at the end of, not inside,' : null;
     if (where !== null) return { status: 'refused', reason: `${n(edit.value!)} is ${where} your range of ${n(q.low!)}–${n(q.high!)}, so nothing was saved: change the range with it.` };
   }
-  const shownAs = onRange ? `${edit.value} ${q.unit}, within ${q.low} to ${q.high}`
-    : edit.low != null && edit.high != null ? `${edit.low} to ${edit.high} ${q.unit}` : `${edit.value} ${q.unit}`;
-  // What the person typed is their words for this figure, so the compiler finds them as theirs.
-  const words = `${goal !== undefined ? `${goal.label} target` : q.label}: ${shownAs}`;
-  // The exact postimage: this ONE figure as theirs, in the words they typed (a goal's target shared with another goal or a
+  // D074 (C6, "Source quote, contributor and approval actor stay distinct"): their words for this figure are the figure as
+  // entered, and nothing the host adds around it (staging: "base sales: 320 loaf/week" was shown "in your words", a label
+  // and a unit they never typed). This edit receives NUMBERS, never the literal text typed (the route reads the canvas's
+  // `value`/`raw_value` as a number), so the words are the number as JavaScript writes it ("320", "0.8"), or both ends of a
+  // range ("80 to 100"): the figure as entered, never claimed to be their keystrokes. That it was set later, not from the
+  // brief, is this edit's own history entry (`entered`, validatePostimage), which `project.ts` reads; never these words.
+  const words = !onRange && edit.low != null && edit.high != null ? `${edit.low} to ${edit.high}` : `${edit.value}`;
+  // The exact postimage: this ONE figure as theirs, in the figure as entered (a goal's target shared with another goal or a
   // limit first gets its own quantity, so the other keeps its figure). No AI call; the same validator as every change.
   if (q.status === 'derived') return { status: 'refused', reason: `"${q.label}" is worked out by its relation; change one of its inputs.` };
   const [low, high] = onRange ? [q.low, q.high] : [edit.low ?? null, edit.high ?? null];
@@ -403,7 +407,8 @@ export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch' |
   const filled: CanonicalQuantityT = { ...q, id, value: edit.value, low, high, range_kind: onRange ? q.range_kind : null, status: 'known', author: 'person', party: null,
     quote: words, question: null, basis: null, approval: 'approved' };
   const canonical = figurePostimage(program.canonical, filled, shared ? goal!.id : undefined);
-  const v = validatePostimage(program.canonical, canonical, { removals: [], words: [...program.person_words, words], fresh: [words], approver: edit.approver });
+  // `entered`: the record they typed, an existing figure or the goal's own target split off, recorded in history as entered (D074).
+  const v = validatePostimage(program.canonical, canonical, { removals: [], words: [...program.person_words, words], fresh: [words], approver: edit.approver, entered: id });
   if (!v.ok) return { status: 'refused', reason: v.reason };
   const next = withNewRun({ ...program, canonical: v.model, person_words: [...program.person_words, words] });
   if (next.evaluation.compiled.errors.length > 0) return { status: 'refused', reason: `That figure does not fit the model: ${next.evaluation.compiled.errors[0]!.message}` };

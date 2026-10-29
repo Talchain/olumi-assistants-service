@@ -13,15 +13,16 @@ import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
 import { todayInLondon } from '../goal-target/deadline-date.js';
 import { compile, compileJson, normalise, type CompileError, type CompileResult } from '../model-program/compile.js';
-import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, CanonicalUpdate, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, todayLine, UPDATE_JSON_SCHEMA, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX,
-  type CanonicalUpdateT } from './prompt.js';
+import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, CanonicalUpdate, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, todayLine, UPDATE_CHANGE_LABEL, UPDATE_JSON_SCHEMA, UPDATE_PREFIX,
+  UPDATE_REPAIR_PREFIX, type CanonicalUpdateT } from './prompt.js';
 
 export const MAX_REPAIRS = 2;
 export const DRAFT_REASONING_EFFORT = 'medium' as const;
 /** Room for a whole canonical model plus its reasoning (phase 0b's largest draft used 11.7k of 16k on a smaller format). */
 export const DRAFT_MAX_OUTPUT_TOKENS = 32_000;
 
-export type InputMessage = { readonly role: 'user' | 'assistant'; readonly content: string };
+/** `user` is the person's own words only; Olumi's host text and its agent's instructions are `developer` (C6: `proposePostimage`). */
+export type InputMessage = { readonly role: 'user' | 'assistant' | 'developer'; readonly content: string };
 export type CallOutput = { readonly text: string | null; readonly status: string | null; readonly incomplete: string | null; readonly usage: unknown };
 /** One Responses call with the body as built here. Injectable, so a test can answer it without a network. */
 export type ResponsesCall = (body: StreamedResponsesBody) => Promise<CallOutput>;
@@ -184,7 +185,9 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
     if (parsed.success) { model = read ?? parsed.data; compiled = result; }
     attempts.push({ attempt: a, errors: result.errors, status: out.status, usage: out.usage, ms });
     if (result.errors.length === 0 || a === MAX_REPAIRS) break;
-    input.push({ role: 'assistant', content: out.text }, { role: 'user', content: repairMessage(result.errors, onto === undefined ? REPAIR_PREFIX : UPDATE_REPAIR_PREFIX) });
+    // C6: an update's repair feedback is the host's (the compiler's sentences), never the person's, so it is developer-role, as
+    // the update's own text is (`proposePostimage`); a first draft's repair is sent as it always was.
+    input.push({ role: 'assistant', content: out.text }, { role: onto === undefined ? 'user' : 'developer', content: repairMessage(result.errors, onto === undefined ? REPAIR_PREFIX : UPDATE_REPAIR_PREFIX) });
   }
   return { model, compiled, attempts, today };
 }
@@ -195,10 +198,14 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
  * the ids it removes; the host merges them by id onto the saved model (`mergeUpdate`), read as a first draft is. The caller
  * validates the merged model exactly (`validatePostimage`). `periodZero`: the saved program's `drafted_on`, so a date in the
  * change counts from the model's own period 0 (undefined on a program saved before it: today, as before).
+ * C6 ("Source quote, contributor and approval actor stay distinct"): `change` is the agent's own instruction, never the
+ * person's words, so it is sent as Olumi's (`UPDATE_CHANGE_LABEL`), with the update's text, in the developer role; the only
+ * user-role message is the person's verified words (`personWords`), where they always were. Staging 29 Oct: sent as the
+ * last user-role message, "The change: Amend the existing…" came back as a quote and was shown "in your words".
  */
 export async function proposePostimage(model: CanonicalModelT, personWords: readonly string[], change: string, removals: readonly string[], call: ResponsesCall,
   periodZero?: string): Promise<DraftOutcome> {
-  const ask = `${UPDATE_PREFIX}\nThe change: ${change}\nRemove: ${removals.length > 0 ? removals.join(', ') : 'nothing'}`;
-  return draftCanonicalModel([{ role: 'user', content: personWords.join('\n\n') }, { role: 'assistant', content: JSON.stringify(model) }, { role: 'user', content: ask }],
+  const ask = `${UPDATE_PREFIX}\n${UPDATE_CHANGE_LABEL} ${change}\nRemove: ${removals.length > 0 ? removals.join(', ') : 'nothing'}`;
+  return draftCanonicalModel([{ role: 'user', content: personWords.join('\n\n') }, { role: 'assistant', content: JSON.stringify(model) }, { role: 'developer', content: ask }],
     call, personWords.join('\n'), { interpret: true, onto: model, ...(periodZero !== undefined ? { periodZero } : {}) });
 }
