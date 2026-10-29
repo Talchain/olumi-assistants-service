@@ -104,7 +104,9 @@ describe('W3b 2 · a risk card reads the chance the model holds', () => {
     const risk = nodeOf(projected(rival(), CLUB_BRIEF), 'rival_opens');
     expect(risk.event_risk).toEqual({ version: 1, occurrence: { p_low: 0.2, p_high: 0.4, meaning: 'at_least_once_within_horizon', basis: 'olumi' }, horizon: { months: 3 } });
     // Contrast (right before, unchanged): the card's words for the chance and the effect.
-    expect(risk.description).toMatch(/^Chance: about 0\.3, 0\.2–0\.4, Olumi's estimate; .*\. If it happens: multiplies by about 0\.5, 0\.4–0\.6, Olumi's estimate; .*, from the start\.$/);
+    // r11: a risk in force from the start says no timing (r10 K01/K02: "from the start" on their risk read as a timing they never gave).
+    expect(risk.description).toMatch(/^Chance: about 0\.3, 0\.2–0\.4, Olumi's estimate; .*\. If it happens: multiplies by about 0\.5, 0\.4–0\.6, Olumi's estimate; [^,]*(, (kept between|never below|never above) [^,]*)?, provisionally\.$/);
+    expect(risk.description).not.toContain('from the start');
   });
 
   it('the person\'s own 25 % is theirs, as a fraction; a yearly model\'s horizon is in months', () => {
