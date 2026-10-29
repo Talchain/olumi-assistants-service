@@ -28,7 +28,7 @@ import { ok, refused, unavailable, type ToolOutcome } from '../path-b/tools/outc
 import { CanonicalQuantity, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
 import { compile } from '../model-program/compile.js';
 import { ledgeredResponsesCall, proposePostimage } from './draft.js';
-import { validatePostimage } from './postimage.js';
+import { keepTheirFigures, theirFiguresIn, validatePostimage } from './postimage.js';
 import { isSaved, postimageOf, programOperationId, savePostimage, withNewRun } from './program-save.js';
 import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, sourceTextOf, unreadableWords, type SavedProgram } from './program-store.js';
 import { shownRun, shownView, type StoredRun } from './run-receipt.js';
@@ -197,6 +197,9 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   const set = answered(program.canonical, answers);
   if (typeof set === 'string') return refused('not_an_answer', set);
   // The drafter counts a date in the change from the model's own period 0, the first draft's day (words#5), never a second one.
+  // A figure they gave is never removed (postimage.ts theirFiguresIn): refused before a drafting call is spent on it.
+  const theirs = theirFiguresIn(set.model, args.remove);
+  if (theirs.length > 0) return refused('figure_removed', keepTheirFigures(set.model, theirs), { ids: theirs });
   const drafted = args.request.trim() !== '' || args.remove.length > 0 ? await proposePostimage(set.model, words, args.request, args.remove, ledgeredResponsesCall(), program.drafted_on) : set;
   // Why an update took more than one drafting call: each attempt's time and the compiler's error codes (never the person's words).
   if ('attempts' in drafted) log.info({ event: 'model_program.update_draft', scenario_id: ctx.scenario_id, attempts: drafted.attempts.map((a) => ({ ms: a.ms,
@@ -287,6 +290,11 @@ export async function applyProgramChange(deps: ProgramToolDeps, ctx: Ctx, propos
   if (prior !== null) return alreadySaved(prior);
   const before = await readSaved(deps, ctx.scenario_id);
   if (!isSavedRead(before)) return before;
+  // A figure they gave is never removed (postimage.ts theirFiguresIn), on this seam too (PL 00:06): a card held before the check
+  // (a card outlives a deploy) that drops one is refused at the press, never saved, and its approved payload is never changed.
+  const savedNow = savedProgramOf(before.graph)?.canonical;
+  const dropped = savedNow === undefined ? [] : theirFiguresIn(savedNow, savedNow.quantities.filter((q) => !program.canonical.quantities.some((x) => x.id === q.id)).map((q) => q.id));
+  if (dropped.length > 0) return refused('figure_removed', keepTheirFigures(savedNow!, dropped), { ids: dropped });
   // A card that carries its base revision holds while the saved program's is the same (`program-card.ts`); one held before it
   // was recorded keeps its full-identity rule.
   const holds = programCardApplies(p, before.graph);

@@ -3409,6 +3409,42 @@ describe('the model-program turn on the real core route', () => {
     expect(registered).toHaveLength(1);
   });
 
+  // Paul 28 Oct (blocking; ALPHA plan item 3, his added change: "an update never deletes a figure you supplied"). Box 3's
+  // European simplify (a72dba23): the agent listed his 400 customers, 8 % churn and £500k budget for removal as "a
+  // representation change" and the validator trusted the list, so they became notes. A figure of theirs is never removable.
+  it('lost figures (Paul 28 Oct): a removal listing a figure they gave is refused before any drafting call, and at the write boundary whoever lists it; an Olumi item listed is not', async () => {
+    replies = [JSON.stringify(bakery())];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const words = 'Drastically streamline it, with 10 or fewer nodes.';
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
+    replies = Array.from({ length: 3 }, () => savedWith((d) => { d.quantities = d.quantities.filter((x) => x.id !== 'base_sales'); }));
+    const out = await proposeProgramChange(deps, ctx, ProgramChangeParams.parse({ public_label: 'Streamlined', basis: 'their request', request: words, remove: ['base_sales'], answers: [] })) as Json;
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'refused', reason: 'figure_removed', data: { ids: ['base_sales'] } });
+    expect(JSON.stringify(out)).toContain('a figure they gave');
+    expect(replies).toHaveLength(3); // no drafting call was spent on it
+    expect(registered).toHaveLength(1);
+    // The write boundary, for any route: the same removal is refused by the validator itself.
+    const saved = bakery();
+    const without = { ...saved, quantities: saved.quantities.filter((x) => x.id !== 'base_sales') };
+    expect(validatePostimage(saved, without, { removals: ['base_sales'], words: [], fresh: [] })).toMatchObject({ ok: false, code: 'figure_removed', ids: ['base_sales'] });
+    // Contrast: an Olumi item listed for removal is not this refusal (Olumi's own estimate may be folded on a simplify).
+    const noShare = { ...saved, quantities: saved.quantities.filter((x) => x.id !== 'sell_through') };
+    expect(validatePostimage(saved, noShare, { removals: ['sell_through'], words: [], fresh: [] })).not.toMatchObject({ code: 'figure_removed' });
+    // The apply seam too (PL 00:06): a card held before this check (cards outlive a deploy) that drops their figure is refused at
+    // the press and nothing is written; its payload is never changed. Contrast: the same held card keeping the figure saves.
+    const live = savedProgramOf({ living_model: persisted!.living_model })!;
+    const hold = (canonical: CanonicalModelT) => holdProgramCard(deps.proposals, { scenarioId: SCENARIO, userId: null, graphHash: hashOf(persisted), identity: computeGraphIdentityHash(persisted as never)!.value },
+      { label: 'Held before the check', basis: 'x', program: { ...live, canonical }, changes: [] });
+    const press = (id: string) => applyProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, id);
+    const dropped = hold({ ...live.canonical, quantities: live.canonical.quantities.filter((x) => x.id !== 'base_sales') });
+    const writes = registered.length;
+    expect(await press(dropped.proposal_id)).toMatchObject({ status: 'refused', reason: 'figure_removed', data: { ids: ['base_sales'] } });
+    expect(registered).toHaveLength(writes);
+    const keeps = hold({ ...live.canonical, quantities: live.canonical.quantities.map((x) => (x.id === 'sell_through' ? { ...x, value: 0.75 } : x)) });
+    expect(await press(keeps.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+  });
+
   it('C4 (alpha spec §3): a mixed turn keeps their exact answer after the structural merge: the drafter returning the answered figure as its own estimate leaves their figure, status, author and quote on the card and on the model it would write', async () => {
     replies = [JSON.stringify(bakery())];
     expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
