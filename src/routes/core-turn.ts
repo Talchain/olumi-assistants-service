@@ -40,7 +40,7 @@ import { CONFIRM_READING, programChipsFor, programHoldApplies, typedApprovalOf }
 import { reconcileProgramCards, refreshedProgramHold } from '../orchestrator-v5/model-program-turn/program-card-turn.js';
 import { proposalPendingAction, rehydrateProposals, withApprovalOfferedOnRow } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import {
-  agentProposalOf, declinedProposalOf, heldProposalId, isHeldProposal,
+  agentProposalOf, declinedProposalOf, heldProposalId, heldProposalUnreadable, isHeldProposal,
   issuedTurnIdsForProposalRecords, proposalFieldsWire, proposalIssuances, proposalRecord,
 } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { parseProposalEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
@@ -55,7 +55,7 @@ import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/
 import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-context.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { runWithTurnFence, unclaimedTurnFenceHandle, type TurnFenceHandle } from '../orchestrator-v5/session/turn-fence.js';
-import { parsePendingAction, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
+import { isPendingActionExpired, parsePendingAction, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appliedGraphWire, coreTurnStores, graphReadyEmitter, programTurnTools } from '../orchestrator-v5/core-route/deps.js';
 import { programInstructions } from '../orchestrator-v5/core-route/instructions.js';
@@ -320,8 +320,14 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       return fail(422, { code: 'BAD_INPUT', message: '`turn_id` is required and must be a UUID.', retry_safe: false, nothing_saved: true });
     }
     const userId = req.scenarioAccess?.callerUserId ?? null;
+    // A1 (PL 23:51Z): `replay_only` looks up a typed turn's recorded reply. A canvas edit is replayed by sending it again (its own
+    // claim, below), so a lookup of one is refused before anything runs; a lookup never creates the scenario.
+    const replayOnly = body.replay_only === true;
+    if (replayOnly && canvasEdit) {
+      return fail(422, { code: 'BAD_INPUT', message: '`replay_only` looks up a typed turn\'s recorded reply; a canvas edit is replayed by sending it again.', retry_safe: false, nothing_saved: true });
+    }
     // A scenario's first turn creates it, on the ownership hook's own continuation (the hook has answered when it refuses).
-    if (req.scenarioAccess?.provisionIfMissing && !await req.scenarioAccess.provisionIfMissing()) return reply;
+    if (!replayOnly && req.scenarioAccess?.provisionIfMissing && !await req.scenarioAccess.provisionIfMissing()) return reply;
     if (typeof store.readCommittedTurn !== 'function') {
       return fail(503, { code: 'TURN_STATE_UNVERIFIABLE', message: 'This turn cannot be recorded here. Nothing was run.', retry_safe: true, nothing_saved: true });
     }
@@ -481,7 +487,24 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
     const replayed = async (prior: CommittedTurnRecord) => {
       const now = savedScenarioOf(await dispatch(graphPath, { ...FRESH_READ }));
       let pending: readonly PendingAction[] = [];
-      try { pending = await store.readMostRecentPendingActions?.(scenarioId, { validation: 'strict' }) ?? []; } catch { pending = []; }
+      try { pending = await store.readMostRecentPendingActions?.(scenarioId, { validation: 'strict' }) ?? []; } catch (err) {
+        // A1 (PL 23:53Z): a recovery lookup that cannot read the held cards is unavailable, never an authoritative empty list.
+        if (replayOnly) {
+          log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: replay_only could not read the held cards');
+          return fail(503, { code: 'REPLAY_CARDS_UNREADABLE', message: 'The recorded reply\'s cards could not be read just now. Nothing was run; reload to see the current model.',
+            retry_safe: true, nothing_saved: false }, 'unknown');
+        }
+        pending = [];
+      }
+      // Independent reads r1–r3 (A1): a live carrier that claims a held card by any of its marks (`claimsHeldProposal`) but
+      // does not verify (`isHeldProposal`) is unreadable for a lookup, never a card that is not there; one that has expired is
+      // genuinely gone. A VERIFIED card the projection deliberately leaves out (an identity card no longer offerable on this
+      // graph) is not damaged, and replays without its card exactly as a resend does.
+      if (replayOnly && pending.some((p) => heldProposalUnreadable(p) && !isPendingActionExpired(p, Date.now()))) {
+        log.warn({ scenario_id: scenarioId, turn_id: turnId }, 'core-turn: replay_only found a held card it cannot read');
+        return fail(503, { code: 'REPLAY_CARDS_UNREADABLE', message: 'The recorded reply\'s cards could not be read just now. Nothing was run; reload to see the current model.',
+          retry_safe: true, nothing_saved: false }, 'unknown');
+      }
       const paused = await store.readOpenAiPausedRun?.(scenarioId).catch(() => undefined);
       const outcome = recordedOutcomeOf(prior.request_hash);
       return send(200, coreTurnContract({
@@ -503,6 +526,13 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       return fail(503, { code: 'TURN_STATE_UNVERIFIABLE', message: 'Could not check whether this turn already ran. Nothing was run; please try again.', retry_safe: true, nothing_saved: true });
     }
     if (prior !== null) return sameRequest(requestHashOfAnswer(prior.request_hash)) ? replayed(prior) : reused();
+    // A1 (PL 23:51Z): `replay_only` is a lookup on this seam, never a request identity (the hash above is the same without it):
+    // a recorded answer replays exactly as above; with none recorded it is a typed miss that takes no claim, writes nothing and
+    // runs no model or Run. A miss says nothing about whether the original turn saved or is still running.
+    if (replayOnly) {
+      return fail(404, { code: 'REPLAY_NOT_RECORDED', message: 'No reply is recorded for this turn yet. Nothing was run; reload to see the current model.',
+        retry_safe: true, nothing_saved: false }, 'unknown');
+    }
     const claim = await takeClaim(requestHash, chiplessRetry, untaggedRunHash);
     if (claim.held === 'refused') return claim.sent;
     if (claim.held === 'same') {

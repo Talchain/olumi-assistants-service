@@ -34,6 +34,8 @@ import { programOperationId, withNewRun } from '../../orchestrator-v5/model-prog
 import { MODEL_PROGRAM, savedProgramOf } from '../../orchestrator-v5/model-program-turn/program-store.js';
 import { PROGRAM_TURN_FACTS_PREFIX } from '../../orchestrator-v5/model-program-turn/program-tools.js';
 import { coreBudget } from '../../orchestrator-v5/agent-lane/model-budgets.js';
+import { createProposal } from '../../orchestrator-v5/agent-lane/proposal.js';
+import { proposalPendingAction } from '../../orchestrator-v5/agent-lane/durable-proposal.js';
 
 type Json = Record<string, any>;
 let SCENARIO = '';
@@ -939,6 +941,76 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect([a.statusCode, e.statusCode]).toEqual([200, 200]);
       expect(registered).toHaveLength(2);
       expect([figure('oven_price'), figure('base_sales')], 'the edit saved on what the approval saved').toEqual([2500, 320]);
+    });
+
+    it('A1 (PL 23:51Z, 23:53Z): replay_only is a lookup only: a typed miss that claims, writes and runs nothing; with a recorded answer, the same replay; unreadable cards are unavailable, never none', async () => {
+      const turnId = randomUUID(), message = 'What does the model hold for the oven today?';
+      const lookup = (text = message) => post({ turn_id: turnId, message: text, source: 'composer', replay_only: true });
+      const callsBefore = calls.length, rowsBefore = turnRows.size;
+      const miss = await lookup();
+      expect(miss.statusCode, miss.body).toBe(404);
+      expect(miss.json()).toMatchObject({ durability: 'unknown', error: { code: 'REPLAY_NOT_RECORDED', retry_safe: true, nothing_saved: false } });
+      expect([calls.length - callsBefore, turnRows.size - rowsBefore], 'no model call, no claim or row written').toEqual([0, 0]);
+      // No claim was taken: the same turn, sent for real, runs once.
+      const real = await typed(message, turnId);
+      expect(real.statusCode, real.body).toBe(200);
+      const callsAfterReal = calls.length;
+      // Recorded now: the lookup is that turn's replay, byte for byte, with no model call.
+      const hit = await lookup();
+      expect(hit.statusCode, hit.body).toBe(200);
+      expect(hit.json()).toMatchObject({ durability: 'replayed', assistant_text: (real.json() as Json).assistant_text, error: null });
+      expect(calls.length).toBe(callsAfterReal);
+      // The flag is no request identity: another body under this turn id is a reuse, never replayed.
+      expect(((await lookup('Something else entirely.')).json() as Json).durability).not.toBe('replayed');
+      // An unreadable held-card read is unavailable for a lookup; a plain resend keeps today's reading (no card known).
+      const read = store.readMostRecentPendingActions as unknown as { mockRejectedValueOnce: (e: Error) => void; mockResolvedValueOnce: (v: never) => void };
+      read.mockRejectedValueOnce(new Error('read failed'));
+      const unreadable = await lookup();
+      expect(unreadable.statusCode, unreadable.body).toBe(503);
+      expect(unreadable.json()).toMatchObject({ durability: 'unknown', error: { code: 'REPLAY_CARDS_UNREADABLE', retry_safe: true, nothing_saved: false } });
+      read.mockRejectedValueOnce(new Error('read failed'));
+      expect(((await typed(message, turnId)).json() as Json)).toMatchObject({ durability: 'replayed', cards: [] });
+      // Independent read r1: a live proposal carrier that cannot be read is unavailable for a lookup; an expired one is gone.
+      // A carrier as the store reads it whose embedded proposal no longer verifies (its id is not its content's).
+      const carrier = (expires_at_iso: string) => ({ id: 'r-corrupt', scenario_id: SCENARIO, chip_id: 'agent-approve-proposal:prop_corrupt',
+        expires_at_iso, expires_at_turn_count: 5, preconditions: { graph_hash: 'h' },
+        action: { kind: 'apply_proposed_change', proposal_ref: 'agent-approve-proposal:prop_corrupt', public_label: 'A change', public_message: 'A change',
+          inline_patch: { agent_proposal: { proposal_id: 'prop_corrupt', scenario_id: SCENARIO, base_graph_identity_hash: 'h' } } } });
+      read.mockResolvedValueOnce([carrier(new Date(Date.now() + 3_600_000).toISOString())] as never);
+      const corrupt = await lookup();
+      expect([corrupt.statusCode, (corrupt.json() as Json).error?.code]).toEqual([503, 'REPLAY_CARDS_UNREADABLE']);
+      (read as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce([carrier(new Date(Date.now() - 1_000).toISOString())]);
+      expect(((await lookup()).json() as Json)).toMatchObject({ durability: 'replayed', cards: [] });
+      // Independent read r2: a verified identity card that is no longer offerable on this graph (`proposalRecord` leaves it
+      // out on purpose, record.ts) is not corrupt: the lookup replays the reply without it, as a resend does.
+      const unofferable = createProposal({ scenario_id: SCENARIO, user_id: null, base_graph_identity_hash: 'h',
+        operations: [{ op: 'confirm_identity', path: 'no_such_outcome', value: { outcome_id: 'no_such_outcome', operation: 'product', factor_ids: ['a', 'b'], words: 'A reading' } }],
+        provenance: { authored_by: 'user_stated', basis: 'A reading' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'A reading' } as never);
+      const verified = proposalPendingAction(unofferable, { id: `agent-approve-proposal:${unofferable.proposal_id}`, label: 'Yes', message: 'Yes — A reading' } as never,
+        { scenario_id: SCENARIO, emitted_at_iso: new Date().toISOString() });
+      (read as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce([verified]);
+      const suppressed = await lookup();
+      expect(suppressed.statusCode, suppressed.body).toBe(200);
+      expect(suppressed.json()).toMatchObject({ durability: 'replayed', cards: [] });
+      // Independent read r3: a live carrier that keeps its approval chip but has lost its proposal payload is damaged (503);
+      // a carrier with no card mark at all (another chip, no payload) is not a card, and replays as before.
+      const marked = (chip_id: string) => ({ ...carrier(new Date(Date.now() + 3_600_000).toISOString()), chip_id,
+        action: { kind: 'apply_proposed_change', proposal_ref: chip_id, public_label: 'A change', public_message: 'A change', inline_patch: {} } });
+      (read as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce([marked('agent-approve-proposal:prop_0123456789abcdef')]);
+      const payloadLost = await lookup();
+      expect([payloadLost.statusCode, (payloadLost.json() as Json).error?.code]).toEqual([503, 'REPLAY_CARDS_UNREADABLE']);
+      (read as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce([marked('some-other-chip')]);
+      expect(((await lookup()).json() as Json)).toMatchObject({ durability: 'replayed', cards: [] });
+      // PL 01:57Z on r4: a live product hold whose marks verify but whose operations are lost cannot be read as a card (503).
+      const hold = { ...marked('gmh_0123456789ab'), action: { kind: 'apply_proposed_change', proposal_ref: 'gmh_0123456789ab', public_label: 'A change', public_message: 'A change',
+        inline_patch: { handler_id: 'graph_management_held_v1', apply_wiring: 'held_execute_v1', operations_count: 1 } } };
+      (read as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce([hold]);
+      const opsLost = await lookup();
+      expect([opsLost.statusCode, (opsLost.json() as Json).error?.code]).toEqual([503, 'REPLAY_CARDS_UNREADABLE']);
+      // A canvas edit is never looked up: refused before anything runs.
+      const edit = await post({ kind: 'system_event', turn_id: randomUUID(), replay_only: true, event: { kind: 'factor_value_edit', target_id: 'base_sales', raw_value: 320 } });
+      expect([edit.statusCode, (edit.json() as Json).error?.code]).toEqual([422, 'BAD_INPUT']);
+      expect(calls.length).toBe(callsAfterReal);
     });
 
     it('the same edit resent replays it: no second change', async () => {
