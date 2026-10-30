@@ -1267,6 +1267,16 @@ describe('S5 (P1 demo journey, 30 Oct) — a PROGRAM scenario\'s commit is ancho
     expect(createRecord).not.toHaveBeenCalled();
   });
 
+  const malformed = (): unknown => { const { graph } = withDissent(); graph.living_model.canonical = { quantities: 'not a list' }; return graph; };
+  it.each<[string, () => unknown]>([['no saved graph', () => null], ['a malformed model', malformed], ['a model without its program form', () => ({ nodes: [], edges: [] })]])(
+    '(b4) a program by its ownership read, with %s, is unavailable even when an old legacy fact exists: never anchored to that fact, nothing recorded', async (_name, saved) => {
+      const { store, createRecord, readNewestAnalysisAnchor } = makeStore({ anchor: { graphHashAtRun: HASH_AT_RUN, computedAt: COMPUTED_AT }, program: true });
+      const res = await commit(store, async () => saved());
+      expect([res.statusCode, res.json().code], res.body).toEqual([503, 'analysis_anchor_unavailable']);
+      expect(createRecord).not.toHaveBeenCalled();
+      expect(readNewestAnalysisAnchor).not.toHaveBeenCalled();
+    });
+
   it('(c) CONTRAST: a legacy scenario\'s commit runs exactly the path before S5: no graph read (so a failing one changes nothing), aag_v1 from its fact, and no_analysed_graph with none', async () => {
     const failing = vi.fn(async () => { throw new Error('read failed'); });
     const anchored = makeStore();
