@@ -413,6 +413,13 @@ export function claimsHeldProposal(pa: PendingAction): boolean {
   return (typeof pa.chip_id === 'string' && (pa.chip_id.startsWith(APPROVE_PREFIX) || GMH_RE.test(pa.chip_id)))
     || patch['agent_proposal'] !== undefined || patch['handler_id'] === GM_HELD_HANDLER_ID;
 }
+/**
+ * A1 (PL 01:57Z on r4): a carrier that claims a held card and cannot be read as one: its marks do not verify
+ * (`isHeldProposal`), or it is a product hold with no readable operation (`isProductHold` checks the marks only, and its
+ * record is then never built). Never a card that is not there.
+ */
+export const heldProposalUnreadable = (pa: PendingAction): boolean =>
+  claimsHeldProposal(pa) && (!isHeldProposal(pa) || (isProductHold(pa) && heldOperationsOf(pa).length === 0));
 
 export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = Date.now()): ProposalRecord | undefined {
   const p = agentProposalOf(pa);

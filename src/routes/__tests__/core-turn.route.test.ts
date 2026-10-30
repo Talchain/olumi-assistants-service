@@ -1001,6 +1001,12 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect([payloadLost.statusCode, (payloadLost.json() as Json).error?.code]).toEqual([503, 'REPLAY_CARDS_UNREADABLE']);
       (read as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce([marked('some-other-chip')]);
       expect(((await lookup()).json() as Json)).toMatchObject({ durability: 'replayed', cards: [] });
+      // PL 01:57Z on r4: a live product hold whose marks verify but whose operations are lost cannot be read as a card (503).
+      const hold = { ...marked('gmh_0123456789ab'), action: { kind: 'apply_proposed_change', proposal_ref: 'gmh_0123456789ab', public_label: 'A change', public_message: 'A change',
+        inline_patch: { handler_id: 'graph_management_held_v1', apply_wiring: 'held_execute_v1', operations_count: 1 } } };
+      (read as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce([hold]);
+      const opsLost = await lookup();
+      expect([opsLost.statusCode, (opsLost.json() as Json).error?.code]).toEqual([503, 'REPLAY_CARDS_UNREADABLE']);
       // A canvas edit is never looked up: refused before anything runs.
       const edit = await post({ kind: 'system_event', turn_id: randomUUID(), replay_only: true, event: { kind: 'factor_value_edit', target_id: 'base_sales', raw_value: 320 } });
       expect([edit.statusCode, (edit.json() as Json).error?.code]).toEqual([422, 'BAD_INPUT']);
