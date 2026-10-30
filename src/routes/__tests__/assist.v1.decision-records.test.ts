@@ -181,10 +181,11 @@ function makeStore(overrides?: Partial<FakeStoreState>) {
   return { store, state, createRecord, recordOutcome, readScenarioOwner, readRecordForOutcome, readNewestAnalysisAnchor };
 }
 
-async function buildApp(store: StorePort): Promise<FastifyInstance> {
+/** `graph`: the scenario's saved graph as the session store reads it (null: none saved; a legacy model reads the same). */
+async function buildApp(store: StorePort, graph: unknown = null): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   await installOwnershipHarness(app);
-  await decisionRecordsRoute(app, { store, now: () => NOW });
+  await decisionRecordsRoute(app, { store, now: () => NOW, loadGraph: async () => graph });
   await app.ready();
   return app;
 }
@@ -1194,5 +1195,74 @@ describe('S1 user-commit route — persisted anchor equals the selected successf
       expect(res.json().code).toBe('analysis_anchor_unavailable');
       expect(createRecord).not.toHaveBeenCalled();
     } finally { await app.close(); }
+  });
+});
+
+const { withNewRun } = await import('../../orchestrator-v5/model-program-turn/program-save.js');
+const { seedOf } = await import('../../orchestrator-v5/model-program-turn/evaluate.js');
+const { MODEL_PROGRAM } = await import('../../orchestrator-v5/model-program-turn/program-store.js');
+const { revisionDigest } = await import('../../orchestrator-v5/model-program-turn/run-receipt.js');
+const { MP_V1_GRAPH_HASH_PREFIX } = await import('../../orchestrator-v5/decision-records/capture.js');
+const { bakery, BRIEF } = await import('../../orchestrator-v5/model-program-turn/__tests__/bakery.fixture.js');
+
+describe('S5 (P1 demo journey, 30 Oct) — a PROGRAM scenario\'s commit is anchored to its newest current Run, the revision holding its dissent', () => {
+  const SAID = 'My business partner thinks a second oven would sit idle on weekdays.';
+  /** The bakery program with their partner's dissent, approved, and a Run computed on exactly that model. */
+  const withDissent = () => {
+    const m = bakery();
+    m.dissent.push({ id: 'partner_idle_oven', holder: 'my business partner', position: 'A second oven would sit idle on weekdays.', concerns: [],
+      author: 'person', party: 'my business partner', quote: 'a second oven would sit idle on weekdays', approval: 'approved', approved_by: OWNER_ID, author_id: OWNER_ID });
+    const { graph } = withNewRun({ model_program: MODEL_PROGRAM, canonical: m, seed: seedOf(SCENARIO_ID), person_words: [BRIEF, SAID], runs: [] });
+    return { m, graph: JSON.parse(JSON.stringify(graph)) as Record<string, any> };
+  };
+  const commit = async (store: StorePort, graph: unknown) => {
+    const app = await buildApp(store, graph);
+    try {
+      return await app.inject({ method: 'POST', url: '/assist/v1/decision-records/commit', headers: { authorization: `Bearer ${token}` }, payload: COMMIT_BODY });
+    } finally { await app.close(); }
+  };
+
+  it('(a) a program-only board (no run_analysis fact) records the decision against its Run\'s revision: the model WITH the dissent', async () => {
+    const { m, graph } = withDissent();
+    const { store, createRecord, readNewestAnalysisAnchor } = makeStore({ anchor: null });
+    const res = await commit(store, graph);
+    expect(res.statusCode, res.body).toBe(201);
+    const digest = graph.living_model.runs.at(-1).receipt.revision_digest as string;
+    expect(createRecord.mock.calls[0]![0].decision.graph_hash).toBe(`${MP_V1_GRAPH_HASH_PREFIX}${digest}`);
+    // The revision it names is the model holding the dissent; the same model without it is a different revision.
+    expect(digest).toBe(revisionDigest(m, [BRIEF, SAID]));
+    expect(digest).not.toBe(revisionDigest({ ...m, dissent: [] }, [BRIEF, SAID]));
+    expect(readNewestAnalysisAnchor, 'a program never anchors to a legacy fact').not.toHaveBeenCalled();
+  });
+
+  it('(b) a program whose model moved since its newest Run is refused with its reason, and nothing is recorded', async () => {
+    const { graph } = withDissent();
+    graph.living_model.canonical.dissent[0].position = 'A second oven would sit idle on Mondays.';
+    const { store, createRecord } = makeStore({ anchor: { graphHashAtRun: HASH_AT_RUN, computedAt: COMPUTED_AT } });
+    const res = await commit(store, graph);
+    expect(res.statusCode, res.body).toBe(409);
+    expect(res.json()).toMatchObject({ code: 'no_current_program_run',
+      message: 'Run the analysis on this version of your model before recording your decision. Nothing was recorded.' });
+    expect(createRecord).not.toHaveBeenCalled();
+  });
+
+  it('(b2) a program with no stored Run is refused the same way', async () => {
+    const { graph } = withDissent();
+    graph.living_model.runs = [];
+    const { store, createRecord } = makeStore({ anchor: null });
+    const res = await commit(store, graph);
+    expect([res.statusCode, res.json().code]).toEqual([409, 'no_current_program_run']);
+    expect(createRecord).not.toHaveBeenCalled();
+  });
+
+  it('(c) CONTRAST: a legacy saved model still anchors to its run_analysis fact (aag_v1), and with none still refuses as before', async () => {
+    const legacy = { nodes: [{ id: 'goal_1', kind: 'goal', label: 'Runway' }], edges: [] };
+    const anchored = makeStore();
+    const res = await commit(anchored.store, legacy);
+    expect(res.statusCode, res.body).toBe(201);
+    expect(anchored.createRecord.mock.calls[0]![0].decision.graph_hash).toBe(GRAPH_HASH);
+    const none = makeStore({ anchor: null });
+    const refused = await commit(none.store, legacy);
+    expect([refused.statusCode, refused.json().code]).toEqual([409, 'no_analysed_graph']);
   });
 });

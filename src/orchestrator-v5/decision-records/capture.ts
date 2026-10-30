@@ -86,6 +86,9 @@ import type { ChosenOptionDecisionWrite, CreateDecisionRecordWrite } from './sto
  *  exists because DecisionRecordDecisionSchema is .strict() (no sibling
  *  version fields possible). */
 export const AAG_V1_GRAPH_HASH_PREFIX = 'aag_v1:sha256:';
+/** The regime for a PROGRAM scenario's anchor (S5, 30 Oct): its newest current Run's receipt `revision_digest`, the
+ *  `graph_hash_at_run` a program's read serves (`run-receipt.ts`). A program Run writes no run_analysis fact. */
+export const MP_V1_GRAPH_HASH_PREFIX = 'mp_v1:sha256:';
 
 /** Review-date horizon. BRIEF-C derivation rules: explicit user date >
  *  decision-horizon heuristic > 90-day default — no elicitation surface

@@ -93,6 +93,8 @@ import {
   computeBrierComponent,
   isDecisionOutcomeResult,
 } from '../orchestrator-v5/decision-records/scoring.js';
+import { programReadOf, reopenProgram, unreadableWords } from '../orchestrator-v5/model-program-turn/program-store.js';
+import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { getRequestId } from '../utils/request-id.js';
 import { log } from '../utils/telemetry.js';
 
@@ -210,9 +212,10 @@ export default async function route(
   /** Test seam: inject a hand-rolled store port; production resolves the
    *  service-role singleton lazily, per-request, exactly like the capture
    *  hook does (so importing this module never requires SUPABASE_* env). */
-  deps?: { readonly store?: DecisionRecordStorePort; readonly now?: () => Date },
+  deps?: { readonly store?: DecisionRecordStorePort; readonly now?: () => Date; readonly loadGraph?: (scenarioId: string) => Promise<unknown> },
 ): Promise<void> {
   const resolveStore = (): DecisionRecordStorePort => deps?.store ?? getDecisionRecordStore();
+  const loadGraph = deps?.loadGraph ?? ((id: string) => getSessionStore().loadGraph(id));
   const nowFn = deps?.now ?? (() => new Date());
   const outcomeReads = new WeakMap<FastifyRequest, NonNullable<Awaited<ReturnType<DecisionRecordStorePort['readRecordForOutcome']>>>>();
 
@@ -257,13 +260,36 @@ export default async function route(
     // user-commit.ts. No analysis ⇒ nothing to anchor the decision to ⇒
     // refuse, rather than record a decision against a hash nobody can
     // re-derive.
-    let anchor;
+    // A PROGRAM scenario (S5, 30 Oct): its Runs live beside its model and write no run_analysis fact, so the decision is
+    // anchored to the newest stored Run's own revision (`mp_v1:sha256:` + its receipt's revision_digest, the
+    // `graph_hash_at_run` the program's read serves), and only while that Run is current for the saved model and engine.
+    let graph: unknown;
     try {
-      anchor = await store.readNewestAnalysisAnchor(scenarioId);
-    } catch (error) {
-      if (!(error instanceof AnalysisAnchorUnavailableError)) throw error;
+      graph = await loadGraph(scenarioId);
+    } catch {
       return refuse(reply, req, 503, 'analysis_anchor_unavailable',
         'Analysis history is unavailable. Please try again.');
+    }
+    const program = programReadOf(graph);
+    if (program.kind === 'unreadable') {
+      return refuse(reply, req, 409, 'model_program_unreadable', unreadableWords(program.reason));
+    }
+    let anchor: { readonly graphHashAtRun: string; readonly anchorRegime?: 'program' } | null;
+    if (program.kind === 'program') {
+      const shown = reopenProgram(graph);
+      if (shown?.run == null || !shown.current || !shown.engine_current) {
+        return refuse(reply, req, 409, 'no_current_program_run',
+          'Run the analysis on this version of your model before recording your decision. Nothing was recorded.');
+      }
+      anchor = { graphHashAtRun: shown.run.receipt.revision_digest, anchorRegime: 'program' };
+    } else {
+      try {
+        anchor = await store.readNewestAnalysisAnchor(scenarioId);
+      } catch (error) {
+        if (!(error instanceof AnalysisAnchorUnavailableError)) throw error;
+        return refuse(reply, req, 503, 'analysis_anchor_unavailable',
+          'Analysis history is unavailable. Please try again.');
+      }
     }
     if (anchor === null) {
       return refuse(
@@ -300,6 +326,7 @@ export default async function route(
         ? body.revisit_trigger_or_date
         : undefined,
       graphHashAtRun: anchor.graphHashAtRun,
+      ...(anchor.anchorRegime !== undefined ? { anchorRegime: anchor.anchorRegime } : {}),
       // A stable client nonce makes a network retry replay through the RPC's
       // dedupe branch; its absence makes every commit a NEW record rather
       // than one silently swallowed by a previous one.
