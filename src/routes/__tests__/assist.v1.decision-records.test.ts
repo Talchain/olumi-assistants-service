@@ -109,6 +109,8 @@ async function anonApiKeyShapedToken(): Promise<string> {
 
 interface FakeStoreState {
   scenarioOwner: string | null | undefined;
+  /** Whether the ownership read says the scenario's model is a program (S5). */
+  program: boolean;
   anchor: { graphHashAtRun: string; computedAt: string | null } | null;
   record: {
     record_id: string;
@@ -132,6 +134,7 @@ interface FakeStoreState {
 function makeStore(overrides?: Partial<FakeStoreState>) {
   const state: FakeStoreState = {
     scenarioOwner: OWNER_ID,
+    program: false,
     anchor: { graphHashAtRun: HASH_AT_RUN, computedAt: COMPUTED_AT },
     record: {
       record_id: RECORD_ID,
@@ -165,6 +168,7 @@ function makeStore(overrides?: Partial<FakeStoreState>) {
     return state.outcomeResult;
   });
   const readScenarioOwner = vi.fn(async () => state.scenarioOwner);
+  const readScenarioOwnerAndProgram = vi.fn(async () => ({ owner: state.scenarioOwner, program: state.program }));
   const readRecordForOutcome = vi.fn(async () => state.record);
   const readNewestAnalysisAnchor = vi.fn(async () => state.anchor);
   const retrieveRecords = vi.fn(async () => ({ records: [], totalCount: 0 }));
@@ -173,6 +177,7 @@ function makeStore(overrides?: Partial<FakeStoreState>) {
     createRecord,
     recordOutcome,
     readScenarioOwner,
+    readScenarioOwnerAndProgram,
     readRecordForOutcome,
     readNewestAnalysisAnchor,
     retrieveRecords,
@@ -181,11 +186,11 @@ function makeStore(overrides?: Partial<FakeStoreState>) {
   return { store, state, createRecord, recordOutcome, readScenarioOwner, readRecordForOutcome, readNewestAnalysisAnchor };
 }
 
-/** `graph`: the scenario's saved graph as the session store reads it (null: none saved; a legacy model reads the same). */
-async function buildApp(store: StorePort, graph: unknown = null): Promise<FastifyInstance> {
+/** `loadGraph`: the session store's read of the scenario's saved graph (S5 reads it only for a program scenario). */
+async function buildApp(store: StorePort, loadGraph: (id: string) => Promise<unknown> = async () => null): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   await installOwnershipHarness(app);
-  await decisionRecordsRoute(app, { store, now: () => NOW, loadGraph: async () => graph });
+  await decisionRecordsRoute(app, { store, now: () => NOW, loadGraph });
   await app.ready();
   return app;
 }
@@ -1215,8 +1220,8 @@ describe('S5 (P1 demo journey, 30 Oct) — a PROGRAM scenario\'s commit is ancho
     const { graph } = withNewRun({ model_program: MODEL_PROGRAM, canonical: m, seed: seedOf(SCENARIO_ID), person_words: [BRIEF, SAID], runs: [] });
     return { m, graph: JSON.parse(JSON.stringify(graph)) as Record<string, any> };
   };
-  const commit = async (store: StorePort, graph: unknown) => {
-    const app = await buildApp(store, graph);
+  const commit = async (store: StorePort, loadGraph: (id: string) => Promise<unknown>) => {
+    const app = await buildApp(store, loadGraph);
     try {
       return await app.inject({ method: 'POST', url: '/assist/v1/decision-records/commit', headers: { authorization: `Bearer ${token}` }, payload: COMMIT_BODY });
     } finally { await app.close(); }
@@ -1224,8 +1229,8 @@ describe('S5 (P1 demo journey, 30 Oct) — a PROGRAM scenario\'s commit is ancho
 
   it('(a) a program-only board (no run_analysis fact) records the decision against its Run\'s revision: the model WITH the dissent', async () => {
     const { m, graph } = withDissent();
-    const { store, createRecord, readNewestAnalysisAnchor } = makeStore({ anchor: null });
-    const res = await commit(store, graph);
+    const { store, createRecord, readNewestAnalysisAnchor } = makeStore({ anchor: null, program: true });
+    const res = await commit(store, async () => graph);
     expect(res.statusCode, res.body).toBe(201);
     const digest = graph.living_model.runs.at(-1).receipt.revision_digest as string;
     expect(createRecord.mock.calls[0]![0].decision.graph_hash).toBe(`${MP_V1_GRAPH_HASH_PREFIX}${digest}`);
@@ -1238,8 +1243,8 @@ describe('S5 (P1 demo journey, 30 Oct) — a PROGRAM scenario\'s commit is ancho
   it('(b) a program whose model moved since its newest Run is refused with its reason, and nothing is recorded', async () => {
     const { graph } = withDissent();
     graph.living_model.canonical.dissent[0].position = 'A second oven would sit idle on Mondays.';
-    const { store, createRecord } = makeStore({ anchor: { graphHashAtRun: HASH_AT_RUN, computedAt: COMPUTED_AT } });
-    const res = await commit(store, graph);
+    const { store, createRecord } = makeStore({ anchor: { graphHashAtRun: HASH_AT_RUN, computedAt: COMPUTED_AT }, program: true });
+    const res = await commit(store, async () => graph);
     expect(res.statusCode, res.body).toBe(409);
     expect(res.json()).toMatchObject({ code: 'no_current_program_run',
       message: 'Run the analysis on this version of your model before recording your decision. Nothing was recorded.' });
@@ -1249,20 +1254,28 @@ describe('S5 (P1 demo journey, 30 Oct) — a PROGRAM scenario\'s commit is ancho
   it('(b2) a program with no stored Run is refused the same way', async () => {
     const { graph } = withDissent();
     graph.living_model.runs = [];
-    const { store, createRecord } = makeStore({ anchor: null });
-    const res = await commit(store, graph);
+    const { store, createRecord } = makeStore({ anchor: null, program: true });
+    const res = await commit(store, async () => graph);
     expect([res.statusCode, res.json().code]).toEqual([409, 'no_current_program_run']);
     expect(createRecord).not.toHaveBeenCalled();
   });
 
-  it('(c) CONTRAST: a legacy saved model still anchors to its run_analysis fact (aag_v1), and with none still refuses as before', async () => {
-    const legacy = { nodes: [{ id: 'goal_1', kind: 'goal', label: 'Runway' }], edges: [] };
+  it('(b3) a program whose graph cannot be read is refused as unavailable, and nothing is recorded', async () => {
+    const { store, createRecord } = makeStore({ anchor: null, program: true });
+    const res = await commit(store, async () => { throw new Error('read failed'); });
+    expect([res.statusCode, res.json().code]).toEqual([503, 'analysis_anchor_unavailable']);
+    expect(createRecord).not.toHaveBeenCalled();
+  });
+
+  it('(c) CONTRAST: a legacy scenario\'s commit runs exactly the path before S5: no graph read (so a failing one changes nothing), aag_v1 from its fact, and no_analysed_graph with none', async () => {
+    const failing = vi.fn(async () => { throw new Error('read failed'); });
     const anchored = makeStore();
-    const res = await commit(anchored.store, legacy);
+    const res = await commit(anchored.store, failing);
     expect(res.statusCode, res.body).toBe(201);
     expect(anchored.createRecord.mock.calls[0]![0].decision.graph_hash).toBe(GRAPH_HASH);
     const none = makeStore({ anchor: null });
-    const refused = await commit(none.store, legacy);
+    const refused = await commit(none.store, failing);
     expect([refused.statusCode, refused.json().code]).toEqual([409, 'no_analysed_graph']);
+    expect(failing, 'a legacy commit never reads the graph').not.toHaveBeenCalled();
   });
 });

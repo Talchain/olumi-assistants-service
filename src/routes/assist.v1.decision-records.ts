@@ -222,7 +222,13 @@ export default async function route(
   // -------------------------------------------------------------------------
   // COMMIT — the user's own decision + their own confidence.
   // -------------------------------------------------------------------------
-  app.post(DECISION_RECORDS_COMMIT_PATH, { config: { scenarioId: { from: 'body', key: 'scenario_id', readOwner: async (_req, id) => resolveStore().readScenarioOwner(id) } } }, async (req, reply) => {
+  // Whether the commit's scenario is a program, from the ownership read itself (S5): only then is its graph read.
+  const programScenarios = new WeakMap<FastifyRequest, boolean>();
+  app.post(DECISION_RECORDS_COMMIT_PATH, { config: { scenarioId: { from: 'body', key: 'scenario_id', readOwner: async (req, id) => {
+    const row = await resolveStore().readScenarioOwnerAndProgram(id);
+    programScenarios.set(req, row.program);
+    return row.owner;
+  } } } }, async (req, reply) => {
     const userId = req.scenarioAccess?.callerUserId ?? null;
     if (userId === null) return reply;
 
@@ -263,12 +269,15 @@ export default async function route(
     // A PROGRAM scenario (S5, 30 Oct): its Runs live beside its model and write no run_analysis fact, so the decision is
     // anchored to the newest stored Run's own revision (`mp_v1:sha256:` + its receipt's revision_digest, the
     // `graph_hash_at_run` the program's read serves), and only while that Run is current for the saved model and engine.
-    let graph: unknown;
-    try {
-      graph = await loadGraph(scenarioId);
-    } catch {
-      return refuse(reply, req, 503, 'analysis_anchor_unavailable',
-        'Analysis history is unavailable. Please try again.');
+    // Its graph is read only when the ownership read says it is a program; a legacy commit reads nothing more than before.
+    let graph: unknown = null;
+    if (programScenarios.get(req) === true) {
+      try {
+        graph = await loadGraph(scenarioId);
+      } catch {
+        return refuse(reply, req, 503, 'analysis_anchor_unavailable',
+          'Analysis history is unavailable. Please try again.');
+      }
     }
     const program = programReadOf(graph);
     if (program.kind === 'unreadable') {

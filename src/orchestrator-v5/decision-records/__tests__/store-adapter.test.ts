@@ -414,3 +414,24 @@ describe('S1 user-commit anchor — canonical successful Run', () => {
       .rejects.toThrow('analysis_anchor_unavailable');
   });
 });
+
+describe('SupabaseDecisionRecordStore.readScenarioOwnerAndProgram (S5: the commit\'s one ownership read)', () => {
+  it('reads the owner and the program marker in ONE scenarios query; a program is a set model_program, a legacy model none', async () => {
+    const program = makeReadClient({ data: [{ user_id: 'owner-1', model_program: 'v1' }] });
+    expect(await new SupabaseDecisionRecordStore(program.client).readScenarioOwnerAndProgram('s-1')).toEqual({ owner: 'owner-1', program: true });
+    expect([program.capture.from, program.capture.select, program.capture.eq, program.capture.limit])
+      .toEqual(['scenarios', 'user_id, model_program:graph->living_model->model_program', ['id', 's-1'], 1]);
+    const legacy = makeReadClient({ data: [{ user_id: 'owner-1', model_program: null }] });
+    expect(await new SupabaseDecisionRecordStore(legacy.client).readScenarioOwnerAndProgram('s-1')).toEqual({ owner: 'owner-1', program: false });
+  });
+
+  it('keeps the owner read\'s three answers: absent (undefined), guest (null), owned; and readScenarioOwner still selects only user_id', async () => {
+    const absent = makeReadClient({ data: [] });
+    expect(await new SupabaseDecisionRecordStore(absent.client).readScenarioOwnerAndProgram('s-1')).toEqual({ owner: undefined, program: false });
+    const guest = makeReadClient({ data: [{ user_id: null, model_program: 'v1' }] });
+    expect(await new SupabaseDecisionRecordStore(guest.client).readScenarioOwnerAndProgram('s-1')).toEqual({ owner: null, program: true });
+    const owner = makeReadClient({ data: [{ user_id: 'owner-1' }] });
+    expect(await new SupabaseDecisionRecordStore(owner.client).readScenarioOwner('s-1')).toBe('owner-1');
+    expect(owner.capture.select).toBe('user_id');
+  });
+});
