@@ -497,6 +497,40 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect((r.json() as Json).error.message).toBe('A panel answer is a chance between 0 and 1; ‘base sales’ is not one. Nothing was changed.');
       expect(figure('base_sales')).toBe(300);
     });
+
+    it.each([['a list', []], ['nothing', null], ['a string', 'r-1'], ['a goal\'s target', 'goal']] as const)(
+      '(f) a present applied_from that is not a panel claim on a card\'s figure (%s) is refused, signed in or not, and nothing is saved', async (_name, sent) => {
+        panelSays(0.6);
+        for (const guest of [false, true]) {
+          const runs = storedRuns();
+          const r = sent === 'goal'
+            ? await app.inject({ method: 'POST', url: '/agent/v1/core-turn', ...(guest ? {} : { headers: { 'x-test-caller': 'owner-1' } }),
+              payload: { kind: 'system_event', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', turn_id: randomUUID(),
+                event: { kind: 'goal_target_edit', goal_node_id: savedProgramOf(persisted)!.canonical.goals[0]!.id, raw_value: 0.6, applied_from: { round_id: 'r-1', participant_id: 'p-sam' } } } })
+            : await apply(0.6, { applied_from: sent }, guest);
+          expect(r.statusCode, r.body).toBe(409);
+          expect((r.json() as Json).error).toMatchObject({ code: 'CANVAS_EDIT_REFUSED', nothing_saved: true,
+            message: 'A panel answer is applied to a card\'s figure, from its round and participant. I haven\'t changed anything.' });
+          expect([figure('sell_through'), storedRuns()]).toEqual([0.7, runs]);
+        }
+      });
+
+    it('(g1) "as it is" is exact: a unitless 0.3333333333333333 is saved as that number, never rounded', async () => {
+      panelSays(1 / 3);
+      const r = await apply(1 / 3);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(Object.is(figure('sell_through'), 1 / 3)).toBe(true);
+    });
+
+    it.each([[0.6, 60], [0.07, 7], [0.29, 29], [1 / 3, 33.33333333333333]])('(g2) a % moves the decimal point exactly: %s → %s', async (answer, pct) => {
+      const m = bakery();
+      m.quantities = m.quantities.map((x) => (x.id === 'sell_through' ? { ...x, unit: '%', value: 70, low: 50, high: 90 } : x));
+      persisted = programGraph(m);
+      panelSays(answer);
+      const r = await apply(answer);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(Object.is(figure('sell_through'), pct)).toBe(true);
+    });
   });
 
   it('a typed turn: the AI’s reply byte for byte, and the saved model in the contract’s exact shape', async () => {

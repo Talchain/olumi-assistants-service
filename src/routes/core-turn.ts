@@ -411,18 +411,23 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           // target and value) before anything is written, then saved as the participant's figure, approved by the owner. The
           // figure is the store's, never the client's number; the participant is the store's, never a client-sent author.
           // A panel answer is a chance between 0 and 1 (`elicitation-append.ts`, stored as given): it lands in the quantity's own
-          // unit (unitless or a rate per period as it is; a % times 100), and on any other figure it is refused, never guessed.
+          // unit (unitless or a rate per period exactly as it is; a % times 100, by moving the decimal point of its shortest
+          // decimal form, so 0.6 is 60, never 59.99…), and on any other figure it is refused, never guessed. A present
+          // `applied_from` that is not a panel claim on a card's figure is refused too: it never falls through to an ordinary save.
           const quantityId = figure !== undefined && 'quantity_id' in figure.target ? figure.target.quantity_id : undefined;
           const target = quantityId === undefined ? undefined : currentProgram.program.canonical.quantities.find((q) => q.id === quantityId);
           const chanceIn = (unit: string | null | undefined): ((p: number) => number) | null => {
             const u = parseUnit(unit ?? '1');
             const dims = u.ok ? Object.entries(u.unit.dims) : [];
-            return u.ok && dims.length <= 1 && dims.every(([d, e]) => TIME_DIMS.has(d) && e === -1) ? (p) => Number((p / u.unit.scale).toPrecision(12)) : null;
+            if (!u.ok || dims.length > 1 || !dims.every(([d, e]) => TIME_DIMS.has(d) && e === -1)) return null;
+            return u.unit.scale === 1 ? (p) => p : u.unit.scale === 0.01 ? (p) => { const [d, e = '0'] = String(p).split('e'); return Number(`${d}e${Number(e) + 2}`); } : null;
           };
           // The claim as the verifier reads it, field by field (the store checks every one; nothing here is trusted).
           const claimOf = (af: Record<string, unknown>): AppliedFromClaim => ({ round_id: String(af.round_id ?? ''), participant_id: String(af.participant_id ?? ''),
             ...(typeof af.evidence_event_id === 'string' ? { evidence_event_id: af.evidence_event_id } : {}) });
-          const panel = claim.held === 'same' || figure === undefined || quantityId === undefined || !isRec(ev.applied_from) ? undefined
+          const panel = claim.held === 'same' || !('applied_from' in ev) || ev.applied_from === undefined ? undefined
+            : figure === undefined || quantityId === undefined || !isRec(ev.applied_from)
+              ? { refused: 'A panel answer is applied to a card\'s figure, from its round and participant. I haven\'t changed anything.' }
             : userId === null ? { refused: 'Only the scenario\'s owner can apply a panel answer. I haven\'t changed anything.' }
             : await verifyAppliedFrom(getCollabStore(), { scenario_id: scenarioId, target_id: quantityId,
               claim: claimOf(ev.applied_from as Record<string, unknown>), claimed_value: figure.value })
