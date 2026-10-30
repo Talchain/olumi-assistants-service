@@ -534,6 +534,56 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(Object.is(figure('monthly_churn'), 8)).toBe(true);
     });
 
+    it('(h1) the chance is converted on the read the save is pinned to: a unit changed from % to 1 meanwhile saves 0.08, never 8', async () => {
+      const m = bakery();
+      m.quantities = m.quantities.map((x) => (x.id === 'sell_through' ? { ...x, unit: '%', value: 70, low: null, high: null, range_kind: null } : x));
+      persisted = programGraph(m);
+      panelSays(0.08);
+      // While the panel record is checked (after the route's read, before the save's own read), the quantity's unit becomes 1.
+      const events = collab.events.get('r-1');
+      vi.spyOn(collab.events, 'get').mockImplementationOnce(() => {
+        const now = bakery();
+        now.quantities = now.quantities.map((x) => (x.id === 'sell_through' ? { ...x, unit: '1', value: 0.7, low: null, high: null, range_kind: null } : x));
+        persisted = programGraph(now);
+        return events;
+      });
+      const r = await apply(0.08);
+      expect(r.statusCode, r.body).toBe(200);
+      const saved = savedProgramOf(persisted)!.canonical.quantities.find((x) => x.id === 'sell_through')!;
+      expect([saved.unit, saved.value]).toEqual(['1', 0.08]);
+    });
+
+    it('(h2) a resend is the same edit only byte for byte: a malformed resend under the turn id of a saved apply is refused as a reused id, and changes nothing', async () => {
+      panelSays(0.6);
+      const turnId = randomUUID();
+      const send = (appliedFrom: unknown) => app.inject({ method: 'POST', url: '/agent/v1/core-turn', headers: { 'x-test-caller': 'owner-1' },
+        payload: { kind: 'system_event', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', turn_id: turnId,
+          event: { kind: 'factor_value_edit', target_id: 'sell_through', value: 0.6, applied_from: appliedFrom } } });
+      const first = await send({ round_id: 'r-1', participant_id: 'p-sam' });
+      expect(first.statusCode, first.body).toBe(200);
+      const runs = storedRuns();
+      const again = await send([]);
+      expect([again.statusCode, (again.json() as Json).error?.code], again.body).toEqual([409, 'TURN_ID_REUSED']);
+      expect([who('sell_through'), storedRuns()]).toEqual([[0.6, 'p-sam', 'owner-1', 'Sam'], runs]);
+      // CONTRAST: the same bytes again are that edit, answered from its own save.
+      const same = await send({ round_id: 'r-1', participant_id: 'p-sam' });
+      expect([same.statusCode, (same.json() as Json).durability], same.body).toEqual([200, 'replayed']);
+    });
+
+    it('(h3) a second participant\'s identical answer, applied after the first, is theirs now, and history keeps both, each approved by the owner', async () => {
+      panelSays(0.6);
+      collab.participants.set('p-ana', { participant_id: 'p-ana', round_id: 'r-1', scenario_id: SCENARIO, display_name: 'Ana' });
+      collab.events.get('r-1')!.push({ event_id: 'e-2', round_id: 'r-1', participant_id: 'p-ana', event_version: 1, kind: 'belief_submitted',
+        target: { kind: 'factor', id: 'sell_through' }, belief: { value: 0.6, expression_raw: '0.6', confidence: null }, evidence: null,
+        provenance: { authored_by: 'p-ana', method: 'elicited_numeric', elicitation_version: 'v1' }, created_at: '2026-10-30T01:05:00.000Z' });
+      expect((await apply(0.6)).statusCode).toBe(200);
+      const r = await apply(0.6, { applied_from: { round_id: 'r-1', participant_id: 'p-ana' } });
+      expect(r.statusCode, r.body).toBe(200);
+      expect(who('sell_through')).toEqual([0.6, 'p-ana', 'owner-1', 'Ana']);
+      const history = (savedProgramOf(persisted)!.canonical.history as unknown as Json[]).filter((h) => h.id === 'sell_through' && h.change === 'entered');
+      expect(history.map((h) => [h.author_id, h.approved_by])).toEqual([['p-sam', 'owner-1'], ['p-ana', 'owner-1']]);
+    });
+
     it.each([[0.6, 60], [0.07, 7], [0.29, 29], [1 / 3, 33.33333333333333]])('(g2) a % moves the decimal point exactly: %s → %s', async (answer, pct) => {
       const m = bakery();
       m.quantities = m.quantities.map((x) => (x.id === 'sell_through' ? { ...x, unit: '%', value: 70, low: 50, high: 90 } : x));

@@ -77,7 +77,6 @@ import { isProgramGraph, programReadOf, reopenProgram, savedProgramOf, sourceTex
 import { compile } from '../orchestrator-v5/model-program/compile.js';
 import { applyCanvasFigure, HOST_REPLY_WITHHELD_TOOLS, programTurnFacts, readProgramContext } from '../orchestrator-v5/model-program-turn/program-tools.js';
 import { verifyAppliedFrom, type AppliedFromClaim } from '../collab/apply-verification.js';
-import { parseUnit, TIME_DIMS } from '../orchestrator-v5/model-program/units.js';
 import { getCollabStore } from '../collab/store.js';
 import { isCollabRefusal } from '../collab/types.js';
 import { programOperationId } from '../orchestrator-v5/model-program-turn/program-save.js';
@@ -410,18 +409,10 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           // A panel answer applied by the owner (`applied_from`): checked against the stored panel event (its round, participant,
           // target and value) before anything is written, then saved as the participant's figure, approved by the owner. The
           // figure is the store's, never the client's number; the participant is the store's, never a client-sent author.
-          // A panel answer is a chance between 0 and 1 (`elicitation-append.ts`, stored as given): it lands in the quantity's own
-          // unit (unitless or a rate per period exactly as it is; a % times 100, by moving the decimal point of its shortest
-          // decimal form, so 0.6 is 60, never 59.99…), and on any other figure it is refused, never guessed. A present
-          // `applied_from` that is not a panel claim on a card's figure is refused too: it never falls through to an ordinary save.
+          // The verified answer (a chance between 0 and 1) is converted into the quantity's own unit by `applyCanvasFigure`, on
+          // the read its save is pinned to, never on this one. A present `applied_from` that is not a panel claim on a card's
+          // figure is refused too: it never falls through to an ordinary save.
           const quantityId = figure !== undefined && 'quantity_id' in figure.target ? figure.target.quantity_id : undefined;
-          const target = quantityId === undefined ? undefined : currentProgram.program.canonical.quantities.find((q) => q.id === quantityId);
-          const chanceIn = (unit: string | null | undefined): ((p: number) => number) | null => {
-            const u = parseUnit(unit ?? '1');
-            const dims = u.ok ? Object.entries(u.unit.dims) : [];
-            if (!u.ok || dims.length > 1 || !dims.every(([d, e]) => TIME_DIMS.has(d) && e === -1)) return null;
-            return u.unit.scale === 1 ? (p) => p : u.unit.scale === 0.01 ? (p) => { const [d, e = '0'] = String(p).split('e'); return Number(`${d}e${Number(e) + 2}`); } : null;
-          };
           // The claim as the verifier reads it, field by field (the store checks every one; nothing here is trusted): each id
           // exactly as a string, never coerced; any other shape, or an evidence id that is present but not a string, is no claim.
           const claimOf = (af: unknown): AppliedFromClaim | null => (!isRec(af) || typeof af.round_id !== 'string' || typeof af.participant_id !== 'string'
@@ -434,17 +425,13 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             : userId === null ? { refused: 'Only the scenario\'s owner can apply a panel answer. I haven\'t changed anything.' }
             : await verifyAppliedFrom(getCollabStore(), { scenario_id: scenarioId, target_id: quantityId,
               claim: sent, claimed_value: figure.value })
-              .then((v) => {
-                const convert = target === undefined ? null : chanceIn(target.unit);
-                return convert === null ? { refused: `A panel answer is a chance between 0 and 1; ‘${target?.label ?? quantityId}’ is not one. Nothing was changed.` }
-                  : { value: convert(v.value), author: v.participant_id, party: v.display_name };
-              })
+              .then((v) => ({ chance: v.value, author: v.participant_id, party: v.display_name }))
               .catch((err: unknown) => { if (isCollabRefusal(err)) return { refused: `${err.message} I haven't changed anything.` }; throw err; });
           const edited = claim.held === 'same'
             ? own !== null ? { status: 'saved' as const, receipt: own }
               : { status: 'unknown' as const, reason: 'This edit was sent again, and Olumi could not confirm it was saved. Reload to see your model.' }
             : panel !== undefined && 'refused' in panel ? { status: 'refused' as const, reason: panel.refused }
-            : figure !== undefined ? await applyCanvasFigure({ dispatch, readTurn }, scenarioId, { ...figure, ...(panel !== undefined ? { value: panel.value, author: panel.author, party: panel.party } : {}),
+            : figure !== undefined ? await applyCanvasFigure({ dispatch, readTurn }, scenarioId, { ...figure, ...(panel !== undefined ? { chance: panel.chance, author: panel.author, party: panel.party } : {}),
               operation_key: turnId, approver: userId })
             : { status: 'refused' as const, reason: ev.kind === 'edge_strength_edit'
               ? 'A link\'s size on this model is a figure in its own units; change it in the chat for now.'
