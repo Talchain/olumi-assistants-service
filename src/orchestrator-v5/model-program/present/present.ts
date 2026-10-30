@@ -45,6 +45,8 @@ import { separated, type PairedDifference } from '../simulate/paired.js';
 import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
 import { isWithheld, type Chance, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
 import { costOf, readingOf, restsOn, simulate } from '../simulate/simulate.js';
+import { createHash } from 'node:crypto';
+import { tippingPoint, type TippingResult, type TippingState } from './tipping.js';
 
 /** Whose a figure is, as the AI wrote it (the A25 'unverified' label is off the path, S1 strip, Paul 26 Oct). */
 type Author = 'person' | 'olumi' | 'structure';
@@ -145,6 +147,9 @@ export interface PresentInput {
   /** Olumi's readings of their dates and spans that this run's windows and timings use (stated-time.ts), each with its basis:
    * said once beside the chances, so a chance is never read as resting on their exact date (option B, PL 16:42Z). */
   readonly time_readings?: readonly PresentTimeReading[];
+  /** G10 (Paul, 30 Oct): what the Run and the driver sweep leave of the admission limit, in `costOf` operations. Absent: no
+   * tipping point is searched (every other caller is unchanged). */
+  readonly tipping_operations?: number;
 }
 /** One of Olumi's readings of their dates and spans; `timing` when a window or timing this run keeps uses it. */
 export interface PresentTimeReading { readonly id: string; readonly label: string; readonly basis: string; readonly accepted: boolean; readonly timing: boolean }
@@ -183,6 +188,8 @@ export interface PresentedAnalysisView {
     /** Everything the result waits on, by label, with the figure its answer box fills where there is one. */
     readonly waits_on?: readonly PresentBlocker[];
   };
+  /** G10: the tipping point searched on the leader's main driver (tipping.ts), as found; said in `leader.words`. */
+  readonly tipping?: TippingResult;
 }
 
 /**
@@ -819,6 +826,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     ...((input.blockers ?? []).length > 0 ? { waits_on: input.blockers!.map((b) => ({ ...b, label: inlineWords(b.label) })) } : {}),
   };
   // ── Which option is most likely to achieve the goal, in this model (Paul 6 and 14 Oct: say it; never choose for them) ──
+  let tipping: TippingResult | undefined;
   const leader = ((): PresentedLeader | undefined => {
     // W6 review B3: a Run known not to be current names no leader (run-facts.ts: "a Run that is not current names no leader").
     if (input.current === false || waiting.length > 0 || jointWords === undefined || options.length < 2) return undefined;
@@ -879,10 +887,41 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const restsOnWords = sharedWords !== undefined ? `It rests on the same ${sharedWhat} as each option’s chance${ownToo ? ', and on its own, listed with it' : ''}.`
       : reading === undefined && !conditional ? 'It rests on your figures.'
       : `Like each option’s chance, it rests on ${[...(reading !== undefined ? [reading.replace(/^on /, '')] : []), ...(conditional ? ['the assumptions listed with it'] : [])].join(' and ')}.`;
+    // G10 (Paul, 30 Oct; contract v2, PL 01:31Z): where the leader's chance rests most on one measured figure, the values of it
+    // tried from its low end to its high end, read in that order: which option is the more likely at each (the leader across
+    // every option), or, where even the leader is more likely to miss, whether it is above or below 50%. Said only of the
+    // values tried and of this finding's own aim; a search over what is left of the admission limit, or nothing.
+    // PL 01:57Z: the figure and the question are chosen from the Run's and the sweep's draws, so the search draws its own: a
+    // seed forked from the Run's, fixed per figure (common draws across its 21 values), so its intervals cover the search
+    // that was chosen, not draws that chose it.
+    const missLikely = top.c.precision_95[1] < 0.5;
+    if (d.kind === 'available' && input.tipping_operations !== undefined) {
+      const x = byId.get(d.driver.quantity)!;
+      const forked = createHash('sha256').update(`tipping:${result.seed}:${x.id}`, 'utf8').digest().readUInt32BE(0);
+      tipping = tippingPoint({ model, seed: forked, draws: sweepDraws, quantity: x.id, ends: [d.driver.low.value, d.driver.high.value],
+        question: missLikely ? { kind: 'level', option_id: top.id, level: 0.5 } : { kind: 'leader' }, maxOperations: input.tipping_operations });
+    }
+    const tippingWords = ((): string => {
+      if (tipping === undefined || d.kind !== 'available') return '';
+      const x = byId.get(d.driver.quantity)!, figure = q(label(x.id) ?? x.id), at = (v: number): string => sayOf(x.id, v, x.unit);
+      if (tipping.kind === 'refused') return tipping.reason === 'work_bound' ? ` This model is too large to test ${figure} across its range in one run.` : '';
+      const [a, b] = [tipping.probes[0]!.value, tipping.probes.at(-1)!.value];
+      const state = (s: TippingState): string => (s.kind === 'leader' ? `${name(s.option_id)} is the more likely to achieve ${aim}`
+        : s.kind === 'tie' ? 'the options are level'
+        : s.kind === 'above' ? `${name(top.id)} is more likely to meet ${aim} than to miss it`
+        : s.kind === 'below' ? `${name(top.id)} is more likely to miss ${aim} than to meet it` : 'the simulation cannot tell');
+      const which = missLikely ? `whether ${name(top.id)} is more likely to meet ${aim} than to miss it` : 'which option is the more likely';
+      switch (tipping.kind) {
+        case 'none': return ` At every value of ${figure} tried from ${at(a)} to ${at(b)}, ${state(tipping.state)}.`;
+        case 'crossing': return ` At the values of ${figure} tried from ${at(a)} to ${at(b)}: up to ${at(tipping.between[0])}, ${state(tipping.from)}; from ${at(tipping.between[1])}, ${state(tipping.to)}. The change comes somewhere between ${at(tipping.between[0])} and ${at(tipping.between[1])}.`;
+        case 'non_monotone': return ` As ${figure} moves from ${at(a)} to ${at(b)}, ${which} changes more than once (${listWords(tipping.changes.map((c) => `between ${at(c.between[0])} and ${at(c.between[1])}`))}), so there is no single tipping point.`;
+        case 'unresolved': return ` At some of the values of ${figure} tried, ${tipping.reason === 'too_close' ? `the simulation cannot tell ${missLikely ? `${which}` : 'the options apart'}` : 'a chance rises and then falls'}, so no single tipping point can be given.`;
+      }
+    })();
     return { licence: 'permitted', option_id: null, goal_chance_leader: top.id, similar_option_ids: [],
       // PL 22:19Z: the finding names exactly what it is of, the aims left out included, said once where it is made.
       words: `In this model, ${name(top.id)} is the option most likely to achieve ${aim}${measuredOnly ? ` (leaving out ${listWords(input.leaves_out!.map(q))}, which ${input.leaves_out!.length === 1 ? 'has' : 'have'} no measure yet)` : ''}: ${top.display} chance, against ${next.display} for ${name(next.id)}, the next most likely. ${restsOnWords}`
-        + (top.c.precision_95[1] < 0.5 ? ` Even so, in this model it is more likely to miss ${aim} than to meet it.` : '') + rests };
+        + (missLikely ? ` Even so, in this model it is more likely to miss ${aim} than to meet it.` : '') + rests + tippingWords };
   })();
   const known = input.current !== undefined && input.run !== undefined;
   // GAP 3: once per result, wherever any of its words call figures "yours".
@@ -901,6 +940,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     ...(leader !== undefined ? { leader } : {}),
     options: sharedNoDriver === undefined ? options : options.map((o) => ({ ...o, main_driver: { kind: 'none_licensed' as const, reason: '' } })),
     ...(Object.keys(disclosed).length > 0 ? { goal_chance: disclosed } : {}),
+    ...(tipping !== undefined ? { tipping } : {}),
   };
 }
 

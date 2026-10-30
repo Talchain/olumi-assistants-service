@@ -148,11 +148,14 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   // The same join on the run path (PL 21:51Z): compile lists such an aim among the executable's `withheld` records, which the
   // result reads as aims that hold the chance back; it is the measured joint's left-out aim, said in the chance's own words
   // ("leaving out ‘…’, which has no measure yet") and its notes, never one the chance waits on.
+  // G10 (Paul, 30 Oct): the tipping point gets only what the headline and the driver sweep leave of the admission limit; its
+  // probes run one at a time on fewer draws than the headline, so its bytes stay inside what the headline was admitted at.
+  const swept = admitted.operations + driverSweepOperations(x, draws);
   const view = presentAnalysisView({ model: { ...x, withheld: (x.withheld ?? []).filter((w) => !(w.kind === 'goal' && leftOut.has(w.id))) }, result: sim, quantities: quantityMeta(model, compiled, x, records), goals, asks, blockers, leaves_out, aims,
     limit_premises: Object.fromEntries(compiled.perLimit.map((l) => [l.limit_id, premisesFor(l.rests_on)])),
     option_premises: Object.fromEntries(compiled.perOption.map((o) => [o.option_id, premisesFor(o.rests_on)])),
-    left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })), sweep: admitted.operations + driverSweepOperations(x, draws) <= MAX_OPERATIONS,
-    time_readings: timeReadings(read, x, records) });
+    left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })), sweep: swept <= MAX_OPERATIONS,
+    time_readings: timeReadings(read, x, records), tipping_operations: Math.max(0, MAX_OPERATIONS - swept) });
   return { compiled, sim, projection, view };
 }
 
