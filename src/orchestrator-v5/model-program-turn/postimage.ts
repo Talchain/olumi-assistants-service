@@ -93,17 +93,19 @@ export const withoutHost = (v: unknown): unknown => (Array.isArray(v) ? v.map(wi
  * `by` for a record of the person's in words they give in this change (`fresh`), else whoever said the same words in the
  * saved record (`prior`), else no one known. Olumi's own records, and structure, are said by no person.
  */
-const hostSet = (v: unknown, approval: 'proposed' | 'approved', by: string | null, fresh: readonly string[] = [], prior?: unknown): unknown => {
-  if (Array.isArray(v)) return v.map((x, i) => hostSet(x, approval, by, fresh, Array.isArray(prior) ? prior[i] : undefined));
+const hostSet = (v: unknown, approval: 'proposed' | 'approved', by: string | null, fresh: readonly string[] = [], prior?: unknown, sayer: string | null = by): unknown => {
+  if (Array.isArray(v)) return v.map((x, i) => hostSet(x, approval, by, fresh, Array.isArray(prior) ? prior[i] : undefined, sayer));
   if (!isRec(v)) return v;
   const was: Rec = isRec(prior) ? prior : {};
-  const saidBy = () => (v['author'] !== 'person' ? null : verbatimIn(v['quote'], fresh) ? by
+  const saidBy = () => (v['author'] !== 'person' ? null : verbatimIn(v['quote'], fresh) ? sayer
     : WORDS.every((k) => (was[k] ?? null) === (v[k] ?? null)) ? (was['author_id'] ?? null) : null);
   return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, k === 'approval' ? approval : k === 'approved_by' ? (approval === 'approved' ? by : null)
-    : k === 'author_id' ? saidBy() : hostSet(x, approval, by, fresh, was[k])]));
+    : k === 'author_id' ? saidBy() : hostSet(x, approval, by, fresh, was[k], sayer)]));
 };
-/** On an approved card: accepted, by the approving person; who said each part as `hostSet` reads it against the saved record. */
-const accepted = (v: unknown, by: string | null, fresh: readonly string[], prior: unknown): unknown => hostSet(v, 'approved', by, fresh, prior);
+/** On an approved card: accepted, by the approving person; who said each part as `hostSet` reads it against the saved record
+ *  (`sayer`, the person whose `fresh` words they are: the approver, unless a panel answer checked against its record names its participant). */
+const accepted = (v: unknown, by: string | null, fresh: readonly string[], prior: unknown, sayer: string | null = by): unknown =>
+  hostSet(v, 'approved', by, fresh, prior, sayer);
 /** A first draft, as the host saves it: every record proposed and approved by no one, whatever the drafter wrote (step 2). */
 export const asDrafted = (m: CanonicalModelT): CanonicalModelT =>
   ({ ...m, ...Object.fromEntries(FAMILIES.map(([f]) => [f, hostSet(m[f], 'proposed', null)])) }) as CanonicalModelT;
@@ -165,11 +167,13 @@ export function keepTheirFigures(saved: CanonicalModelT, ids: readonly string[])
  * explicitly for the person to review on its card; `words`: every word of theirs this change may quote (their earlier words and `fresh`, this change's own);
  * `approver`: who approves the card (its items' approved_by), and the person whose words `fresh` are (in every caller the
  * same person: the turn's own); null for a guest. `entered`: only on a figure typed on the canvas (`applyCanvasFigure`), the id
- * of the one record whose figure the person typed, so its history entry says so (D074, C6).
+ * of the one record whose figure the person typed, so its history entry says so (D074, C6). `author`: only with `entered`, the
+ * panel participant (checked against the panel record) whose answer the owner applied: that record's author_id and its history entry's, while
+ * approved_by stays the approver (S1, 30 Oct: who said it and who approved it are two people).
  */
 export function validatePostimage(saved: CanonicalModelT, raw: unknown,
   opts: { readonly removals: readonly string[]; readonly words: readonly string[]; readonly fresh: readonly string[]; readonly approver?: string | null;
-    readonly entered?: string }): PostimageResult {
+    readonly entered?: string; readonly author?: string }): PostimageResult {
   const parsed = CanonicalModel.safeParse(raw);
   if (!parsed.success) return { ok: false, code: 'schema', reason: 'The proposed model is not in the model format.', ids: [] };
   // Both sides as written: the host clears no direction (B3 off the path, S1 strip), so a direction change is a change, shown.
@@ -278,14 +282,16 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
     const records = (post[family] as readonly Rec[]).map((r) => {
       const old = before.get(String(r['id']));
       const fields = said(String(r['id']), old, r);
-      // Unchanged but for what the host owns: the saved record, exactly.
-      if (old !== undefined && fields.length === 0 && !unshown.some((u) => u.startsWith(`${String(r['id'])} (`))) return old;
-      const record = accepted(r, opts.approver ?? null, opts.fresh, old) as Rec;
+      const entered = opts.entered !== undefined && String(r['id']) === opts.entered;
+      // Unchanged but for what the host owns: the saved record, exactly. A panel answer is its participant's by their checked id,
+      // never their name (S1 r6, PL 03:43Z): another participant's same figure, under the same name too, is theirs now.
+      const reattributed = entered && opts.author !== undefined && old?.['author_id'] !== opts.author;
+      if (old !== undefined && fields.length === 0 && !reattributed && !unshown.some((u) => u.startsWith(`${String(r['id'])} (`))) return old;
+      const record = accepted(r, opts.approver ?? null, opts.fresh, old, entered && opts.author !== undefined ? opts.author : opts.approver ?? null) as Rec;
       changes.push(entry(String(r['id']), old === undefined ? 'add' : 'change', fields, now.title(family, record), authorOf(record), r));
       // D074 (C6): the figure the person typed on the canvas (`entered`) is recorded as entered, on an existing record (the record
       // it replaced in `old`) and on a goal's target that edit split off (`old` "null": it replaced none). Every other change to a
       // saved record is superseded, and any other added record has no entry, as before.
-      const entered = opts.entered !== undefined && String(r['id']) === opts.entered;
       if (old !== undefined || entered) history.push({ id: String(r['id']), change: entered ? 'entered' : 'superseded', old: JSON.stringify(old ?? null),
         quote: typeof r['quote'] === 'string' ? r['quote'] : null, author_id: typeof record['author_id'] === 'string' ? record['author_id'] : null, approved_by: opts.approver ?? null });
       return record;

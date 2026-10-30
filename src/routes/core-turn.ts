@@ -76,6 +76,9 @@ import type { ToolOutcome } from '../orchestrator-v5/path-b/tools/outcome.js';
 import { isProgramGraph, programReadOf, reopenProgram, savedProgramOf, sourceTextOf, unreadableWords } from '../orchestrator-v5/model-program-turn/program-store.js';
 import { compile } from '../orchestrator-v5/model-program/compile.js';
 import { applyCanvasFigure, HOST_REPLY_WITHHELD_TOOLS, programTurnFacts, readProgramContext } from '../orchestrator-v5/model-program-turn/program-tools.js';
+import { verifyAppliedFrom, type AppliedFromClaim } from '../collab/apply-verification.js';
+import { getCollabStore } from '../collab/store.js';
+import { isCollabRefusal } from '../collab/types.js';
 import { programOperationId } from '../orchestrator-v5/model-program-turn/program-save.js';
 import { findOperationSave } from '../orchestrator-v5/path-b/tools/core-write.js';
 import { registrationTurnId } from '../orchestrator-v5/graph-registration/registration-identity.js';
@@ -376,8 +379,10 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
     };
 
     if (canvasEdit) {
-      // The edit's identity is the event itself: the same edit resent is that edit, never a second one.
-      const claim = await takeClaim(agentTurnRequestHash(scenarioId, userId, '', stableStringify({ system_event: body.event ?? body.system_event ?? null })), false);
+      // The edit's identity is the event itself: the same edit resent is that edit, never a second one. It is the ONE event this
+      // path reads, chosen once (S1 r6, PL 03:43Z): a resend whose read event differs is a reused id, never an earlier edit's receipt.
+      const ev = isRec(body.event) ? body.event : isRec(body.system_event) ? body.system_event : {};
+      const claim = await takeClaim(agentTurnRequestHash(scenarioId, userId, '', stableStringify({ system_event: ev })), false);
       if (claim.held === 'refused') return claim.sent;
       // One turn at a time per scenario, as for a message. A resend runs after its original, and the canvas-edit path answers
       // it from its own record: the store replays a turn id it committed and never writes it twice.
@@ -392,7 +397,6 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             error: { code: 'MODEL_PROGRAM_UNREADABLE', message: unreadableWords(currentProgram.reason), retry_safe: false, nothing_saved: true }, agent: { forwarded_kind: kind, program: true } }));
         }
         if (currentProgram.kind === 'program') {
-          const ev = isRec(body.event) ? body.event : isRec(body.system_event) ? body.system_event : {};
           const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
           // A card's figure (by its quantity id) or a goal's target; a resend of the same edit is answered from what is saved.
           const figure = ev.kind === 'factor_value_edit' && typeof ev.target_id === 'string' && num(ev.raw_value ?? ev.value) !== undefined
@@ -403,10 +407,33 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           // With none found it is never called saved: the first send may have been refused, or its outcome is unknown.
           const own = claim.held === 'same'
             ? await findOperationSave(dispatch, readTurn, scenarioId, programOperationId(scenarioId, `card:${turnId}`)).catch(() => null) : null;
+          // A panel answer applied by the owner (`applied_from`): checked against the stored panel event (its round, participant,
+          // target and value) before anything is written, then saved as the participant's figure, approved by the owner. The
+          // figure is the store's, never the client's number; the participant is the store's, never a client-sent author.
+          // The verified answer (a chance between 0 and 1) is converted into the quantity's own unit by `applyCanvasFigure`, on
+          // the read its save is pinned to, never on this one. A present `applied_from` that is not a panel claim on a card's
+          // figure is refused too: it never falls through to an ordinary save.
+          const quantityId = figure !== undefined && 'quantity_id' in figure.target ? figure.target.quantity_id : undefined;
+          // The claim as the verifier reads it, field by field (the store checks every one; nothing here is trusted): each id
+          // exactly as a string, never coerced; any other shape, or an evidence id that is present but not a string, is no claim.
+          const claimOf = (af: unknown): AppliedFromClaim | null => (!isRec(af) || typeof af.round_id !== 'string' || typeof af.participant_id !== 'string'
+            || (af.evidence_event_id !== undefined && typeof af.evidence_event_id !== 'string') ? null
+            : { round_id: af.round_id, participant_id: af.participant_id, ...(typeof af.evidence_event_id === 'string' ? { evidence_event_id: af.evidence_event_id } : {}) });
+          const sent = claimOf(ev.applied_from);
+          const panel = claim.held === 'same' || !('applied_from' in ev) || ev.applied_from === undefined ? undefined
+            : figure === undefined || quantityId === undefined || sent === null
+              ? { refused: 'That panel answer couldn’t be matched to its round, so nothing was changed.' }
+            : userId === null ? { refused: 'Only the scenario\'s owner can apply a panel answer. I haven\'t changed anything.' }
+            : await verifyAppliedFrom(getCollabStore(), { scenario_id: scenarioId, target_id: quantityId,
+              claim: sent, claimed_value: figure.value })
+              .then((v) => ({ chance: v.value, author: v.participant_id, party: v.display_name }))
+              .catch((err: unknown) => { if (isCollabRefusal(err)) return { refused: `${err.message} I haven't changed anything.` }; throw err; });
           const edited = claim.held === 'same'
             ? own !== null ? { status: 'saved' as const, receipt: own }
               : { status: 'unknown' as const, reason: 'This edit was sent again, and Olumi could not confirm it was saved. Reload to see your model.' }
-            : figure !== undefined ? await applyCanvasFigure({ dispatch, readTurn }, scenarioId, { ...figure, operation_key: turnId, approver: userId })
+            : panel !== undefined && 'refused' in panel ? { status: 'refused' as const, reason: panel.refused }
+            : figure !== undefined ? await applyCanvasFigure({ dispatch, readTurn }, scenarioId, { ...figure, ...(panel !== undefined ? { chance: panel.chance, author: panel.author, party: panel.party } : {}),
+              operation_key: turnId, approver: userId })
             : { status: 'refused' as const, reason: ev.kind === 'edge_strength_edit'
               ? 'A link\'s size on this model is a figure in its own units; change it in the chat for now.'
               : 'Only a figure on a card or a goal\'s target can be edited here on this model; ask Olumi in the chat for other changes.' };

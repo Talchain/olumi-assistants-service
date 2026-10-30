@@ -27,6 +27,7 @@ import { isNoModelYet, isSavedRead, readSaved } from './saved-read.js';
 import { ok, refused, unavailable, type ToolOutcome } from '../path-b/tools/outcome.js';
 import { APPROXIMATE_FIGURE, CanonicalQuantity, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
 import { compile } from '../model-program/compile.js';
+import { parseUnit, TIME_DIMS } from '../model-program/units.js';
 import { ledgeredResponsesCall, proposePostimage } from './draft.js';
 import { keepTheirFigures, theirFiguresIn, validatePostimage } from './postimage.js';
 import { isSaved, postimageOf, programOperationId, savePostimage, withNewRun } from './program-save.js';
@@ -385,8 +386,27 @@ export async function runProgram(deps: ProgramToolDeps, ctx: Ctx): Promise<ToolO
  * its approval, approved_by and author_id included.
  */
 export type CanvasFigure = { readonly quantity_id: string } | { readonly goal_id: string };
+/**
+ * A panel answer is a chance between 0 and 1 (`elicitation-append.ts`, stored as given). In a quantity's own unit: unitless
+ * or a rate per period exactly as it is; a % (or a % per period) times 100, by moving the decimal point of its shortest
+ * decimal form, so 0.6 is 60, never 59.99…; any other unit is no chance (null), refused, never guessed.
+ */
+function chanceIn(unit: string | null | undefined): ((p: number) => number) | null {
+  const u = parseUnit(unit ?? '1');
+  const dims = u.ok ? Object.entries(u.unit.dims) : [];
+  if (!u.ok || dims.length > 1 || !dims.every(([d, e]) => TIME_DIMS.has(d) && e === -1)) return null;
+  return u.unit.scale === 1 ? (p) => p : u.unit.scale === 0.01 ? (p) => { const [d, e = '0'] = String(p).split('e'); return Number(`${d}e${Number(e) + 2}`); } : null;
+}
 export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch' | 'readTurn'>, scenarioId: string, edit: { readonly target: CanvasFigure; readonly value: number | null;
-  readonly low?: number | null; readonly high?: number | null; readonly operation_key: string; readonly approver: string | null }): Promise<{ readonly status: 'saved' | 'refused' | 'unknown'; readonly reason?: string; readonly receipt?: unknown;
+  readonly low?: number | null; readonly high?: number | null; readonly operation_key: string; readonly approver: string | null;
+  /** A panel participant, checked against the panel record, whose answer the owner applies: the figure's author_id; `approver` stays its approved_by. */
+  readonly author?: string;
+  /** That participant's name, as the panel store holds it: the figure's `party` (whose statement the owner applied). */
+  readonly party?: string;
+  /** That participant's verified answer, a chance between 0 and 1: converted HERE, into the unit of the quantity THIS read
+   *  holds (the read the save is pinned to), so a unit changed since the caller's read never gets a figure meant for the old
+   *  one. When given, `value` is not used. */
+  readonly chance?: number }): Promise<{ readonly status: 'saved' | 'refused' | 'unknown'; readonly reason?: string; readonly receipt?: unknown;
   readonly changes?: readonly ProposalChange[] }> {
   const saved = await readSaved(deps, scenarioId);
   if (!isSavedRead(saved)) return { status: 'refused', reason: 'Your model could not be read just now.' };
@@ -397,13 +417,16 @@ export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch' |
   const qid = 'quantity_id' in edit.target ? edit.target.quantity_id : goal?.measure?.target;
   const q = program.canonical.quantities.find((x) => x.id === qid);
   if (q === undefined) return { status: 'refused', reason: 'goal_id' in edit.target ? 'That goal has no target to set yet; say it in the chat.' : 'That is not a figure in this model.' };
+  const convert = edit.chance === undefined ? undefined : chanceIn(q.unit);
+  if (convert === null) return { status: 'refused', reason: `A panel answer is a chance between 0 and 1; ‘${q.label}’ is not one. Nothing was changed.` };
+  const value = convert === undefined ? edit.value : convert(edit.chance!);
   // A figure typed on the person's OWN range (DL 23 Oct): inside it, it is their new most likely figure (the draw's centre)
   // and the range and its reading stay; outside it, nothing is saved, and the refusal says the range must change with it.
-  const onRange = edit.low == null && edit.high == null && edit.value !== null && q.author === 'person' && q.low !== null && q.high !== null && q.low < q.high;
+  const onRange = edit.low == null && edit.high == null && value !== null && q.author === 'person' && q.low !== null && q.high !== null && q.low < q.high;
   if (onRange) {
     const n = (x: number) => x.toLocaleString('en-GB');
-    const where = edit.value! < q.low! || edit.value! > q.high! ? 'outside' : edit.value === q.low || edit.value === q.high ? 'at the end of, not inside,' : null;
-    if (where !== null) return { status: 'refused', reason: `${n(edit.value!)} is ${where} your range of ${n(q.low!)}–${n(q.high!)}, so nothing was saved: change the range with it.` };
+    const where = value! < q.low! || value! > q.high! ? 'outside' : value === q.low || value === q.high ? 'at the end of, not inside,' : null;
+    if (where !== null) return { status: 'refused', reason: `${n(value!)} is ${where} your range of ${n(q.low!)}–${n(q.high!)}, so nothing was saved: change the range with it.` };
   }
   // D074 (C6, "Source quote, contributor and approval actor stay distinct"): their words for this figure are the figure as
   // entered, and nothing the host adds around it (staging: "base sales: 320 loaf/week" was shown "in your words", a label
@@ -411,21 +434,22 @@ export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch' |
   // `value`/`raw_value` as a number), so the words are the number as JavaScript writes it ("320", "0.8"), or both ends of a
   // range ("80 to 100"): the figure as entered, never claimed to be their keystrokes. That it was set later, not from the
   // brief, is this edit's own history entry (`entered`, validatePostimage), which `project.ts` reads; never these words.
-  const words = !onRange && edit.low != null && edit.high != null ? `${edit.low} to ${edit.high}` : `${edit.value}`;
+  const words = !onRange && edit.low != null && edit.high != null ? `${edit.low} to ${edit.high}` : `${value}`;
   // The exact postimage: this ONE figure as theirs, in the figure as entered (a goal's target shared with another goal or a
   // limit first gets its own quantity, so the other keeps its figure). No AI call; the same validator as every change.
   if (q.status === 'derived') return { status: 'refused', reason: `"${q.label}" is worked out by its relation; change one of its inputs.` };
   const [low, high] = onRange ? [q.low, q.high] : [edit.low ?? null, edit.high ?? null];
-  if (edit.value === null && (low === null || high === null)) return { status: 'refused', reason: 'A figure needs a value, or both ends of a range.' };
+  if (value === null && (low === null || high === null)) return { status: 'refused', reason: 'A figure needs a value, or both ends of a range.' };
   if (low !== null && high !== null && low > high) return { status: 'refused', reason: `The low end ${low} is above the high end ${high}.` };
   const shared = goal !== undefined && (program.canonical.goals.some((x) => x.id !== goal.id && x.measure?.target === q.id) || program.canonical.limits.some((l) => l.measure?.bound === q.id));
   const id = shared ? `${goal!.id}_target` : q.id;
   // A typed figure is theirs.
-  const filled: CanonicalQuantityT = { ...q, id, value: edit.value, low, high, range_kind: onRange ? q.range_kind : null, status: 'known', author: 'person', party: null,
+  const filled: CanonicalQuantityT = { ...q, id, value: value, low, high, range_kind: onRange ? q.range_kind : null, status: 'known', author: 'person', party: edit.party ?? null,
     quote: words, question: null, basis: null, approval: 'approved' };
   const canonical = figurePostimage(program.canonical, filled, shared ? goal!.id : undefined);
   // `entered`: the record they typed, an existing figure or the goal's own target split off, recorded in history as entered (D074).
-  const v = validatePostimage(program.canonical, canonical, { removals: [], words: [...program.person_words, words], fresh: [words], approver: edit.approver, entered: id });
+  const v = validatePostimage(program.canonical, canonical, { removals: [], words: [...program.person_words, words], fresh: [words], approver: edit.approver, entered: id,
+    ...(edit.author !== undefined ? { author: edit.author } : {}) });
   if (!v.ok) return { status: 'refused', reason: v.reason };
   const next = withNewRun({ ...program, canonical: v.model, person_words: [...program.person_words, words] });
   if (next.evaluation.compiled.errors.length > 0) return { status: 'refused', reason: `That figure does not fit the model: ${next.evaluation.compiled.errors[0]!.message}` };
