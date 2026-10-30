@@ -496,10 +496,12 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         }
         pending = [];
       }
-      // Independent read r1 (A1): a live proposal carrier that cannot be read or projected is unreadable for a lookup, never
-      // a card that is not there; one that has expired is genuinely gone.
+      // Independent read r1 (A1): a live carrier that claims a proposal its content no longer verifies is unreadable for a
+      // lookup, never a card that is not there; one that has expired is genuinely gone. Independent read r2: a VERIFIED
+      // proposal the projection deliberately leaves out (an identity card no longer offerable on this graph) is not corrupt,
+      // and replays without its card exactly as a resend does.
       if (replayOnly && pending.some((p) => p.action.kind === 'apply_proposed_change' && !isPendingActionExpired(p, Date.now())
-        && (!isHeldProposal(p) || proposalRecord(p, now.graph) === undefined))) {
+        && p.action.inline_patch['agent_proposal'] !== undefined && agentProposalOf(p) === undefined)) {
         log.warn({ scenario_id: scenarioId, turn_id: turnId }, 'core-turn: replay_only found a held card it cannot read');
         return fail(503, { code: 'REPLAY_CARDS_UNREADABLE', message: 'The recorded reply\'s cards could not be read just now. Nothing was run; reload to see the current model.',
           retry_safe: true, nothing_saved: false }, 'unknown');

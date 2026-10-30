@@ -34,6 +34,8 @@ import { programOperationId, withNewRun } from '../../orchestrator-v5/model-prog
 import { MODEL_PROGRAM, savedProgramOf } from '../../orchestrator-v5/model-program-turn/program-store.js';
 import { PROGRAM_TURN_FACTS_PREFIX } from '../../orchestrator-v5/model-program-turn/program-tools.js';
 import { coreBudget } from '../../orchestrator-v5/agent-lane/model-budgets.js';
+import { createProposal } from '../../orchestrator-v5/agent-lane/proposal.js';
+import { proposalPendingAction } from '../../orchestrator-v5/agent-lane/durable-proposal.js';
 
 type Json = Record<string, any>;
 let SCENARIO = '';
@@ -979,6 +981,17 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect([corrupt.statusCode, (corrupt.json() as Json).error?.code]).toEqual([503, 'REPLAY_CARDS_UNREADABLE']);
       (read as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce([carrier(new Date(Date.now() - 1_000).toISOString())]);
       expect(((await lookup()).json() as Json)).toMatchObject({ durability: 'replayed', cards: [] });
+      // Independent read r2: a verified identity card that is no longer offerable on this graph (`proposalRecord` leaves it
+      // out on purpose, record.ts) is not corrupt: the lookup replays the reply without it, as a resend does.
+      const unofferable = createProposal({ scenario_id: SCENARIO, user_id: null, base_graph_identity_hash: 'h',
+        operations: [{ op: 'confirm_identity', path: 'no_such_outcome', value: { outcome_id: 'no_such_outcome', operation: 'product', factor_ids: ['a', 'b'], words: 'A reading' } }],
+        provenance: { authored_by: 'user_stated', basis: 'A reading' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'A reading' } as never);
+      const verified = proposalPendingAction(unofferable, { id: `agent-approve-proposal:${unofferable.proposal_id}`, label: 'Yes', message: 'Yes — A reading' } as never,
+        { scenario_id: SCENARIO, emitted_at_iso: new Date().toISOString() });
+      (read as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce([verified]);
+      const suppressed = await lookup();
+      expect(suppressed.statusCode, suppressed.body).toBe(200);
+      expect(suppressed.json()).toMatchObject({ durability: 'replayed', cards: [] });
       // A canvas edit is never looked up: refused before anything runs.
       const edit = await post({ kind: 'system_event', turn_id: randomUUID(), replay_only: true, event: { kind: 'factor_value_edit', target_id: 'base_sales', raw_value: 320 } });
       expect([edit.statusCode, (edit.json() as Json).error?.code]).toEqual([422, 'BAD_INPUT']);
