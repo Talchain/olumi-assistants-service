@@ -32,6 +32,7 @@ import { convertLinkEffect } from '../../cee/magnitude/link-effect.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { levelOf as accumulationInputLevelOf } from '../agent-lane/accumulation-identity.js';
 import { readGoalRecord } from '../goal-target/goal-record.js';
+import { linkHoldsStatedRange } from '../statement-door/statements.js';
 import type { PressBlocker } from '../agent-lane/press-next-step.js';
 import { LAUNCH_WINDOW_UNBUILT, launchWindowOf, launchWindowQuestion, periodWords } from '../goal-target/goal-target-basis.js';
 import { readCohortForecast } from '../goal-target/cohort-forecast.js';
@@ -576,9 +577,13 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
    * `user_specified`), and the next Run asked for its size as if they had set nothing. A band is not a size in the target's
    * unit (strength-as-size stays banned), so it is still asked — after saying what they set (DL's words).
    */
+  // The link the question itself asks for (`linkQuestion`: the failing case's own link, else the first one it names).
+  const asked = failingLink?.link ?? failedLinks[0];
+  // ⭐ ITEM 3 (AIE 16 Oct range contract: a range already supplied is never asked for again): the link whose effect the USER
+  // stated as a range keeps its need said but gets no question, as the sizer (`link-effect.ts`) and the Run's withhold read it,
+  // through the statement door's one reader. Served C2 G2 turn 05 @1253187a asked it beside a reply saying it was supplied.
+  const askedRangeHeld = asked !== undefined && linkHoldsStatedRange(graph, asked.from, asked.to);
   const bandTheUserSet = ((): string | null => {
-    // The link the question itself asks for (`linkQuestion`: the failing case's own link, else the first one it names).
-    const asked = failingLink?.link ?? failedLinks[0];
     if (asked === undefined || !Array.isArray(graph.edges)) return null;
     const edge = graph.edges.filter(isRec).find((e) => e.from === asked.from && e.to === asked.to);
     const mean = isRec(edge?.strength) ? edge.strength.mean : undefined;
@@ -613,7 +618,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
       : [`it needs today's level of ${name}`, "today's level", `What's today's level of ${name}?`]
     : c === 'c' ? [`it needs ${link}`, link,
       // AIQ (c): the smallest missing link, in natural units; a pending identity has its own card, so no second question.
-      identityCase || lever === undefined ? null : askedAfterTheBand(linkQuestion())]
+      identityCase || lever === undefined || askedRangeHeld ? null : askedAfterTheBand(linkQuestion())]
     : c === 'b' ? [`it can't yet test a '${comparatorTarget}' target on ${name}`, null, null]
     : [`${targetNounOf(graph, verdict.goal_id)} is in ${unit || 'its own units'}, but the model measures ${name} only relative to that target`,
       `${name} measured in ${unit || 'its own units'}`, `What's today's level of ${name}${unit !== '' ? `, in ${unit}` : ''}?`];

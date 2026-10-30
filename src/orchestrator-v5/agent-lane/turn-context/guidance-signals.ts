@@ -19,7 +19,7 @@ import { statusQuoOptionId, type GraphEdgeLike, type StatusQuoNodeLike } from '.
 import { detectSameLeverOptions } from '../../../cee/structure/index.js';
 import { linkSizing, type LinkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { valueAuthorshipOf as valueAuthorshipFromProvenance, type ValueAuthorship as ProvenanceValueAuthorship } from '../../../cee/provenance/provenance-of.js';
-import { placeholderGoalPaths } from '../goal-certainty.js';
+import { placeholderGoalPaths, userStatedRangeOn } from '../goal-certainty.js';
 import { decisionSensitivityOf, tippingPointOf, type TippingPoint } from '../decision-sensitivity.js';
 import { readStoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import { computeResponseHash } from '../../../utils/response-hash.js';
@@ -327,7 +327,9 @@ export function assembleGuidanceSignals(i: GuidanceSignalInputs): GuidanceSignal
   let placeholder: string[] = [];
   try {
     const paths = model === null ? [] : placeholderGoalPaths(i.graph, nonSq, i.identityEvaluations);
-    placeholder = [...new Set(paths.flatMap((p) => p.links.map((l) => `${l.from}->${l.to}`)))];
+    // ⭐ ITEM 3 (AIE 16 Oct range contract): S1 is a size ask, so a link whose effect the USER stated as a range is not
+    // offered (policy silent_when "the value is yours"); its figures stay withheld by the Run's own reader.
+    placeholder = [...new Set(paths.flatMap((p) => p.links.filter((l) => !userStatedRangeOn(i.graph, l)).map((l) => `${l.from}->${l.to}`)))];
   } catch { placeholder = []; }
 
   // The leader's identity is read ONLY under the owner's licence.
