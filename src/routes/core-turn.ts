@@ -55,7 +55,7 @@ import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/
 import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-context.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { runWithTurnFence, unclaimedTurnFenceHandle, type TurnFenceHandle } from '../orchestrator-v5/session/turn-fence.js';
-import { parsePendingAction, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
+import { isPendingActionExpired, parsePendingAction, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appliedGraphWire, coreTurnStores, graphReadyEmitter, programTurnTools } from '../orchestrator-v5/core-route/deps.js';
 import { programInstructions } from '../orchestrator-v5/core-route/instructions.js';
@@ -495,6 +495,14 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             retry_safe: true, nothing_saved: false }, 'unknown');
         }
         pending = [];
+      }
+      // Independent read r1 (A1): a live proposal carrier that cannot be read or projected is unreadable for a lookup, never
+      // a card that is not there; one that has expired is genuinely gone.
+      if (replayOnly && pending.some((p) => p.action.kind === 'apply_proposed_change' && !isPendingActionExpired(p, Date.now())
+        && (!isHeldProposal(p) || proposalRecord(p, now.graph) === undefined))) {
+        log.warn({ scenario_id: scenarioId, turn_id: turnId }, 'core-turn: replay_only found a held card it cannot read');
+        return fail(503, { code: 'REPLAY_CARDS_UNREADABLE', message: 'The recorded reply\'s cards could not be read just now. Nothing was run; reload to see the current model.',
+          retry_safe: true, nothing_saved: false }, 'unknown');
       }
       const paused = await store.readOpenAiPausedRun?.(scenarioId).catch(() => undefined);
       const outcome = recordedOutcomeOf(prior.request_hash);

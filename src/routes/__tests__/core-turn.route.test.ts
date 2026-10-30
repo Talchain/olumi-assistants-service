@@ -961,13 +961,24 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // The flag is no request identity: another body under this turn id is a reuse, never replayed.
       expect(((await lookup('Something else entirely.')).json() as Json).durability).not.toBe('replayed');
       // An unreadable held-card read is unavailable for a lookup; a plain resend keeps today's reading (no card known).
-      const read = store.readMostRecentPendingActions as unknown as { mockRejectedValueOnce: (e: Error) => void };
+      const read = store.readMostRecentPendingActions as unknown as { mockRejectedValueOnce: (e: Error) => void; mockResolvedValueOnce: (v: never) => void };
       read.mockRejectedValueOnce(new Error('read failed'));
       const unreadable = await lookup();
       expect(unreadable.statusCode, unreadable.body).toBe(503);
       expect(unreadable.json()).toMatchObject({ durability: 'unknown', error: { code: 'REPLAY_CARDS_UNREADABLE', retry_safe: true, nothing_saved: false } });
       read.mockRejectedValueOnce(new Error('read failed'));
       expect(((await typed(message, turnId)).json() as Json)).toMatchObject({ durability: 'replayed', cards: [] });
+      // Independent read r1: a live proposal carrier that cannot be read is unavailable for a lookup; an expired one is gone.
+      // A carrier as the store reads it whose embedded proposal no longer verifies (its id is not its content's).
+      const carrier = (expires_at_iso: string) => ({ id: 'r-corrupt', scenario_id: SCENARIO, chip_id: 'agent-approve-proposal:prop_corrupt',
+        expires_at_iso, expires_at_turn_count: 5, preconditions: { graph_hash: 'h' },
+        action: { kind: 'apply_proposed_change', proposal_ref: 'agent-approve-proposal:prop_corrupt', public_label: 'A change', public_message: 'A change',
+          inline_patch: { agent_proposal: { proposal_id: 'prop_corrupt', scenario_id: SCENARIO, base_graph_identity_hash: 'h' } } } });
+      read.mockResolvedValueOnce([carrier(new Date(Date.now() + 3_600_000).toISOString())] as never);
+      const corrupt = await lookup();
+      expect([corrupt.statusCode, (corrupt.json() as Json).error?.code]).toEqual([503, 'REPLAY_CARDS_UNREADABLE']);
+      (read as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce([carrier(new Date(Date.now() - 1_000).toISOString())]);
+      expect(((await lookup()).json() as Json)).toMatchObject({ durability: 'replayed', cards: [] });
       // A canvas edit is never looked up: refused before anything runs.
       const edit = await post({ kind: 'system_event', turn_id: randomUUID(), replay_only: true, event: { kind: 'factor_value_edit', target_id: 'base_sales', raw_value: 320 } });
       expect([edit.statusCode, (edit.json() as Json).error?.code]).toEqual([422, 'BAD_INPUT']);
