@@ -422,15 +422,18 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             if (!u.ok || dims.length > 1 || !dims.every(([d, e]) => TIME_DIMS.has(d) && e === -1)) return null;
             return u.unit.scale === 1 ? (p) => p : u.unit.scale === 0.01 ? (p) => { const [d, e = '0'] = String(p).split('e'); return Number(`${d}e${Number(e) + 2}`); } : null;
           };
-          // The claim as the verifier reads it, field by field (the store checks every one; nothing here is trusted).
-          const claimOf = (af: Record<string, unknown>): AppliedFromClaim => ({ round_id: String(af.round_id ?? ''), participant_id: String(af.participant_id ?? ''),
-            ...(typeof af.evidence_event_id === 'string' ? { evidence_event_id: af.evidence_event_id } : {}) });
+          // The claim as the verifier reads it, field by field (the store checks every one; nothing here is trusted): each id
+          // exactly as a string, never coerced; any other shape, or an evidence id that is present but not a string, is no claim.
+          const claimOf = (af: unknown): AppliedFromClaim | null => (!isRec(af) || typeof af.round_id !== 'string' || typeof af.participant_id !== 'string'
+            || (af.evidence_event_id !== undefined && typeof af.evidence_event_id !== 'string') ? null
+            : { round_id: af.round_id, participant_id: af.participant_id, ...(typeof af.evidence_event_id === 'string' ? { evidence_event_id: af.evidence_event_id } : {}) });
+          const sent = claimOf(ev.applied_from);
           const panel = claim.held === 'same' || !('applied_from' in ev) || ev.applied_from === undefined ? undefined
-            : figure === undefined || quantityId === undefined || !isRec(ev.applied_from)
+            : figure === undefined || quantityId === undefined || sent === null
               ? { refused: 'That panel answer couldn’t be matched to its round, so nothing was changed.' }
             : userId === null ? { refused: 'Only the scenario\'s owner can apply a panel answer. I haven\'t changed anything.' }
             : await verifyAppliedFrom(getCollabStore(), { scenario_id: scenarioId, target_id: quantityId,
-              claim: claimOf(ev.applied_from as Record<string, unknown>), claimed_value: figure.value })
+              claim: sent, claimed_value: figure.value })
               .then((v) => {
                 const convert = target === undefined ? null : chanceIn(target.unit);
                 return convert === null ? { refused: `A panel answer is a chance between 0 and 1; ‘${target?.label ?? quantityId}’ is not one. Nothing was changed.` }

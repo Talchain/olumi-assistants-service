@@ -498,7 +498,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(figure('base_sales')).toBe(300);
     });
 
-    it.each([['a list', []], ['nothing', null], ['a string', 'r-1'], ['a goal\'s target', 'goal']] as const)(
+    it.each([['a list', []], ['nothing', null], ['a string', 'r-1'], ['a goal\'s target', 'goal'],
+      ['ids in lists', { round_id: ['r-1'], participant_id: ['p-sam'] }], ['a numeric round id', { round_id: 1, participant_id: 'p-sam' }],
+      ['a numeric evidence id', { round_id: 'r-1', participant_id: 'p-sam', evidence_event_id: 7 }]] as const)(
       '(f) a present applied_from that is not a panel claim on a card\'s figure (%s) is refused, signed in or not, and nothing is saved', async (_name, sent) => {
         panelSays(0.6);
         for (const guest of [false, true]) {
@@ -520,6 +522,16 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const r = await apply(1 / 3);
       expect(r.statusCode, r.body).toBe(200);
       expect(Object.is(figure('sell_through'), 1 / 3)).toBe(true);
+    });
+
+    it('(g3) a % per period moves the decimal point too, as intended (%/month: 0.08 → 8)', async () => {
+      const m = bakery();
+      m.quantities.push({ ...m.quantities.find((x) => x.id === 'sell_through')!, id: 'monthly_churn', label: 'monthly churn', unit: '%/month', value: 5, low: null, high: null, range_kind: null });
+      persisted = programGraph(m);
+      panelSays(0.08, 'monthly_churn');
+      const r = await apply(0.08, {}, false, 'monthly_churn');
+      expect(r.statusCode, r.body).toBe(200);
+      expect(Object.is(figure('monthly_churn'), 8)).toBe(true);
     });
 
     it.each([[0.6, 60], [0.07, 7], [0.29, 29], [1 / 3, 33.33333333333333]])('(g2) a % moves the decimal point exactly: %s → %s', async (answer, pct) => {
