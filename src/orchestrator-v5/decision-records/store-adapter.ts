@@ -404,6 +404,13 @@ export interface DecisionRecordStorePort {
    */
   readScenarioOwner(scenarioId: string): Promise<string | null | undefined>;
 
+  /**
+   * The same read as {@link readScenarioOwner}, in the same one query, plus whether the scenario's saved model is a
+   * PROGRAM (`graph->living_model->model_program` is set, S5): the commit anchors a program to its own Run, and reads its
+   * graph only then. A legacy scenario's commit reads nothing more than it did before.
+   */
+  readScenarioOwnerAndProgram(scenarioId: string): Promise<{ readonly owner: string | null | undefined; readonly program: boolean }>;
+
   /** Owner + staked confidence for one record, or null when absent. */
   readRecordForOutcome(recordId: string): Promise<DecisionRecordOwnerRead | null>;
 
@@ -618,25 +625,34 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
   }
 
   async readScenarioOwner(scenarioId: string): Promise<string | null | undefined> {
+    return (await this.readScenarioRow(scenarioId, 'user_id', 'readScenarioOwner')).owner;
+  }
+
+  async readScenarioOwnerAndProgram(scenarioId: string): Promise<{ readonly owner: string | null | undefined; readonly program: boolean }> {
+    return this.readScenarioRow(scenarioId, 'user_id, model_program:graph->living_model->model_program', 'readScenarioOwnerAndProgram');
+  }
+
+  private async readScenarioRow(scenarioId: string, columns: string, name: string): Promise<{ owner: string | null | undefined; program: boolean }> {
     const { data, error } = await this.client
       .from('scenarios')
-      .select('user_id')
+      .select(columns)
       .eq('id', scenarioId)
       .limit(1);
     if (error) {
       throw new DecisionRecordStoreError(
-        `readScenarioOwner(${scenarioId}) failed: ${errMsg(error)}`,
+        `${name}(${scenarioId}) failed: ${errMsg(error)}`,
         { cause: error },
       );
     }
-    const rows = (data ?? []) as Array<{ user_id?: unknown }>;
+    const rows = (data ?? []) as Array<{ user_id?: unknown; model_program?: unknown }>;
     const row = rows[0];
     // THREE distinct answers, never conflated: absent scenario (undefined),
     // guest scenario (null), owned scenario (the uuid). Collapsing the first
     // two would turn "there is no such scenario" into "sign in", which is a
     // different — and wrong — thing to tell a signed-in user.
-    if (!row) return undefined;
-    return typeof row.user_id === 'string' && row.user_id.length > 0 ? row.user_id : null;
+    if (!row) return { owner: undefined, program: false };
+    return { owner: typeof row.user_id === 'string' && row.user_id.length > 0 ? row.user_id : null,
+      program: row.model_program !== undefined && row.model_program !== null };
   }
 
   async readRecordForOutcome(recordId: string): Promise<DecisionRecordOwnerRead | null> {

@@ -49,6 +49,7 @@ const collab = {
 };
 const records = {
   readScenarioOwner: async (id: string) => id === SID ? state.owner : null,
+  readScenarioOwnerAndProgram: async (id: string) => ({ owner: id === SID ? state.owner : null, program: false }),
   readRecordForOutcome: async (id: string) => state.entityAbsent || id !== RID ? null : ({ record_id: RID, scenario_id: SID, owner_user_id: A, hasOutcome: false }),
 };
 vi.mock('../collab/store.js', () => ({ getCollabStore: () => collab }));

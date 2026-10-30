@@ -93,6 +93,8 @@ import {
   computeBrierComponent,
   isDecisionOutcomeResult,
 } from '../orchestrator-v5/decision-records/scoring.js';
+import { reopenProgram } from '../orchestrator-v5/model-program-turn/program-store.js';
+import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { getRequestId } from '../utils/request-id.js';
 import { log } from '../utils/telemetry.js';
 
@@ -210,16 +212,23 @@ export default async function route(
   /** Test seam: inject a hand-rolled store port; production resolves the
    *  service-role singleton lazily, per-request, exactly like the capture
    *  hook does (so importing this module never requires SUPABASE_* env). */
-  deps?: { readonly store?: DecisionRecordStorePort; readonly now?: () => Date },
+  deps?: { readonly store?: DecisionRecordStorePort; readonly now?: () => Date; readonly loadGraph?: (scenarioId: string) => Promise<unknown> },
 ): Promise<void> {
   const resolveStore = (): DecisionRecordStorePort => deps?.store ?? getDecisionRecordStore();
+  const loadGraph = deps?.loadGraph ?? ((id: string) => getSessionStore().loadGraph(id));
   const nowFn = deps?.now ?? (() => new Date());
   const outcomeReads = new WeakMap<FastifyRequest, NonNullable<Awaited<ReturnType<DecisionRecordStorePort['readRecordForOutcome']>>>>();
 
   // -------------------------------------------------------------------------
   // COMMIT — the user's own decision + their own confidence.
   // -------------------------------------------------------------------------
-  app.post(DECISION_RECORDS_COMMIT_PATH, { config: { scenarioId: { from: 'body', key: 'scenario_id', readOwner: async (_req, id) => resolveStore().readScenarioOwner(id) } } }, async (req, reply) => {
+  // Whether the commit's scenario is a program, from the ownership read itself (S5): only then is its graph read.
+  const programScenarios = new WeakMap<FastifyRequest, boolean>();
+  app.post(DECISION_RECORDS_COMMIT_PATH, { config: { scenarioId: { from: 'body', key: 'scenario_id', readOwner: async (req, id) => {
+    const row = await resolveStore().readScenarioOwnerAndProgram(id);
+    programScenarios.set(req, row.program);
+    return row.owner;
+  } } } }, async (req, reply) => {
     const userId = req.scenarioAccess?.callerUserId ?? null;
     if (userId === null) return reply;
 
@@ -257,13 +266,35 @@ export default async function route(
     // user-commit.ts. No analysis ⇒ nothing to anchor the decision to ⇒
     // refuse, rather than record a decision against a hash nobody can
     // re-derive.
-    let anchor;
-    try {
-      anchor = await store.readNewestAnalysisAnchor(scenarioId);
-    } catch (error) {
-      if (!(error instanceof AnalysisAnchorUnavailableError)) throw error;
-      return refuse(reply, req, 503, 'analysis_anchor_unavailable',
-        'Analysis history is unavailable. Please try again.');
+    // A PROGRAM scenario (S5, 30 Oct): its Runs live beside its model and write no run_analysis fact, so the decision is
+    // anchored to the newest stored Run's own revision (`mp_v1:sha256:` + its receipt's revision_digest, the
+    // `graph_hash_at_run` the program's read serves), and only while that Run is current for the saved model and engine.
+    // Its graph is read only when the ownership read says it is a program; a legacy commit reads nothing more than before.
+    // Once it is a program, ONLY its own Run anchors the decision: a graph that is gone or unreadable is unavailable, never
+    // a fall-through to a legacy fact that could vouch for a model the program has since replaced.
+    const unavailable = () => refuse(reply, req, 503, 'analysis_anchor_unavailable', 'Analysis history is unavailable. Please try again.');
+    let anchor: { readonly graphHashAtRun: string; readonly anchorRegime?: 'program' } | null;
+    if (programScenarios.get(req) === true) {
+      let graph: unknown;
+      try {
+        graph = await loadGraph(scenarioId);
+      } catch {
+        return unavailable();
+      }
+      const shown = reopenProgram(graph); // undefined: no program, or one that cannot be read
+      if (shown === undefined) return unavailable();
+      if (shown.run === null || !shown.current || !shown.engine_current) {
+        return refuse(reply, req, 409, 'no_current_program_run',
+          'Run the analysis on this version of your model before recording your decision. Nothing was recorded.');
+      }
+      anchor = { graphHashAtRun: shown.run.receipt.revision_digest, anchorRegime: 'program' };
+    } else {
+      try {
+        anchor = await store.readNewestAnalysisAnchor(scenarioId);
+      } catch (error) {
+        if (!(error instanceof AnalysisAnchorUnavailableError)) throw error;
+        return unavailable();
+      }
     }
     if (anchor === null) {
       return refuse(
@@ -300,6 +331,7 @@ export default async function route(
         ? body.revisit_trigger_or_date
         : undefined,
       graphHashAtRun: anchor.graphHashAtRun,
+      ...(anchor.anchorRegime !== undefined ? { anchorRegime: anchor.anchorRegime } : {}),
       // A stable client nonce makes a network retry replay through the RPC's
       // dedupe branch; its absence makes every commit a NEW record rather
       // than one silently swallowed by a previous one.

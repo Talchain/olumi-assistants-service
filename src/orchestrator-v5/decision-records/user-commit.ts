@@ -110,7 +110,7 @@ import {
   USER_COMMIT_RECORD_ID_NAMESPACE,
   deterministicRecordUuid,
 } from './record-id.js';
-import { AAG_V1_GRAPH_HASH_PREFIX, DECISION_RECORD_REVIEW_HORIZON_DAYS } from './capture.js';
+import { AAG_V1_GRAPH_HASH_PREFIX, DECISION_RECORD_REVIEW_HORIZON_DAYS, MP_V1_GRAPH_HASH_PREFIX } from './capture.js';
 
 const REVIEW_HORIZON_MS = DECISION_RECORD_REVIEW_HORIZON_DAYS * 24 * 60 * 60 * 1000;
 
@@ -222,8 +222,10 @@ export interface UserCommitInput {
   /** Free text from the modal's "Revisit trigger or date" field, if any. */
   readonly revisitTriggerOrDate?: string;
   /** `graph_hash_at_run` from CEE's own newest non-noop run_analysis fact —
-   *  UNPREFIXED; this builder applies `aag_v1:sha256:`. */
+   *  UNPREFIXED; this builder applies `aag_v1:sha256:`, or `mp_v1:sha256:` for a program Run's revision digest. */
   readonly graphHashAtRun: string;
+  /** `program` when the anchor is a program Run's revision digest (S5); absent for the run_analysis fact's hash. */
+  readonly anchorRegime?: 'program';
   /**
    * Per-commit nonce. A client-supplied stable value makes a network RETRY
    * idempotent (the RPC replays); a fresh value makes a genuinely NEW commit
@@ -443,7 +445,7 @@ export function buildUserCommitWrite(input: UserCommitInput): BuiltUserCommit {
       ? parsedDate
       : new Date(input.now.getTime() + REVIEW_HORIZON_MS);
 
-  const graphHash = `${AAG_V1_GRAPH_HASH_PREFIX}${input.graphHashAtRun}`;
+  const graphHash = `${input.anchorRegime === 'program' ? MP_V1_GRAPH_HASH_PREFIX : AAG_V1_GRAPH_HASH_PREFIX}${input.graphHashAtRun}`;
   const recordId = deriveCommittedDecisionRecordId(
     input.scenarioId,
     graphHash,
