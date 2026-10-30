@@ -153,6 +153,13 @@ vi.mock('../../orchestrator-v5/session/index.js', () => ({ getSessionStore: () =
 vi.mock('../../orchestrator/user-identity.js', async (original) => ({
   ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
 }));
+/** S1: the panel's stored rounds, people and answers (the collab store's seam), set per row. */
+const collab = vi.hoisted(() => ({ rounds: new Map<string, unknown>(), participants: new Map<string, unknown>(), events: new Map<string, unknown[]>() }));
+vi.mock('../../collab/store.js', async (original) => ({
+  ...await original<Record<string, unknown>>(),
+  getCollabStore: () => ({ getRound: async (id: string) => collab.rounds.get(id) ?? null, getParticipant: async (id: string) => collab.participants.get(id) ?? null,
+    listAllRoundEvents: async (id: string) => collab.events.get(id) ?? [] }),
+}));
 /** Spies that call the real legacy functions, so a row can say a program turn never reaches them (spec §3, DL 26 Oct). */
 const legacy = vi.hoisted(() => ({ livingView: vi.fn(), capabilities: vi.fn(), rank: vi.fn(), restoreRun: vi.fn(), heldWriter: vi.fn(), history: vi.fn(),
   chips: vi.fn(), lifecycle: vi.fn(), stillApplies: vi.fn(), subjectMoved: vi.fn(), appliesAt: vi.fn(), recordApplies: vi.fn() }));
@@ -359,6 +366,13 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     // The real Stop handler (route-v2's `/orchestrate/v2/turn/stop` body), over the same store.
     const { recordExplicitTurnStop } = await import('../turn-stop.js');
     app.post('/orchestrate/v2/turn/stop', async (req, reply) => { const r = await recordExplicitTurnStop(req, 'req-stop'); return reply.code(r.status).send(r.body as never); });
+    // S1: the caller the ownership plugin admits (`req.scenarioAccess.callerUserId`, a signed-in user). That plugin is not mounted
+    // here, so every request is a guest's, as before, unless a row names its signed-in caller.
+    app.addHook('preHandler', async (req) => {
+      const caller = req.headers['x-test-caller'];
+      if (typeof caller === 'string') Object.assign(req, { scenarioAccess: { scenarioId: SCENARIO, ownerUserId: caller, callerUserId: caller,
+        caller: { userId: caller, verified: true }, memberRead: false } });
+    });
     await app.register(route.coreTurnRoute);
     await app.ready();
   }, 60_000);
@@ -394,6 +408,96 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   /** One figure typed on a card: the person's own hand on the bakery's weekly sales (`applyCanvasFigure`). */
   const canvasEdit = (turnId: string, value = 320) => post({ kind: 'system_event', turn_id: turnId,
     event: { kind: 'factor_value_edit', target_id: 'base_sales', raw_value: value } });
+
+  describe('S1 (P1 demo journey, 30 Oct): a panel answer the owner applies is the participant\'s figure, approved by the owner', () => {
+    /** A closed round on this scenario where Sam answered `answer` (a chance between 0 and 1, as the panel stores it) for `target`. */
+    const panelSays = (answer: number, target = 'sell_through') => {
+      collab.rounds.set('r-1', { round_id: 'r-1', scenario_id: SCENARIO, status: 'closed' });
+      collab.participants.set('p-sam', { participant_id: 'p-sam', round_id: 'r-1', scenario_id: SCENARIO, display_name: 'Sam' });
+      collab.events.set('r-1', [{ event_id: 'e-1', round_id: 'r-1', participant_id: 'p-sam', event_version: 1, kind: 'belief_submitted',
+        target: { kind: 'factor', id: target }, belief: { value: answer, expression_raw: String(answer), confidence: null }, evidence: null,
+        provenance: { authored_by: 'p-sam', method: 'elicited_numeric', elicitation_version: 'v1' }, created_at: '2026-10-30T01:00:00.000Z' }]);
+    };
+    /** The owner's apply of Sam's answer (signed in unless `guest`), with any extra event fields a client might send. */
+    const apply = (value: number, extra: Json = {}, guest = false, target = 'sell_through') => app.inject({ method: 'POST', url: '/agent/v1/core-turn',
+      ...(guest ? {} : { headers: { 'x-test-caller': 'owner-1' } }),
+      payload: { kind: 'system_event', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', turn_id: randomUUID(),
+        event: { kind: 'factor_value_edit', target_id: target, value, applied_from: { round_id: 'r-1', participant_id: 'p-sam' }, ...extra } } });
+    const asJson = (v: unknown): Json => JSON.parse(JSON.stringify(v ?? null)) as Json;
+    const record = (id: string) => asJson(savedProgramOf(persisted)!.canonical.quantities.find((x) => x.id === id));
+    const entered = (id: string) => (asJson(savedProgramOf(persisted)!.canonical.history) as Json[]).filter((h) => h.id === id && h.change === 'entered').at(-1);
+    const who = (id: string) => [figure(id), record(id).author_id, record(id).approved_by, record(id).party];
+    beforeEach(() => { collab.rounds.clear(); collab.participants.clear(); collab.events.clear(); });
+
+    it('(a) checked against the panel record: Sam\'s 0.6 is saved as Sam\'s (author_id, party), approved by the owner (approved_by), and its history entry says both', async () => {
+      panelSays(0.6);
+      const r = await apply(0.6);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(who('sell_through')).toEqual([0.6, 'p-sam', 'owner-1', 'Sam']);
+      expect([entered('sell_through')?.author_id, entered('sell_through')?.approved_by]).toEqual(['p-sam', 'owner-1']);
+    });
+
+    it('(b) a figure the panel record does not hold is refused with its reason, and nothing is saved', async () => {
+      panelSays(0.55);
+      const runs = storedRuns();
+      const r = await apply(0.6);
+      expect(r.statusCode, r.body).toBe(409);
+      expect((r.json() as Json).error).toMatchObject({ code: 'CANVAS_EDIT_REFUSED', nothing_saved: true });
+      expect(String((r.json() as Json).error.message)).toContain("I haven't changed anything.");
+      expect([figure('sell_through'), storedRuns()]).toEqual([0.7, runs]);
+    });
+
+    it('(b2) with no signed-in owner, a panel answer is refused, and nothing is saved', async () => {
+      panelSays(0.6);
+      const r = await apply(0.6, {}, true);
+      expect(r.statusCode, r.body).toBe(409);
+      expect((r.json() as Json).error.message).toBe("Only the scenario's owner can apply a panel answer. I haven't changed anything.");
+      expect(figure('sell_through')).toBe(0.7);
+    });
+
+    it('(c) CONTRAST: the owner\'s own typed figure, with no panel answer, is theirs and approved by them, as before', async () => {
+      const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', headers: { 'x-test-caller': 'owner-1' },
+        payload: { kind: 'system_event', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', turn_id: randomUUID(),
+          event: { kind: 'factor_value_edit', target_id: 'base_sales', raw_value: 320 } } });
+      expect(r.statusCode, r.body).toBe(200);
+      expect(who('base_sales')).toEqual([320, 'owner-1', 'owner-1', null]);
+    });
+
+    it('(d) an author the client sends is never the figure\'s author: the participant on the panel record is', async () => {
+      panelSays(0.6);
+      const r = await apply(0.6, { author_id: 'mallory', participant_id: 'mallory' });
+      expect(r.statusCode, r.body).toBe(200);
+      expect(who('sell_through')).toEqual([0.6, 'p-sam', 'owner-1', 'Sam']);
+    });
+
+    it('(e1) units: a rate per month takes the chance as it is (0.08 → 0.08 /month)', async () => {
+      const m = bakery();
+      m.quantities.push({ ...m.quantities.find((x) => x.id === 'sell_through')!, id: 'monthly_churn', label: 'monthly churn', unit: '1/month', value: 0.05, low: null, high: null, range_kind: null });
+      persisted = programGraph(m);
+      panelSays(0.08, 'monthly_churn');
+      const r = await apply(0.08, {}, false, 'monthly_churn');
+      expect(r.statusCode, r.body).toBe(200);
+      expect(who('monthly_churn')).toEqual([0.08, 'p-sam', 'owner-1', 'Sam']);
+    });
+
+    it('(e2) units: a percentage takes the chance times 100 (0.6 → 60 %)', async () => {
+      const m = bakery();
+      m.quantities = m.quantities.map((x) => (x.id === 'sell_through' ? { ...x, unit: '%', value: 70, low: 50, high: 90 } : x));
+      persisted = programGraph(m);
+      panelSays(0.6);
+      const r = await apply(0.6);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(who('sell_through')).toEqual([60, 'p-sam', 'owner-1', 'Sam']);
+    });
+
+    it('(e3) units: a figure that is not a chance (loaves a week) is refused, and nothing is saved', async () => {
+      panelSays(0.6, 'base_sales');
+      const r = await apply(0.6, {}, false, 'base_sales');
+      expect(r.statusCode, r.body).toBe(409);
+      expect((r.json() as Json).error.message).toBe('A panel answer is a chance between 0 and 1; ‘base sales’ is not one. Nothing was changed.');
+      expect(figure('base_sales')).toBe(300);
+    });
+  });
 
   it('a typed turn: the AI’s reply byte for byte, and the saved model in the contract’s exact shape', async () => {
     const r = await typed('What does the model hold for the oven today?');

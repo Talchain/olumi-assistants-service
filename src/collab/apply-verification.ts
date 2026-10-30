@@ -82,6 +82,8 @@ export interface VerifiedAppliedValue {
   readonly value: number;
   readonly round_id: string;
   readonly participant_id: string;
+  /** The participant's name as the store holds it (the round's own row), so a figure applied from them can say whose it is. */
+  readonly display_name: string;
   /** Present only when binding (f) verified a citation. */
   readonly evidence_event_id?: string;
 }
@@ -312,6 +314,7 @@ export async function verifyAppliedFrom(
     value: serverValue,
     round_id: round.round_id,
     participant_id: participant.participant_id,
+    display_name: participant.display_name,
     // Present ONLY when a citation was made AND verified. Absence means "this
     // apply cited no evidence", never "the citation was lost" — the contract's
     // stated absence semantics, carried through the verifier unchanged.

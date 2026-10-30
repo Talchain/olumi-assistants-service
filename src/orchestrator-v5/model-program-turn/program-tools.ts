@@ -386,7 +386,11 @@ export async function runProgram(deps: ProgramToolDeps, ctx: Ctx): Promise<ToolO
  */
 export type CanvasFigure = { readonly quantity_id: string } | { readonly goal_id: string };
 export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch' | 'readTurn'>, scenarioId: string, edit: { readonly target: CanvasFigure; readonly value: number | null;
-  readonly low?: number | null; readonly high?: number | null; readonly operation_key: string; readonly approver: string | null }): Promise<{ readonly status: 'saved' | 'refused' | 'unknown'; readonly reason?: string; readonly receipt?: unknown;
+  readonly low?: number | null; readonly high?: number | null; readonly operation_key: string; readonly approver: string | null;
+  /** A panel participant, checked against the panel record, whose answer the owner applies: the figure's author_id; `approver` stays its approved_by. */
+  readonly author?: string;
+  /** That participant's name, as the panel store holds it: the figure's `party` (whose statement the owner applied). */
+  readonly party?: string }): Promise<{ readonly status: 'saved' | 'refused' | 'unknown'; readonly reason?: string; readonly receipt?: unknown;
   readonly changes?: readonly ProposalChange[] }> {
   const saved = await readSaved(deps, scenarioId);
   if (!isSavedRead(saved)) return { status: 'refused', reason: 'Your model could not be read just now.' };
@@ -421,11 +425,12 @@ export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch' |
   const shared = goal !== undefined && (program.canonical.goals.some((x) => x.id !== goal.id && x.measure?.target === q.id) || program.canonical.limits.some((l) => l.measure?.bound === q.id));
   const id = shared ? `${goal!.id}_target` : q.id;
   // A typed figure is theirs.
-  const filled: CanonicalQuantityT = { ...q, id, value: edit.value, low, high, range_kind: onRange ? q.range_kind : null, status: 'known', author: 'person', party: null,
+  const filled: CanonicalQuantityT = { ...q, id, value: edit.value, low, high, range_kind: onRange ? q.range_kind : null, status: 'known', author: 'person', party: edit.party ?? null,
     quote: words, question: null, basis: null, approval: 'approved' };
   const canonical = figurePostimage(program.canonical, filled, shared ? goal!.id : undefined);
   // `entered`: the record they typed, an existing figure or the goal's own target split off, recorded in history as entered (D074).
-  const v = validatePostimage(program.canonical, canonical, { removals: [], words: [...program.person_words, words], fresh: [words], approver: edit.approver, entered: id });
+  const v = validatePostimage(program.canonical, canonical, { removals: [], words: [...program.person_words, words], fresh: [words], approver: edit.approver, entered: id,
+    ...(edit.author !== undefined ? { author: edit.author } : {}) });
   if (!v.ok) return { status: 'refused', reason: v.reason };
   const next = withNewRun({ ...program, canonical: v.model, person_words: [...program.person_words, words] });
   if (next.evaluation.compiled.errors.length > 0) return { status: 'refused', reason: `That figure does not fit the model: ${next.evaluation.compiled.errors[0]!.message}` };
