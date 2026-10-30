@@ -22,6 +22,12 @@ vi.mock('../../model-program/simulate/simulate.js', async (importOriginal) => {
   return { ...real, simulate: (...args: Parameters<typeof real.simulate>) => { calls++; return real.simulate(...args); } };
 });
 beforeEach(() => { calls = 0; });
+/** G10: what evaluate gives the tipping point, as the presenter receives it. */
+const tippingBudgets: (number | undefined)[] = [];
+vi.mock('../../model-program/present/present.js', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../model-program/present/present.js')>();
+  return { ...real, presentAnalysisView: (input: Parameters<typeof real.presentAnalysisView>[0]) => { tippingBudgets.push(input.tipping_operations); return real.presentAnalysisView(input); } };
+});
 
 type Json = Record<string, any>;
 /** The club, counted over `months` months from now. */
@@ -122,12 +128,22 @@ describe('the Run admission limit (alpha G11)', () => {
     expect((v.goal_chance.notes as string[]).filter((n) => n === 'This model is too large to test each figure one at a time in one run, so what the chances rest on most is not measured.')).toHaveLength(1);
   });
 
-  it('contrast: the club over its own three months runs the headline and the sweep (one ranged input, three settings)', () => {
+  it('contrast: the club over its own three months runs the headline, the sweep (one ranged input, three settings) and the tipping point (21 values)', () => {
     const e = evaluateCanonical(club(), { sourceText: CLUB_BRIEF, seed: 7 });
-    expect(calls).toBe(4);
+    // G10 (Paul, 30 Oct): the leader's measured driver is searched at TIPPING_PROBES values, inside what the headline and
+    // the sweep leave of the limit: 1 + 3 + 21.
+    expect(calls).toBe(1 + 3 + 21);
+    expect((e.view as Json).tipping?.kind).not.toBe('refused');
     const promotion = (e.view as Json).options.find((o: Json) => o.option_id === 'promotion');
     expect(promotion.main_driver.reason ?? '').not.toMatch(/too large/);
     expect(['available', 'none_licensed']).toContain(promotion.main_driver.kind);
+  });
+
+  it('G10: the tipping point is given exactly what the headline and the sweep leave of the limit, never the sweep\'s share', () => {
+    tippingBudgets.length = 0;
+    evaluateCanonical(club(), { sourceText: CLUB_BRIEF, seed: 7 });
+    const x = compile(club()).executable!;
+    expect(tippingBudgets).toEqual([MAX_OPERATIONS - costOf(x, RUN_DRAWS).operations - driverSweepOperations(x, RUN_DRAWS)]);
   });
 });
 

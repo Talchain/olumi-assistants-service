@@ -946,7 +946,14 @@ describe('the model-program turn on the real core route', () => {
     const words = `In this model, ‘A second oven’ is the option most likely to achieve the goal: ${oven.cell.display} chance, against 0% for ‘Keep our one oven’, `
       // Acceptance 29 Oct (c7.1): what both chances rest on alike is said once beside the chances; the finding points to it.
       + 'the next most likely. It rests on the same reading and assumptions as each option’s chance. '
-      + 'Even so, in this model it is more likely to miss the goal than to meet it. Its chance is most sensitive to ‘sell through’ (Olumi’s estimate).';
+      + 'Even so, in this model it is more likely to miss the goal than to meet it. Its chance is most sensitive to ‘sell through’ (Olumi’s estimate).'
+      // G10 (Paul, 30 Oct; contract v2): the leader is more likely to miss, so the search asks where its chance crosses 50%,
+      // over the driver's own ends at 21 values 0.02 apart; the 26 Oct design's real-path row found it between 0.78 and 0.8.
+      + ' At the values of ‘sell through’ tried from 0.5 to 0.9: up to 0.78, ‘A second oven’ is more likely to miss the goal than to meet it;'
+      + ' from 0.8, ‘A second oven’ is more likely to meet the goal than to miss it. The change comes somewhere between 0.78 and 0.8.';
+    expect(view.tipping).toMatchObject({ kind: 'crossing', quantity: 'sell_through', from: { kind: 'below' }, to: { kind: 'above' } });
+    expect(view.tipping.between[0]).toBeCloseTo(0.78, 12);
+    expect(view.tipping.between[1]).toBeCloseTo(0.8, 12);
     expect(view.goal_chance.notes[0]).toMatch(/^Each option’s chance rests on Olumi’s reading of your figures \(not yet confirmed\)\. Each assumes /);
     expect(oven.main_driver.detail).toContain(`held at its low end (0.5), the chance is ${d.low.display}; at its middle (0.7), ${d.middle.display}; at its high end (0.9), ${d.high.display}.`);
     expect(view.goal_chance.chance_words).toBe(`chance of ${BAKERY_SALES}, while ‘spend’ is at most £3,000`);
