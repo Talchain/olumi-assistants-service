@@ -402,6 +402,17 @@ export function productHoldRecord(pa: PendingAction, graph: unknown, nowMs: numb
 
 export { agentProposalOf, heldProposalId } from '../durable-proposal.js';
 export const isHeldProposal = (pa: PendingAction): boolean => isProductHold(pa) || agentProposalOf(pa) !== undefined;
+/**
+ * A1 (independent reads r2, r3): whether `pa` claims to carry a held card by ANY of its marks: an approval chip
+ * (`agent-approve-proposal:` or a product hold's `gmh_`) or a card payload (`agent_proposal`, the product hold's handler).
+ * A claim that `isHeldProposal` does not verify is a damaged card, never a card that is not there.
+ */
+export function claimsHeldProposal(pa: PendingAction): boolean {
+  if (pa.action.kind !== 'apply_proposed_change') return false;
+  const patch = isRec(pa.action.inline_patch) ? pa.action.inline_patch : {};
+  return (typeof pa.chip_id === 'string' && (pa.chip_id.startsWith(APPROVE_PREFIX) || GMH_RE.test(pa.chip_id)))
+    || patch['agent_proposal'] !== undefined || patch['handler_id'] === GM_HELD_HANDLER_ID;
+}
 
 export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = Date.now()): ProposalRecord | undefined {
   const p = agentProposalOf(pa);

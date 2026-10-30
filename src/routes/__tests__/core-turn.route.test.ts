@@ -992,6 +992,15 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const suppressed = await lookup();
       expect(suppressed.statusCode, suppressed.body).toBe(200);
       expect(suppressed.json()).toMatchObject({ durability: 'replayed', cards: [] });
+      // Independent read r3: a live carrier that keeps its approval chip but has lost its proposal payload is damaged (503);
+      // a carrier with no card mark at all (another chip, no payload) is not a card, and replays as before.
+      const marked = (chip_id: string) => ({ ...carrier(new Date(Date.now() + 3_600_000).toISOString()), chip_id,
+        action: { kind: 'apply_proposed_change', proposal_ref: chip_id, public_label: 'A change', public_message: 'A change', inline_patch: {} } });
+      (read as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce([marked('agent-approve-proposal:prop_0123456789abcdef')]);
+      const payloadLost = await lookup();
+      expect([payloadLost.statusCode, (payloadLost.json() as Json).error?.code]).toEqual([503, 'REPLAY_CARDS_UNREADABLE']);
+      (read as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce([marked('some-other-chip')]);
+      expect(((await lookup()).json() as Json)).toMatchObject({ durability: 'replayed', cards: [] });
       // A canvas edit is never looked up: refused before anything runs.
       const edit = await post({ kind: 'system_event', turn_id: randomUUID(), replay_only: true, event: { kind: 'factor_value_edit', target_id: 'base_sales', raw_value: 320 } });
       expect([edit.statusCode, (edit.json() as Json).error?.code]).toEqual([422, 'BAD_INPUT']);
