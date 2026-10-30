@@ -207,11 +207,23 @@ function attributedCount(sentence: string, speakerIsOlumi = false): CountClaim[]
   const possessiveAt = (at: number): boolean => tokens[at]?.word === 'olumi' && !tokens[at]!.quoted
     && tokens[at + 1]?.word === 's' && joined(tokens[at]!, tokens[at + 1]!);
   const claims: CountClaim[] = [];
-  // Start only at a direct clause boundary. Unknown lead-ins, reported and negated constructions are not claims.
+  let assertedClause = false;
+  let unassertedLead = false;
+  // An unknown comma/colon lead cannot assert a current count; coordination keeps that same scope.
+  // Existing affirmative count clauses and independent clause stops still reach the record comparison.
   for (let at = 0; at < tokens.length; at += 1) {
-    const actor = tokens[at]!;
-    if (actor.quoted || (at === 0 ? sentence.slice(0, actor.start).trim() !== ''
-      : tokens[at - 1]!.clause === actor.clause && !CONJUNCTIONS.has(tokens[at - 1]!.word))) continue;
+    const actor = tokens[at]!, previous = tokens[at - 1];
+    const boundary = previous !== undefined && previous.clause !== actor.clause;
+    const lead = boundary && /[,:]/.test(sentence.slice(previous.end, actor.start));
+    const coordinated = CONJUNCTIONS.has(previous?.word ?? '');
+    if (boundary && !lead) unassertedLead = false;
+    if (actor.quoted || (at === 0 ? sentence.slice(0, actor.start).trim() !== '' : !coordinated && !boundary)) continue;
+    if (unassertedLead) continue;
+    if (lead && !coordinated && !assertedClause) {
+      if (sourceIsOlumi(actor.word) || actor.word === 'you' || objectAt(at) !== undefined) unassertedLead = true;
+      continue;
+    }
+    if (boundary) assertedClause = false;
     let next = at + 1;
     const ours = sourceIsOlumi(actor.word);
     if (possessiveAt(at)) {
@@ -219,7 +231,8 @@ function attributedCount(sentence: string, speakerIsOlumi = false): CountClaim[]
       if (noun === undefined || following === undefined || !COUNT_KINDS.has(noun.word)) continue;
       if (sentence.slice(noun.end, following.start).trim() === ':') {
         const count = countNumber(following.word);
-        if (count !== undefined) claims.push({ count, kind: kindOf(noun.word) });
+        if (count !== undefined) { claims.push({ count, kind: kindOf(noun.word) }); assertedClause = true; }
+        at += 3; // The canonical label's colon and count are part of this recognised clause.
         continue;
       }
       // The possessive subject is still the same closed authorship-count claim, not a second authority.
@@ -238,19 +251,25 @@ function attributedCount(sentence: string, speakerIsOlumi = false): CountClaim[]
       next = object.end;
       const ownsSubject = tokens.slice(at + 1, next).some((_, i) => possessiveAt(at + 1 + i));
       if (ownsSubject && COUNT_CLAIM_PREDICATES.has(tokens[next]?.word ?? '')) {
+        assertedClause = true;
         claims.push(object.claim);
         continue;
       }
       if (!['is', 'are', 'was', 'were'].includes(tokens[next]?.word ?? '')) continue;
       next += 1;
       if (possessiveAt(next) && ['assumption', 'assumptions', 'estimate', 'estimates'].includes(tokens[next + 2]?.word ?? '')) {
+        assertedClause = true;
         claims.push(object.claim);
       } else if (COUNT_CLAIM_PREDICATES.has(tokens[next]?.word ?? '') && tokens[next + 1]?.word === 'by'
-        && sourceIsOlumi(tokens[next + 2]?.word)) claims.push(object.claim);
+        && (sourceIsOlumi(tokens[next + 2]?.word) || tokens[next + 2]?.word === 'you')) {
+        assertedClause = true;
+        if (sourceIsOlumi(tokens[next + 2]?.word)) claims.push(object.claim);
+      }
       continue;
     }
     const object = objectAt(next);
     if (object === undefined) continue;
+    assertedClause = true;
     if (ours) claims.push(object.claim);
     next = object.end;
     while (tokens[next]?.word === 'and') {
