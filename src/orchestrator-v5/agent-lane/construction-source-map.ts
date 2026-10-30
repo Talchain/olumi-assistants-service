@@ -22,7 +22,8 @@ import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
 import { wholeStatementIn, quoteIsNotTheUsersClaim } from '../goal-target/input-claim-context.js';
 import { readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
-import { figureTheUserWroteFor } from './stated-by-user.js';
+import { factorTheUserNamed, figureTheUserWroteFor } from './stated-by-user.js';
+import { coordinateClausesOf } from './link-effect-option-statement.js';
 import { goalTargetIdentity } from './construction-size-gate.js';
 
 /**
@@ -249,7 +250,43 @@ export function subjectSource(model: unknown, brief: string | undefined, subject
   // figure-free reading is Olumi's. The user's whole words stay human material, unverified; their chance is recorded only by the
   // door's own occurrence card, on their press.
   // Known human words (or only Olumi's holds-now reading) remain human material, never an Olumi estimate.
-  return claims.some(c => typeof c.quote === 'string' && usersWords(c.quote)) || keptWords ? unverifiedHuman(claimed) : unknown(claimed);
+  const own = claims.flatMap(c => (typeof c.quote === 'string' && usersWords(c.quote) ? [c.quote] : []));
+  if (own.length === 0 && !keptWords) return unknown(claimed);
+  // ⭐ AIE 19 Oct 10:54Z + 11:25Z AMEND (#3450 Codex R1): a quote is a source for the CLAIM, not a change of author, and removing human
+  // credit does not by itself make a risk Olumi's. Only a risk the drafter itself says it ADDED beyond the source (`ai_proposed`; never
+  // `inferred`, which is a reformulation or an unresolved introduction) stays Olumi's, and only where EVERY claim on it is a description
+  // and EVERY user sentence it cites is another subject's verified figure statement (`rivalled`) with no clause naming the risk (the
+  // existing naming authority, `factorTheUserNamed`, per coordinated clause). A clause that raises, sizes or adopts the risk names it, so
+  // another figure in the same sentence never erases the user's concern; that sentence keeps today's path, with its record.
+  if (!keptWords && subject.kind === 'risk' && drafterAddedIt(model, subject.label)
+    && claims.every((c) => c['form'] === 'describes' && c['field'] !== 'holds_now' && c['field'] !== 'occurrence')
+    && own.every((q) => rivalled(q) && !namesTheRisk(model, subject.label, q))) return unknown(claimed);
+  return unverifiedHuman(claimed);
+}
+
+/** The admitted node is Olumi's by its own provenance (the one authorship reader). */
+function olumisNode(graph: { nodes: unknown[] }, id: string): boolean {
+  const n = graph.nodes.find((x) => x !== null && typeof x === 'object' && (x as { id?: unknown }).id === id) as { provenance?: unknown } | undefined;
+  return n !== undefined && authorshipOf({ nodeTag: n.provenance }).origin === 'ai';
+}
+
+/** The drafter's own introduction tag says it ADDED this risk beyond the source (`ai_proposed`). Positive evidence only. */
+function drafterAddedIt(model: unknown, label: string): boolean {
+  const risks = model !== null && typeof model === 'object' ? (model as { risks?: unknown }).risks : undefined;
+  return Array.isArray(risks) && risks.some((r) => r !== null && typeof r === 'object' && typeof (r as { label?: unknown }).label === 'string'
+    && norm((r as { label: string }).label) === norm(label) && (r as { provenance?: unknown }).provenance === 'ai_proposed');
+}
+
+/** Some coordinated clause of `quote` names the risk by its own words (the model's other labels' shared words never count). */
+function namesTheRisk(model: unknown, label: string, quote: string): boolean {
+  const m = model !== null && typeof model === 'object' ? model as Record<string, unknown> : {};
+  const labelsOf = (v: unknown): string[] => (Array.isArray(v) ? v : []).flatMap((x: unknown) => {
+    const l = x !== null && typeof x === 'object' ? (x as { label?: unknown; metric?: unknown }).label ?? (x as { metric?: unknown }).metric : undefined;
+    return typeof l === 'string' && norm(l) !== norm(label) ? [l] : [];
+  });
+  const goal = m.goal !== null && typeof m.goal === 'object' ? [(m.goal as { metric?: unknown }).metric].filter((x): x is string => typeof x === 'string') : [];
+  const scope = { options: labelsOf(m.options), others: [...labelsOf(m.factors), ...labelsOf(m.outcomes), ...labelsOf(m.risks), ...goal] };
+  return coordinateClausesOf(quote).some((clause) => factorTheUserNamed(label, clause, scope));
 }
 
 export function figureSource(model: unknown, brief: string | undefined, subject: DraftedSubject, field: StatementField, value: number): FigureSource | undefined {
@@ -524,6 +561,9 @@ export function withConstructionStatements<G extends { nodes: unknown[] }>(graph
       : { kind: drafted.kind, label: drafted.label, ...(drafted.to_label !== undefined ? { to_label: drafted.to_label } : {}), field };
     const resolved = resolveSubject(graph, ref);
     if (resolved.kind !== 'resolved') continue;
+    // A risk admission made Olumi's carries no record of the user's words as ITS statement: those words stay with the subject they
+    // state (#3450). Every other risk's record is unchanged.
+    if (drafted.kind === 'risk' && olumisNode(graph, resolved.subject.id)) continue;
     const key = doorSubjectKey(resolved.subject);
     const group = groups.get(key) ?? { subject: resolved.subject, statements: [] };
     group.statements.push(...said);
