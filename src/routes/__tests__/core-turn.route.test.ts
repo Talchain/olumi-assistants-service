@@ -510,7 +510,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
             : await apply(0.6, { applied_from: sent }, guest);
           expect(r.statusCode, r.body).toBe(409);
           expect((r.json() as Json).error).toMatchObject({ code: 'CANVAS_EDIT_REFUSED', nothing_saved: true,
-            message: 'A panel answer is applied to a card\'s figure, from its round and participant. I haven\'t changed anything.' });
+            message: 'That panel answer couldn’t be matched to its round, so nothing was changed.' });
           expect([figure('sell_through'), storedRuns()]).toEqual([0.7, runs]);
         }
       });

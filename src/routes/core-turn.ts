@@ -427,7 +427,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             ...(typeof af.evidence_event_id === 'string' ? { evidence_event_id: af.evidence_event_id } : {}) });
           const panel = claim.held === 'same' || !('applied_from' in ev) || ev.applied_from === undefined ? undefined
             : figure === undefined || quantityId === undefined || !isRec(ev.applied_from)
-              ? { refused: 'A panel answer is applied to a card\'s figure, from its round and participant. I haven\'t changed anything.' }
+              ? { refused: 'That panel answer couldn’t be matched to its round, so nothing was changed.' }
             : userId === null ? { refused: 'Only the scenario\'s owner can apply a panel answer. I haven\'t changed anything.' }
             : await verifyAppliedFrom(getCollabStore(), { scenario_id: scenarioId, target_id: quantityId,
               claim: claimOf(ev.applied_from as Record<string, unknown>), claimed_value: figure.value })
