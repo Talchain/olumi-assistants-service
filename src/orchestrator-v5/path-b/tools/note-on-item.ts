@@ -62,7 +62,12 @@ export async function noteOnItem(deps: Pick<RunDeps, 'dispatch'>, ctx: Pick<Agen
   // One raw id can name both a card and a link: which one the AI meant is not ours to guess, so it is told and picks.
   if (link !== undefined && nodes.some((n) => n.id === args.item_id)) return refused('item_id_ambiguous');
   const node = card(args.item_id) ?? (link === undefined ? undefined : card(link.from) ?? card(link.to));
-  if (node === undefined) return refused('item_not_in_model');
+  if (node === undefined) {
+    const living = isRec(saved.graph.living_model) ? saved.graph.living_model : {};
+    const stored = ['aims', 'factors', 'options', 'risks', 'links'].some(k => recs(living[k]).some(x => x.id === args.item_id));
+    // The saved representation can retain an aim or mechanism that this canvas projection cannot draw.
+    return refused(stored ? 'item_not_on_canvas' : 'item_not_in_model');
+  }
   const label = String(node.label).trim();
   // A machine-shaped id (`tech_lead`, `f2`), never a plain word that happens to be an id (`goal`): the route re-checks after egress.
   if (nodes.some((n) => typeof n.id === 'string' && /[_\d]/.test(n.id) && new RegExp(`\\b${escape(n.id)}\\b`).test(note))) return refused('note_names_an_id');
