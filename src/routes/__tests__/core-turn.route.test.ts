@@ -584,6 +584,34 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(history.map((h) => [h.author_id, h.approved_by])).toEqual([['p-sam', 'owner-1'], ['p-ana', 'owner-1']]);
     });
 
+    it('(h4) PL 03:43Z: a second participant under the SAME name is another person: their identical answer is theirs now, and history keeps both', async () => {
+      panelSays(0.6);
+      collab.participants.set('p-sam-2', { participant_id: 'p-sam-2', round_id: 'r-1', scenario_id: SCENARIO, display_name: 'Sam' });
+      collab.events.get('r-1')!.push({ event_id: 'e-2', round_id: 'r-1', participant_id: 'p-sam-2', event_version: 1, kind: 'belief_submitted',
+        target: { kind: 'factor', id: 'sell_through' }, belief: { value: 0.6, expression_raw: '0.6', confidence: null }, evidence: null,
+        provenance: { authored_by: 'p-sam-2', method: 'elicited_numeric', elicitation_version: 'v1' }, created_at: '2026-10-30T01:05:00.000Z' });
+      expect((await apply(0.6)).statusCode).toBe(200);
+      const r = await apply(0.6, { applied_from: { round_id: 'r-1', participant_id: 'p-sam-2' } });
+      expect(r.statusCode, r.body).toBe(200);
+      expect(who('sell_through')).toEqual([0.6, 'p-sam-2', 'owner-1', 'Sam']);
+      const history = (savedProgramOf(persisted)!.canonical.history as unknown as Json[]).filter((h) => h.id === 'sell_through' && h.change === 'entered');
+      expect(history.map((h) => [h.author_id, h.approved_by])).toEqual([['p-sam', 'owner-1'], ['p-sam-2', 'owner-1']]);
+    });
+
+    it('(h5) PL 03:43Z: the edit hashed is the edit read: under a saved edit\'s turn id, event [] beside a DIFFERENT system_event is a reused id, never that edit\'s receipt', async () => {
+      const turnId = randomUUID();
+      const send = (value: number) => post({ kind: 'system_event', turn_id: turnId, event: [], system_event: { kind: 'factor_value_edit', target_id: 'base_sales', raw_value: value } });
+      const first = await send(320);
+      expect(first.statusCode, first.body).toBe(200);
+      const runs = storedRuns();
+      const other = await send(340);
+      expect([other.statusCode, (other.json() as Json).error?.code], other.body).toEqual([409, 'TURN_ID_REUSED']);
+      expect([figure('base_sales'), storedRuns()]).toEqual([320, runs]);
+      // CONTRAST: the identical resend is that edit, answered from its own save.
+      const same = await send(320);
+      expect([same.statusCode, (same.json() as Json).durability], same.body).toEqual([200, 'replayed']);
+    });
+
     it.each([[0.6, 60], [0.07, 7], [0.29, 29], [1 / 3, 33.33333333333333]])('(g2) a % moves the decimal point exactly: %s → %s', async (answer, pct) => {
       const m = bakery();
       m.quantities = m.quantities.map((x) => (x.id === 'sell_through' ? { ...x, unit: '%', value: 70, low: 50, high: 90 } : x));

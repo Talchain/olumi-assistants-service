@@ -379,8 +379,10 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
     };
 
     if (canvasEdit) {
-      // The edit's identity is the event itself: the same edit resent is that edit, never a second one.
-      const claim = await takeClaim(agentTurnRequestHash(scenarioId, userId, '', stableStringify({ system_event: body.event ?? body.system_event ?? null })), false);
+      // The edit's identity is the event itself: the same edit resent is that edit, never a second one. It is the ONE event this
+      // path reads, chosen once (S1 r6, PL 03:43Z): a resend whose read event differs is a reused id, never an earlier edit's receipt.
+      const ev = isRec(body.event) ? body.event : isRec(body.system_event) ? body.system_event : {};
+      const claim = await takeClaim(agentTurnRequestHash(scenarioId, userId, '', stableStringify({ system_event: ev })), false);
       if (claim.held === 'refused') return claim.sent;
       // One turn at a time per scenario, as for a message. A resend runs after its original, and the canvas-edit path answers
       // it from its own record: the store replays a turn id it committed and never writes it twice.
@@ -395,7 +397,6 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             error: { code: 'MODEL_PROGRAM_UNREADABLE', message: unreadableWords(currentProgram.reason), retry_safe: false, nothing_saved: true }, agent: { forwarded_kind: kind, program: true } }));
         }
         if (currentProgram.kind === 'program') {
-          const ev = isRec(body.event) ? body.event : isRec(body.system_event) ? body.system_event : {};
           const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
           // A card's figure (by its quantity id) or a goal's target; a resend of the same edit is answered from what is saved.
           const figure = ev.kind === 'factor_value_edit' && typeof ev.target_id === 'string' && num(ev.raw_value ?? ev.value) !== undefined

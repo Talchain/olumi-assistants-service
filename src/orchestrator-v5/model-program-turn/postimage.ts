@@ -282,9 +282,11 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
     const records = (post[family] as readonly Rec[]).map((r) => {
       const old = before.get(String(r['id']));
       const fields = said(String(r['id']), old, r);
-      // Unchanged but for what the host owns: the saved record, exactly.
-      if (old !== undefined && fields.length === 0 && !unshown.some((u) => u.startsWith(`${String(r['id'])} (`))) return old;
       const entered = opts.entered !== undefined && String(r['id']) === opts.entered;
+      // Unchanged but for what the host owns: the saved record, exactly. A panel answer is its participant's by their checked id,
+      // never their name (S1 r6, PL 03:43Z): another participant's same figure, under the same name too, is theirs now.
+      const reattributed = entered && opts.author !== undefined && old?.['author_id'] !== opts.author;
+      if (old !== undefined && fields.length === 0 && !reattributed && !unshown.some((u) => u.startsWith(`${String(r['id'])} (`))) return old;
       const record = accepted(r, opts.approver ?? null, opts.fresh, old, entered && opts.author !== undefined ? opts.author : opts.approver ?? null) as Rec;
       changes.push(entry(String(r['id']), old === undefined ? 'add' : 'change', fields, now.title(family, record), authorOf(record), r));
       // D074 (C6): the figure the person typed on the canvas (`entered`) is recorded as entered, on an existing record (the record
