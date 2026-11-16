@@ -33,6 +33,7 @@ const created: Json[] = [];
 /** Every item the code added to a Conversation directly (request bodies). */
 const added: Json[] = [];
 let served = 0;
+let inputTokenDetails: Record<string, unknown> = { cached_tokens: 0 };
 /** The scenario store's saved Conversation ids (the `scenarios.openai_conversation_id` column), fresh per test. */
 let column = new Map<string, string>();
 const columnStore = (): ConversationIdStore => ({
@@ -47,11 +48,12 @@ const body = (output: Json[]): Json => {
       ? { id: `msg_${served}_${i}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: item.text, annotations: [] }] }
       : item.type === 'compaction' ? { id: `cmp_${served}_${i}`, type: 'compaction', encrypted_content: 'opaque' }
       : { id: `fc_${served}_${i}`, status: 'completed', type: 'function_call', call_id: `call_${served}_${i}`, name: item.name, arguments: JSON.stringify(item.args) }),
-    usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 0 } },
+    usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15, input_tokens_details: inputTokenDetails, output_tokens_details: { reasoning_tokens: 0 } },
   };
 };
 beforeEach(() => {
   scripted = []; sent.length = 0; created.length = 0; added.length = 0; column = new Map();
+  inputTokenDetails = { cached_tokens: 0 };
   vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
     if (/\/v1\/conversations\/[^/]+\/items$/.test(String(url))) {
       added.push(JSON.parse(String(init?.body ?? '{}')) as Json);
@@ -108,6 +110,29 @@ const callable = (b: Record<string, any>): string[] => {
 };
 
 describe('PATH-B core turn on the Agents SDK', () => {
+  it('nested cache usage does not lose a streamed tool call or reply, and the next turn reopens the same Conversation', async () => {
+    // Staging 16 Nov: a successful response carried an object here; the SDK's numeric-only usage schema rejected it.
+    inputTokenDetails = { cached_tokens: 4, cache_write_tokens_details: { short_lived_tokens: 2, long_lived_tokens: 1 } };
+    scripted = [[{ type: 'function_call', name: 'read_canonical_context', args: {} }], [{ type: 'message', text: 'The saved model is ready to discuss.' }]];
+    const first = await turn('Explain the saved model.', caps());
+    expect(first.result.assistant_text).toBe('The saved model is ready to discuss.');
+    expect(first.result.tool_calls.map((t) => t.name)).toEqual(['read_canonical_context']);
+    expect(first.calls).toHaveLength(2);
+    for (const row of first.calls) {
+      expect(row.attempt?.outcome).toBe('success');
+      expect(row.attempt?.retry).toBe(false);
+      expect(row.usage?.cached_input_tokens).toBe(4);
+      expect(row.usage?.raw.input_tokens_details, 'the original nested provider usage is retained').toEqual(inputTokenDetails);
+    }
+    scripted = [[{ type: 'message', text: 'This is still the same saved model.' }]];
+    const reopened = await turn('What did we just discuss?', caps());
+    expect(reopened.result.assistant_text).toBe('This is still the same saved model.');
+    expect(reopened.result.sdk.conversation_id).toBe(first.result.sdk.conversation_id);
+    expect(created).toHaveLength(1);
+    expect(sent).toHaveLength(3);
+    expect(sent.every((request) => request.stream === true)).toBe(true);
+  });
+
   it('WITNESS: each provider row carries the returned model, the tools sent and an input digest; the turn names its SDK and trace', async () => {
     scripted = [[{ type: 'function_call', name: 'read_canonical_context', args: {} }], [{ type: 'message', text: 'The model is empty.' }]];
     const { result, calls } = await turn('What is in my model?', caps());

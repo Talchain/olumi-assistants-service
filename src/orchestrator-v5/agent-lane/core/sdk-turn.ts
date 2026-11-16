@@ -27,12 +27,13 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  Agent, extractAllTextOutput, MaxTurnsExceededError, OpenAIResponsesModel, run, RunState, setTracingDisabled,
+  Agent, extractAllTextOutput, MaxTurnsExceededError, run, RunState, setTracingDisabled,
   ToolCallError, withTrace, type AgentInputItem, type RunToolApprovalItem, type Tool, type ToolToFinalOutputFunction,
 } from '@openai/agents';
 import { APIConnectionError, APIError, type OpenAI } from 'openai-v7';
 import { getRuntimeEnv } from '../../../config/env-resolver.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
+import { UsageCompatibleResponsesModel } from '../../../adapters/llm/openai-agents-model.js';
 import { currentStageEmitter, emitAgentPhase } from '../../../cee/unified-pipeline/stage-stream-context.js';
 import { log } from '../../../utils/telemetry.js';
 import type { CardId, OpenAiPausedRun } from '../../session/store.js';
@@ -406,7 +407,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   const agent = new Agent({
     name: 'Olumi',
     instructions: input.instructions,
-    model: new OpenAIResponsesModel(client, budget.model),
+    model: new UsageCompatibleResponsesModel(client, budget.model),
     modelSettings: {
       maxTokens: budget.max_output_tokens,
       ...(budget.reasoning_effort !== undefined ? { reasoning: { effort: budget.reasoning_effort } } : {}),
