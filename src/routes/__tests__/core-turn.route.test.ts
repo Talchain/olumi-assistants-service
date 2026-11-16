@@ -2113,6 +2113,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // says it is the first model.
       expect(String(reply.instructions)).toContain('On a first model, briefly distinguish what came from the brief, what Olumi added, and what the calculation leaves out and why, '
         + 'when any material is excluded.');
+      // 16 Nov: on the real first-model reply call, the instructions put the work the brief asks for before the note on the model.
+      expect(String(reply.instructions)).toContain("begin with the work their brief asks for: take each thing they asked, in their order");
+      expect(String(reply.instructions)).not.toContain('explanation-only');
       const facts = system.filter((s) => s.startsWith(PROGRAM_TURN_FACTS_PREFIX));
       expect(facts).toHaveLength(1);
       expect(JSON.parse(facts[0]!.slice(PROGRAM_TURN_FACTS_PREFIX.length))).toMatchObject({ trigger: 'first_model' });
